@@ -1,0 +1,1086 @@
+# 功能一后端引擎与协作规格 V1
+
+## 1. 文档目标
+
+本文档用于定义 `AI 驱动的需求交付流程引擎` 在 `功能一` 范围内的后端引擎设计、前后端协作契约与扩展边界，作为后端实现、接口设计和前端联调的正式依据。
+
+本文档聚焦：
+- 功能一后端领域对象与状态流转
+- Pipeline 编排、阶段执行、自动回归与人工审批处理
+- 前端控制台消费的查询投影与实时更新契约
+- REST API、事件模型与工作区能力边界
+- 为功能二预留的复用对象与接口
+
+本文档不重新定义：
+- 功能一的产品范围与产品级验收边界
+- 前端控制台的信息架构、交互形态与视觉层级
+
+## 2. 文档关系与口径优先级
+
+本文档与其他规格文档的关系如下：
+
+1. `docs/specs/function-one-product-overview-v1.md`
+定义功能一的正式产品边界、阶段边界与人工介入边界。
+
+2. `docs/specs/frontend-workspace-global-design-v1.md`
+定义前端控制台的正式交互口径。凡涉及 Narrative Feed、Inspector、Composer、审批块、澄清与审批前端行为的表述，以该文档为准。
+
+3. `docs/specs/function-one-backend-engine-design-v1.md`
+负责把产品边界与前端交互口径落到后端领域模型、状态机、投影视图、事件流与接口契约。
+
+`docs/archive/function-one-design-v2.md` 仅保留为迁移参考，不再作为当前后端规格依据。
+
+## 3. 后端职责范围
+
+功能一后端必须承担以下职责：
+- 管理项目上下文、需求会话与 Pipeline 运行
+- 编排各阶段执行、校验、回退、重试与终止
+- 持久化阶段输入、阶段输出、结构化产物与审批记录
+- 提供前端控制台所需的查询投影与实时更新能力
+- 管理工作区读取、代码修改、命令执行、测试运行与交付通道适配
+- 为功能二保留 `ChangeSet`、`ContextReference`、`PreviewTarget`、`DeliveryRecord` 的复用边界
+
+## 4. 总体架构
+
+功能一后端采用以下基础结构：
+
+`状态机编排 + 结构化产物存储 + 领域事件日志 + 查询投影 + 工作区/交付适配层`
+
+架构边界如下：
+- `Pipeline Orchestrator` 负责阶段流转与状态决策
+- `Agent Runtime` 负责组装上下文、执行模型调用与工具调用
+- `Artifact Store` 负责持久化结构化产物与执行记录
+- `Projection Layer` 负责输出前端控制台消费的数据视图
+- `Workspace & Delivery Adapter` 负责与代码仓库、测试环境和托管平台交互
+
+### 4.1 系统模块划分
+
+功能一后端至少包含以下核心模块：
+
+1. `Pipeline Template Registry`
+负责管理流程模板、阶段顺序、依赖关系、检查点位置与自动回归配置。
+
+2. `Pipeline Orchestrator`
+负责运行时调度，驱动阶段开始、完成、失败、回退、重试、暂停、恢复与终止。
+
+3. `Run Context / Artifact Store`
+负责持久化运行上下文、阶段输入输出、结构化产物与共享引用。
+
+4. `Agent Role Registry`
+负责管理阶段角色、Prompt 模板、输入输出契约与失败处理策略。
+
+5. `Clarification & Decision Service`
+负责管理需求澄清记录、设计决策、审批反馈与关键结论回注。
+
+6. `Agent Runtime`
+负责组装上下文、调用模型供应商、执行工具调用、校验结构化输出并回写产物。
+
+7. `LLM Provider Adapter`
+负责统一封装模型供应商接入与切换逻辑。
+
+8. `Workspace & Tool Service`
+负责工作区隔离、文件读取、代码修改、命令执行、diff 生成与工具接口管理。
+
+9. `SCM & Delivery Adapter`
+负责封装本地 Git、远端托管平台、交付通道与 MR/PR 创建能力。
+
+10. `Checkpoint & Review Service`
+负责审批对象创建、审批决策记录、拒绝理由回注与回退触发。
+
+11. `Observability & Projection Service`
+负责阶段状态、事件时间线、错误文本、量化指标与前端查询投影生成。
+
+12. `REST API + Query Layer`
+负责暴露命令接口、查询接口、事件流接口与 OpenAPI 文档。
+
+### 4.2 实施原则
+
+后端实现必须遵循以下原则：
+- `状态驱动`
+  阶段推进、等待澄清、等待审批、回退与终止都必须由显式状态表达。
+- `产物驱动`
+  后续阶段只能依赖持久化产物和契约化上下文，不允许依赖运行期隐式记忆。
+- `API First`
+  前端控制台只能通过命令接口、查询接口和事件流消费后端能力。
+- `工具统一抽象`
+  文件系统、命令执行、分支准备和代码评审请求都必须通过统一工具协议暴露。
+- `前后端解耦`
+  前端定义交互语义，后端负责投影与载荷；双方不得在另一侧重复定义一套口径。
+
+## 5. 核心领域对象
+
+### 5.1 项目与会话对象
+
+1. `Project`
+表示一个被加载到系统中的本地项目上下文，至少包含：
+- `project_id`
+- `name`
+- `root_path`
+- `created_at`
+- `updated_at`
+
+`Project` 必须满足以下初始化规则：
+- 系统首次启动时必须自动登记一个默认项目，绑定平台仓库自身路径
+- 在用户未手动加载其他项目之前，`GET /api/projects` 也必须返回该默认项目
+
+2. `Session`
+表示项目下的一次需求会话，至少包含：
+- `session_id`
+- `project_id`
+- `title`
+- `status`
+- `current_run_id`
+- `latest_stage_type`
+- `created_at`
+- `updated_at`
+
+`Session.status` 必须至少支持：
+- `draft`
+- `running`
+- `waiting_clarification`
+- `waiting_approval`
+- `completed`
+- `failed`
+- `terminated`
+
+### 5.2 Pipeline 与阶段对象
+
+3. `PipelineTemplate`
+定义一条流程模板，包含阶段顺序、依赖、回退策略、自动回归策略和 Agent 绑定。
+
+4. `PipelineRun`
+表示某个会话的一次具体运行，至少包含：
+- `run_id`
+- `session_id`
+- `template_id`
+- `status`
+- `current_stage_run_id`
+- `attempt_index`
+- `started_at`
+- `ended_at`
+
+5. `StageDefinition`
+定义某个阶段的标准契约，包含：
+- `stage_type`
+- `order_index`
+- `input_contract`
+- `output_contract`
+- `allowed_retry_policy`
+- `allowed_rollback_targets`
+
+6. `StageRun`
+表示某次运行中的具体阶段实例，至少包含：
+- `stage_run_id`
+- `run_id`
+- `stage_type`
+- `status`
+- `attempt_index`
+- `started_at`
+- `ended_at`
+- `input_ref`
+- `output_ref`
+
+`StageRun.status` 必须至少支持：
+- `pending`
+- `running`
+- `waiting_clarification`
+- `waiting_approval`
+- `completed`
+- `failed`
+- `rolled_back`
+
+### 5.3 产物与审批对象
+
+7. `StageArtifact`
+表示阶段级结构化产物，是阶段流转、审批展示与历史回看的基础容器。
+
+8. `ClarificationRecord`
+表示 `Requirement Analysis` 阶段内部的澄清问答记录，至少包含：
+- `clarification_id`
+- `stage_run_id`
+- `question`
+- `answer`
+- `status`
+- `asked_at`
+- `answered_at`
+
+9. `ApprovalRequest`
+表示正式人工审批对象，至少包含：
+- `approval_id`
+- `run_id`
+- `approval_type`
+- `source_stage_run_id`
+- `status`
+- `approval_object_excerpt`
+- `payload_ref`
+- `rollback_target_stage_type`
+- `requested_at`
+- `responded_at`
+
+`ApprovalRequest.approval_type` 在功能一 V1 中只允许：
+- `solution_design_approval`
+- `code_review_approval`
+
+10. `ApprovalDecision`
+表示审批结果，至少包含：
+- `approval_id`
+- `decision`
+- `reason`
+- `operator_id`
+- `created_at`
+
+### 5.4 代码与交付对象
+
+11. `ChangeSet`
+表示一次代码变更集合，记录受影响文件、补丁、说明文本、变更统计和来源阶段。
+
+12. `ChangeRisk`
+表示变更风险分级与风险说明。
+
+13. `DeliveryChannel`
+表示目标托管平台、仓库标识、默认分支、代码评审请求类型及交付策略。
+
+14. `DeliveryRecord`
+表示最终交付结果，记录：
+- 交付说明
+- 变更结果
+- 测试结论
+- 评审结论
+- 分支信息
+- 提交意图
+- MR/PR 信息
+
+### 5.5 上下文与扩展对象
+
+15. `ContextReference`
+表示阶段执行时引用的上下文来源。功能一 V1 至少支持：
+- `requirement_text`
+- `repo_path`
+- `directory_path`
+- `file_path`
+- `artifact_ref`
+- `approval_feedback`
+
+16. `PreviewTarget`
+表示工作区对应的预览目标对象。V1 只定义对象与查询接口，不实现预览启动与热更新。
+
+17. `ToolCallRecord`
+表示单次工具调用记录，用于审查、回放与前端执行条目展示。
+
+18. `DomainEvent`
+表示驱动状态流转与投影视图更新的领域事件。
+
+## 6. 阶段编排与生命周期
+
+### 6.1 正式阶段序列
+
+功能一 V1 的正式阶段序列如下：
+
+1. `Requirement Analysis`
+2. `Solution Design`
+3. `Design Approval Checkpoint`
+4. `Code Generation`
+5. `Test Generation & Execution`
+6. `Code Review`
+7. `Code Review Approval Checkpoint`
+8. `Delivery Integration`
+
+其中：
+- `Solution Validation Agent` 是 `Solution Design` 阶段内部的第二个 Agent，不形成独立 `StageRun`
+- `Design Approval Checkpoint` 与 `Code Review Approval Checkpoint` 是审批检查点，不是独立业务生成阶段
+- `Rollback / Retry` 是运行时按需插入的控制型阶段，必须创建独立 `StageRun`、独立 `execution_node` 与独立 Inspector 载荷，但不替代正式业务阶段序列
+
+### 6.2 Requirement Analysis 生命周期
+
+`Requirement Analysis` 必须按以下规则运行：
+- 接收用户原始需求输入
+- 产出结构化需求、验收标准、约束与待确认事项
+- 当信息不足时，创建 `ClarificationRecord` 并将 `StageRun.status` 置为 `waiting_clarification`
+- 前端通过会话消息接口提交补充信息
+- 补充信息回写到同一个 `StageRun`
+- 本阶段恢复执行后继续分析，直到产出完整结果
+
+本阶段禁止创建 `ApprovalRequest`。
+
+### 6.3 Solution Design 生命周期
+
+`Solution Design` 必须按以下规则运行：
+- 本阶段内部必须采用 `Solution Design Agent -> Solution Validation Agent` 的串行子步骤
+- `Solution Design Agent` 先产出技术方案、影响范围与关键设计决策
+- `Solution Validation Agent` 在同一个 `Solution Design` 阶段内对方案做独立校验
+- 方案校验结果必须作为 `Solution Design` 阶段产物的一部分持久化
+- 校验失败时，不得创建新的独立 `Solution Validation` 阶段；系统必须依据校验结论重新进入 `Solution Design` 阶段的设计子步骤
+- 校验通过后，创建 `ApprovalRequest(type=solution_design_approval)`
+- 审批通过后，进入 `Code Generation`
+- 审批拒绝后，记录拒绝理由并回退到 `Solution Design`
+
+### 6.4 Code Generation 到 Code Review 生命周期
+
+`Code Generation`、`Test Generation & Execution`、`Code Review` 必须保持串行执行：
+- 先执行代码生成
+- 再执行测试生成与执行
+- 最后执行代码评审
+
+`Code Review` 完成后：
+- 若需要自动回归，则根据问题根因回退到 `Code Generation` 或 `Solution Design`
+- 自动回归循环结束且得到稳定评审产物后，创建 `ApprovalRequest(type=code_review_approval)`
+- 审批通过后进入 `Delivery Integration`
+- 审批拒绝后，记录拒绝理由并按根因回退
+
+### 6.5 Delivery Integration 生命周期
+
+`Delivery Integration` 必须完成以下工作：
+- 汇总最终变更结果、测试结论与评审结论
+- 读取交付通道信息
+- 准备分支信息与提交说明意图
+- 按交付策略生成 MR/PR 信息或交付描述
+- 产出 `DeliveryRecord`
+
+本阶段不创建新的人工审批检查点。
+
+### 6.6 流程引擎实施约束
+
+Pipeline 引擎必须满足以下实施约束：
+
+1. `可配置阶段结构`
+- 支持 `StageDefinition` 定义
+- 支持顺序与依赖关系
+- 支持阶段类型扩展
+- 支持审批检查点插入
+- 支持按模板定义是否允许自动回归、最大重试次数和回退策略
+- `PipelineTemplate.max_auto_regression_retries` 在 V1 固定为 `2`
+
+2. `阶段绑定 Agent`
+- 每个阶段可绑定一个或多个 `AgentRole`
+- `Requirement Analysis` 使用单 Agent
+- `Solution Design` 使用双 Agent 串行结构，其中第二个 Agent 负责阶段内方案校验
+- `Code Generation` 使用单 Agent
+- `Test Generation & Execution` 使用单 Agent
+- `Code Review` 使用单 Agent
+- `Delivery Integration` 使用单 Agent
+
+3. `阶段间数据流转`
+- 上一阶段输出必须以 `StageArtifact` 形式持久化
+- 后续阶段必须通过契约化引用读取产物
+- 不允许仅依赖内存态临时传参
+- `acceptance_criteria`、澄清结论、设计决策、审批反馈、评审意见等关键上下文必须可跨阶段传递
+
+4. `生命周期管理`
+- 支持启动、暂停、恢复、终止
+- 支持阶段失败后终止或重试
+- 支持审批拒绝后回退到指定阶段重跑
+- 支持代码评审失败后进入自动回归循环
+- 自动回归结束后，进入代码评审人工审批或失败状态
+
+5. `运行可观测`
+- 可查询当前运行状态
+- 可查询各阶段状态
+- 可查询关键事件时间线
+- 可查询每阶段产物与错误信息
+- 可查询每阶段是否通过、失败、等待澄清或等待审批
+- 可查询澄清记录是否已得到回复与收敛
+
+## 7. 澄清、审批与回退语义
+
+### 7.1 需求澄清语义
+
+需求澄清必须满足以下规则：
+- 需求澄清不是审批
+- 需求澄清不提供 `Approve / Reject`
+- 需求澄清通过统一会话消息接口提交
+- 需求澄清必须保留问题、回答、影响范围与最终结论
+- 同一 `Requirement Analysis` 结点允许多轮澄清
+
+### 7.2 人工审批语义
+
+人工审批必须满足以下规则：
+- 仅存在 `solution_design_approval` 与 `code_review_approval`
+- 审批对象必须引用稳定产物快照，而不是运行中间态
+- `Approve` 可以直接提交
+- `Reject` 必须携带理由
+- 拒绝理由必须进入后续上下文，供重新生成与审查使用
+- 审批结果必须进入事件流与 Narrative Feed 投影
+
+### 7.3 自动回归与回退语义
+
+自动回归必须满足以下规则：
+- 默认回退目标为 `Code Generation`
+- 当根因属于方案错误、影响范围遗漏或接口路径错误时，允许回退到 `Solution Design`
+- 自动回归最大次数由模板配置控制，V1 固定为 `2`
+- 自动回归结束后，才能进入代码评审人工审批
+- 自动回归超限后，必须输出明确的失败或高风险状态，不得静默推进
+
+### 7.4 Agent 编排与执行约束
+
+Agent 编排必须满足以下规则：
+
+1. `阶段角色明确`
+每个阶段都必须配置明确的 `AgentRole`，至少包含：
+- 角色名称
+- System Prompt
+- 输入契约
+- 输出契约
+- 失败处理策略
+
+功能一 V1 的核心 Agent 固定为：
+- `Requirement Analysis Agent`
+- `Solution Design Agent`
+- `Solution Validation Agent`
+- `Code Generation Agent`
+- `Test Generation & Execution Agent`
+- `Code Review Agent`
+- `Delivery Integration Agent`
+
+2. `上下文感知能力`
+Agent 至少支持以下上下文输入方式：
+- 目标仓库路径
+- 指定目录路径
+- 指定文件路径
+- 前序阶段产物引用
+- 结构化验收标准引用
+- 需求澄清结论引用
+- 设计审批反馈引用
+- 历史评审意见引用
+
+3. `工具调用模型`
+Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用能力。
+
+`Workspace Tools`
+- `read_file`
+- `write_file`
+- `edit_file`
+- `list_files`
+- `search`
+- `shell`
+
+`SCM / Delivery Tools`
+- `prepare_branch`
+- `record_commit_intent`
+- `push_branch`
+- `create_code_review_request`
+- `read_delivery_channel`
+
+工具系统必须满足以下要求：
+- 每个工具都通过统一接口暴露元数据、输入参数、执行结果和错误信息
+- `Agent Runtime` 只依赖统一 Tool 协议，不依赖具体实现细节
+- 工作区工具支持本地执行，并为未来远程或沙箱执行保留一致接口
+- 交付工具负责封装本地 Git 与远端托管平台差异，规格层不直接暴露具体命令名
+- 工具调用结果必须记录到运行上下文和事件流中
+
+4. `模型供应商可切换`
+- V1 模型供应商集合固定为两个：
+  - `火山引擎`：要求 `api_key` 与 `model_id`
+  - `OpenAI Completions` 兼容接口：要求 `base_url`、`api_key` 与 `model_id`
+- 支持运行时按 Pipeline、按阶段或按执行策略切换
+- Provider 差异不得泄漏到上层流程逻辑
+
+5. `输出结构化`
+- Agent 输出必须转换为结构化领域对象
+- 必须执行格式校验与错误处理
+- 非法输出不得直接推进下一阶段
+
+6. `执行与编排解耦`
+- `Agent Runtime` 只负责执行
+- `Pipeline Orchestrator` 负责决定何时执行、何时暂停、何时回退
+
+7. `多 Agent 使用原则`
+- `Solution Design` 阶段必须采用 `Solution Design Agent -> Solution Validation Agent` 串行结构，且 `Solution Validation Agent` 只作为该阶段内部第二个 Agent，不形成独立 `StageRun`
+- `Code Generation` 与 `Test Generation & Execution` 在 V1 必须保持阶段串行执行，不采用并行多 Agent
+- 其余阶段使用单 Agent
+
+### 7.5 核心 Agent 契约
+
+各核心 Agent 必须具备明确的目标、输入、输出、可用工具和失败处理规则。
+
+`Requirement Analysis Agent`
+- 目标：将自然语言需求转换为结构化需求、验收标准、约束与澄清问题
+- 输入：原始需求文本、历史会话上下文、必要仓库上下文
+- 输出：`structured_requirement`、`acceptance_criteria`、`clarification_records`
+- 可用工具：`list_files`、`search`、`read_file`
+- 失败处理：输出不完整或无法形成结构化结果时停留在本阶段重试；存在信息缺口时创建澄清记录并等待用户回复
+
+`Solution Design Agent`
+- 目标：输出技术方案、影响范围、关键设计决策与文件变更范围
+- 输入：`structured_requirement`、`acceptance_criteria`、澄清结论、仓库上下文
+- 输出：`solution_design`、`design_decisions`、`impacted_files`
+- 可用工具：`list_files`、`search`、`read_file`
+- 失败处理：无法定位影响范围、无法形成方案或缺少关键设计决策时回到本阶段重试
+
+`Solution Validation Agent`
+- 目标：作为 `Solution Design` 阶段内部第二个 Agent，独立校验技术方案是否偏离需求、遗漏影响范围、缺少测试策略或引入过高风险
+- 输入：`solution_design`、`design_decisions`、`acceptance_criteria`
+- 输出：`solution_validation_report`
+- 可用工具：`read_file`、`search`
+- 失败处理：校验不通过时回到同一个 `Solution Design` 阶段内的设计子步骤，不创建独立阶段
+
+`Code Generation Agent`
+- 目标：根据已通过校验且经审批通过的方案生成或修改代码，并输出变更集合
+- 输入：`solution_design`、`design_decisions`、设计审批反馈、仓库上下文
+- 输出：`code_changeset`、`change_description`
+- 可用工具：`read_file`、`write_file`、`edit_file`、`list_files`、`search`、`shell`
+- 失败处理：生成结果不满足结构约束、修改失败或无法形成有效变更时回到本阶段重试
+
+`Test Generation & Execution Agent`
+- 目标：生成测试、执行测试，并输出测试结果与测试缺口分析
+- 输入：`code_changeset`、`acceptance_criteria`、相关仓库上下文
+- 输出：`test_bundle`、`test_execution_result`、`test_gap_report`
+- 可用工具：`read_file`、`write_file`、`edit_file`、`list_files`、`search`、`shell`
+- 失败处理：测试生成失败或执行失败时回到 `Code Generation`，并携带失败信息
+
+`Code Review Agent`
+- 目标：独立审查代码变更、方案一致性、测试充分性与变更风险
+- 输入：`code_changeset`、`solution_design`、`design_decisions`、`test_execution_result`、`test_gap_report`
+- 输出：`review_report`、`change_risk`、`rollback_decision`
+- 可用工具：`read_file`、`list_files`、`search`
+- 失败处理：发现可修复问题时触发自动回归；发现根因属于方案错误时回退到 `Solution Design`
+
+`Delivery Integration Agent`
+- 目标：整理交付物、交付说明、分支信息与 MR/PR 信息
+- 输入：已通过审批的 `code_changeset`、`review_report`、`test_execution_result`、`delivery_channel`
+- 输出：`delivery_record`、`delivery_description`、`branch_info`、`merge_request_info`
+- 可用工具：`read_file`、`list_files`、`search`、`read_delivery_channel`、`prepare_branch`、`record_commit_intent`、`push_branch`、`create_code_review_request`
+- 失败处理：交付物不完整、交付通道信息缺失或无法生成交付记录时停留在本阶段并返回错误信息
+
+## 8. 前端查询投影契约
+
+后端必须为 `frontend-workspace-global-design-v1.md` 提供稳定的查询投影视图。
+
+### 8.1 左栏投影
+
+后端必须提供以下投影：
+
+1. `ProjectSidebarProjection`
+- `project_id`
+- `name`
+- `root_path_excerpt`
+- `session_count`
+- `last_activity_at`
+
+2. `SessionListItemProjection`
+- `session_id`
+- `title`
+- `status`
+- `updated_at`
+- `current_stage_type`
+- `pending_action_type`
+
+其中 `pending_action_type` 至少支持：
+- `none`
+- `clarification`
+- `approval`
+
+### 8.2 中栏 Narrative Feed 投影
+
+后端必须提供 `SessionWorkspaceProjection`，至少包含：
+- `session_id`
+- `project_id`
+- `session_status`
+- `current_run_id`
+- `narrative_entries`
+- `composer_mode`
+
+`composer_mode` 至少支持：
+- `new_requirement`
+- `clarification_reply`
+- `readonly`
+
+`narrative_entries` 必须支持以下条目类型：
+- `user_message`
+- `execution_node`
+- `approval_request`
+- `approval_result`
+- `delivery_result`
+- `system_status`
+
+`narrative_entries` 采用前端规格要求的 `结点 + 条目` 两层模型：
+- `execution_node` 是阶段级顶层结点
+- 结点内部条目通过 `execution_node.items` 表达
+- 不允许把结点内部条目直接摊平成无阶段归属的顶层瀑布流
+- `user_message` 用于会话起始需求输入等独立顶层用户消息
+- `Requirement Analysis` 阶段内的澄清问答通过 `execution_node.items` 表达
+- `approval_request`、`approval_result`、`delivery_result` 作为顶层条目追加到主流中
+
+其中以下条目必须定义明确字段契约：
+
+`approval_result`
+- `approval_id`
+- `approval_type`
+- `decision`
+- `reason`
+- `source_stage_run_id`
+- `next_stage_type`
+- `next_action_text`
+- `waiting_duration_ms`
+- `response_duration_ms`
+- `occurred_at`
+
+规则如下：
+- 当 `decision = reject` 时，`reason` 不得为空
+- `next_stage_type` 必须能表达审批后进入的下一阶段或回退目标
+- `next_action_text` 必须可直接用于前端 Narrative Feed 展示审批后链路如何继续推进
+- `approval_result` 必须作为独立 Narrative Feed 条目追加到主流中
+
+`delivery_result`
+- `delivery_record_id`
+- `delivery_excerpt`
+- `delivery_status`
+- `delivery_artifact_count`
+- `changed_file_count`
+- `occurred_at`
+- `delivery_record_ref`
+
+### 8.3 执行结点投影
+
+`execution_node` 投影必须满足前端 Narrative Feed 与 Inspector 的共同需求，至少包含：
+- `node_id`
+- `stage_run_id`
+- `stage_type`
+- `status`
+- `sequence_index`
+- `attempt_index`
+- `started_at`
+- `ended_at`
+- `is_expandable`
+- `items`
+- `metrics_preview`
+- `inspector_ref`
+
+`execution_node.stage_type` 在功能一 V1 至少支持：
+- `requirement_analysis`
+- `solution_design`
+- `code_generation`
+- `test_generation_execution`
+- `code_review`
+- `rollback_or_retry`
+- `delivery_integration`
+
+`execution_node.items` 至少支持以下内部条目类型：
+- `clarification_question`
+- `clarification_answer`
+- `reasoning_item`
+- `decision_item`
+- `tool_call_item`
+- `diff_preview_item`
+- `stage_result_item`
+- `rollback_item`
+
+其中 `rollback_item` 只用于在触发回退的源阶段中记录“为何触发回退”的摘要信息。
+完整的回退或重试过程必须通过独立的 `rollback_or_retry` 执行结点表达，不得与其重复承载同一批详细信息。
+
+结点内部条目字段契约必须符合前端 `10.5` 的显示规则，并遵守以下原则：
+- 中栏正文以原生内容为主，不另造摘要文本
+- 内容过长时使用截断显示
+- 截断信息必须通过显式字段表达，而不是依赖前端自行猜测
+
+`clarification_question` / `clarification_answer` 至少包含：
+- `item_id`
+- `item_type`
+- `content`
+- `occurred_at`
+
+`reasoning_item` 至少包含：
+- `item_id`
+- `item_type`
+- `content`
+- `is_truncated`
+- `preview_line_count`
+- `expandable`
+
+`decision_item` 至少包含：
+- `item_id`
+- `item_type`
+- `content`
+- `rationale`
+- `impact`
+- `is_truncated`
+- `expandable`
+
+`tool_call_item` 至少包含：
+- `item_id`
+- `item_type`
+- `tool_name`
+- `target`
+- `command_or_args`
+- `output_excerpt`
+- `is_truncated`
+- `detail_ref`
+
+`diff_preview_item` 至少包含：
+- `item_id`
+- `item_type`
+- `changed_files`
+- `diff_chunks`
+- `is_truncated`
+- `detail_ref`
+
+`stage_result_item` 至少包含：
+- `item_id`
+- `item_type`
+- `result_type`
+- `content`
+- `is_truncated`
+- `attachments_ref`
+
+`rollback_item` 至少包含：
+- `item_id`
+- `item_type`
+- `reason`
+- `target_stage_type`
+- `next_action_text`
+
+`metrics_preview` 只用于中栏显示少量指标，不替代完整指标集合；`inspector_ref` 用于拉取完整结构化详情。
+
+### 8.4 Inspector 投影
+
+后端必须提供按阶段类型区分的 Inspector 数据载荷。
+
+所有 Inspector 载荷至少包含：
+- `title`
+- `stage_type`
+- `status`
+- `structured_input`
+- `structured_output`
+- `reasoning_trace`
+- `decision_trace`
+- `activity_trace`
+- `full_metrics`
+- `attachments`
+
+并且必须针对不同阶段补齐前端文档要求的完整信息：
+- `requirement_analysis` 至少包含：
+  - `structured_requirement`
+  - `acceptance_criteria`
+  - `constraints`
+  - `assumptions`
+  - `clarification_items`
+  - `clarification_records`
+  - `decision_trace`
+  - `context_references`
+- `solution_design` 至少包含：
+  - `solution_design`
+  - `impact_scope`
+  - `design_decisions`
+  - `key_files`
+  - `risk_analysis`
+  - `solution_validation_report`
+  - `validation_conclusion`
+  - `validation_checks`
+  - `validation_issues`
+  - `passed_checks`
+  - `failed_checks`
+  - `fix_direction`
+  - `decision_trace`
+- `code_generation` 至少包含：
+  - `change_description`
+  - `changed_files`
+  - `diff_snippets`
+  - `implementation_decisions`
+  - `design_trace_links`
+  - `activity_records`
+- `test_generation_execution` 至少包含：
+  - `test_targets`
+  - `test_execution_details`
+  - `failed_tests`
+  - `test_gap_report`
+  - `test_decision_trace`
+- `code_review` 至少包含：
+  - `review_conclusion`
+  - `review_issues`
+  - `issue_evidence`
+  - `risk_assessment`
+  - `rollback_reason`
+- `rollback_or_retry` 至少包含：
+  - `rollback_source`
+  - `rollback_context`
+  - `target_stage_type`
+  - `attempt_history`
+- `approval_result` 字段组在所属阶段结点 Inspector 中至少包含：
+  - `approval_id`
+  - `approval_type`
+  - `decision`
+  - `reason`
+  - `next_stage_type`
+  - `next_action_text`
+  - `waiting_duration_ms`
+  - `response_duration_ms`
+- `delivery_result` 至少包含：
+  - `delivery_description`
+  - `change_result`
+  - `test_result`
+  - `review_result`
+  - `branch_info`
+  - `commit_info`
+  - `merge_request_info`
+  - `delivery_target`
+
+### 8.5 审批块投影
+
+`approval_request` 投影至少包含：
+- `approval_id`
+- `approval_type`
+- `title`
+- `approval_object_excerpt`
+- `risk_excerpt`
+- `approval_object_preview`
+- `approve_action`
+- `reject_action`
+- `requested_at`
+- `waiting_duration_ms`
+- `response_duration_ms`
+
+`reject_action` 必须声明需要补充理由输入。
+
+### 8.6 量化指标投影
+
+所有适用执行结点至少支持以下通用量化指标：
+- `duration_ms`
+- `input_tokens`
+- `output_tokens`
+- `total_tokens`
+- `attempt_index`
+
+顶层非阶段条目中的审批与交付对象必须输出各自约定的量化指标。
+
+不同类型对象的专项指标必须按前端文档定义输出，并遵守以下规则：
+- 不适用的指标不输出
+- 中栏只返回高信号指标子集
+- Inspector 返回完整指标集
+
+不同结点类型的专项量化指标清单固定如下：
+
+- `requirement_analysis`
+  - `context_file_count`
+  - `reasoning_step_count`
+  - `tool_call_count`
+- `solution_design`
+  - `context_file_count`
+  - `reasoning_step_count`
+  - `tool_call_count`
+- `code_generation`
+  - `context_file_count`
+  - `tool_call_count`
+  - `changed_file_count`
+  - `added_line_count`
+  - `removed_line_count`
+- `test_generation_execution`
+  - `tool_call_count`
+  - `generated_test_count`
+  - `executed_test_count`
+  - `passed_test_count`
+  - `failed_test_count`
+  - `skipped_test_count`
+  - `test_gap_count`
+- `code_review`
+  - `context_file_count`
+  - `reasoning_step_count`
+  - `tool_call_count`
+- `rollback_or_retry`
+  - `retry_index`
+  - `source_attempt_index`
+- `approval_request`
+  - `waiting_duration_ms`
+  - `response_duration_ms`
+- `approval_result`
+  - `waiting_duration_ms`
+  - `response_duration_ms`
+- `delivery_result`
+  - `delivery_artifact_count`
+  - `changed_file_count`
+
+## 9. API 契约
+
+功能一后端必须通过 REST API 暴露所有核心能力。V1 接口分为三类。
+
+### 9.1 Project 与 Session Command API
+
+至少提供以下命令接口：
+- `POST /api/projects`
+加载新的本地项目上下文
+- `GET /api/projects`
+获取项目列表
+- `POST /api/projects/{projectId}/sessions`
+创建新会话
+- `POST /api/sessions/{sessionId}/messages`
+提交会话消息
+
+`POST /api/sessions/{sessionId}/messages` 只允许两类语义：
+- 新需求输入
+- 澄清回复
+
+该接口必须满足以下行为：
+- 当消息语义为 `new_requirement` 且当前会话不存在活跃运行时，后端必须自动创建 `PipelineRun` 并进入 `Requirement Analysis`
+- 当消息语义为 `clarification_reply` 时，后端必须把补充信息回写到当前 `Requirement Analysis` 阶段并恢复执行
+
+该接口不承担审批提交职责。
+
+### 9.2 Run 与 Approval Command API
+
+至少提供以下命令接口：
+- `POST /api/sessions/{sessionId}/runs`
+显式启动或重启会话运行
+- `POST /api/runs/{runId}/pause`
+- `POST /api/runs/{runId}/resume`
+- `POST /api/runs/{runId}/terminate`
+- `POST /api/approvals/{approvalId}/approve`
+- `POST /api/approvals/{approvalId}/reject`
+
+`POST /api/sessions/{sessionId}/runs` 只用于显式重跑、人工恢复草稿会话或后台运维场景，不应作为新建会话后首次需求输入的必需前置调用。
+
+`POST /api/approvals/{approvalId}/reject` 必须要求：
+- `reason`
+
+系统不得提供把需求澄清提交为审批决定的接口。
+
+### 9.3 Query API
+
+至少提供以下查询接口：
+- `GET /api/projects/{projectId}/sessions`
+- `GET /api/sessions/{sessionId}/workspace`
+- `GET /api/runs/{runId}`
+- `GET /api/runs/{runId}/timeline`
+- `GET /api/stages/{stageRunId}/inspector`
+- `GET /api/approvals/{approvalId}`
+- `GET /api/delivery-records/{deliveryRecordId}`
+- `GET /api/preview-targets/{previewTargetId}`
+
+其中：
+- `GET /api/stages/{stageRunId}/inspector` 只用于拉取阶段结点的完整 Inspector 信息
+- `GET /api/delivery-records/{deliveryRecordId}` 只用于拉取交付结果的完整信息
+- `GET /api/approvals/{approvalId}` 只用于审批块自身的状态刷新、审批对象显示文本补全和操作结果回读，不用于驱动右侧 Inspector 打开
+
+## 10. 实时更新契约
+
+V1 的实时更新机制定义为：
+
+`快照查询 + 会话级事件流`
+
+后端必须提供：
+- `GET /api/sessions/{sessionId}/workspace`
+用于首次加载与断线重建
+- `GET /api/sessions/{sessionId}/events/stream`
+用于持续接收增量事件
+
+V1 实时推送协议采用 `SSE`。
+
+SSE 事件至少包含：
+- `event_id`
+- `session_id`
+- `run_id`
+- `event_type`
+- `occurred_at`
+- `payload`
+
+前端收到增量事件后，必须能够：
+- 追加 Narrative Feed 条目
+- 更新会话状态
+- 更新当前审批块状态
+- 更新结点条目内容与量化指标
+- 在需要时重新拉取 Inspector 详情
+
+## 11. 领域事件模型
+
+功能一 V1 至少定义以下关键事件：
+- `ProjectLoaded`
+- `SessionCreated`
+- `SessionMessageAppended`
+- `PipelineRunCreated`
+- `StageStarted`
+- `RequirementParsed`
+- `ClarificationRequested`
+- `ClarificationAnswered`
+- `ClarificationResolved`
+- `SolutionProposed`
+- `SolutionValidationCompleted`
+- `SolutionValidationFailedWithinDesign`
+- `ApprovalRequested`
+- `ApprovalApproved`
+- `ApprovalRejected`
+- `CodePatchGenerated`
+- `TestsGenerated`
+- `TestsExecuted`
+- `TestGapAnalyzed`
+- `ReviewCompleted`
+- `AutoRegressionTriggered`
+- `AutoRegressionExhausted`
+- `RollbackTriggered`
+- `StageCompleted`
+- `StageFailed`
+- `DeliveryPrepared`
+- `BranchPrepared`
+- `CommitIntentRecorded`
+- `BranchPushed`
+- `MergeRequestCreated`
+- `RunCompleted`
+- `RunFailed`
+- `RunPaused`
+- `RunResumed`
+- `RunTerminated`
+
+事件模型必须满足以下规则：
+- 事件既服务于编排，也服务于前端投影更新
+- 事件必须能映射到 Narrative Feed 条目或状态变化
+- 审批结果与澄清结果必须进入同一条会话事件流
+
+## 12. 工作区、工具与交付适配
+
+后端必须通过统一工具接口暴露能力，分为两类。
+
+### 12.1 Workspace Tools
+
+V1 仅实现以下六个核心工具：
+- `read_file`
+- `write_file`
+- `edit_file`
+- `list_files`
+- `search`
+- `shell`
+
+### 12.2 SCM / Delivery Tools
+
+V1 仅实现以下五个核心工具：
+- `prepare_branch`
+- `record_commit_intent`
+- `push_branch`
+- `create_code_review_request`
+- `read_delivery_channel`
+
+工具接口必须统一表达：
+- 工具名称与描述
+- 输入参数 Schema
+- 执行结果载荷
+- 错误信息
+- 审计记录
+
+## 13. 为功能二预留的接口边界
+
+功能一后端必须保留以下复用边界：
+
+1. `ChangeSet`
+未来页面圈选驱动的改动也必须统一落到该对象。
+
+2. `ContextReference`
+未来需要扩展：
+- `page_selection`
+- `dom_anchor`
+- `preview_snapshot`
+
+3. `PreviewTarget`
+V1 仅定义对象和查询接口，不实现预览启动与热更新。
+
+4. `DeliveryRecord`
+统一文本需求驱动与未来页面交互驱动的交付出口。
+
+## 14. 后端验收标准
+
+功能一后端至少满足以下验收标准：
+
+1. 能创建项目、会话与完整 Pipeline 运行。
+2. 能在 `Requirement Analysis` 阶段内部处理多轮需求澄清。
+3. 不把需求澄清建模为人工审批。
+4. 只在 `Solution Design` 与 `Code Review` 创建正式 `ApprovalRequest`。
+5. 审批 `Reject` 理由能够进入后续上下文并驱动回退重跑。
+6. 能为前端输出项目列表、会话列表、Narrative Feed、Inspector、审批块和交付结果投影。
+7. 能通过 SSE 提供会话级增量事件流。
+8. 能在历史会话中回放结构化产物、审批记录、回退记录与交付结果。
+9. 能在代码评审失败时执行受控自动回归。
+10. 能为功能二保留 `ChangeSet`、`ContextReference`、`PreviewTarget`、`DeliveryRecord` 的复用边界。

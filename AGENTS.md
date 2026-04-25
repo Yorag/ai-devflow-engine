@@ -30,8 +30,16 @@ Do not use competition-facing phrasing such as "for judges", "for contest demo",
 
 ## Current Working Agreement
 
-- The baseline accepted specification is:
-  `docs/specs/function-one-design-v1.md`
-- The current active document under review is:
-  `docs/specs/function-one-design-v2.md`
-- The user must review and approve any spec document before any commit related to that spec.
+- Archived reference documents only:
+  `docs/archive/function-one-design-v1.md`
+  `docs/archive/function-one-design-v2.md`
+- The current feature one split specification set under review is:
+  `docs/specs/function-one-product-overview-v1.md`
+  `docs/specs/frontend-workspace-global-design-v1.md`
+  `docs/specs/function-one-backend-engine-design-v1.md`
+- When the current split specifications overlap, resolve by:
+  product boundary and stage boundary: `docs/specs/function-one-product-overview-v1.md`
+  frontend interaction and presentation semantics: `docs/specs/frontend-workspace-global-design-v1.md`
+  backend domain model, API contract, projection contract, and event semantics: `docs/specs/function-one-backend-engine-design-v1.md`
+- Do not reintroduce archived feature one semantics. In the current split specs, `Solution Validation` is internal to `Solution Design`, `Rollback / Retry` is a runtime control node, `approval_request` / `approval_result` / `delivery_result` are top-level Narrative Feed entries, and the first `new_requirement` auto-starts a `PipelineRun`.
+- The user must review and approve any spec document in the current feature one split specification set before any commit related to those specs.
