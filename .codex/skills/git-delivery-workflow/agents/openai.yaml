@@ -1,0 +1,6 @@
+interface:
+  display_name: "Git Delivery Workflow"
+  short_description: "Repo Git workflow for branch to release gates"
+  default_prompt: "Use $git-delivery-workflow to manage branch, commit, PR, merge, and release decisions for this repository."
+policy:
+  allow_implicit_invocation: true

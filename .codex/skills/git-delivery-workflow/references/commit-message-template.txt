@@ -1,0 +1,24 @@
+# Agent reference commit message template
+#
+# Subject format:
+# <type>(<scope>): <summary>
+#
+# Rules:
+# - scope is required
+# - use imperative mood
+# - keep subject within 72 characters
+# - allowed types: feat, fix, refactor, docs, chore, test, build, ci
+# - body is required
+# - for documentation-only commits, Verification may be "manual review"
+
+<type>(<scope>): <summary>
+
+Changes:
+- <key change 1>
+- <key change 2>
+
+Verification:
+- <command> -> <result>
+
+Refs:
+- <spec|plan|issue|none>
