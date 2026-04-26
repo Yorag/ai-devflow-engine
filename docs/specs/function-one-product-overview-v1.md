@@ -135,7 +135,7 @@
 4. 每次需求推进都必须归属到一个 `Session`。
 5. 每个 `Session` 承载同一个需求链路，不承载多个彼此独立的需求。
 6. 同一 `Session` 的首条需求消息必须自动启动首个 `PipelineRun`。
-7. 同一 `Session` 可因重跑、重新尝试或运维重启产生多个 `PipelineRun`，但这些运行只表示同一需求链路的不同执行尝试；暂停后的恢复属于原 run 的继续执行，不创建新的 `PipelineRun`。
+7. 同一 `Session` 可因重新尝试或运维重启产生多个 `PipelineRun`，但这些运行只表示同一需求链路的不同执行尝试；暂停后的恢复属于原 run 的继续执行，不创建新的 `PipelineRun`。
 8. 新的 `PipelineRun` 只允许在前一个活动 run 处于 `failed` 或 `terminated` 后创建；`completed` 表示该会话链路已经完成，不再在同一会话中开启新的 run。
 9. 新的 `PipelineRun` 必须从完整链路起点重新开始，而不是从上一个 run 的中间阶段断点续跑。
 10. 不同 `PipelineRun` 之间不得共享未交付的工作区改动；新 run 必须基于干净基线启动。
@@ -241,15 +241,19 @@
 职责：
 - 整理已通过审批的变更、测试结论、评审结论与交付信息
 - 读取本次 run 已固化的项目级交付快照
+- 执行交付步骤并沉淀交付过程记录
 - 根据交付模式生成对应的交付结果
 - 生成最终交付记录
 
 边界：
 - `Delivery Integration` 不属于人工审批阶段
+- `Delivery Integration` 表达的是交付执行过程；本阶段成功完成后，系统再以顶层 `Delivery Result` 条目输出最终交付结果
+- `Delivery Result` 不替代 `Delivery Integration` 阶段结点
 - 本阶段必须支持 `demo_delivery` 与 `git_auto_delivery` 两类交付模式
 - `demo_delivery` 只生成展示型交付结果，不执行真实 Git 写操作
 - `git_auto_delivery` 执行真实分支、提交与 MR/PR 交付动作
 - 交付配置与凭据的阻塞性检查必须在进入本阶段前完成；本阶段只负责读取已固化的交付快照并输出结果展示
+- 若本阶段失败，不生成 `Delivery Result`，并由 run 尾部终态状态条目表达失败结果
 - 本阶段完成后，会话进入交付完成状态
 
 ## 10. 需求澄清与人工审批边界

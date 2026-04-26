@@ -193,7 +193,7 @@ V1 运行环境必须满足以下约束：
 - 首次启动运行后，实际执行必须以 `PipelineRun.template_snapshot_ref` 为准
 - 后续模板修改不得回写影响已经启动的 `PipelineRun`
 - 功能一 V1 中，一个 `Session` 只承载一条从需求输入到交付结果的主链路
-- 同一 `Session` 可因重跑、重新尝试或运维重启产生多个 `PipelineRun`
+- 同一 `Session` 可因重新尝试或运维重启产生多个 `PipelineRun`
 - 暂停后的恢复属于当前 `PipelineRun` 的继续执行，不创建新的 run
 - 同一 `Session` 下的多个 `PipelineRun` 只表示同一需求链路的不同执行尝试，不表示新的独立需求
 - 新的 `PipelineRun` 只允许在前一个活动 run 处于 `failed` 或 `terminated` 后创建；`completed` 表示该会话链路已经完成，不再在同一会话中开启新的 run；同一 `Session` 在同一时刻不允许并存多个活动 run
@@ -610,7 +610,7 @@ Pipeline 引擎必须满足以下实施约束：
 5. `生命周期管理`
 - 支持启动、暂停、恢复、终止
 - 支持阶段失败后终止或重试
-- 支持审批拒绝后回退到指定阶段重跑
+- 支持审批拒绝后回退到指定阶段重新执行
 - 支持代码评审失败后进入自动回归循环
 - 自动回归结束后，进入代码评审人工审批或失败状态
 
@@ -920,8 +920,10 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `narrative_entries` 必须返回该会话下按时间顺序组织的完整多 run 主流，而不是只返回单个 run 的条目集合
 - `composer_mode`、当前审批状态与 `current_stage_type` 都必须基于 `current_run_id` 计算，而不是基于历史 run 焦点计算
 - `available_runs` 用于支撑前端 `Run Switcher`，至少包含 `run_id`、`status`、`attempt_index`、`started_at`、`ended_at`
+- `available_runs` 还必须包含 `trigger_type`，用于前端生成 run 分界头部中的触发来源文案
+- `available_runs.trigger_type` 至少支持：`initial_run`、`retry_run`、`ops_restart`
 - 历史 run 只读语义通过 `narrative_entries` 中各条目所属的 run 标识和可操作标记表达，不通过把整个页面切换为只读实现
-- `narrative_entries` 中不同 run 之间必须存在显式分界条目或等价结构，以支撑前端展示强分界的 run 分段
+- 前端必须基于 `available_runs` 与 `narrative_entries.run_id` 自行插入纯视觉 run 分界头部，不依赖后端额外返回专门的分界条目
 
 `SessionWorkspaceProjection.current_stage_type`、`SessionListItemProjection.current_stage_type`、`approval_result.next_stage_type` 与所有 `rollback_target_stage_type` 字段必须共用同一 `stage_type` 枚举；当会话处于审批等待时，这些字段保持为触发审批的源阶段类型。
 
@@ -953,7 +955,6 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - 其返回值表达的是运行前配置，而不是只用于展示的元信息
 
 `narrative_entries` 必须支持以下条目类型：
-- `run_boundary`
 - `user_message`
 - `execution_node`
 - `approval_request`
@@ -962,7 +963,6 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `system_status`
 
 `narrative_entries` 采用前端规格要求的 `结点 + 条目` 两层模型：
-- `run_boundary` 用于标记同一会话中不同 `PipelineRun` 的显式分界
 - `execution_node` 是阶段级顶层结点
 - 结点内部条目通过 `execution_node.items` 表达
 - 不允许把结点内部条目直接摊平成无阶段归属的顶层瀑布流
@@ -972,11 +972,25 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `system_status` 用于表达暂停、恢复、失败、终止等运行控制结果
 - `completed` run 以 `delivery_result` 作为尾部收束条目，不追加完成态 `system_status`
 - `failed` 与 `terminated` run 必须在各自 run 尾部追加顶层 `system_status` 终态条目
-- 不同 `PipelineRun` 的条目必须在主流中保留原有时间顺序，但 run 与 run 之间必须插入显式分界条目
+- 不同 `PipelineRun` 的条目必须在主流中保留原有时间顺序
+- 每个顶层条目和阶段结点都必须携带所属 `run_id`，以前端基于 `available_runs` 与条目所属 run 插入纯视觉分界头部和页面内导航锚点
 
 其中以下条目必须定义明确字段契约：
 
+`user_message`
+- `run_id`
+- `message_id`
+- `message_semantics`
+- `content`
+- `occurred_at`
+
+规则如下：
+- `message_semantics` 至少支持：`new_requirement`
+- `user_message` 用于表达顶层用户输入条目，不承载澄清问答；澄清问答仍通过 `requirement_analysis.execution_node.items` 表达
+- 当 `Session.status = draft` 且尚未启动首个 run 时，不存在 run 级 `user_message` 条目；首条需求消息提交并创建首个 `PipelineRun` 后，才在对应 run 下生成该顶层条目
+
 `approval_result`
+- `run_id`
 - `approval_id`
 - `approval_type`
 - `decision`
@@ -996,6 +1010,7 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `approval_result` 必须作为独立 Narrative Feed 条目追加到主流中
 
 `delivery_result`
+- `run_id`
 - `delivery_record_id`
 - `delivery_excerpt`
 - `delivery_status`
@@ -1005,6 +1020,7 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `delivery_record_ref`
 
 `system_status`
+- `run_id`
 - `status_code`
 - `title`
 - `message`
@@ -1022,25 +1038,11 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - 当 `can_retry = true` 时，`retry_action` 必须明确对应 `POST /api/sessions/{sessionId}/runs`
 - 历史 run、`completed` run 和非终态 `system_status` 条目不得返回可执行的 `retry_action`
 
-`run_boundary`
-- `run_id`
-- `attempt_index`
-- `run_status`
-- `trigger_type`
-- `started_at`
-- `ended_at`
-- `is_current_run`
-- `entry_type`
-
-规则如下：
-- 每个 `PipelineRun` 的首条运行内容之前都必须插入一个 `run_boundary`
-- `trigger_type` 至少支持：`initial_run`、`retry_run`、`ops_restart`
-- `run_boundary` 用于支撑前端 run 分界头部与页面内导航，不承担审批或输入操作
-
 ### 8.3 执行结点投影
 
 `execution_node` 投影必须满足前端 Narrative Feed 与 Inspector 的共同需求，至少包含：
 - `node_id`
+- `run_id`
 - `stage_run_id`
 - `stage_type`
 - `status`
@@ -1148,6 +1150,7 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 
 `StageInspectorProjection` 必须按阶段类型区分载荷，并至少包含：
 - `title`
+- `run_id`
 - `stage_type`
 - `status`
 - `structured_input`
@@ -1206,6 +1209,15 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
   - `rollback_context`
   - `target_stage_type`
   - `attempt_history`
+- `delivery_integration` 至少包含：
+  - `delivery_mode`
+  - `delivery_channel_snapshot`
+  - `delivery_target`
+  - `delivery_steps`
+  - `step_results`
+  - `generated_artifacts`
+  - `failure_reason`
+  - `delivery_record_ref`
 - `approval_result` 字段组在所属阶段结点 Inspector 中至少包含：
   - `approval_id`
   - `approval_type`
@@ -1235,6 +1247,7 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 ### 8.5 审批块投影
 
 `approval_request` 投影至少包含：
+- `run_id`
 - `approval_id`
 - `approval_type`
 - `status`
@@ -1417,9 +1430,9 @@ Provider 管理接口必须满足以下规则：
 - `POST /api/approvals/{approvalId}/approve`
 - `POST /api/approvals/{approvalId}/reject`
 
-`POST /api/sessions/{sessionId}/runs` 只用于显式重跑、重新尝试或后台运维重启场景，不应作为新建会话后首次需求输入的必需前置调用。
+`POST /api/sessions/{sessionId}/runs` 只用于显式重新尝试或后台运维重启场景，不应作为新建会话后首次需求输入的必需前置调用。
 
-该接口仅用于对当前会话所承载的同一需求链路执行显式重跑、重新尝试或运维重启，不用于承接新的独立需求文本。
+该接口仅用于对当前会话所承载的同一需求链路执行显式重新尝试或运维重启，不用于承接新的独立需求文本。
 
 该接口必须满足以下规则：
 - 只有当当前活动 run 已处于 `failed` 或 `terminated` 终态时，才允许创建新的 `PipelineRun`
@@ -1448,7 +1461,7 @@ Provider 管理接口必须满足以下规则：
 - 若暂停前源状态为 `waiting_clarification`，恢复后必须回到 `waiting_clarification`
 - 若暂停前源状态为 `waiting_approval`，恢复后必须回到 `waiting_approval`
 - 若暂停前源状态为 `running` 或 `pending`，恢复后必须在原阶段继续执行
-- 恢复后继续同一个 `PipelineRun` 的既有链路上下文，不得新建 run，不得把恢复语义投影为 `retry_run`
+- 恢复后继续同一个 `PipelineRun` 的既有链路上下文，不得新建 run，不得把恢复语义投影为新的重新尝试
 - 若暂停前已有临时工作快照，恢复时必须优先基于该快照续接，而不是丢弃已完成的一半结点内工作并从空白状态重做
 
 `POST /api/runs/{runId}/terminate` 必须满足以下规则：
@@ -1641,7 +1654,7 @@ V1 仅定义对象和查询接口，不实现预览启动与热更新。
 2. 能在 `Requirement Analysis` 阶段内部处理多轮需求澄清。
 3. 不把需求澄清建模为人工审批。
 4. 只在 `Solution Design` 与 `Code Review` 创建正式 `ApprovalRequest`。
-5. 审批 `Reject` 理由能够进入后续上下文并驱动回退重跑。
+5. 审批 `Reject` 理由能够进入后续上下文并驱动回退重新执行。
 6. 能为前端输出项目列表、会话列表、Narrative Feed、Inspector、审批块和交付结果投影。
 7. 能通过 SSE 提供会话级增量事件流。
 8. 能在历史会话中回放结构化产物、审批记录、回退记录与交付结果。
