@@ -167,12 +167,13 @@
 - `updated_at`
 
 `PipelineTemplate` 必须满足以下规则：
+- 功能一 V1 对外管理语义中的 `Pipeline` 资源由 `PipelineTemplate` 承载；`PipelineRun` 是从模板快照派生的运行实例，不作为可编辑模板资源参与 CRUD
 - `template_source` 在 V1 只允许：`system_template`、`user_template`
 - `fixed_stage_sequence` 在 V1 固定为：`Requirement Analysis -> Solution Design -> Design Approval Checkpoint -> Code Generation -> Test Generation & Execution -> Code Review -> Code Review Approval Checkpoint -> Delivery Integration`
 - 用户不可通过模板删除、禁用或重排核心业务阶段
 - 用户不可通过模板关闭 `Design Approval Checkpoint` 或 `Code Review Approval Checkpoint`
 - `system_template` 允许被选择和另存，但不允许被直接覆盖
-- `user_template` 允许被覆盖更新，也允许另存为新模板
+- `user_template` 允许被覆盖更新、另存为新模板和删除
 - `PipelineTemplate` 的完整定义服务于后端校验、运行编排与模板持久化，不等同于前端模板配置 UI 的展示载荷
 - 系统启动时必须至少预置以下三个 `system_template`：
   - `Bug 修复流程`
@@ -327,7 +328,16 @@
 表示变更风险分级与风险说明。
 
 15. `DeliveryChannel`
-表示目标托管平台、仓库标识、默认分支、代码评审请求类型及交付策略。
+表示目标托管平台、仓库标识、默认分支、代码评审请求类型及交付策略，至少包含：
+- `delivery_mode`
+- `provider_type`
+- `repository_ref`
+- `default_branch`
+- `review_request_type`
+
+`DeliveryChannel.delivery_mode` 在功能一 V1 中至少支持：
+- `demo_delivery`
+- `git_auto_delivery`
 
 16. `DeliveryRecord`
 表示最终交付结果，记录：
@@ -335,8 +345,9 @@
 - 变更结果
 - 测试结论
 - 评审结论
+- 交付模式
 - 分支信息
-- 提交意图
+- 提交信息或提交说明展示
 - MR/PR 信息
 
 ### 5.5 上下文与扩展对象
@@ -422,6 +433,8 @@
 - 汇总最终变更结果、测试结论与评审结论
 - 读取交付通道信息
 - 准备分支信息与提交说明意图
+- 当 `delivery_mode = demo_delivery` 时，仅生成用于演示的交付说明、分支信息展示和 `commit_message_preview`，不得执行真实提交、推送或 MR/PR 创建
+- 当 `delivery_mode = git_auto_delivery` 时，必须执行真实交付流程：`prepare_branch -> create_commit -> push_branch -> create_code_review_request`
 - 按交付策略生成 MR/PR 信息或交付描述
 - 产出 `DeliveryRecord`
 
@@ -565,7 +578,7 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 
 `SCM / Delivery Tools`
 - `prepare_branch`
-- `record_commit_intent`
+- `create_commit`
 - `push_branch`
 - `create_code_review_request`
 - `read_delivery_channel`
@@ -653,8 +666,8 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 `Delivery Integration Agent`
 - 目标：整理交付物、交付说明、分支信息与 MR/PR 信息
 - 输入：已通过审批的 `code_changeset`、`review_report`、`test_execution_result`、`delivery_channel`
-- 输出：`delivery_record`、`delivery_description`、`branch_info`、`merge_request_info`
-- 可用工具：`read_file`、`list_files`、`search`、`read_delivery_channel`、`prepare_branch`、`record_commit_intent`、`push_branch`、`create_code_review_request`
+- 输出：`delivery_record`、`delivery_description`、`branch_info`、`commit_info`、`merge_request_info`
+- 可用工具：`read_file`、`list_files`、`search`、`read_delivery_channel`、`prepare_branch`、`create_commit`、`push_branch`、`create_code_review_request`
 - 失败处理：交付物不完整、交付通道信息缺失或无法生成交付记录时停留在本阶段并返回错误信息
 
 ## 8. 前端查询投影契约
@@ -1067,6 +1080,8 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 更新已有用户模板
 - `POST /api/pipeline-templates/{templateId}/save-as`
 基于现有模板另存为新的用户模板
+- `DELETE /api/pipeline-templates/{templateId}`
+删除已有用户模板
 - `POST /api/providers`
 创建新的自定义 Provider
 - `PATCH /api/providers/{providerId}`
@@ -1094,6 +1109,9 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 模板保存接口必须满足以下规则：
 - `PATCH /api/pipeline-templates/{templateId}` 只允许更新 `user_template`
 - `POST /api/pipeline-templates/{templateId}/save-as` 允许基于 `system_template` 或 `user_template` 创建新的 `user_template`
+- `DELETE /api/pipeline-templates/{templateId}` 只允许删除 `user_template`
+- 删除模板不得影响任何已启动运行所绑定的 `template_snapshot_ref`
+- 删除当前会话选中的用户模板后，后端必须为该草稿会话重新绑定一个可用模板；未显式指定时回退到默认系统模板 `新功能开发流程`
 - 模板保存前必须执行模板字段和角色绑定完整性校验
 - 保存结果必须返回最终生效的 `template_id`
 - 模板保存接口服务于启动前模板配置，不用于修改任何已启动运行的模板快照
@@ -1204,7 +1222,7 @@ SSE 事件至少包含：
 - `StageFailed`
 - `DeliveryPrepared`
 - `BranchPrepared`
-- `CommitIntentRecorded`
+- `CommitCreated`
 - `BranchPushed`
 - `MergeRequestCreated`
 - `RunCompleted`
@@ -1236,7 +1254,7 @@ V1 仅实现以下六个核心工具：
 
 V1 仅实现以下五个核心工具：
 - `prepare_branch`
-- `record_commit_intent`
+- `create_commit`
 - `push_branch`
 - `create_code_review_request`
 - `read_delivery_channel`
@@ -1281,5 +1299,7 @@ V1 仅定义对象和查询接口，不实现预览启动与热更新。
 8. 能在历史会话中回放结构化产物、审批记录、回退记录与交付结果。
 9. 能在代码评审失败时执行受控自动回归。
 10. 能列出系统模板与用户模板，并在不破坏固定主干阶段的前提下编辑允许字段。
-11. 能把模板修改保存为覆盖现有用户模板或另存为新用户模板，并在运行开始时固化模板快照。
-12. 能为功能二保留 `ChangeSet`、`ContextReference`、`PreviewTarget`、`DeliveryRecord` 的复用边界。
+11. 能把模板修改保存为覆盖现有用户模板、另存为新用户模板或删除用户模板，并在运行开始时固化模板快照。
+12. 当 `delivery_mode = demo_delivery` 时，能生成仅用于展示的分支信息与提交说明预览，而不执行真实 Git 写操作。
+13. 当 `delivery_mode = git_auto_delivery` 时，能自动创建分支、创建提交并发起 MR/PR。
+14. 能为功能二保留 `ChangeSet`、`ContextReference`、`PreviewTarget`、`DeliveryRecord` 的复用边界。
