@@ -121,6 +121,9 @@ V1 默认部署拓扑必须满足以下规则：
 V1 运行环境必须满足以下约束：
 - 每个 `Project.root_path` 必须对应一个可被后端直接访问的本地仓库路径。
 - `Workspace & Tool Service` 必须在隔离工作区中完成文件读取、代码修改、命令执行、diff 生成与测试执行。
+- 每个 `PipelineRun` 都必须使用独立隔离工作区。
+- 新建 `PipelineRun` 时，工作区必须从干净基线创建，不得自动继承前一个 run 未交付的工作区改动。
+- 只有已经通过明确交付路径落入仓库基线的结果，才允许成为后续 run 的输入基线；未交付的本地工作区改动不得跨 run 泄漏。
 - `SCM & Delivery Adapter` 必须统一封装本地 Git 与远端托管平台差异，不向前端和编排层暴露具体命令细节。
 - 当系统未配置远端托管平台时，仍必须支持 `demo_delivery` 路径下的完整本地闭环。
 - 当系统配置了可用的远端托管平台与交付通道时，必须支持 `git_auto_delivery` 路径下的真实交付流程。
@@ -139,12 +142,14 @@ V1 运行环境必须满足以下约束：
 - `project_id`
 - `name`
 - `root_path`
+- `default_delivery_channel_id`
 - `created_at`
 - `updated_at`
 
 `Project` 必须满足以下初始化规则：
 - 系统首次启动时必须自动登记一个默认项目，绑定平台仓库自身路径
 - 在用户未手动加载其他项目之前，`GET /api/projects` 也必须返回该默认项目
+- 每个 `Project` 在 V1 必须能够解析一个默认 `DeliveryChannel`；未配置远端交付条件时，默认回落到 `demo_delivery`
 
 2. `Session`
 表示项目下的一次需求会话，至少包含：
@@ -183,6 +188,10 @@ V1 运行环境必须满足以下约束：
 - 首次启动运行后，实际执行必须以 `PipelineRun.template_snapshot_ref` 为准
 - 后续模板修改不得回写影响已经启动的 `PipelineRun`
 - 功能一 V1 中，一个 `Session` 只承载一条从需求输入到交付结果的主链路
+- 同一 `Session` 可因重跑、重新尝试或运维重启产生多个 `PipelineRun`
+- 暂停后的恢复属于当前 `PipelineRun` 的继续执行，不创建新的 run
+- 同一 `Session` 下的多个 `PipelineRun` 只表示同一需求链路的不同执行尝试，不表示新的独立需求
+- 新的 `PipelineRun` 只允许在前一个活动 run 已进入终态后创建；同一 `Session` 在同一时刻不允许并存多个活动 run
 - 若用户要发起新的独立需求，必须创建新的 `Session`，不得在已有运行历史的会话中再次提交 `new_requirement` 以开启第二条链路
 
 `Session.latest_stage_type` 与所有下游查询投影中的阶段类型字段必须统一使用本文定义的 `stage_type` 枚举值。
@@ -429,6 +438,7 @@ V1 运行环境必须满足以下约束：
 - `demo_delivery` 是功能一 V1 的演示交付模式。
 - `git_auto_delivery` 是功能一 V1 的正式交付模式，不属于仅为后续版本预留的增强能力。
 - 当交付通道可用时，后端必须能够基于 `git_auto_delivery` 执行真实分支准备、提交创建、分支推送与代码评审请求创建。
+- `DeliveryChannel` 的解析来源属于项目上下文或运行上下文，不属于前端模板编辑载荷的一部分。
 
 16. `DeliveryRecord`
 表示最终交付结果，记录：
@@ -561,10 +571,12 @@ Pipeline 引擎必须满足以下实施约束：
   - `AgentRole.provider_id`
   - `auto_regression_enabled`
   - `max_auto_regression_retries`
+- 上述字段属于运行前配置，直接服务于后续阶段 Agent 的实际执行行为，不是只用于前端展示的说明性字段
 - 用户不可编辑核心阶段顺序、审批检查点存在性、阶段输入输出契约、结构化产物要求和工具权限边界
 - 保存模板时，必须校验所有必需角色槽位都已完成 `AgentRole` 与 `Provider` 绑定
 - 保存模板时，必须校验 `max_auto_regression_retries` 落在平台允许范围内
 - 后端面向前端输出的模板编辑载荷只返回允许字段，不返回固定阶段骨架、审批检查点、阶段输入输出契约、结构化产物要求和工具权限边界
+- 运行启动后，这些配置必须固化到 `PipelineRun.template_snapshot_ref`，后续查询只读返回，不可回写正在执行或已结束的 run
 
 4. `阶段间数据流转`
 - 上一阶段输出必须以 `StageArtifact` 形式持久化
@@ -597,6 +609,9 @@ Pipeline 引擎必须满足以下实施约束：
 - 需求澄清通过统一会话消息接口提交
 - 需求澄清必须保留问题、回答、影响范围与最终结论
 - 同一 `Requirement Analysis` 结点允许多轮澄清
+- `waiting_clarification` 只表示当前 run 正在等待用户补充信息，不表示 Agent 已停止在该结点内继续分析的整个会话阶段
+- 当用户提交 `clarification_reply` 后，当前 run 必须恢复为 `running` 并继续同一个 `Requirement Analysis` 结点
+- 用户回复后的 Agent 连续分析、继续追问或继续输出，仍属于同一澄清链路；若信息仍不足，可再次切回 `waiting_clarification`
 
 ### 7.2 人工审批语义
 
@@ -721,6 +736,11 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - 可用工具：`list_files`、`search`、`read_file`
 - 失败处理：输出不完整或无法形成结构化结果时停留在本阶段重试；存在信息缺口时创建澄清记录并等待用户回复
 
+当该 Agent 由新的 `PipelineRun` 重新启动时：
+- `历史会话上下文` 只允许引用已经持久化的结构化产物与结论
+- 至少包括：原始需求文本、澄清结论、设计审批反馈、历史评审意见与其他已持久化关键产物引用
+- 不得读取前一个 run 未交付的临时工作区改动作为输入
+
 `Solution Design Agent`
 - 目标：输出技术方案、影响范围、关键设计决策与文件变更范围
 - 输入：`structured_requirement`、`acceptance_criteria`、澄清结论、仓库上下文
@@ -801,6 +821,7 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `current_stage_type`
 - `selected_template_id`
 - `selected_template_summary`
+- `available_runs`
 - `narrative_entries`
 - `composer_mode`
 
@@ -808,6 +829,13 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `new_requirement`
 - `clarification_reply`
 - `readonly`
+
+`composer_mode` 必须满足以下状态映射规则：
+- 当 `Session.status = draft` 且尚未创建首个 `PipelineRun` 时，返回 `new_requirement`
+- 当当前活动 run 处于 `waiting_clarification` 且当前阶段为 `requirement_analysis` 时，返回 `clarification_reply`
+- 当当前活动 run 处于 `running`、`waiting_approval`、`paused`、`completed`、`failed` 或 `terminated` 时，返回 `readonly`
+- `composer_mode` 只约束输入框语义，不负责表达 `发送`、`暂停`、`恢复` 等生命周期按钮的视觉状态
+- 当 `current_stage_type = requirement_analysis` 且 `Session.status = running` 时，前端应将其理解为澄清对话中的 Agent 连续分析 / 连续回复回合，而不是等待用户输入的回合
 
 `selected_template_summary` 表示当前会话选中模板或当前运行所用模板的只读摘要，不承担模板编辑载荷职责。至少包含：
 - `template_id`
@@ -826,6 +854,15 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 当 `session_status != draft` 或 `PipelineRun` 已启动时：
 - `SessionWorkspaceProjection` 只返回 `selected_template_summary`
 - 工作台不得依赖 workspace 载荷渲染模板编辑区
+- `selected_template_summary` 必须表示当前活动 run 绑定的模板快照摘要，而不是可继续编辑的共享配置
+
+`SessionWorkspaceProjection` 必须满足以下 run 视图规则：
+- `current_run_id` 表示该会话当前有效的运行，通常为最新 run 或当前活跃 run
+- `narrative_entries` 必须返回该会话下按时间顺序组织的完整多 run 主流，而不是只返回单个 run 的条目集合
+- `composer_mode`、当前审批状态与 `current_stage_type` 都必须基于 `current_run_id` 计算，而不是基于历史 run 焦点计算
+- `available_runs` 用于支撑前端 `Run Switcher`，至少包含 `run_id`、`status`、`attempt_index`、`started_at`、`ended_at`
+- 历史 run 只读语义通过 `narrative_entries` 中各条目所属的 run 标识和可操作标记表达，不通过把整个页面切换为只读实现
+- `narrative_entries` 中不同 run 之间必须存在显式分界条目或等价结构，以支撑前端展示强分界的 run 分段
 
 `SessionWorkspaceProjection.current_stage_type`、`SessionListItemProjection.current_stage_type`、`approval_result.next_stage_type` 与所有 `rollback_target_stage_type` 字段必须共用同一 `stage_type` 枚举；当会话处于审批等待时，这些字段保持为触发审批的源阶段类型。
 
@@ -851,8 +888,10 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `available_providers` 必须至少包含两个内置 Provider：`火山引擎`、`DeepSeek`
 - `available_providers` 可以包含用户新增的 `custom` Provider
 - `available_providers` 对前端返回的是 Provider 展示名和必要标识，不返回把协议名当作 Provider 名称的展示结果
+- 其返回值表达的是运行前配置，而不是只用于展示的元信息
 
 `narrative_entries` 必须支持以下条目类型：
+- `run_boundary`
 - `user_message`
 - `execution_node`
 - `approval_request`
@@ -861,12 +900,15 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `system_status`
 
 `narrative_entries` 采用前端规格要求的 `结点 + 条目` 两层模型：
+- `run_boundary` 用于标记同一会话中不同 `PipelineRun` 的显式分界
 - `execution_node` 是阶段级顶层结点
 - 结点内部条目通过 `execution_node.items` 表达
 - 不允许把结点内部条目直接摊平成无阶段归属的顶层瀑布流
 - `user_message` 用于会话起始需求输入等独立顶层用户消息
 - `Requirement Analysis` 阶段内的澄清问答通过 `execution_node.items` 表达
 - `approval_request`、`approval_result`、`delivery_result` 作为顶层条目追加到主流中
+- `system_status` 用于表达暂停、恢复、终止等运行控制结果，其中终止后的提示条目必须作为顶层条目追加到该 run 尾部
+- 不同 `PipelineRun` 的条目必须在主流中保留原有时间顺序，但 run 与 run 之间必须插入显式分界条目
 
 其中以下条目必须定义明确字段契约：
 
@@ -897,6 +939,21 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `changed_file_count`
 - `occurred_at`
 - `delivery_record_ref`
+
+`run_boundary`
+- `run_id`
+- `attempt_index`
+- `run_status`
+- `trigger_type`
+- `started_at`
+- `ended_at`
+- `is_current_run`
+- `entry_type`
+
+规则如下：
+- 每个 `PipelineRun` 的首条运行内容之前都必须插入一个 `run_boundary`
+- `trigger_type` 至少支持：`initial_run`、`retry_run`、`ops_restart`
+- `run_boundary` 用于支撑前端 run 分界头部与页面内导航，不承担审批或输入操作
 
 ### 8.3 执行结点投影
 
@@ -1105,11 +1162,17 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `approval_object_preview`
 - `approve_action`
 - `reject_action`
+- `is_actionable`
 - `requested_at`
 - `waiting_duration_ms`
 - `response_duration_ms`
 
 `reject_action` 必须声明需要补充理由输入。
+
+`approval_request.is_actionable` 必须满足以下规则：
+- 当该审批块属于当前活动 run、审批仍待处理，且当前 run 未进入 `terminated` 时，返回 `true`
+- 当该审批块属于当前活动 run 且当前 run 处于 `paused`，若审批仍待处理，仍返回 `true`
+- 当该审批块属于历史 run、当前 run 已进入 `terminated`，或审批已结束时，返回 `false`
 
 审批时长字段统一按以下规则解释：
 - `waiting_duration_ms`：从 `requested_at` 到当前投影时刻或 `responded_at` 的等待时长
@@ -1243,16 +1306,54 @@ Provider 管理接口必须满足以下规则：
 
 至少提供以下命令接口：
 - `POST /api/sessions/{sessionId}/runs`
-显式启动或重启会话运行
+显式创建一次新的运行尝试
 - `POST /api/runs/{runId}/pause`
 - `POST /api/runs/{runId}/resume`
 - `POST /api/runs/{runId}/terminate`
 - `POST /api/approvals/{approvalId}/approve`
 - `POST /api/approvals/{approvalId}/reject`
 
-`POST /api/sessions/{sessionId}/runs` 只用于显式重跑、运行恢复或后台运维场景，不应作为新建会话后首次需求输入的必需前置调用。
+`POST /api/sessions/{sessionId}/runs` 只用于显式重跑、重新尝试或后台运维重启场景，不应作为新建会话后首次需求输入的必需前置调用。
 
-该接口仅用于对当前会话所承载的同一需求链路执行显式重跑、恢复或运维重启，不用于承接新的独立需求文本。
+该接口仅用于对当前会话所承载的同一需求链路执行显式重跑、重新尝试或运维重启，不用于承接新的独立需求文本。
+
+该接口必须满足以下规则：
+- 只有当当前活动 run 已处于 `failed` 或 `terminated` 终态时，才允许创建新的 `PipelineRun`
+- 新建 `PipelineRun` 必须从 `requirement_analysis` 重新开始完整链路，而不是从上一个 run 的中间阶段断点续跑
+- 新建 `PipelineRun` 必须创建新的隔离工作区
+- 上一个 run 未交付的本地工作区改动不得自动带入新的 `PipelineRun`
+- 该接口对应前端 `重新尝试` 动作，不对应暂停 run 的继续执行
+
+`POST /api/runs/{runId}/resume` 只用于继续当前已暂停的同一个 `PipelineRun`，不得创建新的 run。
+
+`POST /api/runs/{runId}/pause`、`POST /api/runs/{runId}/resume`、`POST /api/runs/{runId}/terminate` 属于前端工作台可直接触发的正式用户能力，不只是后台运维接口。
+
+`POST /api/runs/{runId}/pause` 必须满足以下规则：
+- 只允许作用于当前活动 run
+- 只要当前活动 run 仍处于链路运行过程中，就允许调用，不因当前处于哪个阶段而受限
+- 至少允许从 `pending`、`running`、`waiting_clarification` 与 `waiting_approval` 进入 `paused`
+- 调用成功后，run 级状态必须切换为 `paused`，并同步投影为 `Session.status = paused`
+- 调用成功后，必须记录本次暂停前的源状态、源阶段与必要运行上下文快照，用于后续 `resume` 原位恢复
+- 当暂停发生在结点执行中途时，后端必须为当前 run 临时固化可续接的工作快照；该快照至少覆盖当前阶段上下文、已生成的中间产物引用、工作区当前改动状态与必要的执行历史
+- 调用成功后，不得删除、重建或改写当前 run 已经产生的阶段记录、审批请求、审批结果、澄清记录与交付记录
+- 若暂停发生在 `waiting_approval`，待处理审批对象必须继续保留为可提交状态，不因 run 进入 `paused` 而自动关闭或转只读
+
+`POST /api/runs/{runId}/resume` 必须满足以下规则：
+- 只允许从 `paused` 恢复
+- 恢复后必须优先回到暂停前记录的源状态，而不是统一恢复为某个固定状态
+- 若暂停前源状态为 `waiting_clarification`，恢复后必须回到 `waiting_clarification`
+- 若暂停前源状态为 `waiting_approval`，恢复后必须回到 `waiting_approval`
+- 若暂停前源状态为 `running` 或 `pending`，恢复后必须在原阶段继续执行
+- 恢复后继续同一个 `PipelineRun` 的既有链路上下文，不得新建 run，不得把恢复语义投影为 `retry_run`
+- 若暂停前已有临时工作快照，恢复时必须优先基于该快照续接，而不是丢弃已完成的一半结点内工作并从空白状态重做
+
+`POST /api/runs/{runId}/terminate` 必须满足以下规则：
+- 只允许作用于当前活动 run
+- 只要当前活动 run 尚未进入 `completed`、`failed` 或 `terminated` 终态，就允许调用
+- 调用成功后，run 级状态必须切换为 `terminated`，并同步投影为 `Session.status = terminated`
+- 调用成功后，不得关闭、删除或隐式完成当前 run 已存在的审批对象、澄清对象或其他历史执行记录
+- 调用成功后，当前 run 上仍为 `pending` 的审批对象必须转为不可操作视图；前端不得再允许提交 `Approve` 或 `Reject`
+- 调用成功后，必须在该 run 的 Narrative Feed 尾部追加一个顶层 `system_status` 终止提示条目，用于明确表达该 run 已被用户终止
 
 `POST /api/approvals/{approvalId}/reject` 必须要求：
 - `reason`
@@ -1278,6 +1379,9 @@ Provider 管理接口必须满足以下规则：
 - `GET /api/providers` 用于拉取内置 Provider 和用户新增的自定义 Provider 列表
 - `GET /api/pipeline-templates` 用于拉取系统模板和用户模板列表；返回结果中必须至少包含三个预置 `system_template`
 - `GET /api/pipeline-templates/{templateId}` 用于拉取 `TemplateEditorProjection`，即启动前模板配置所需的允许字段
+- `GET /api/sessions/{sessionId}/workspace` 用于拉取当前会话工作台视图；该接口返回完整会话的多 run 主流，而不是单 run 视图，run 之间的浏览与定位由前端页面内导航完成
+- `GET /api/runs/{runId}` 用于拉取单个 run 的基础状态与摘要信息
+- `GET /api/runs/{runId}/timeline` 用于拉取该 run 独立的 Narrative Feed 时间线，不混入同一会话其他 run 的条目
 - `GET /api/stages/{stageRunId}/inspector` 只用于拉取 `StageInspectorProjection`
 - `GET /api/delivery-records/{deliveryRecordId}` 只用于拉取 `DeliveryResultDetailProjection`
 - `GET /api/approvals/{approvalId}` 只用于审批块自身的状态刷新、审批对象显示文本补全和操作结果回读，不用于驱动右侧 Inspector 打开
