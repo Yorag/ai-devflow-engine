@@ -194,7 +194,7 @@ V1 运行环境必须满足以下约束：
 - 同一 `Session` 可因重跑、重新尝试或运维重启产生多个 `PipelineRun`
 - 暂停后的恢复属于当前 `PipelineRun` 的继续执行，不创建新的 run
 - 同一 `Session` 下的多个 `PipelineRun` 只表示同一需求链路的不同执行尝试，不表示新的独立需求
-- 新的 `PipelineRun` 只允许在前一个活动 run 已进入终态后创建；同一 `Session` 在同一时刻不允许并存多个活动 run
+- 新的 `PipelineRun` 只允许在前一个活动 run 处于 `failed` 或 `terminated` 后创建；`completed` 表示该会话链路已经完成，不再在同一会话中开启新的 run；同一 `Session` 在同一时刻不允许并存多个活动 run
 - 若用户要发起新的独立需求，必须创建新的 `Session`，不得在已有运行历史的会话中再次提交 `new_requirement` 以开启第二条链路
 
 `Session.latest_stage_type` 与所有下游查询投影中的阶段类型字段必须统一使用本文定义的 `stage_type` 枚举值。
@@ -410,6 +410,9 @@ V1 运行环境必须满足以下约束：
 - `rejected`
 
 `ApprovalRequest.rollback_target_stage_type` 必须使用本文定义的 `stage_type` 枚举值。
+并满足以下规则：
+- 当 `approval_type = solution_design_approval` 时，`rollback_target_stage_type` 固定为 `solution_design`
+- 当 `approval_type = code_review_approval` 时，`rollback_target_stage_type` 固定为 `code_generation`
 
 12. `ApprovalDecision`
 表示审批结果，至少包含：
@@ -539,7 +542,7 @@ V1 运行环境必须满足以下约束：
 - 自动回归循环结束且得到稳定评审产物后，创建 `ApprovalRequest(type=code_review_approval)`
 - 创建 `ApprovalRequest(type=code_review_approval)` 后，当前 `code_review` 的 `StageRun.status` 必须置为 `waiting_approval`
 - 审批通过后进入 `Delivery Integration`
-- 审批拒绝后，记录拒绝理由并按根因回退
+- 审批拒绝后，记录拒绝理由并回退到 `Code Generation`
 
 ### 6.5 Delivery Integration 生命周期
 
@@ -635,6 +638,8 @@ Pipeline 引擎必须满足以下实施约束：
 - 拒绝理由必须进入后续上下文，供重新生成与审查使用
 - 审批结果必须进入事件流与 Narrative Feed 投影
 - 审批等待期间，会话级 `current_stage_type` 与源阶段 `stage_type` 保持不变；是否待审批由 `Session.status = waiting_approval`、`pending_action_type = approval` 与 `ApprovalRequest.status = pending` 共同表达
+- `solution_design_approval` 的 `Reject` 固定回到 `Solution Design`
+- `code_review_approval` 的 `Reject` 固定回到 `Code Generation`
 
 ### 7.3 自动回归与回退语义
 
