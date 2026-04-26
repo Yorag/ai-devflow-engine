@@ -67,7 +67,7 @@
 负责持久化运行上下文、阶段输入输出、结构化产物与共享引用。
 
 4. `Agent Role Registry`
-负责管理阶段角色、Prompt 模板、输入输出契约与失败处理策略。
+负责管理阶段角色预设、Prompt 模板、输入输出契约与失败处理策略。
 
 5. `Clarification & Decision Service`
 负责管理需求澄清记录、设计决策、审批反馈与关键结论回注。
@@ -152,7 +152,9 @@ V1 运行环境必须满足以下约束：
 - 每个 `Project` 在 V1 必须能够解析一个默认 `DeliveryChannel`；未配置远端交付条件时，默认回落到 `demo_delivery`
 - 每个 `Project` 在 V1 只维护一个项目级生效中的默认 `DeliveryChannel`
 - `DeliveryChannel` 的编辑与校验属于项目级配置，不属于 `Session` 或模板编辑范围
-- 当前活动 run 在启动时必须从 `Project.default_delivery_channel_id` 解析交付配置并固化为运行快照；后续项目级交付配置修改不得影响已启动 run
+- 当前活动 run 在进入 `Delivery Integration` 前必须能够从 `Project.default_delivery_channel_id` 解析当前有效交付配置，并在最终人工审批通过后固化为运行快照
+- 一旦当前 run 的 `delivery_channel_snapshot_ref` 已固化，后续项目级交付配置修改不得影响该 run 或历史 run
+- 前端统一设置弹窗中的 `通用配置` 页面必须以当前 `Project` 为作用对象消费项目级交付配置接口
 
 2. `Session`
 表示项目下的一次需求会话，至少包含：
@@ -257,8 +259,11 @@ V1 运行环境必须满足以下约束：
 - `updated_at`
 
 `AgentRole` 必须满足以下规则：
+- `AgentRole` 在 V1 只作为模板阶段配置的预设来源，不直接充当跨模板共享的运行时真源
 - `provider_id` 绑定发生在 `AgentRole` 上，而不是直接绑定在阶段上
-- V1 用户可编辑字段只包括：`role_name`、`system_prompt`、`provider_id`
+- V1 用户可编辑字段只包括：`system_prompt`、`provider_id`
+- `role_name` 在 V1 只作为角色定义与前端展示标签返回，不作为用户可编辑字段
+- 模板保存时，必须把各阶段槽位最终生效的角色绑定、`system_prompt` 与 `provider_id` 固化到模板自身配置中；run 启动后再固化到 `template_snapshot_ref`
 - 输入契约、输出契约、结构化产物要求与工具权限边界仍由平台固定，不向用户开放编辑
 
 5. `LLMProvider`
@@ -300,9 +305,10 @@ V1 运行环境必须满足以下约束：
 - `ended_at`
 
 `PipelineRun` 必须满足以下运行快照规则：
-- 每次运行开始前都必须固化一份模板快照和一份交付通道快照
+- 每次运行开始前都必须固化一份模板快照
+- 交付通道快照不在 run 启动时固化，而是在最终人工审批通过后、进入 `Delivery Integration` 前固化
 - 运行期间实际读取的角色绑定、Provider 绑定和自动回归配置必须来自模板快照
-- 运行期间实际读取的 `delivery_mode`、仓库标识、默认分支与代码评审请求类型必须来自 `delivery_channel_snapshot_ref`
+- `Delivery Integration` 阶段实际读取的 `delivery_mode`、仓库标识、默认分支与代码评审请求类型必须来自 `delivery_channel_snapshot_ref`
 - 模板快照与交付通道快照一旦绑定到某次运行，不得再被运行外部修改
 
 `PipelineRun.status` 必须至少支持：
@@ -453,7 +459,7 @@ V1 运行环境必须满足以下约束：
 - `git_auto_delivery` 必须要求 `provider_type`、`repository_ref`、`default_branch`、`review_request_type` 与 `credential_ref` 全部有效。
 - `host_base_url` 用于兼容不同托管平台或私有部署地址；当供应商接入不需要自定义地址时可以为空。
 - `DeliveryChannel` 的解析来源属于项目上下文或运行上下文，不属于前端模板编辑载荷的一部分。
-- 项目级默认 `DeliveryChannel` 是后续新启动 run 的交付来源；run 启动后必须复制为只读快照。
+- 项目级默认 `DeliveryChannel` 是后续新启动 run 以及尚未固化交付快照的当前活动 run 的交付来源；最终交付快照只在进入 `Delivery Integration` 前复制为只读快照。
 
 16. `DeliveryRecord`
 表示最终交付结果，记录：
@@ -541,7 +547,8 @@ V1 运行环境必须满足以下约束：
 - 若需要自动回归，则根据问题根因回退到 `Code Generation` 或 `Solution Design`
 - 自动回归循环结束且得到稳定评审产物后，创建 `ApprovalRequest(type=code_review_approval)`
 - 创建 `ApprovalRequest(type=code_review_approval)` 后，当前 `code_review` 的 `StageRun.status` 必须置为 `waiting_approval`
-- 审批通过后进入 `Delivery Integration`
+- 当当前项目 `delivery_mode = git_auto_delivery` 时，审批通过前必须校验交付配置与凭据是否达到 `ready`；通过后先固化 `delivery_channel_snapshot_ref`，再进入 `Delivery Integration`
+- 当当前项目 `delivery_mode = demo_delivery` 时，不执行上述交付配置阻塞校验；审批通过后直接进入 `Delivery Integration`
 - 审批拒绝后，记录拒绝理由并回退到 `Code Generation`
 
 ### 6.5 Delivery Integration 生命周期
@@ -581,12 +588,13 @@ Pipeline 引擎必须满足以下实施约束：
 3. `模板用户编辑边界`
 - 用户可编辑模板只开放以下字段：
   - 必需角色槽位到 `AgentRole` 的绑定关系
-  - `AgentRole.role_name`
   - `AgentRole.system_prompt`
   - `AgentRole.provider_id`
   - `auto_regression_enabled`
   - `max_auto_regression_retries`
 - 上述字段属于运行前配置，直接服务于后续阶段 Agent 的实际执行行为，不是只用于前端展示的说明性字段
+- 模板编辑修改的是当前模板各阶段槽位最终生效配置，不是回写一个会同时影响其他模板的共享运行对象
+- `AgentRole.role_name` 在模板编辑中只作为只读展示标签返回，不提供修改入口
 - 用户不可编辑核心阶段顺序、审批检查点存在性、阶段输入输出契约、结构化产物要求和工具权限边界
 - 保存模板时，必须校验所有必需角色槽位都已完成 `AgentRole` 与 `Provider` 绑定
 - 保存模板时，必须校验 `max_auto_regression_retries` 落在平台允许范围内
@@ -640,6 +648,9 @@ Pipeline 引擎必须满足以下实施约束：
 - 审批等待期间，会话级 `current_stage_type` 与源阶段 `stage_type` 保持不变；是否待审批由 `Session.status = waiting_approval`、`pending_action_type = approval` 与 `ApprovalRequest.status = pending` 共同表达
 - `solution_design_approval` 的 `Reject` 固定回到 `Solution Design`
 - `code_review_approval` 的 `Reject` 固定回到 `Code Generation`
+- 当 `approval_type = code_review_approval` 且当前项目 `delivery_mode = git_auto_delivery` 时，`Approve` 前必须校验交付配置与凭据是否达到 `ready`
+- 当上述校验不通过时，系统不得进入 `Delivery Integration`，必须继续保持该审批对象待处理，并向前端返回明确的交付配置阻塞信息
+- 当当前项目 `delivery_mode = demo_delivery` 时，不因交付配置或凭据缺失额外阻塞 `code_review_approval`
 
 ### 7.3 自动回归与回退语义
 
@@ -817,6 +828,11 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `current_delivery_mode`
 - `delivery_channel_status`
 
+其中 `delivery_channel_status` 至少支持：
+- `unconfigured`
+- `invalid`
+- `ready`
+
 2. `ProjectDeliveryChannelProjection`
 - `project_id`
 - `delivery_mode`
@@ -825,14 +841,21 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `repository_ref`
 - `default_branch`
 - `review_request_type`
+- `credential_ref`
 - `credential_status`
+- `delivery_channel_status`
 - `last_validated_at`
 
 `ProjectDeliveryChannelProjection` 用于项目级交付设置查看与编辑。
 并满足以下规则：
 - 当 `delivery_mode = demo_delivery` 时，不适用的 Git 交付字段不返回
 - 当 `delivery_mode = git_auto_delivery` 时，必须返回前端完成校验与保存所需的全部项目级交付字段
+- `credential_ref` 表示当前项目默认交付配置所绑定的凭据引用，可作为前端编辑和保存输入，但不得回传任何密钥明文
+- `credential_status` 只用于表达当前凭据绑定的可用性或校验状态，不承担可编辑字段语义
+- `delivery_channel_status` 至少支持：`unconfigured`、`invalid`、`ready`
+- 后端必须仅根据 `credential_ref` 解析真实凭据；真实密钥不得进入 `ProjectDeliveryChannelProjection`、工作台投影或事件流
 - 投影只表达当前项目的默认交付配置，不表达任何已启动 run 的快照内容
+- 该投影服务于前端统一设置弹窗中的 `通用配置` 页面，而不是模板编辑区或左栏局部编辑入口
 
 3. `SessionListItemProjection`
 - `session_id`
@@ -921,6 +944,9 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - 只返回功能一 V1 已开放的模板可编辑字段
 - 不返回固定阶段骨架、审批检查点、阶段输入输出契约、结构化产物要求和工具权限边界
 - 只在 `Session.status = draft` 且尚未创建 `PipelineRun` 的上下文中被前端消费
+- `editable_role_bindings` 用于表达阶段必需角色槽位到具体 `AgentRole` 的可编辑绑定关系
+- `editable_agent_roles` 只返回所选或可选 `AgentRole` 的只读 `role_name` 与可编辑 `system_prompt`、`provider_id`
+- `editable_role_bindings` 与 `editable_agent_roles` 共同表达的是“当前模板的阶段生效配置编辑面”，而不是一个独立共享角色注册表的直接编辑面
 - `available_providers` 必须至少包含两个内置 Provider：`火山引擎`、`DeepSeek`
 - `available_providers` 可以包含用户新增的 `custom` Provider
 - `available_providers` 对前端返回的是 Provider 展示名和必要标识，不返回把协议名当作 Provider 名称的展示结果
@@ -943,7 +969,9 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `user_message` 用于会话起始需求输入等独立顶层用户消息
 - `Requirement Analysis` 阶段内的澄清问答通过 `execution_node.items` 表达
 - `approval_request`、`approval_result`、`delivery_result` 作为顶层条目追加到主流中
-- `system_status` 用于表达暂停、恢复、终止等运行控制结果，其中终止后的提示条目必须作为顶层条目追加到该 run 尾部
+- `system_status` 用于表达暂停、恢复、失败、终止等运行控制结果
+- `completed` run 以 `delivery_result` 作为尾部收束条目，不追加完成态 `system_status`
+- `failed` 与 `terminated` run 必须在各自 run 尾部追加顶层 `system_status` 终态条目
 - 不同 `PipelineRun` 的条目必须在主流中保留原有时间顺序，但 run 与 run 之间必须插入显式分界条目
 
 其中以下条目必须定义明确字段契约：
@@ -975,6 +1003,24 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `changed_file_count`
 - `occurred_at`
 - `delivery_record_ref`
+
+`system_status`
+- `status_code`
+- `title`
+- `message`
+- `run_status`
+- `occurred_at`
+- `is_terminal`
+- `can_retry`
+- `retry_action`
+
+规则如下：
+- `system_status` 只用于表达运行控制反馈或非交付型终态，不替代 `delivery_result`
+- 当 `run_status = failed` 或 `run_status = terminated` 时，`is_terminal` 必须返回 `true`
+- 当 `run_status = failed` 或 `run_status = terminated` 时，该条目必须位于所属 run 尾部
+- `can_retry` 只允许在当前活动 run 已进入 `failed` 或 `terminated` 时返回 `true`
+- 当 `can_retry = true` 时，`retry_action` 必须明确对应 `POST /api/sessions/{sessionId}/runs`
+- 历史 run、`completed` run 和非终态 `system_status` 条目不得返回可执行的 `retry_action`
 
 `run_boundary`
 - `run_id`
@@ -1202,8 +1248,16 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `requested_at`
 - `waiting_duration_ms`
 - `response_duration_ms`
+- `delivery_readiness_status`
+- `delivery_readiness_message`
+- `open_settings_action`
 
 `reject_action` 必须声明需要补充理由输入。
+
+`delivery_readiness_status` 必须满足以下规则：
+- 当 `approval_type = code_review_approval` 且当前项目 `delivery_mode = git_auto_delivery` 时，至少支持：`ready`、`blocked`
+- 当 `delivery_readiness_status = blocked` 时，`delivery_readiness_message` 必须给出明确阻塞原因，`open_settings_action` 必须指向前端统一设置弹窗中的 `通用配置` 页面
+- 当 `approval_type = solution_design_approval`，或当前项目 `delivery_mode = demo_delivery` 时，`delivery_readiness_status` 可以为空且不得额外阻塞审批
 
 `approval_request.is_actionable` 必须满足以下规则：
 - 当该审批块属于当前活动 run、审批仍待处理，且当前 run 未进入 `terminated` 时，返回 `true`
@@ -1322,9 +1376,11 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - 当请求显式指定模板时，必须校验该模板存在且可用
 
 项目级交付配置接口必须满足以下规则：
-- `PUT /api/projects/{projectId}/delivery-channel` 只更新项目默认 `DeliveryChannel`，不回写任何已启动 run 的 `delivery_channel_snapshot_ref`
+- `PUT /api/projects/{projectId}/delivery-channel` 更新项目默认 `DeliveryChannel`；该更新必须影响后续新启动的 run，以及尚未固化交付快照的当前活动 run
 - 当 `delivery_mode = demo_delivery` 时，后端只校验最小演示交付语义
 - 当 `delivery_mode = git_auto_delivery` 时，后端必须校验 `provider_type`、`repository_ref`、`default_branch`、`review_request_type` 与 `credential_ref` 的完整性
+- 请求中的 `credential_ref` 表示用户选择的凭据绑定引用；交付配置查询投影中的 `credential_status` 只作为绑定状态展示字段返回
+- 后端必须仅在服务端安全域内根据 `credential_ref` 解析真实凭据，前端请求与响应都不得承载密钥明文
 - 校验不通过时，不得把项目切换到伪可用的 `git_auto_delivery` 状态
 - `POST /api/projects/{projectId}/delivery-channel/validate` 只承担配置校验职责，不产生持久化副作用
 
@@ -1348,6 +1404,7 @@ Provider 管理接口必须满足以下规则：
 - `PATCH /api/providers/{providerId}` 只允许更新 `custom` Provider
 - `builtin` Provider 不通过该接口修改其供应商类型
 - `custom` Provider 在 V1 必须使用 `openai_completions_compatible` 协议
+- 上述接口服务于前端统一设置弹窗中的 `模型提供商` 页面
 
 ### 9.2 Run 与 Approval Command API
 
@@ -1425,6 +1482,7 @@ Provider 管理接口必须满足以下规则：
 
 其中：
 - `GET /api/providers` 用于拉取内置 Provider 和用户新增的自定义 Provider 列表
+- `GET /api/providers` 的返回结果服务于前端统一设置弹窗中的 `模型提供商` 页面，以及模板编辑区中的 Provider 选择列表
 - `GET /api/pipeline-templates` 用于拉取系统模板和用户模板列表；返回结果中必须至少包含三个预置 `system_template`
 - `GET /api/pipeline-templates/{templateId}` 用于拉取 `TemplateEditorProjection`，即启动前模板配置所需的允许字段
 - `GET /api/projects/{projectId}/delivery-channel` 用于拉取 `ProjectDeliveryChannelProjection`
@@ -1590,7 +1648,7 @@ V1 仅定义对象和查询接口，不实现预览启动与热更新。
 9. 能在代码评审失败时执行受控自动回归。
 10. 能列出系统模板与用户模板，并在不破坏固定主干阶段的前提下编辑允许字段。
 11. 能把模板修改保存为覆盖现有用户模板、另存为新用户模板或删除用户模板，并在运行开始时固化模板快照。
-12. 能在项目级配置默认 `DeliveryChannel`，并在 run 启动时固化 `delivery_channel_snapshot_ref`。
+12. 能在项目级配置默认 `DeliveryChannel`，并在最终人工审批通过后、进入 `Delivery Integration` 前固化 `delivery_channel_snapshot_ref`。
 13. 能提供与运行接口一致的 `OpenAPI` 文档 JSON 与可读 API 文档页。
 14. 当 `delivery_mode = demo_delivery` 时，能生成仅用于展示的分支信息与提交说明预览，而不执行真实 Git 写操作。
 15. 当 `delivery_mode = git_auto_delivery` 时，能自动创建分支、创建提交并发起 MR/PR。
