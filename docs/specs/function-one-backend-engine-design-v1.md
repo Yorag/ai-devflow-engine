@@ -161,17 +161,33 @@ V1 运行环境必须满足以下约束：
 `Session.status` 必须至少支持：
 - `draft`
 - `running`
+- `paused`
 - `waiting_clarification`
 - `waiting_approval`
 - `completed`
 - `failed`
 - `terminated`
 
+其中：
+- `draft` 只在尚未创建 `PipelineRun` 时出现
+- 一旦 `current_run_id` 已存在，`Session.status` 必须作为当前运行状态的会话级摘要，不得脱离 `PipelineRun.status` 独立流转
+- `PipelineRun.pending` 与 `PipelineRun.running` 在会话级统一投影为 `Session.status = running`
+- `PipelineRun.paused` 必须投影为 `Session.status = paused`
+- `PipelineRun.waiting_clarification` 必须投影为 `Session.status = waiting_clarification`
+- `PipelineRun.waiting_approval` 必须投影为 `Session.status = waiting_approval`
+- `PipelineRun.completed`、`PipelineRun.failed`、`PipelineRun.terminated` 必须投影为同名 `Session.status`
+
 `Session` 必须满足以下模板选择规则：
 - 新建会话时必须关联一个当前选中的 `PipelineTemplate`
 - 当会话仍处于 `draft` 且尚未创建 `PipelineRun` 时，允许更新 `selected_template_id`
 - 首次启动运行后，实际执行必须以 `PipelineRun.template_snapshot_ref` 为准
 - 后续模板修改不得回写影响已经启动的 `PipelineRun`
+- 功能一 V1 中，一个 `Session` 只承载一条从需求输入到交付结果的主链路
+- 若用户要发起新的独立需求，必须创建新的 `Session`，不得在已有运行历史的会话中再次提交 `new_requirement` 以开启第二条链路
+
+`Session.latest_stage_type` 与所有下游查询投影中的阶段类型字段必须统一使用本文定义的 `stage_type` 枚举值。
+
+当 `Session.status = draft` 且 `current_run_id = null` 时，`Session.latest_stage_type` 必须为 `null`。
 
 ### 5.2 Pipeline 与阶段对象
 
@@ -192,9 +208,12 @@ V1 运行环境必须满足以下约束：
 `PipelineTemplate` 必须满足以下规则：
 - 功能一 V1 对外管理语义中的 `Pipeline` 资源由 `PipelineTemplate` 承载；`PipelineRun` 是从模板快照派生的运行实例，不作为可编辑模板资源参与 CRUD
 - `template_source` 在 V1 只允许：`system_template`、`user_template`
-- `fixed_stage_sequence` 在 V1 固定为：`Requirement Analysis -> Solution Design -> Design Approval Checkpoint -> Code Generation -> Test Generation & Execution -> Code Review -> Code Review Approval Checkpoint -> Delivery Integration`
+- `fixed_stage_sequence` 在 V1 固定为：`requirement_analysis -> solution_design -> code_generation -> test_generation_execution -> code_review -> delivery_integration`
+- V1 固定存在两个不可关闭的审批检查点：
+  - `solution_design_approval`：位于 `solution_design` 完成之后
+  - `code_review_approval`：位于 `code_review` 完成之后
 - 用户不可通过模板删除、禁用或重排核心业务阶段
-- 用户不可通过模板关闭 `Design Approval Checkpoint` 或 `Code Review Approval Checkpoint`
+- 用户不可通过模板关闭上述两个固定审批检查点
 - `system_template` 允许被选择和另存，但不允许被直接覆盖
 - `user_template` 允许被覆盖更新、另存为新模板和删除
 - `PipelineTemplate` 的完整定义服务于后端校验、运行编排与模板持久化，不等同于前端模板配置 UI 的展示载荷
@@ -272,6 +291,16 @@ V1 运行环境必须满足以下约束：
 - 运行期间实际读取的角色绑定、Provider 绑定和自动回归配置必须来自模板快照
 - 模板快照一旦绑定到某次运行，不得再被运行外部修改
 
+`PipelineRun.status` 必须至少支持：
+- `pending`
+- `running`
+- `paused`
+- `waiting_clarification`
+- `waiting_approval`
+- `completed`
+- `failed`
+- `terminated`
+
 7. `StageDefinition`
 定义某个阶段的标准契约，包含：
 - `stage_type`
@@ -280,6 +309,19 @@ V1 运行环境必须满足以下约束：
 - `output_contract`
 - `allowed_retry_policy`
 - `allowed_rollback_targets`
+
+`stage_type` 在功能一 V1 中必须统一使用以下机器可读枚举：
+- `requirement_analysis`
+- `solution_design`
+- `code_generation`
+- `test_generation_execution`
+- `code_review`
+- `delivery_integration`
+- `rollback_or_retry`
+
+文档中的 `Requirement Analysis`、`Solution Design`、`Code Generation` 等名称仅作为展示标签，不作为 API、事件和持久化层取值。
+
+审批检查点属于编排控制语义，不创建独立 `StageDefinition`，也不占用 `stage_type` 枚举值。
 
 8. `StageRun`
 表示某次运行中的具体阶段实例，至少包含：
@@ -302,6 +344,8 @@ V1 运行环境必须满足以下约束：
 - `failed`
 - `rolled_back`
 
+当运行进入审批等待时，保持触发审批的源阶段 `StageRun` 处于 `waiting_approval`，审批过程通过 `approval_request` 与 `approval_result` 顶层条目表达。
+
 ### 5.3 产物与审批对象
 
 9. `StageArtifact`
@@ -313,9 +357,21 @@ V1 运行环境必须满足以下约束：
 - `stage_run_id`
 - `question`
 - `answer`
+- `impact_scope`
+- `resolution_summary`
 - `status`
 - `asked_at`
 - `answered_at`
+- `resolved_at`
+
+`ClarificationRecord.status` 必须至少支持：
+- `asked`
+- `answered`
+- `resolved`
+
+其中：
+- `impact_scope` 用于标识本轮澄清影响的需求点、约束项或验收标准
+- `resolution_summary` 用于沉淀本轮澄清形成的规范化结论，并回写到 `Requirement Analysis` 阶段产物
 
 11. `ApprovalRequest`
 表示正式人工审批对象，至少包含：
@@ -333,6 +389,13 @@ V1 运行环境必须满足以下约束：
 `ApprovalRequest.approval_type` 在功能一 V1 中只允许：
 - `solution_design_approval`
 - `code_review_approval`
+
+`ApprovalRequest.status` 必须至少支持：
+- `pending`
+- `approved`
+- `rejected`
+
+`ApprovalRequest.rollback_target_stage_type` 必须使用本文定义的 `stage_type` 枚举值。
 
 12. `ApprovalDecision`
 表示审批结果，至少包含：
@@ -404,19 +467,18 @@ V1 运行环境必须满足以下约束：
 
 功能一 V1 的正式阶段序列如下：
 
-1. `Requirement Analysis`
-2. `Solution Design`
-3. `Design Approval Checkpoint`
-4. `Code Generation`
-5. `Test Generation & Execution`
-6. `Code Review`
-7. `Code Review Approval Checkpoint`
-8. `Delivery Integration`
+1. `requirement_analysis`
+2. `solution_design`
+3. `code_generation`
+4. `test_generation_execution`
+5. `code_review`
+6. `delivery_integration`
 
 其中：
-- `Solution Validation Agent` 是 `Solution Design` 阶段内部的第二个 Agent，不形成独立 `StageRun`
-- `Design Approval Checkpoint` 与 `Code Review Approval Checkpoint` 是审批检查点，不是独立业务生成阶段
-- `Rollback / Retry` 是运行时按需插入的控制型阶段，必须创建独立 `StageRun`、独立 `execution_node` 与独立 Inspector 载荷，但不替代正式业务阶段序列
+- `Solution Validation Agent` 是 `solution_design` 阶段内部的第二个 Agent，不形成独立 `StageRun`
+- `solution_design_approval` 与 `code_review_approval` 是固定审批检查点，位于对应源阶段完成之后，不属于正式业务阶段，不创建独立 `StageDefinition`
+- 当系统进入审批等待时，源 `StageRun.status` 必须置为 `waiting_approval`
+- `rollback_or_retry` 是运行时按需插入的控制型阶段，必须创建独立 `StageRun`、独立 `execution_node` 与独立 Inspector 载荷，但不替代正式业务阶段序列
 
 ### 6.2 Requirement Analysis 生命周期
 
@@ -439,6 +501,7 @@ V1 运行环境必须满足以下约束：
 - 方案校验结果必须作为 `Solution Design` 阶段产物的一部分持久化
 - 校验失败时，不得创建新的独立 `Solution Validation` 阶段；系统必须依据校验结论重新进入 `Solution Design` 阶段的设计子步骤
 - 校验通过后，创建 `ApprovalRequest(type=solution_design_approval)`
+- 创建 `ApprovalRequest(type=solution_design_approval)` 后，当前 `solution_design` 的 `StageRun.status` 必须置为 `waiting_approval`
 - 审批通过后，进入 `Code Generation`
 - 审批拒绝后，记录拒绝理由并回退到 `Solution Design`
 
@@ -452,6 +515,7 @@ V1 运行环境必须满足以下约束：
 `Code Review` 完成后：
 - 若需要自动回归，则根据问题根因回退到 `Code Generation` 或 `Solution Design`
 - 自动回归循环结束且得到稳定评审产物后，创建 `ApprovalRequest(type=code_review_approval)`
+- 创建 `ApprovalRequest(type=code_review_approval)` 后，当前 `code_review` 的 `StageRun.status` 必须置为 `waiting_approval`
 - 审批通过后进入 `Delivery Integration`
 - 审批拒绝后，记录拒绝理由并按根因回退
 
@@ -543,6 +607,7 @@ Pipeline 引擎必须满足以下实施约束：
 - `Reject` 必须携带理由
 - 拒绝理由必须进入后续上下文，供重新生成与审查使用
 - 审批结果必须进入事件流与 Narrative Feed 投影
+- 审批等待期间，会话级 `current_stage_type` 与源阶段 `stage_type` 保持不变；是否待审批由 `Session.status = waiting_approval`、`pending_action_type = approval` 与 `ApprovalRequest.status = pending` 共同表达
 
 ### 7.3 自动回归与回退语义
 
@@ -733,6 +798,7 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `project_id`
 - `session_status`
 - `current_run_id`
+- `current_stage_type`
 - `selected_template_id`
 - `selected_template_summary`
 - `narrative_entries`
@@ -760,6 +826,10 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 当 `session_status != draft` 或 `PipelineRun` 已启动时：
 - `SessionWorkspaceProjection` 只返回 `selected_template_summary`
 - 工作台不得依赖 workspace 载荷渲染模板编辑区
+
+`SessionWorkspaceProjection.current_stage_type`、`SessionListItemProjection.current_stage_type`、`approval_result.next_stage_type` 与所有 `rollback_target_stage_type` 字段必须共用同一 `stage_type` 枚举；当会话处于审批等待时，这些字段保持为触发审批的源阶段类型。
+
+当 `Session.status = draft` 且 `current_run_id = null` 时，`SessionWorkspaceProjection.current_stage_type` 与 `SessionListItemProjection.current_stage_type` 必须返回 `null`。
 
 后端必须提供 `TemplateEditorProjection`，只用于启动前模板配置，至少包含：
 - `template_id`
@@ -816,6 +886,7 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - 当 `decision = reject` 时，`reason` 不得为空
 - `next_stage_type` 必须能表达审批后进入的下一阶段或回退目标
 - `next_action_text` 必须可直接用于前端 Narrative Feed 展示审批后链路如何继续推进
+- `next_stage_type` 必须使用本文定义的 `stage_type` 枚举值
 - `approval_result` 必须作为独立 Narrative Feed 条目追加到主流中
 
 `delivery_result`
@@ -930,9 +1001,13 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 
 ### 8.4 Inspector 投影
 
-后端必须提供按阶段类型区分的 Inspector 数据载荷。
+后端必须提供两类详情载荷：
+- `StageInspectorProjection`
+  用于 `GET /api/stages/{stageRunId}/inspector`
+- `DeliveryResultDetailProjection`
+  用于 `GET /api/delivery-records/{deliveryRecordId}`
 
-所有 Inspector 载荷至少包含：
+`StageInspectorProjection` 必须按阶段类型区分载荷，并至少包含：
 - `title`
 - `stage_type`
 - `status`
@@ -1001,21 +1076,29 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
   - `next_action_text`
   - `waiting_duration_ms`
   - `response_duration_ms`
-- `delivery_result` 至少包含：
-  - `delivery_description`
-  - `change_result`
-  - `test_result`
-  - `review_result`
-  - `branch_info`
-  - `commit_info`
-  - `merge_request_info`
-  - `delivery_target`
+
+`DeliveryResultDetailProjection` 至少包含：
+- `delivery_record_id`
+- `delivery_status`
+- `delivery_description`
+- `change_result`
+- `test_result`
+- `review_result`
+- `branch_info`
+- `commit_info`
+- `merge_request_info`
+- `delivery_target`
+- `full_metrics`
+- `attachments`
+
+`DeliveryResultDetailProjection` 不要求提供 `stage_type`、`structured_input`、`structured_output`、`reasoning_trace` 或 `decision_trace` 等阶段结点专属字段。
 
 ### 8.5 审批块投影
 
 `approval_request` 投影至少包含：
 - `approval_id`
 - `approval_type`
+- `status`
 - `title`
 - `approval_object_excerpt`
 - `risk_excerpt`
@@ -1027,6 +1110,11 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `response_duration_ms`
 
 `reject_action` 必须声明需要补充理由输入。
+
+审批时长字段统一按以下规则解释：
+- `waiting_duration_ms`：从 `requested_at` 到当前投影时刻或 `responded_at` 的等待时长
+- `response_duration_ms`：仅在审批已响应时输出，值为 `responded_at - requested_at`；未响应时为 `null`
+- 当 `approval_result` 已生成时，`waiting_duration_ms` 与 `response_duration_ms` 数值相同属于合法情况
 
 ### 8.6 量化指标投影
 
@@ -1120,8 +1208,9 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - 澄清回复
 
 该接口必须满足以下行为：
-- 当消息语义为 `new_requirement` 且当前会话不存在活跃运行时，后端必须基于当前 `selected_template_id` 创建 `PipelineRun`，固化模板快照，并进入 `Requirement Analysis`
-- 当消息语义为 `clarification_reply` 时，后端必须把补充信息回写到当前 `Requirement Analysis` 阶段并恢复执行
+- 当消息语义为 `new_requirement` 时，只允许在 `Session.status = draft` 且 `current_run_id = null` 时调用；后端必须基于当前 `selected_template_id` 创建 `PipelineRun`，固化模板快照，并进入 `requirement_analysis`
+- 当消息语义为 `new_requirement` 且会话已有运行历史时，后端必须拒绝该调用并返回明确错误，提示用户创建新的 `Session`
+- 当消息语义为 `clarification_reply` 时，只允许在当前会话处于 `waiting_clarification` 且当前阶段为 `requirement_analysis` 时调用；后端必须把补充信息回写到当前 `Requirement Analysis` 阶段并恢复执行
 
 该接口不承担审批提交职责。
 
@@ -1161,7 +1250,9 @@ Provider 管理接口必须满足以下规则：
 - `POST /api/approvals/{approvalId}/approve`
 - `POST /api/approvals/{approvalId}/reject`
 
-`POST /api/sessions/{sessionId}/runs` 只用于显式重跑、人工恢复草稿会话或后台运维场景，不应作为新建会话后首次需求输入的必需前置调用。
+`POST /api/sessions/{sessionId}/runs` 只用于显式重跑、运行恢复或后台运维场景，不应作为新建会话后首次需求输入的必需前置调用。
+
+该接口仅用于对当前会话所承载的同一需求链路执行显式重跑、恢复或运维重启，不用于承接新的独立需求文本。
 
 `POST /api/approvals/{approvalId}/reject` 必须要求：
 - `reason`
@@ -1187,8 +1278,8 @@ Provider 管理接口必须满足以下规则：
 - `GET /api/providers` 用于拉取内置 Provider 和用户新增的自定义 Provider 列表
 - `GET /api/pipeline-templates` 用于拉取系统模板和用户模板列表；返回结果中必须至少包含三个预置 `system_template`
 - `GET /api/pipeline-templates/{templateId}` 用于拉取 `TemplateEditorProjection`，即启动前模板配置所需的允许字段
-- `GET /api/stages/{stageRunId}/inspector` 只用于拉取阶段结点的完整 Inspector 信息
-- `GET /api/delivery-records/{deliveryRecordId}` 只用于拉取交付结果的完整信息
+- `GET /api/stages/{stageRunId}/inspector` 只用于拉取 `StageInspectorProjection`
+- `GET /api/delivery-records/{deliveryRecordId}` 只用于拉取 `DeliveryResultDetailProjection`
 - `GET /api/approvals/{approvalId}` 只用于审批块自身的状态刷新、审批对象显示文本补全和操作结果回读，不用于驱动右侧 Inspector 打开
 
 ## 10. 实时更新契约
