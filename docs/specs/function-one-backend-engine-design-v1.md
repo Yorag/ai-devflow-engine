@@ -150,6 +150,9 @@ V1 运行环境必须满足以下约束：
 - 系统首次启动时必须自动登记一个默认项目，绑定平台仓库自身路径
 - 在用户未手动加载其他项目之前，`GET /api/projects` 也必须返回该默认项目
 - 每个 `Project` 在 V1 必须能够解析一个默认 `DeliveryChannel`；未配置远端交付条件时，默认回落到 `demo_delivery`
+- 每个 `Project` 在 V1 只维护一个项目级生效中的默认 `DeliveryChannel`
+- `DeliveryChannel` 的编辑与校验属于项目级配置，不属于 `Session` 或模板编辑范围
+- 当前活动 run 在启动时必须从 `Project.default_delivery_channel_id` 解析交付配置并固化为运行快照；后续项目级交付配置修改不得影响已启动 run
 
 2. `Session`
 表示项目下的一次需求会话，至少包含：
@@ -289,16 +292,18 @@ V1 运行环境必须满足以下约束：
 - `session_id`
 - `template_id`
 - `template_snapshot_ref`
+- `delivery_channel_snapshot_ref`
 - `status`
 - `current_stage_run_id`
 - `attempt_index`
 - `started_at`
 - `ended_at`
 
-`PipelineRun` 必须满足以下模板快照规则：
-- 每次运行开始前都必须固化一份模板快照
+`PipelineRun` 必须满足以下运行快照规则：
+- 每次运行开始前都必须固化一份模板快照和一份交付通道快照
 - 运行期间实际读取的角色绑定、Provider 绑定和自动回归配置必须来自模板快照
-- 模板快照一旦绑定到某次运行，不得再被运行外部修改
+- 运行期间实际读取的 `delivery_mode`、仓库标识、默认分支与代码评审请求类型必须来自 `delivery_channel_snapshot_ref`
+- 模板快照与交付通道快照一旦绑定到某次运行，不得再被运行外部修改
 
 `PipelineRun.status` 必须至少支持：
 - `pending`
@@ -424,11 +429,14 @@ V1 运行环境必须满足以下约束：
 
 15. `DeliveryChannel`
 表示目标托管平台、仓库标识、默认分支、代码评审请求类型及交付策略，至少包含：
+- `channel_id`
 - `delivery_mode`
 - `provider_type`
+- `host_base_url`
 - `repository_ref`
 - `default_branch`
 - `review_request_type`
+- `credential_ref`
 
 `DeliveryChannel.delivery_mode` 在功能一 V1 中至少支持：
 - `demo_delivery`
@@ -438,7 +446,11 @@ V1 运行环境必须满足以下约束：
 - `demo_delivery` 是功能一 V1 的演示交付模式。
 - `git_auto_delivery` 是功能一 V1 的正式交付模式，不属于仅为后续版本预留的增强能力。
 - 当交付通道可用时，后端必须能够基于 `git_auto_delivery` 执行真实分支准备、提交创建、分支推送与代码评审请求创建。
+- `demo_delivery` 只要求最小交付语义成立；`provider_type`、`repository_ref`、`default_branch`、`review_request_type` 与 `credential_ref` 可以为空。
+- `git_auto_delivery` 必须要求 `provider_type`、`repository_ref`、`default_branch`、`review_request_type` 与 `credential_ref` 全部有效。
+- `host_base_url` 用于兼容不同托管平台或私有部署地址；当供应商接入不需要自定义地址时可以为空。
 - `DeliveryChannel` 的解析来源属于项目上下文或运行上下文，不属于前端模板编辑载荷的一部分。
+- 项目级默认 `DeliveryChannel` 是后续新启动 run 的交付来源；run 启动后必须复制为只读快照。
 
 16. `DeliveryRecord`
 表示最终交付结果，记录：
@@ -533,7 +545,7 @@ V1 运行环境必须满足以下约束：
 
 `Delivery Integration` 必须完成以下工作：
 - 汇总最终变更结果、测试结论与评审结论
-- 读取交付通道信息
+- 读取当前 run 已固化的交付通道快照信息
 - 准备分支信息与提交说明意图
 - 当 `delivery_mode = demo_delivery` 时，仅生成用于演示的交付说明、分支信息展示和 `commit_message_preview`，不得执行真实提交、推送或 MR/PR 创建
 - 当 `delivery_mode = git_auto_delivery` 时，必须执行真实交付流程：`prepare_branch -> create_commit -> push_branch -> create_code_review_request`
@@ -797,8 +809,27 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `root_path_excerpt`
 - `session_count`
 - `last_activity_at`
+- `current_delivery_mode`
+- `delivery_channel_status`
 
-2. `SessionListItemProjection`
+2. `ProjectDeliveryChannelProjection`
+- `project_id`
+- `delivery_mode`
+- `provider_type`
+- `host_base_url`
+- `repository_ref`
+- `default_branch`
+- `review_request_type`
+- `credential_status`
+- `last_validated_at`
+
+`ProjectDeliveryChannelProjection` 用于项目级交付设置查看与编辑。
+并满足以下规则：
+- 当 `delivery_mode = demo_delivery` 时，不适用的 Git 交付字段不返回
+- 当 `delivery_mode = git_auto_delivery` 时，必须返回前端完成校验与保存所需的全部项目级交付字段
+- 投影只表达当前项目的默认交付配置，不表达任何已启动 run 的快照内容
+
+3. `SessionListItemProjection`
 - `session_id`
 - `title`
 - `status`
@@ -1238,15 +1269,19 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 
 ## 9. API 契约
 
-功能一后端必须通过 REST API 暴露所有核心能力。V1 接口分为三类。
+功能一后端必须通过 REST API 暴露所有核心能力。V1 接口分为四类。
 
-### 9.1 Project、Session 与 Template Command API
+### 9.1 Project、Session、Template 与 Project Delivery Command API
 
 至少提供以下命令接口：
 - `POST /api/projects`
 加载新的本地项目上下文
 - `GET /api/projects`
 获取项目列表
+- `PUT /api/projects/{projectId}/delivery-channel`
+更新项目默认交付配置
+- `POST /api/projects/{projectId}/delivery-channel/validate`
+校验项目交付配置
 - `POST /api/projects/{projectId}/sessions`
 创建新会话
 - `PUT /api/sessions/{sessionId}/template`
@@ -1280,6 +1315,13 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 `POST /api/projects/{projectId}/sessions` 必须满足以下规则：
 - 当请求未显式指定模板时，后端必须为新会话绑定默认系统模板 `新功能开发流程`
 - 当请求显式指定模板时，必须校验该模板存在且可用
+
+项目级交付配置接口必须满足以下规则：
+- `PUT /api/projects/{projectId}/delivery-channel` 只更新项目默认 `DeliveryChannel`，不回写任何已启动 run 的 `delivery_channel_snapshot_ref`
+- 当 `delivery_mode = demo_delivery` 时，后端只校验最小演示交付语义
+- 当 `delivery_mode = git_auto_delivery` 时，后端必须校验 `provider_type`、`repository_ref`、`default_branch`、`review_request_type` 与 `credential_ref` 的完整性
+- 校验不通过时，不得把项目切换到伪可用的 `git_auto_delivery` 状态
+- `POST /api/projects/{projectId}/delivery-channel/validate` 只承担配置校验职责，不产生持久化副作用
 
 `PUT /api/sessions/{sessionId}/template` 必须满足以下规则：
 - 只允许在 `Session.status = draft` 且尚未创建 `PipelineRun` 时调用
@@ -1366,6 +1408,7 @@ Provider 管理接口必须满足以下规则：
 - `GET /api/providers`
 - `GET /api/pipeline-templates`
 - `GET /api/pipeline-templates/{templateId}`
+- `GET /api/projects/{projectId}/delivery-channel`
 - `GET /api/projects/{projectId}/sessions`
 - `GET /api/sessions/{sessionId}/workspace`
 - `GET /api/runs/{runId}`
@@ -1379,12 +1422,29 @@ Provider 管理接口必须满足以下规则：
 - `GET /api/providers` 用于拉取内置 Provider 和用户新增的自定义 Provider 列表
 - `GET /api/pipeline-templates` 用于拉取系统模板和用户模板列表；返回结果中必须至少包含三个预置 `system_template`
 - `GET /api/pipeline-templates/{templateId}` 用于拉取 `TemplateEditorProjection`，即启动前模板配置所需的允许字段
+- `GET /api/projects/{projectId}/delivery-channel` 用于拉取 `ProjectDeliveryChannelProjection`
 - `GET /api/sessions/{sessionId}/workspace` 用于拉取当前会话工作台视图；该接口返回完整会话的多 run 主流，而不是单 run 视图，run 之间的浏览与定位由前端页面内导航完成
 - `GET /api/runs/{runId}` 用于拉取单个 run 的基础状态与摘要信息
 - `GET /api/runs/{runId}/timeline` 用于拉取该 run 独立的 Narrative Feed 时间线，不混入同一会话其他 run 的条目
 - `GET /api/stages/{stageRunId}/inspector` 只用于拉取 `StageInspectorProjection`
 - `GET /api/delivery-records/{deliveryRecordId}` 只用于拉取 `DeliveryResultDetailProjection`
 - `GET /api/approvals/{approvalId}` 只用于审批块自身的状态刷新、审批对象显示文本补全和操作结果回读，不用于驱动右侧 Inspector 打开
+
+### 9.4 API 文档契约
+
+后端必须把 API 文档作为正式交付物提供。
+
+至少提供以下文档接口：
+- `GET /api/openapi.json`
+- `GET /api/docs`
+
+并满足以下规则：
+- `GET /api/openapi.json` 必须返回与当前服务实现一致的 machine-readable OpenAPI 文档
+- `GET /api/docs` 必须提供 human-readable API 文档页面
+- OpenAPI 文档必须覆盖功能一全部核心 REST 接口，包括 `Project`、`Session`、`PipelineTemplate`、`Provider`、项目级 `DeliveryChannel`、`PipelineRun` 生命周期、审批、Inspector、交付结果与预览目标查询
+- OpenAPI 文档必须覆盖 `GET /api/sessions/{sessionId}/events/stream` 的事件流端点及其事件载荷结构
+- API 文档必须定义请求参数、请求体 Schema、响应体 Schema、枚举值、通用错误响应与关键接口示例
+- 运行接口与 OpenAPI 文档必须同版本交付，不允许文档落后于已发布接口
 
 ## 10. 实时更新契约
 
@@ -1525,6 +1585,8 @@ V1 仅定义对象和查询接口，不实现预览启动与热更新。
 9. 能在代码评审失败时执行受控自动回归。
 10. 能列出系统模板与用户模板，并在不破坏固定主干阶段的前提下编辑允许字段。
 11. 能把模板修改保存为覆盖现有用户模板、另存为新用户模板或删除用户模板，并在运行开始时固化模板快照。
-12. 当 `delivery_mode = demo_delivery` 时，能生成仅用于展示的分支信息与提交说明预览，而不执行真实 Git 写操作。
-13. 当 `delivery_mode = git_auto_delivery` 时，能自动创建分支、创建提交并发起 MR/PR。
-14. 能为功能二保留 `ChangeSet`、`ContextReference`、`PreviewTarget`、`DeliveryRecord` 的复用边界。
+12. 能在项目级配置默认 `DeliveryChannel`，并在 run 启动时固化 `delivery_channel_snapshot_ref`。
+13. 能提供与运行接口一致的 `OpenAPI` 文档 JSON 与可读 API 文档页。
+14. 当 `delivery_mode = demo_delivery` 时，能生成仅用于展示的分支信息与提交说明预览，而不执行真实 Git 写操作。
+15. 当 `delivery_mode = git_auto_delivery` 时，能自动创建分支、创建提交并发起 MR/PR。
+16. 能为功能二保留 `ChangeSet`、`ContextReference`、`PreviewTarget`、`DeliveryRecord` 的复用边界。
