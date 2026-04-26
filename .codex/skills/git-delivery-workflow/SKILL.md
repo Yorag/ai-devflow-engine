@@ -106,10 +106,11 @@ Use the repository commit standard:
 - `scope` is required.
 - Keep the subject imperative and within 72 characters.
 - Use one of `feat`, `fix`, `refactor`, `docs`, `chore`, `test`, `build`, `ci`.
-- Body is required for every commit and uses `Changes` and `Refs`.
+- Body is required for every commit and defaults to `Changes` and `Refs`.
 - `Changes` uses as many bullets as the checkpoint needs. Do not pad short commits or compress dense commits to fit an artificial count.
 - Fresh verification evidence is required in the commit approval request and later review gates.
-- Add `Verification` to the commit body only when that evidence should remain attached to commit history.
+- Keep verification evidence in approval and review material by default, not in the commit body.
+- Do not add `Verification` to the commit body unless that evidence should remain attached to commit history.
 - For documentation-only commits, `Verification` may be `manual review` when included.
 
 Examples:
