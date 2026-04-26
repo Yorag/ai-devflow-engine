@@ -32,8 +32,8 @@ Proposed commit subject:
 
 Commit body summary:
 - Changes: <what changed>
-- Verification: <what proved it>
 - Refs: <spec/plan/issue if any>
+- Optional Verification in commit body: <only if commit history should retain it>
 
 Approve or reject this commit.
 ```
