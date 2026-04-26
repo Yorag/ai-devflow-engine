@@ -206,7 +206,32 @@
 - V1 用户可编辑字段只包括：`role_name`、`system_prompt`、`provider_id`
 - 输入契约、输出契约、结构化产物要求与工具权限边界仍由平台固定，不向用户开放编辑
 
-5. `PipelineRun`
+5. `LLMProvider`
+表示一个可被 `AgentRole` 绑定的模型提供商配置，至少包含：
+- `provider_id`
+- `display_name`
+- `provider_source`
+- `protocol_type`
+- `base_url`
+- `api_key_ref`
+- `default_model_id`
+- `supported_model_ids`
+- `created_at`
+- `updated_at`
+
+`LLMProvider` 必须满足以下规则：
+- `provider_source` 在 V1 至少支持：`builtin`、`custom`
+- `protocol_type` 在 V1 至少支持：`volcengine_native`、`openai_completions_compatible`
+- `display_name` 是前端展示和模板配置时使用的 Provider 名称
+- 协议类型是接入实现细节，不作为产品层 Provider 名称直接对外呈现
+- V1 默认内置两个 `builtin` Provider：
+  - `火山引擎`
+  - `DeepSeek`
+- V1 允许用户新增 `custom` Provider
+- `custom` Provider 在 V1 统一使用 `openai_completions_compatible` 协议接入
+- `OpenAI Completions compatible` 是自定义 Provider 的接入协议，不是独立 Provider 名称
+
+6. `PipelineRun`
 表示某个会话的一次具体运行，至少包含：
 - `run_id`
 - `session_id`
@@ -223,7 +248,7 @@
 - 运行期间实际读取的角色绑定、Provider 绑定和自动回归配置必须来自模板快照
 - 模板快照一旦绑定到某次运行，不得再被运行外部修改
 
-6. `StageDefinition`
+7. `StageDefinition`
 定义某个阶段的标准契约，包含：
 - `stage_type`
 - `order_index`
@@ -232,7 +257,7 @@
 - `allowed_retry_policy`
 - `allowed_rollback_targets`
 
-7. `StageRun`
+8. `StageRun`
 表示某次运行中的具体阶段实例，至少包含：
 - `stage_run_id`
 - `run_id`
@@ -255,10 +280,10 @@
 
 ### 5.3 产物与审批对象
 
-8. `StageArtifact`
+9. `StageArtifact`
 表示阶段级结构化产物，是阶段流转、审批展示与历史回看的基础容器。
 
-9. `ClarificationRecord`
+10. `ClarificationRecord`
 表示 `Requirement Analysis` 阶段内部的澄清问答记录，至少包含：
 - `clarification_id`
 - `stage_run_id`
@@ -268,7 +293,7 @@
 - `asked_at`
 - `answered_at`
 
-10. `ApprovalRequest`
+11. `ApprovalRequest`
 表示正式人工审批对象，至少包含：
 - `approval_id`
 - `run_id`
@@ -285,7 +310,7 @@
 - `solution_design_approval`
 - `code_review_approval`
 
-11. `ApprovalDecision`
+12. `ApprovalDecision`
 表示审批结果，至少包含：
 - `approval_id`
 - `decision`
@@ -295,16 +320,16 @@
 
 ### 5.4 代码与交付对象
 
-12. `ChangeSet`
+13. `ChangeSet`
 表示一次代码变更集合，记录受影响文件、补丁、说明文本、变更统计和来源阶段。
 
-13. `ChangeRisk`
+14. `ChangeRisk`
 表示变更风险分级与风险说明。
 
-14. `DeliveryChannel`
+15. `DeliveryChannel`
 表示目标托管平台、仓库标识、默认分支、代码评审请求类型及交付策略。
 
-15. `DeliveryRecord`
+16. `DeliveryRecord`
 表示最终交付结果，记录：
 - 交付说明
 - 变更结果
@@ -316,7 +341,7 @@
 
 ### 5.5 上下文与扩展对象
 
-16. `ContextReference`
+17. `ContextReference`
 表示阶段执行时引用的上下文来源。功能一 V1 至少支持：
 - `requirement_text`
 - `repo_path`
@@ -325,13 +350,13 @@
 - `artifact_ref`
 - `approval_feedback`
 
-17. `PreviewTarget`
+18. `PreviewTarget`
 表示工作区对应的预览目标对象。V1 只定义对象与查询接口，不实现预览启动与热更新。
 
-18. `ToolCallRecord`
+19. `ToolCallRecord`
 表示单次工具调用记录，用于审查、回放与前端执行条目展示。
 
-19. `DomainEvent`
+20. `DomainEvent`
 表示驱动状态流转与投影视图更新的领域事件。
 
 ## 6. 阶段编排与生命周期
@@ -553,9 +578,12 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - 工具调用结果必须记录到运行上下文和事件流中
 
 4. `模型供应商可切换`
-- V1 模型供应商集合固定为两个：
-  - `火山引擎`：要求 `api_key` 与 `model_id`
-  - `OpenAI Completions` 兼容接口：要求 `base_url`、`api_key` 与 `model_id`
+- V1 默认内置两个 `builtin` Provider：
+  - `火山引擎`
+  - `DeepSeek`
+- V1 允许用户新增 `custom` Provider
+- `custom` Provider 的接入协议统一采用 `OpenAI Completions compatible`
+- `OpenAI Completions compatible` 是接入协议，不作为独立 Provider 名称对外呈现
 - Provider 绑定单位是 `AgentRole`
 - 运行时可切换的含义是：不同 `AgentRole` 可以在同一模板中绑定不同 Provider，或在运行开始前通过模板编辑修改 `AgentRole` 到 Provider 的绑定关系
 - V1 不以阶段为单位直接绑定 Provider
@@ -699,6 +727,7 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `template_use_case`
 - `editable_role_bindings`
 - `editable_agent_roles`
+- `available_providers`
 - `auto_regression_enabled`
 - `max_auto_regression_retries`
 - `can_overwrite`
@@ -708,6 +737,9 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - 只返回功能一 V1 已开放的模板可编辑字段
 - 不返回固定阶段骨架、审批检查点、阶段输入输出契约、结构化产物要求和工具权限边界
 - 只在 `Session.status = draft` 且尚未创建 `PipelineRun` 的上下文中被前端消费
+- `available_providers` 必须至少包含两个内置 Provider：`火山引擎`、`DeepSeek`
+- `available_providers` 可以包含用户新增的 `custom` Provider
+- `available_providers` 对前端返回的是 Provider 展示名和必要标识，不返回把协议名当作 Provider 名称的展示结果
 
 `narrative_entries` 必须支持以下条目类型：
 - `user_message`
@@ -1035,6 +1067,10 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 更新已有用户模板
 - `POST /api/pipeline-templates/{templateId}/save-as`
 基于现有模板另存为新的用户模板
+- `POST /api/providers`
+创建新的自定义 Provider
+- `PATCH /api/providers/{providerId}`
+更新自定义 Provider
 
 `POST /api/sessions/{sessionId}/messages` 只允许两类语义：
 - 新需求输入
@@ -1062,6 +1098,12 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - 保存结果必须返回最终生效的 `template_id`
 - 模板保存接口服务于启动前模板配置，不用于修改任何已启动运行的模板快照
 
+Provider 管理接口必须满足以下规则：
+- `POST /api/providers` 只用于创建 `custom` Provider
+- `PATCH /api/providers/{providerId}` 只允许更新 `custom` Provider
+- `builtin` Provider 不通过该接口修改其供应商类型
+- `custom` Provider 在 V1 必须使用 `openai_completions_compatible` 协议
+
 ### 9.2 Run 与 Approval Command API
 
 至少提供以下命令接口：
@@ -1083,6 +1125,7 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 ### 9.3 Query API
 
 至少提供以下查询接口：
+- `GET /api/providers`
 - `GET /api/pipeline-templates`
 - `GET /api/pipeline-templates/{templateId}`
 - `GET /api/projects/{projectId}/sessions`
@@ -1095,6 +1138,7 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `GET /api/preview-targets/{previewTargetId}`
 
 其中：
+- `GET /api/providers` 用于拉取内置 Provider 和用户新增的自定义 Provider 列表
 - `GET /api/pipeline-templates` 用于拉取系统模板和用户模板列表；返回结果中必须至少包含三个预置 `system_template`
 - `GET /api/pipeline-templates/{templateId}` 用于拉取 `TemplateEditorProjection`，即启动前模板配置所需的允许字段
 - `GET /api/stages/{stageRunId}/inspector` 只用于拉取阶段结点的完整 Inspector 信息
