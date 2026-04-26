@@ -129,6 +129,7 @@
 - `project_id`
 - `title`
 - `status`
+- `selected_template_id`
 - `current_run_id`
 - `latest_stage_type`
 - `created_at`
@@ -143,23 +144,86 @@
 - `failed`
 - `terminated`
 
+`Session` 必须满足以下模板选择规则：
+- 新建会话时必须关联一个当前选中的 `PipelineTemplate`
+- 当会话仍处于 `draft` 且尚未创建 `PipelineRun` 时，允许更新 `selected_template_id`
+- 首次启动运行后，实际执行必须以 `PipelineRun.template_snapshot_ref` 为准
+- 后续模板修改不得回写影响已经启动的 `PipelineRun`
+
 ### 5.2 Pipeline 与阶段对象
 
 3. `PipelineTemplate`
-定义一条流程模板，包含阶段顺序、依赖、回退策略、自动回归策略和 Agent 绑定。
+定义一条可复用的流程模板，包含固定阶段骨架、必需角色槽位绑定、自动回归策略与运行前可编辑配置。至少包含：
+- `template_id`
+- `name`
+- `description`
+- `template_source`
+- `base_template_id`
+- `fixed_stage_sequence`
+- `stage_role_bindings`
+- `auto_regression_enabled`
+- `max_auto_regression_retries`
+- `created_at`
+- `updated_at`
 
-4. `PipelineRun`
+`PipelineTemplate` 必须满足以下规则：
+- `template_source` 在 V1 只允许：`system_template`、`user_template`
+- `fixed_stage_sequence` 在 V1 固定为：`Requirement Analysis -> Solution Design -> Design Approval Checkpoint -> Code Generation -> Test Generation & Execution -> Code Review -> Code Review Approval Checkpoint -> Delivery Integration`
+- 用户不可通过模板删除、禁用或重排核心业务阶段
+- 用户不可通过模板关闭 `Design Approval Checkpoint` 或 `Code Review Approval Checkpoint`
+- `system_template` 允许被选择和另存，但不允许被直接覆盖
+- `user_template` 允许被覆盖更新，也允许另存为新模板
+- `PipelineTemplate` 的完整定义服务于后端校验、运行编排与模板持久化，不等同于前端模板配置 UI 的展示载荷
+- 系统启动时必须至少预置以下三个 `system_template`：
+  - `Bug 修复流程`
+  - `新功能开发流程`
+  - `重构流程`
+- 新建会话在未显式指定模板时，默认绑定 `新功能开发流程`
+- 三个预置 `system_template` 必须共享同一固定阶段骨架
+- 三个预置 `system_template` 的差异只允许体现在：
+  - 必需角色槽位默认绑定的 `AgentRole`
+  - 各 `AgentRole` 的默认 `system_prompt`
+  - 各 `AgentRole` 绑定的默认 `Provider`
+  - 自动回归默认策略
+
+三个预置 `system_template` 的默认适用语义如下：
+- `Bug 修复流程`：用于已有缺陷、失败测试、报错修复
+- `新功能开发流程`：用于新增业务能力、接口或页面功能
+- `重构流程`：用于不改变外部行为前提下的结构整理与可维护性提升
+
+4. `AgentRole`
+表示绑定到模板必需角色槽位上的 Agent 角色定义，至少包含：
+- `role_id`
+- `role_name`
+- `system_prompt`
+- `provider_id`
+- `created_by`
+- `created_at`
+- `updated_at`
+
+`AgentRole` 必须满足以下规则：
+- `provider_id` 绑定发生在 `AgentRole` 上，而不是直接绑定在阶段上
+- V1 用户可编辑字段只包括：`role_name`、`system_prompt`、`provider_id`
+- 输入契约、输出契约、结构化产物要求与工具权限边界仍由平台固定，不向用户开放编辑
+
+5. `PipelineRun`
 表示某个会话的一次具体运行，至少包含：
 - `run_id`
 - `session_id`
 - `template_id`
+- `template_snapshot_ref`
 - `status`
 - `current_stage_run_id`
 - `attempt_index`
 - `started_at`
 - `ended_at`
 
-5. `StageDefinition`
+`PipelineRun` 必须满足以下模板快照规则：
+- 每次运行开始前都必须固化一份模板快照
+- 运行期间实际读取的角色绑定、Provider 绑定和自动回归配置必须来自模板快照
+- 模板快照一旦绑定到某次运行，不得再被运行外部修改
+
+6. `StageDefinition`
 定义某个阶段的标准契约，包含：
 - `stage_type`
 - `order_index`
@@ -168,7 +232,7 @@
 - `allowed_retry_policy`
 - `allowed_rollback_targets`
 
-6. `StageRun`
+7. `StageRun`
 表示某次运行中的具体阶段实例，至少包含：
 - `stage_run_id`
 - `run_id`
@@ -191,10 +255,10 @@
 
 ### 5.3 产物与审批对象
 
-7. `StageArtifact`
+8. `StageArtifact`
 表示阶段级结构化产物，是阶段流转、审批展示与历史回看的基础容器。
 
-8. `ClarificationRecord`
+9. `ClarificationRecord`
 表示 `Requirement Analysis` 阶段内部的澄清问答记录，至少包含：
 - `clarification_id`
 - `stage_run_id`
@@ -204,7 +268,7 @@
 - `asked_at`
 - `answered_at`
 
-9. `ApprovalRequest`
+10. `ApprovalRequest`
 表示正式人工审批对象，至少包含：
 - `approval_id`
 - `run_id`
@@ -221,7 +285,7 @@
 - `solution_design_approval`
 - `code_review_approval`
 
-10. `ApprovalDecision`
+11. `ApprovalDecision`
 表示审批结果，至少包含：
 - `approval_id`
 - `decision`
@@ -231,16 +295,16 @@
 
 ### 5.4 代码与交付对象
 
-11. `ChangeSet`
+12. `ChangeSet`
 表示一次代码变更集合，记录受影响文件、补丁、说明文本、变更统计和来源阶段。
 
-12. `ChangeRisk`
+13. `ChangeRisk`
 表示变更风险分级与风险说明。
 
-13. `DeliveryChannel`
+14. `DeliveryChannel`
 表示目标托管平台、仓库标识、默认分支、代码评审请求类型及交付策略。
 
-14. `DeliveryRecord`
+15. `DeliveryRecord`
 表示最终交付结果，记录：
 - 交付说明
 - 变更结果
@@ -252,7 +316,7 @@
 
 ### 5.5 上下文与扩展对象
 
-15. `ContextReference`
+16. `ContextReference`
 表示阶段执行时引用的上下文来源。功能一 V1 至少支持：
 - `requirement_text`
 - `repo_path`
@@ -261,13 +325,13 @@
 - `artifact_ref`
 - `approval_feedback`
 
-16. `PreviewTarget`
+17. `PreviewTarget`
 表示工作区对应的预览目标对象。V1 只定义对象与查询接口，不实现预览启动与热更新。
 
-17. `ToolCallRecord`
+18. `ToolCallRecord`
 表示单次工具调用记录，用于审查、回放与前端执行条目展示。
 
-18. `DomainEvent`
+19. `DomainEvent`
 表示驱动状态流转与投影视图更新的领域事件。
 
 ## 6. 阶段编排与生命周期
@@ -345,13 +409,13 @@ Pipeline 引擎必须满足以下实施约束：
 1. `可配置阶段结构`
 - 支持 `StageDefinition` 定义
 - 支持顺序与依赖关系
-- 支持阶段类型扩展
-- 支持审批检查点插入
+- 平台内部保留阶段类型扩展与检查点扩展能力
+- V1 面向用户开放的模板编辑不支持阶段增删、重排或审批检查点开关
 - 支持按模板定义是否允许自动回归、最大重试次数和回退策略
-- `PipelineTemplate.max_auto_regression_retries` 在 V1 固定为 `2`
+- 平台必须为 `PipelineTemplate.max_auto_regression_retries` 设定统一上限，模板只能在该上限内取值
 
 2. `阶段绑定 Agent`
-- 每个阶段可绑定一个或多个 `AgentRole`
+- 每个阶段必须暴露固定的必需角色槽位，并由模板绑定一个或多个 `AgentRole`
 - `Requirement Analysis` 使用单 Agent
 - `Solution Design` 使用双 Agent 串行结构，其中第二个 Agent 负责阶段内方案校验
 - `Code Generation` 使用单 Agent
@@ -359,20 +423,33 @@ Pipeline 引擎必须满足以下实施约束：
 - `Code Review` 使用单 Agent
 - `Delivery Integration` 使用单 Agent
 
-3. `阶段间数据流转`
+3. `模板用户编辑边界`
+- 用户可编辑模板只开放以下字段：
+  - 必需角色槽位到 `AgentRole` 的绑定关系
+  - `AgentRole.role_name`
+  - `AgentRole.system_prompt`
+  - `AgentRole.provider_id`
+  - `auto_regression_enabled`
+  - `max_auto_regression_retries`
+- 用户不可编辑核心阶段顺序、审批检查点存在性、阶段输入输出契约、结构化产物要求和工具权限边界
+- 保存模板时，必须校验所有必需角色槽位都已完成 `AgentRole` 与 `Provider` 绑定
+- 保存模板时，必须校验 `max_auto_regression_retries` 落在平台允许范围内
+- 后端面向前端输出的模板编辑载荷只返回允许字段，不返回固定阶段骨架、审批检查点、阶段输入输出契约、结构化产物要求和工具权限边界
+
+4. `阶段间数据流转`
 - 上一阶段输出必须以 `StageArtifact` 形式持久化
 - 后续阶段必须通过契约化引用读取产物
 - 不允许仅依赖内存态临时传参
 - `acceptance_criteria`、澄清结论、设计决策、审批反馈、评审意见等关键上下文必须可跨阶段传递
 
-4. `生命周期管理`
+5. `生命周期管理`
 - 支持启动、暂停、恢复、终止
 - 支持阶段失败后终止或重试
 - 支持审批拒绝后回退到指定阶段重跑
 - 支持代码评审失败后进入自动回归循环
 - 自动回归结束后，进入代码评审人工审批或失败状态
 
-5. `运行可观测`
+6. `运行可观测`
 - 可查询当前运行状态
 - 可查询各阶段状态
 - 可查询关键事件时间线
@@ -406,7 +483,7 @@ Pipeline 引擎必须满足以下实施约束：
 自动回归必须满足以下规则：
 - 默认回退目标为 `Code Generation`
 - 当根因属于方案错误、影响范围遗漏或接口路径错误时，允许回退到 `Solution Design`
-- 自动回归最大次数由模板配置控制，V1 固定为 `2`
+- 自动回归最大次数由模板配置控制，且必须落在平台定义的统一上限内
 - 自动回归结束后，才能进入代码评审人工审批
 - 自动回归超限后，必须输出明确的失败或高风险状态，不得静默推进
 
@@ -430,6 +507,14 @@ Agent 编排必须满足以下规则：
 - `Test Generation & Execution Agent`
 - `Code Review Agent`
 - `Delivery Integration Agent`
+
+每个阶段的必需角色槽位固定如下：
+- `Requirement Analysis`：`requirement_analysis_role`
+- `Solution Design`：`solution_design_role`、`solution_validation_role`
+- `Code Generation`：`code_generation_role`
+- `Test Generation & Execution`：`test_generation_execution_role`
+- `Code Review`：`code_review_role`
+- `Delivery Integration`：`delivery_integration_role`
 
 2. `上下文感知能力`
 Agent 至少支持以下上下文输入方式：
@@ -471,7 +556,10 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - V1 模型供应商集合固定为两个：
   - `火山引擎`：要求 `api_key` 与 `model_id`
   - `OpenAI Completions` 兼容接口：要求 `base_url`、`api_key` 与 `model_id`
-- 支持运行时按 Pipeline、按阶段或按执行策略切换
+- Provider 绑定单位是 `AgentRole`
+- 运行时可切换的含义是：不同 `AgentRole` 可以在同一模板中绑定不同 Provider，或在运行开始前通过模板编辑修改 `AgentRole` 到 Provider 的绑定关系
+- V1 不以阶段为单位直接绑定 Provider
+- 自动故障切换到备用 Provider 不属于 V1 的必需能力
 - Provider 差异不得泄漏到上层流程逻辑
 
 5. `输出结构化`
@@ -576,6 +664,8 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `project_id`
 - `session_status`
 - `current_run_id`
+- `selected_template_id`
+- `selected_template_summary`
 - `narrative_entries`
 - `composer_mode`
 
@@ -583,6 +673,41 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `new_requirement`
 - `clarification_reply`
 - `readonly`
+
+`selected_template_summary` 表示当前会话选中模板或当前运行所用模板的只读摘要，不承担模板编辑载荷职责。至少包含：
+- `template_id`
+- `name`
+- `template_source`
+- `template_use_case`
+- `auto_regression_enabled`
+- `max_auto_regression_retries`
+- `role_summary`
+
+当 `session_status = draft` 且尚未开始运行时：
+- 前端必须能够基于 `selected_template_id` 通过独立模板编辑查询拉取 `TemplateEditorProjection`
+- 工作台必须能够区分当前模板是否为系统模板或用户模板
+- 工作台必须能够据此决定是否展示 `覆盖当前模板` 入口
+
+当 `session_status != draft` 或 `PipelineRun` 已启动时：
+- `SessionWorkspaceProjection` 只返回 `selected_template_summary`
+- 工作台不得依赖 workspace 载荷渲染模板编辑区
+
+后端必须提供 `TemplateEditorProjection`，只用于启动前模板配置，至少包含：
+- `template_id`
+- `name`
+- `template_source`
+- `template_use_case`
+- `editable_role_bindings`
+- `editable_agent_roles`
+- `auto_regression_enabled`
+- `max_auto_regression_retries`
+- `can_overwrite`
+- `can_save_as`
+
+`TemplateEditorProjection` 必须满足以下规则：
+- 只返回功能一 V1 已开放的模板可编辑字段
+- 不返回固定阶段骨架、审批检查点、阶段输入输出契约、结构化产物要求和工具权限边界
+- 只在 `Session.status = draft` 且尚未创建 `PipelineRun` 的上下文中被前端消费
 
 `narrative_entries` 必须支持以下条目类型：
 - `user_message`
@@ -891,7 +1016,7 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 
 功能一后端必须通过 REST API 暴露所有核心能力。V1 接口分为三类。
 
-### 9.1 Project 与 Session Command API
+### 9.1 Project、Session 与 Template Command API
 
 至少提供以下命令接口：
 - `POST /api/projects`
@@ -900,18 +1025,42 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 获取项目列表
 - `POST /api/projects/{projectId}/sessions`
 创建新会话
+- `PUT /api/sessions/{sessionId}/template`
+更新草稿会话当前选中的模板
 - `POST /api/sessions/{sessionId}/messages`
 提交会话消息
+- `POST /api/pipeline-templates`
+创建新的用户模板
+- `PATCH /api/pipeline-templates/{templateId}`
+更新已有用户模板
+- `POST /api/pipeline-templates/{templateId}/save-as`
+基于现有模板另存为新的用户模板
 
 `POST /api/sessions/{sessionId}/messages` 只允许两类语义：
 - 新需求输入
 - 澄清回复
 
 该接口必须满足以下行为：
-- 当消息语义为 `new_requirement` 且当前会话不存在活跃运行时，后端必须自动创建 `PipelineRun` 并进入 `Requirement Analysis`
+- 当消息语义为 `new_requirement` 且当前会话不存在活跃运行时，后端必须基于当前 `selected_template_id` 创建 `PipelineRun`，固化模板快照，并进入 `Requirement Analysis`
 - 当消息语义为 `clarification_reply` 时，后端必须把补充信息回写到当前 `Requirement Analysis` 阶段并恢复执行
 
 该接口不承担审批提交职责。
+
+`POST /api/projects/{projectId}/sessions` 必须满足以下规则：
+- 当请求未显式指定模板时，后端必须为新会话绑定默认系统模板 `新功能开发流程`
+- 当请求显式指定模板时，必须校验该模板存在且可用
+
+`PUT /api/sessions/{sessionId}/template` 必须满足以下规则：
+- 只允许在 `Session.status = draft` 且尚未创建 `PipelineRun` 时调用
+- 更新成功后，会话的 `selected_template_id` 必须立即可查询
+- 不得用于修改已经启动运行所使用的模板快照
+
+模板保存接口必须满足以下规则：
+- `PATCH /api/pipeline-templates/{templateId}` 只允许更新 `user_template`
+- `POST /api/pipeline-templates/{templateId}/save-as` 允许基于 `system_template` 或 `user_template` 创建新的 `user_template`
+- 模板保存前必须执行模板字段和角色绑定完整性校验
+- 保存结果必须返回最终生效的 `template_id`
+- 模板保存接口服务于启动前模板配置，不用于修改任何已启动运行的模板快照
 
 ### 9.2 Run 与 Approval Command API
 
@@ -934,6 +1083,8 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 ### 9.3 Query API
 
 至少提供以下查询接口：
+- `GET /api/pipeline-templates`
+- `GET /api/pipeline-templates/{templateId}`
 - `GET /api/projects/{projectId}/sessions`
 - `GET /api/sessions/{sessionId}/workspace`
 - `GET /api/runs/{runId}`
@@ -944,6 +1095,8 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `GET /api/preview-targets/{previewTargetId}`
 
 其中：
+- `GET /api/pipeline-templates` 用于拉取系统模板和用户模板列表；返回结果中必须至少包含三个预置 `system_template`
+- `GET /api/pipeline-templates/{templateId}` 用于拉取 `TemplateEditorProjection`，即启动前模板配置所需的允许字段
 - `GET /api/stages/{stageRunId}/inspector` 只用于拉取阶段结点的完整 Inspector 信息
 - `GET /api/delivery-records/{deliveryRecordId}` 只用于拉取交付结果的完整信息
 - `GET /api/approvals/{approvalId}` 只用于审批块自身的状态刷新、审批对象显示文本补全和操作结果回读，不用于驱动右侧 Inspector 打开
@@ -1083,4 +1236,6 @@ V1 仅定义对象和查询接口，不实现预览启动与热更新。
 7. 能通过 SSE 提供会话级增量事件流。
 8. 能在历史会话中回放结构化产物、审批记录、回退记录与交付结果。
 9. 能在代码评审失败时执行受控自动回归。
-10. 能为功能二保留 `ChangeSet`、`ContextReference`、`PreviewTarget`、`DeliveryRecord` 的复用边界。
+10. 能列出系统模板与用户模板，并在不破坏固定主干阶段的前提下编辑允许字段。
+11. 能把模板修改保存为覆盖现有用户模板或另存为新用户模板，并在运行开始时固化模板快照。
+12. 能为功能二保留 `ChangeSet`、`ContextReference`、`PreviewTarget`、`DeliveryRecord` 的复用边界。
