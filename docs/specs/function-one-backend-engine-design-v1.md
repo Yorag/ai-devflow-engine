@@ -30,6 +30,37 @@
 
 `docs/archive/function-one-design-v2.md` 仅保留为迁移参考，不再作为当前后端规格依据。
 
+## 2.1 后端技术选型
+
+功能一 V1 后端技术方向固定如下：
+- 运行时语言：`Python`
+- API 框架：`FastAPI`
+- 接口形态：`REST + SSE`
+- 本地部署形态：`浏览器访问 localhost + 单个本地 Python 服务`
+
+该技术选型必须满足以下规则：
+- `FastAPI` 必须作为 `REST API`、`SSE` 端点与 `OpenAPI` 文档暴露的统一入口
+- 前端控制台只通过本地 Python 服务暴露的 HTTP 能力消费后端，不直接访问工作区文件系统
+- 当前版本不以多服务、分布式队列或远程执行集群作为落地前提
+
+功能一 V1 的持久化方向固定为 `多 SQLite 文件，按领域拆分`，而不是单一大库。
+
+后端至少按以下边界拆分存储职责：
+- `control.db`
+  承载 `Project`、`Session`、模板、Provider 与项目级配置；其中 `Session` 是规范归属对象，包含会话级摘要字段，如 `status`、`current_run_id`、`latest_stage_type`、`selected_template_id`、`title` 与时间戳
+- `runtime.db`
+  承载 `PipelineRun`、`StageRun`、审批对象、结构化产物索引与运行状态
+- `event.db`
+  承载事件日志、Narrative Feed 投影来源数据与审计记录
+
+该存储策略必须满足以下规则：
+- 不允许把全部领域对象、运行记录与事件流混入同一个 `SQLite` 文件
+- 领域拆分必须服务于后续迁移到更重数据库时的平滑替换，而不是只为当前版本制造额外复杂度
+- 各库之间的边界以职责分离为目标，不要求当前版本过度追求数据库级分布式事务
+- `runtime.db` 不重复持有第二份规范 `Session` 实体；其会话相关数据通过 `session_id` 关联到 `PipelineRun`、`StageRun`、审批对象与运行记录
+- `PipelineRun` 生命周期推进导致的会话级摘要变化，必须由编排层回写 `control.db` 中的 `Session`
+- 当 `Session.status = draft` 且 `current_run_id = null` 时，表示该会话尚未启动首个 run；该语义以 `control.db.Session` 为准
+
 ## 3. 后端职责范围
 
 功能一后端必须承担以下职责：
@@ -113,7 +144,7 @@
 
 V1 默认部署拓扑必须满足以下规则：
 - 前端控制台、后端服务与工作区执行能力部署在同一台主机。
-- 前端与后端可以是独立进程，也可以采用同机集成部署；是否同进程或同容器不属于规格约束范围。
+- 前端以浏览器访问 `localhost` 的方式运行，后端以单个本地 Python 服务方式运行。
 - 前端控制台只能通过命令接口、查询接口和事件流消费后端能力，不直接访问目标仓库文件系统，不直接执行本地命令，不直接承担 Git 交付动作。
 - 后端中的执行侧必须与目标仓库、本地 Git 环境以及项目依赖的构建、运行和测试工具链处于同一台主机，并共享一致的文件系统视角。
 - 远端托管平台在 V1 中属于可选交付出口，不属于系统启动与本地执行的前提条件。
@@ -121,6 +152,8 @@ V1 默认部署拓扑必须满足以下规则：
 V1 运行环境必须满足以下约束：
 - 每个 `Project.root_path` 必须对应一个可被后端直接访问的本地仓库路径。
 - `Workspace & Tool Service` 必须在隔离工作区中完成文件读取、代码修改、命令执行、diff 生成与测试执行。
+- 后端必须以单服务方式统一承载 API、`SSE`、编排与本地任务调度。
+- 与工作区、测试、Git 交付相关的长任务必须通过受控子进程执行，而不是阻塞 HTTP 请求处理主路径。
 - 每个 `PipelineRun` 都必须使用独立隔离工作区。
 - 新建 `PipelineRun` 时，工作区必须从干净基线创建，不得自动继承前一个 run 未交付的工作区改动。
 - 只有已经通过明确交付路径落入仓库基线的结果，才允许成为后续 run 的输入基线；未交付的本地工作区改动不得跨 run 泄漏。
@@ -132,6 +165,7 @@ V1 运行环境必须满足以下约束：
 - 前端交互语义不变。
 - 核心 `Tool` 协议不变。
 - `Project`、`Session`、`PipelineRun`、`ChangeSet`、`DeliveryRecord` 等核心领域对象语义不变。
+- API 层、编排层与工作区执行层之间的职责边界不变。
 
 ## 5. 核心领域对象
 
@@ -310,6 +344,7 @@ V1 运行环境必须满足以下约束：
 - 运行期间实际读取的角色绑定、Provider 绑定和自动回归配置必须来自模板快照
 - `Delivery Integration` 阶段实际读取的 `delivery_mode`、仓库标识、默认分支与代码评审请求类型必须来自 `delivery_channel_snapshot_ref`
 - 模板快照与交付通道快照一旦绑定到某次运行，不得再被运行外部修改
+- `template_snapshot_ref` 与 `delivery_channel_snapshot_ref` 默认指向 `runtime.db` 中的运行期快照记录，而不是继续回指可变的模板实体或项目级配置实体
 
 `PipelineRun.status` 必须至少支持：
 - `pending`
@@ -370,6 +405,12 @@ V1 运行环境必须满足以下约束：
 
 9. `StageArtifact`
 表示阶段级结构化产物，是阶段流转、审批展示与历史回看的基础容器。
+
+`StageArtifact` 必须满足以下规则：
+- 作为运行期结构化产物、阶段输入输出快照与稳定引用目标的统一索引对象
+- 默认持久化在 `runtime.db`
+- 如无特别说明，`StageRun.input_ref`、`StageRun.output_ref` 与 `ApprovalRequest.payload_ref` 默认指向 `StageArtifact` 或其派生快照记录
+- `StageArtifact` 可通过 `artifact_ref`、`attachments_ref`、`delivery_record_ref` 等查询层稳定引用被前端或其他领域对象间接访问
 
 10. `ClarificationRecord`
 表示 `Requirement Analysis` 阶段内部的澄清问答记录，至少包含：
@@ -1115,6 +1156,11 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `is_truncated`
 - `detail_ref`
 
+其中 `detail_ref` 必须满足以下规则：
+- 作为查询层稳定引用返回
+- 可解析到 `runtime.db` 中的运行期详情记录，或解析到 `event.db` 中的事件明细记录
+- 不要求前端感知其底层具体存储位置，但后端必须保证其在对应 run 生命周期内稳定可读
+
 `diff_preview_item` 至少包含：
 - `item_id`
 - `item_type`
@@ -1130,6 +1176,11 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `content`
 - `is_truncated`
 - `attachments_ref`
+
+其中 `attachments_ref` 必须满足以下规则：
+- 作为查询层稳定引用返回
+- 默认解析到 `runtime.db` 中由 `StageArtifact` 统一索引的附件或派生产物记录
+- 附件实体本身可以落在数据库、文件系统或两者混合介质中，但对外必须表现为稳定引用
 
 `rollback_item` 至少包含：
 - `item_id`
@@ -1243,6 +1294,11 @@ Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用
 - `attachments`
 
 `DeliveryResultDetailProjection` 不要求提供 `stage_type`、`structured_input`、`structured_output`、`reasoning_trace` 或 `decision_trace` 等阶段结点专属字段。
+
+`delivery_record_ref` 必须满足以下规则：
+- 作为查询层稳定引用返回
+- 默认指向 `runtime.db` 中的 `DeliveryRecord` 主记录
+- 其关联的展示明细可通过 `runtime.db` 记录继续解析到数据库内详情或文件系统附件
 
 ### 8.5 审批块投影
 
@@ -1452,6 +1508,7 @@ Provider 管理接口必须满足以下规则：
 - 调用成功后，run 级状态必须切换为 `paused`，并同步投影为 `Session.status = paused`
 - 调用成功后，必须记录本次暂停前的源状态、源阶段与必要运行上下文快照，用于后续 `resume` 原位恢复
 - 当暂停发生在结点执行中途时，后端必须为当前 run 临时固化可续接的工作快照；该快照至少覆盖当前阶段上下文、已生成的中间产物引用、工作区当前改动状态与必要的执行历史
+- 运行上下文快照默认持久化在 `runtime.db`；工作区续接快照采用 `runtime.db` 中的索引记录加文件系统工作快照目录的混合模型，不允许只存在进程内存
 - 调用成功后，不得删除、重建或改写当前 run 已经产生的阶段记录、审批请求、审批结果、澄清记录与交付记录
 - 若暂停发生在 `waiting_approval`，待处理审批对象必须继续保留为可提交状态，不因 run 进入 `paused` 而自动关闭或转只读
 
@@ -1463,6 +1520,7 @@ Provider 管理接口必须满足以下规则：
 - 若暂停前源状态为 `running` 或 `pending`，恢复后必须在原阶段继续执行
 - 恢复后继续同一个 `PipelineRun` 的既有链路上下文，不得新建 run，不得把恢复语义投影为新的重新尝试
 - 若暂停前已有临时工作快照，恢复时必须优先基于该快照续接，而不是丢弃已完成的一半结点内工作并从空白状态重做
+- 恢复流程必须能够同时解析 `runtime.db` 中的上下文快照记录与文件系统工作快照目录中的实体内容
 
 `POST /api/runs/{runId}/terminate` 必须满足以下规则：
 - 只允许作用于当前活动 run
