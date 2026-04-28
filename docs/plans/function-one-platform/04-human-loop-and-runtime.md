@@ -7,6 +7,8 @@
 本分卷承接 03 分卷的 Run 状态机和投影基础，负责运行中断、恢复、人工决策和执行内核副作用。每个任务只处理一个控制行为或 runtime 能力。
 凡本分卷修改 `backend/app/api/routes/*` 的 API 切片，对应 API 测试必须在本切片内断言新增或修改的 path、method、请求 Schema、响应 Schema 和主要错误响应已进入 `/api/openapi.json`；V6.4 只做全局覆盖回归。
 
+人工介入、运行控制、runtime、Provider 和交付前置动作必须嵌入日志审计能力。用户可触发命令必须为接受、拒绝、成功和失败结果写入审计记录；系统自动执行的高影响动作必须以 `system`、`agent` 或 `tool` 主体写入审计记录。审计记录写入失败时，高影响动作必须拒绝或回滚；普通运行日志失败不得破坏已持久化领域状态。
+
 <a id="a40"></a>
 
 ## A4.0 Runtime orchestration boundary
@@ -42,9 +44,69 @@
 - rerun 必须只确认旧 run 对应 `GraphThreadRef` 已处于终态，不得调用 `resume_interrupt()`，不得复用旧 `GraphThreadRef` 创建新 run。
 - A4.0 只定义 orchestration boundary 和可 fake 的端口，不实现 deterministic 或 LangGraph 具体 runtime。
 - 后续 H4.1、H4.3、H4.4、H4.5、H4.6、H4.7 不得绕过该边界直接推进或复用执行图状态。
+- orchestration boundary 必须传递 `TraceContext`，为 interrupt、resume、pause、terminate、rerun terminal check 分配或继承 `span_id`。
 
 **测试方法**：
 - `pytest backend/tests/services/test_runtime_orchestration_boundary.py -v`
+
+<a id="l41"></a>
+
+## L4.1 命令审计失败语义
+
+**计划周期**：Week 6
+**状态**：`[ ]`
+**目标**：固定用户命令和高影响动作在审计写入失败时的拒绝或回滚语义，确保后续澄清、审批、暂停、恢复、终止、重新尝试和交付前置动作不会把审计失败降级为普通运行日志失败。
+**实施计划**：`docs/plans/implementation/l4.1-command-audit-failure-semantics.md`
+
+**修改文件列表**：
+- Modify: `backend/app/observability/audit.py`
+- Create: `backend/tests/observability/test_command_audit_failure_semantics.py`
+
+**实现类/函数**：
+- `AuditService.require_audit_record()`
+- `AuditService.record_rejected_command()`
+- `AuditService.record_blocked_action()`
+
+**验收标准**：
+- 用户可触发命令接口的成功、失败、被拒绝三类结果必须能通过本服务记录。
+- L4.1 必须复用并补强 L2.4 建立的 `AuditService`，只增加审计写入失败时的提交、拒绝和回滚语义；不得创建第二套审计服务、第二套审计表或绕过 `AuditLogEntry` 的临时记录。
+- 高影响动作在审计台账写入失败时必须拒绝或回滚，并返回明确错误；不得降级为普通运行日志失败。
+- 普通运行日志写入失败不得破坏已持久化领域状态，但必须追加可定位的服务级错误线索。
+- H4.1、H4.4、H4.5、H4.6、H4.7 与 D4.0 后续切片必须复用本切片的审计失败语义，不得各自临时分叉。
+- L4.1 不暴露审计查询 API；只读查询能力由 L4.2 实现。
+
+**测试方法**：
+- `pytest backend/tests/observability/test_command_audit_failure_semantics.py -v`
+
+<a id="l42"></a>
+
+## L4.2 审计日志查询 API
+
+**计划周期**：Week 6
+**状态**：`[ ]`
+**目标**：实现平台审计日志只读查询，使本地诊断与运维可以按主体、动作、目标、run 和结果过滤审计记录。
+**实施计划**：`docs/plans/implementation/l4.2-audit-log-query-api.md`
+
+**修改文件列表**：
+- Modify: `backend/app/observability/audit.py`
+- Create: `backend/app/api/routes/audit_logs.py`
+- Create: `backend/tests/observability/test_audit_query_service.py`
+- Create: `backend/tests/api/test_audit_log_api.py`
+
+**实现类/函数**：
+- `AuditService.list_audit_logs()`
+
+**验收标准**：
+- `GET /api/audit-logs` 返回平台审计日志分页结果。
+- 查询参数至少支持 `actor_type`、`action`、`target_type`、`target_id`、`run_id`、`result`、`since`、`until`、`cursor`、`limit`。
+- 响应返回 `entries`、`next_cursor`、`has_more` 与查询条件回显。
+- 审计查询响应不得返回完整大载荷，只返回动作主体、目标、结果、原因、摘要、关联标识和时间字段。
+- `GET /api/audit-logs` 是后端诊断与本地运维只读接口，不属于前端工作台主路径依赖。
+- API 测试必须断言 `GET /api/audit-logs` 的查询参数、响应 Schema、主要错误响应和 OpenAPI path/method 已进入 `/api/openapi.json`。
+
+**测试方法**：
+- `pytest backend/tests/observability/test_audit_query_service.py -v`
+- `pytest backend/tests/api/test_audit_log_api.py -v`
 
 <a id="h41"></a>
 
@@ -78,6 +140,7 @@
 - 澄清不创建 ApprovalRequest。
 - `clarification_reply` 只能在 `waiting_clarification` 且当前阶段为 `requirement_analysis` 时使用。
 - 补充信息回写到同一个业务阶段上下文，并通过 runtime boundary 恢复同一个 run 与同一个 GraphThreadRef。
+- 澄清请求、澄清回复成功、非法状态拒绝和恢复失败必须写入审计记录和运行日志；澄清事实仍以 ClarificationRecord、领域事件和 StageArtifact 为准。
 - API 测试必须断言 `POST /api/sessions/{sessionId}/messages` 的 `clarification_reply` 请求/响应 Schema、非法状态错误响应和 OpenAPI path/method 已进入 `/api/openapi.json`。
 
 **测试方法**：
@@ -145,6 +208,7 @@
 - 审批等待期间，会话级 `latest_stage_type` 与 `current_stage_type` 保持源阶段类型不变。
 - `approval_request` 包含 `is_actionable`、`disabled_reason`、`delivery_readiness_status` 和 `open_settings_action` 字段。
 - 本切片只创建审批对象和投影来源，不暴露审批命令路由；审批命令路由由 H4.4 作为单一公开入口创建。
+- 审批对象创建、中断创建成功和中断创建失败必须写入运行日志；本切片不写用户审批提交审计。
 
 **测试方法**：
 - `pytest backend/tests/services/test_approval_creation.py -v`
@@ -229,6 +293,9 @@
 - `demo_delivery` 不因远端配置缺失阻塞 approve。
 - paused run 不接受审批提交，并返回明确错误信息。
 - 本切片不得新增第二条 code review approve 入口。
+- 审批提交接受、审批提交被 paused 拒绝、delivery readiness 阻塞、Approve 成功、Reject 成功和 runtime resume 失败必须写入审计记录。
+- 审计写入失败时不得提交审批决策、`approval_result` 事件或交付快照。
+- 运行日志必须记录审批命令耗时、结果状态、阻塞原因摘要和关联的 `approval_id`、`run_id`、`stage_run_id`。
 - API 测试必须断言 `POST /api/approvals/{approvalId}/approve`、`POST /api/approvals/{approvalId}/reject` 的请求/响应 Schema、paused 错误、delivery readiness 错误和 OpenAPI path/method 已进入 `/api/openapi.json`。
 
 **测试方法**：
@@ -266,6 +333,7 @@
 - waiting_approval 下暂停后审批不可提交，投影 `is_actionable = false`。
 - resume 继续同一 run 和同一 GraphThreadRef，不创建新 run。
 - 若 run 暂停前停留于审批等待，resume 后恢复到同一个 `waiting_approval` 检查点。
+- pause 接受、pause 成功、resume 接受、resume 成功、非法状态拒绝和 checkpoint 保存失败必须写入审计记录和运行日志。
 - API 测试必须断言 `POST /api/runs/{runId}/pause`、`POST /api/runs/{runId}/resume` 的请求/响应 Schema、非法状态错误响应和 OpenAPI path/method 已进入 `/api/openapi.json`。
 
 **测试方法**：
@@ -300,6 +368,7 @@
 - failed 与 terminated 的顶层 `system_status` 必须由同一个 `TerminalStatusProjector.append_terminal_system_status()` 生成，不得分散在不同服务中各自拼装。
 - `system_status` 不属于 `control_item.control_type`。
 - terminated run 中仍待处理的审批块退化为不可提交状态。
+- terminate 接受、terminate 成功、非法状态拒绝和 runtime terminate 失败必须写入审计记录和运行日志。
 - API 测试必须断言 `POST /api/runs/{runId}/terminate` 的请求/响应 Schema、非法状态错误响应和 OpenAPI path/method 已进入 `/api/openapi.json`。
 
 **测试方法**：
@@ -338,6 +407,7 @@
 - 重新尝试不继承旧 run 未交付的工作区改动。
 - 重新尝试不创建 `RunControlRecord(type=retry)`；`control_item(type=retry)` 只用于当前 run 内自动回归或阶段内再次尝试。
 - 本切片是重新尝试外部命令唯一落点；R3.3 只提供内部创建基础。
+- 重新尝试接受、旧 GraphThread 未终结拒绝、非法 run 状态拒绝、创建成功和创建失败必须写入审计记录；新 run 必须生成新 `trace_id` 并记录新旧 run 与 trace 关联。
 - API 测试必须断言 `POST /api/sessions/{sessionId}/runs` 的请求/响应 Schema、旧 GraphThread 未终结错误、非法 run 状态错误和 OpenAPI path/method 已进入 `/api/openapi.json`。
 
 **测试方法**：
@@ -510,6 +580,7 @@
 - deterministic 与 LangGraph runtime 必须实现 A4.0 定义的 `RuntimeCommandPort` / `CheckpointPort` 调用边界。
 - deterministic runtime 只作为稳定测试、前端联调和可重复端到端验收路径；正式 Agent 编排路径由 LangGraph runtime 承担。
 - `RuntimeEngine` 接口不得要求调用方识别 deterministic 或 LangGraph 的内部状态结构。
+- runtime 接口必须接收并传递 `TraceContext`，运行步骤结果必须允许返回日志摘要引用和审计引用，但不得要求调用方读取日志来推进状态。
 
 **测试方法**：
 - `pytest backend/tests/runtime/test_runtime_engine_contract.py -v`
@@ -537,6 +608,7 @@
 - 每个阶段写入 StageRun、StageArtifact 和领域事件。
 - Solution Validation 作为 `solution_design` 内部过程记录出现，不形成独立阶段。
 - deterministic runtime 在调用文件、搜索或 shell 能力时必须通过 W5.0 `ToolProtocol` 与 `ToolRegistry`；若本切片尚未调用工具，则只能写入固定结构化产物和领域事件，不得引入临时工具函数。
+- deterministic runtime 每个阶段推进必须写入运行日志摘要，包含阶段、耗时、结果状态、产物引用和 `span_id`；阶段事实仍由 StageRun、StageArtifact 和领域事件承载。
 - 前端端到端测试可使用固定输出。
 
 **测试方法**：
@@ -566,6 +638,7 @@
 - 可配置触发 code review approval。
 - 中断恢复必须通过 A4.0 runtime boundary 继续同一个 run、同一个 GraphThreadRef 和同一个源阶段。
 - 审批拒绝按规格回到目标阶段。
+- deterministic 中断、恢复、审批请求生成和恢复失败必须写入运行日志，并继承同一 `trace_id` 与 `correlation_id`。
 
 **测试方法**：
 - `pytest backend/tests/runtime/test_deterministic_interrupts.py -v`
@@ -594,6 +667,7 @@
 - failed / terminated run 尾部生成正确终态来源记录，并统一通过 `TerminalStatusProjector` 追加顶层 `system_status`。
 - 终态记录可支持后续重新尝试 run 创建。
 - 本切片不生成 DeliveryRecord，正式 `demo_delivery` 由 D4.2 负责。
+- deterministic 失败和终止必须写入运行日志，并记录直接失败点、源阶段和后续重新尝试所需的关联线索。
 
 **测试方法**：
 - `pytest backend/tests/runtime/test_deterministic_terminal_states.py -v`
@@ -625,6 +699,7 @@
 - DeliveryRecord 必须读取 D4.0 已固化的 `delivery_channel_snapshot_ref`，不得重新读取项目级最新 DeliveryChannel。
 - 本切片不改变 `ApprovalService.approve()`，不承担交付快照固化。
 - 交付 adapter base 只定义输入、输出、错误和审计引用边界，不执行真实 Git 写动作。
+- DeliveryRecord 创建成功、创建失败和 adapter 选择失败必须写入运行日志；未来真实交付的高影响动作审计由 D5.1-D5.4 嵌入。
 
 **测试方法**：
 - `pytest backend/tests/delivery/test_delivery_record_service.py -v`
@@ -657,6 +732,7 @@
 - `delivery_result` 详情可通过 DeliveryResultDetailProjection 深看。
 - deterministic runtime 可跑通六阶段到 `demo_delivery` 的完整成功链路。
 - `demo_delivery` 必须读取已固化交付快照，不重新读取项目级最新 DeliveryChannel。
+- `demo_delivery` 必须写入运行日志和审计记录，明确其不执行真实 Git 写动作；审计引用进入 DeliveryRecord 或交付过程引用。
 
 **测试方法**：
 - `pytest backend/tests/delivery/test_demo_delivery.py -v`
@@ -686,6 +762,7 @@
 - 详情来源必须是 DeliveryRecord、已固化交付快照、StageArtifact 和稳定引用，不得使用前端摘要或临时 projection payload 反推。
 - `delivery_result` 详情包含交付模式、变更结果、测试结论、评审结论、产物、原始交付过程引用与量化信息。
 - `approval_result` 仍不作为独立右栏对象；交付详情只服务 `delivery_result`。
+- DeliveryResultDetailProjection 可以展示与交付过程直接相关的日志摘要、裁剪片段和审计引用，但不得从日志反推交付结果。
 - API 测试必须断言 `GET /api/delivery-records/{deliveryRecordId}` 的响应 Schema、主要错误响应和 OpenAPI path/method 已进入 `/api/openapi.json`。
 
 **测试方法**：
@@ -724,6 +801,7 @@
 - 条件路由使用 LangGraph conditional edges 表达，不在 `RunLifecycleService` 中另写一套阶段分支状态机。
 - checkpoint 通过 LangGraph checkpointer 保存，并同步写入 `GraphCheckpoint.checkpoint_ref`。
 - 测试断言 checkpoint 可用于同一 `GraphThread` 恢复，而不是只验证业务状态字段变化。
+- LangGraph graph build、thread start、node start、node completed、checkpoint saved、graph failed 必须写入运行日志摘要，并继承 `TraceContext`。
 
 **测试方法**：
 - `pytest backend/tests/runtime/test_langgraph_engine.py -v`
@@ -757,6 +835,7 @@
 - `clarification_reply`、`approval approve/reject` 必须通过 A4.0 runtime boundary 进入 LangGraph resume，不得由 API 或领域服务直接调用 LangGraph internals。
 - `clarification_reply`、`approval approve/reject` 不得绕过 `GraphInterrupt` 直接推进阶段状态。
 - pause 后 resume 不创建新的 `GraphThread`，也不创建新的 `PipelineRun`。
+- LangGraph interrupt、resume command、resume success 和 resume failure 必须写入运行日志；审批或澄清命令审计仍由对应 H4 命令切片负责。
 
 **测试方法**：
 - `pytest backend/tests/runtime/test_langgraph_interrupts.py -v`
@@ -789,6 +868,7 @@
 - translator 输出领域事件、`StageArtifact`、`RunControlRecord` 或稳定引用。
 - SSE、Projection、Inspector 不读取 LangGraph raw event、raw state、compiled graph 或 checkpoint 原始 payload。
 - 测试覆盖 raw graph event 不会直接出现在对外事件 payload 中。
+- translator 必须把底层事件先分类、裁剪、关联后再写入运行日志；raw LangGraph event 不得作为可查询日志载荷原样保存。
 
 **测试方法**：
 - `pytest backend/tests/runtime/test_langgraph_event_translation.py -v`
@@ -818,6 +898,7 @@
 - 运行时读取模板快照中的 Provider 绑定。
 - Provider 绑定单位是 AgentRole。
 - Provider 配置不直接泄漏密钥内容到前端。
+- Provider 解析成功、解析失败和凭据引用不可用必须写入运行日志；日志和审计摘要不得包含真实密钥。
 
 **测试方法**：
 - `pytest backend/tests/providers/test_provider_registry.py -v`
@@ -848,6 +929,7 @@
 - LangChain adapter 只创建 chat model、绑定工具、声明结构化输出，不表达业务阶段流转。
 - 工具绑定对象来自 W5.0 定义的抽象 `ToolProtocol` 与工具注册表；Week 8 只能绑定已注册 workspace 工具和 fake 工具，不得在 D5.1-D5.4 前绑定具体 delivery tool 实例。
 - 结构化输出失败必须返回可处理错误，不得直接推进 LangGraph 节点成功完成。
+- 模型请求、模型响应、结构化输出解析、模型错误和重试必须写入运行日志摘要；模型输入输出进入日志前必须裁剪、阻断敏感字段并限制长度。
 
 **测试方法**：
 - `pytest backend/tests/providers/test_langchain_adapter.py -v`
@@ -875,6 +957,7 @@
 - 最大重试次数受控，并落在平台定义统一上限内。
 - Code Review 相关自动回归统一回到 `code_generation`。
 - 自动回归结束后才能进入 code review approval。
+- 自动回归策略判定、跳过、进入重试和超限必须写入运行日志，并继承当前 run 的 `trace_id`。
 
 **测试方法**：
 - `pytest backend/tests/runtime/test_auto_regression_policy.py -v`
@@ -904,6 +987,7 @@
 - 控制条目包含 `retry_index` 与 `source_attempt_index`。
 - 自动回归超限后输出明确失败或高风险状态，不静默推进。
 - 自动回归结束且得到稳定评审产物后，创建 `code_review_approval`。
+- 自动回归产生的 retry 控制条目仍由领域对象和事件驱动投影；运行日志只记录诊断摘要和关联标识。
 
 **测试方法**：
 - `pytest backend/tests/runtime/test_auto_regression_control_items.py -v`

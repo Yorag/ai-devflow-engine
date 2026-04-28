@@ -8,6 +8,123 @@
 
 凡本分卷修改 `backend/app/api/routes/*` 的 API 切片，对应 API 测试必须在本切片内断言新增或修改的 path、method、请求 Schema、响应 Schema 和主要错误响应已进入 `/api/openapi.json`；V6.4 只做全局覆盖回归，不作为这些路由第一次发现 OpenAPI 漂移的入口。
 
+控制面写操作必须嵌入日志审计要求。Project 加载、Session 创建、模板另存/覆盖/删除、Provider 创建/修改、DeliveryChannel 保存与校验必须继承 L2.1 建立的 request/correlation 上下文，使用 L2.2 的载荷裁剪策略，经由 L2.3 的 JSONL 与索引入口落盘，并通过 L2.4 为成功、失败和被拒绝结果写入审计记录；审计记录不得替代控制面领域对象或 API 响应真源。
+
+<a id="l21"></a>
+
+## L2.1 API 请求与关联上下文
+
+**计划周期**：Week 3
+**状态**：`[ ]`
+**目标**：建立 API request/correlation 上下文，使统一错误响应、控制面命令和后续日志审计入口能够共享 `request_id`、`trace_id`、`correlation_id` 与 `span_id`。
+**实施计划**：`docs/plans/implementation/l2.1-api-correlation-context.md`
+
+**修改文件列表**：
+- Create: `backend/app/observability/context.py`
+- Modify: `backend/app/main.py`
+- Modify: `backend/app/api/errors.py`
+- Create: `backend/tests/api/test_request_correlation_context.py`
+
+**实现类/函数**：
+- `RequestCorrelationMiddleware`
+- `get_trace_context()`
+- `TraceContext.child_span()`
+
+**验收标准**：
+- `request_id` 由外部请求传入或由中间件生成；同一请求内服务、API 错误、审计记录和后续领域命令共享 `correlation_id`。
+- `TraceContext` 能为控制面命令、服务调用、运行步骤和审计记录分配子 span，并保留 `parent_span_id`。
+- API 参数校验失败和统一错误响应必须具备 `request_id` 与 `correlation_id`。
+- L2.1 只负责上下文传播和错误响应挂载，不写 JSONL 文件、不写 `log.db` 索引、不创建审计记录。
+
+**测试方法**：
+- `pytest backend/tests/api/test_request_correlation_context.py -v`
+
+<a id="l22"></a>
+
+## L2.2 基础 RedactionPolicy 与 payload summarizer
+
+**计划周期**：Week 3
+**状态**：`[ ]`
+**目标**：建立日志与审计载荷的基础裁剪、摘要和敏感字段阻断策略，作为 L2.3 JSONL 写入和 L2.4 审计记录的统一前置处理。
+**实施计划**：`docs/plans/implementation/l2.2-redaction-payload-summarizer.md`
+
+**修改文件列表**：
+- Create: `backend/app/observability/redaction.py`
+- Create: `backend/tests/observability/test_redaction_policy.py`
+
+**实现类/函数**：
+- `RedactionPolicy.redact_mapping()`
+- `RedactionPolicy.summarize_payload()`
+- `RedactionPolicy.summarize_text()`
+
+**验收标准**：
+- 基础脱敏策略必须阻断字段名命中 `api_key`、`token`、`secret`、`password`、`authorization`、`cookie`、`private_key`、`credential` 或等价敏感含义的字段值。
+- 日志和审计载荷必须先生成摘要和裁剪片段，不能无界写入大文本或真实凭据。
+- 裁剪结果必须标记 `redaction_status`，区分未裁剪、已裁剪、已阻断和载荷不可序列化。
+- L2.2 不决定日志写入位置和审计失败语义；写入位置由 L2.3 固定，审计失败语义由 L2.4 与 L4.1 固定。
+
+**测试方法**：
+- `pytest backend/tests/observability/test_redaction_policy.py -v`
+
+<a id="l23"></a>
+
+## L2.3 JSONL writer 与 log index
+
+**计划周期**：Week 3
+**状态**：`[ ]`
+**目标**：建立本地 JSONL 日志写入与 `log.db` 轻量索引入口，使服务日志、run 日志和审计副本具备统一落盘格式和可查询定位信息。
+**实施计划**：`docs/plans/implementation/l2.3-jsonl-writer-log-index.md`
+
+**修改文件列表**：
+- Create: `backend/app/observability/log_writer.py`
+- Create: `backend/app/observability/log_index.py`
+- Create: `backend/tests/observability/test_jsonl_log_writer.py`
+
+**实现类/函数**：
+- `JsonlLogWriter.write()`
+- `JsonlLogWriter.write_run_log()`
+- `JsonlLogWriter.write_audit_copy()`
+- `LogIndexRepository.append_run_log_index()`
+
+**验收标准**：
+- 服务级日志写入 `.runtime/logs/app.jsonl`，run 级日志可按 `run_id` 写入 `.runtime/logs/runs/{run_id}.jsonl`，审计文件副本写入 `.runtime/logs/audit.jsonl`。
+- 每行 JSONL 是完整 JSON 对象，包含 `schema_version = 1`、`log_id`、`created_at`、`level`、`category`、`source`、`message`、`request_id`、`trace_id`、`correlation_id`、`span_id`、`parent_span_id`、`redaction_status` 和当前可用产品对象标识。
+- `RunLogEntry` 索引必须记录 `log_file_ref`、`line_offset`、`line_number`、`level`、`category`、`source`、`run_id`、`stage_run_id` 与关联 trace 字段。
+- JSONL writer 与 log index 不得接收或写入未经过 L2.2 处理的 raw payload；调用方只能传入已裁剪摘要、载荷片段、大小、内容哈希和 `redaction_status`。
+- 普通运行日志文件写入成功但 `log.db` 索引写入失败时，不阻断已完成领域事务，但必须追加服务级错误日志。
+- L2.3 不创建平台审计台账，不决定高影响动作的提交或回滚语义。
+
+**测试方法**：
+- `pytest backend/tests/observability/test_jsonl_log_writer.py -v`
+
+<a id="l24"></a>
+
+## L2.4 AuditService 与控制面命令审计
+
+**计划周期**：Week 3
+**状态**：`[ ]`
+**目标**：建立控制面命令可复用的 AuditService 入口，使 Project、Session、Template、Provider 和 DeliveryChannel 后续切片能够按统一结构记录成功、失败和被拒绝结果。
+**实施计划**：`docs/plans/implementation/l2.4-audit-service-control-plane.md`
+
+**修改文件列表**：
+- Create: `backend/app/observability/audit.py`
+- Create: `backend/tests/observability/test_audit_service.py`
+
+**实现类/函数**：
+- `AuditService.record_command_result()`
+- `AuditService.record_rejected_command()`
+- `AuditService.record_failed_command()`
+
+**验收标准**：
+- 审计记录写入 `log.db` 的 `AuditLogEntry`，并可通过 L2.3 写入 `.runtime/logs/audit.jsonl` 副本。
+- 控制面审计记录必须包含动作主体、动作名、目标类型、目标标识摘要、结果、原因摘要、`request_id`、`trace_id`、`correlation_id`、`span_id` 和创建时间。
+- 控制面命令拒绝结果必须具备 `request_id` 与 `correlation_id`，且不能以审计记录替代 API 错误响应或领域状态。
+- 安全审计台账写入失败时，必须向调用方返回明确错误，不得降级为普通运行日志失败。
+- 本切片只建立控制面可复用审计入口；C2.1-C2.7 在各自业务切片中完成具体命令接入，runtime、工具、模型和交付动作在后续阶段接入。
+
+**测试方法**：
+- `pytest backend/tests/observability/test_audit_service.py -v`
+
 <a id="c21"></a>
 
 ## C2.1 默认 Project、项目加载与项目列表
@@ -38,6 +155,7 @@
 - 默认 Project 创建时通过 `DeliveryChannelService.ensure_default_channel()` 同步创建最小项目级默认 `DeliveryChannel(delivery_mode=demo_delivery, credential_status=ready, readiness_status=ready, readiness_message=null)`。
 - 新建 Project 记录 `root_path`、`name`、`default_delivery_channel_id` 和时间戳，且 `default_delivery_channel_id` 指向可解析的默认通道。
 - 本切片不实现 Session、Template 或 DeliveryChannel 查询、保存、readiness 校验业务。
+- 默认 Project 初始化、本地项目加载成功、本地项目加载失败和非法 `root_path` 被拒绝必须继承 L2.1 上下文并通过 L2.4 写入审计记录；审计摘要不得把本机绝对路径作为可查询主引用。
 - API 测试必须断言 `GET /api/projects`、`POST /api/projects` 及其请求/响应 Schema 和主要错误响应已进入 `/api/openapi.json`。
 
 **测试方法**：
@@ -110,6 +228,7 @@
 - 只有 `draft` 且尚未创建 run 的 Session 允许更新 `selected_template_id`。
 - `latest_stage_type` 在 draft 状态下为 `null`。
 - 同一 Project 下可列出近期 Session。
+- Session 创建、非法模板更新和成功模板更新必须继承 L2.1 上下文并通过 L2.4 写入审计记录，且不以审计记录替代 `Session` 领域状态。
 - API 测试必须断言 `POST /api/projects/{projectId}/sessions`、`GET /api/projects/{projectId}/sessions`、`GET /api/sessions/{sessionId}`、`PUT /api/sessions/{sessionId}/template` 及其请求/响应 Schema 和主要错误响应已进入 `/api/openapi.json`。
 
 **测试方法**：
@@ -144,6 +263,7 @@
 - 模板保存必须固化各阶段槽位最终生效的 `role_id`、`system_prompt` 与 `provider_id`，不得修改共享 `AgentRole.role_name`。
 - 用户不能通过模板删除、禁用、重排核心阶段，不能关闭两个必需审批检查点。
 - 删除当前选中的用户模板后，调用方可回退到默认系统模板。
+- 用户模板另存、覆盖、删除、非法覆盖系统模板和非法删除系统模板必须继承 L2.1 上下文并通过 L2.4 写入审计记录。
 - API 测试必须断言 `POST /api/pipeline-templates`、`PATCH /api/pipeline-templates/{templateId}`、`POST /api/pipeline-templates/{templateId}/save-as`、`DELETE /api/pipeline-templates/{templateId}` 及其请求/响应 Schema 和主要错误响应已进入 `/api/openapi.json`。
 
 **测试方法**：
@@ -175,6 +295,7 @@
 - custom Provider 使用用户自定义展示名。
 - custom Provider 接入协议为 `OpenAI Completions compatible`。
 - API 返回 Provider 状态，不返回真实密钥内容。
+- custom Provider 创建、修改、内置 Provider 修改被拒绝和凭据引用变更必须继承 L2.1 上下文，使用 L2.2 裁剪载荷，并通过 L2.4 写入审计记录；审计摘要不得包含真实密钥。
 - API 测试必须断言 `POST /api/providers`、`PATCH /api/providers/{providerId}`、`GET /api/providers/{providerId}` 及其请求/响应 Schema 和主要错误响应已进入 `/api/openapi.json`。
 
 **测试方法**：
@@ -208,6 +329,7 @@
 - `demo_delivery` 下 Git 字段允许为 `null`。
 - `git_auto_delivery` 保存时接收托管平台类型、仓库标识、默认分支、代码评审请求类型和 `credential_ref`。
 - DeliveryChannel 配置不属于 Session 或模板。
+- DeliveryChannel 保存成功、保存失败、字段非法和凭据引用变更必须继承 L2.1 上下文，使用 L2.2 裁剪载荷，并通过 L2.4 写入审计记录；审计元数据只保存摘要和凭据引用，不保存真实凭据。
 - API 测试必须断言 `GET /api/projects/{projectId}/delivery-channel`、`PUT /api/projects/{projectId}/delivery-channel` 及其请求/响应 Schema 和主要错误响应已进入 `/api/openapi.json`。
 
 **测试方法**：
@@ -240,6 +362,7 @@
 - `git_auto_delivery` 缺少可用凭据时 `credential_status` 为 `unbound` 或 `invalid`，且 `readiness_status != ready`。
 - 校验接口不修改已固化到历史 run 的交付快照。
 - 返回的 `readiness_message` 能表达主阻塞原因。
+- DeliveryChannel readiness 校验必须继承 L2.1 上下文，使用 L2.2 裁剪载荷，经由 L2.3 写入运行日志，并通过 L2.4 写入审计记录；记录内容包含校验结果、阻塞原因摘要和 `validated_at`，不得改写历史 run 的交付快照。
 - API 测试必须断言 `POST /api/projects/{projectId}/delivery-channel/validate` 的请求 Schema、响应 Schema、`validated_at` 字段和主要错误响应已进入 `/api/openapi.json`。
 
 **测试方法**：

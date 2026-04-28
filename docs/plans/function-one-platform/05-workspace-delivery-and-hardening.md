@@ -8,6 +8,8 @@
 
 凡本分卷修改 `backend/app/api/routes/*` 的 API 切片，对应 API 测试必须在本切片内断言新增或修改的 path、method、请求 Schema、响应 Schema 和主要错误响应已进入 `/api/openapi.json`；V6.4 只做全局覆盖回归，不替代本地 API 契约断言。
 
+工作区、工具、Git 交付和硬化任务必须嵌入日志审计要求。`.runtime/logs` 属于平台运行数据目录，不属于被操作项目工作区；工作区工具、搜索、diff、Git 自动交付、交付结果统计和 ChangeSet 计算必须默认排除该目录。所有工具调用必须通过统一 Log & Audit Service 记录运行日志；会造成工作区、Git、远端交付或配置状态变化的工具调用必须写入审计记录。
+
 <a id="w50"></a>
 
 ## W5.0 ToolProtocol 与工具注册表
@@ -38,6 +40,8 @@
 - `ToolRegistry` 能按工具类别和名称注册、解析、列出工具，并拒绝重复注册和未知工具解析。
 - LangGraph runtime、LangChain Provider adapter、workspace 工具和后续 delivery 工具只能依赖该抽象协议与注册表。
 - 本切片不实现文件、搜索、shell 或 delivery 具体工具，不绑定具体业务函数。
+- ToolProtocol 的审计引用必须能引用 `AuditLogEntry` 或其稳定引用，不能只是自由文本。
+- ToolResult 必须能承载 `trace_id`、`correlation_id`、`span_id` 与 `audit_ref`。
 
 **测试方法**：
 - `pytest backend/tests/tools/test_tool_protocol_registry.py -v`
@@ -66,6 +70,8 @@
 - 新 run 从干净基线创建，不继承前一 run 未交付改动。
 - 工作区路径必须处于受控根目录下。
 - 工作区管理不执行业务文件读写或 shell 命令。
+- 工作区根目录不得包含平台运行数据目录；若平台运行数据目录落在平台仓库路径下，WorkspaceManager 必须把 `.runtime/logs` 标记为排除路径。
+- 工作区创建、定位失败、路径越界和清理必须写入运行日志；路径越界属于安全敏感失败并写入审计记录。
 
 **测试方法**：
 - `pytest backend/tests/workspace/test_workspace_manager.py -v`
@@ -96,6 +102,9 @@
 - `read_file`、`write_file`、`edit_file`、`list_files` 都返回结构化结果和错误信息。
 - 文件编辑可生成变更记录引用，供 StageArtifact 或 ChangeSet 使用。
 - 本切片不重新定义工具协议，不实现搜索、shell 或 delivery 具体工具。
+- 文件工具必须默认排除 `.runtime/logs` 和平台运行数据目录，不能把日志文件作为业务文件读写、编辑、列出或纳入变更引用。
+- 每次文件工具调用必须写入运行日志；`write_file` 与 `edit_file` 必须写入审计记录。
+- 文件工具输入输出摘要必须裁剪敏感字段和大文本。
 
 **测试方法**：
 - `pytest backend/tests/workspace/test_workspace_file_tools.py -v`
@@ -124,38 +133,43 @@
 - search 返回路径、行号和匹配片段。
 - search 能排除常见构建产物和依赖目录。
 - 搜索错误返回结构化错误信息。
+- search 必须默认排除 `.runtime/logs`、平台运行数据目录、依赖目录和构建产物。
+- search 调用必须写入运行日志摘要；路径越界、权限拒绝和敏感信息阻断必须写入审计记录。
 
 **测试方法**：
 - `pytest backend/tests/workspace/test_workspace_search_tool.py -v`
 
 <a id="w54"></a>
 
-## W5.4 shell 工具与审计记录
+## W5.4 shell 工具与日志审计记录
 
 **计划周期**：Week 7-8
 **状态**：`[ ]`
-**目标**：实现受控 shell 工具和工具调用审计记录，使测试执行和命令执行可追踪。
+**目标**：实现受控 shell 工具和工具调用日志审计记录，使测试执行和命令执行可追踪。
 **实施计划**：`docs/plans/implementation/w5.4-workspace-shell-audit.md`
 
 **修改文件列表**：
 - Create: `backend/app/workspace/shell.py`
-- Create: `backend/app/tools/audit.py`
+- Modify: `backend/app/observability/audit.py`
 - Create: `backend/tests/workspace/test_workspace_shell.py`
 - Create: `backend/tests/tools/test_tool_audit.py`
 
 **实现类/函数**：
 - `run_shell_command()`
 - `ShellExecutionResult`
-- `ToolAuditLogger.record_tool_call()`
-- `ToolAuditLogger.record_tool_error()`
+- `AuditService.record_tool_call()`
+- `AuditService.record_tool_error()`
 
 **验收标准**：
 - shell 命令通过受控子进程执行。
 - shell 工作目录被限制在当前 run 工作区。
 - 命令输出、退出码、耗时和错误被结构化记录。
 - 工具调用产生日志和审计记录。
-- 每次被审计的工具调用都必须生成并持久化 W5.0 `ToolAuditRef`，且 `ToolResult.audit_ref` 必须能与 `ToolAuditLogger` 记录一一对应。
+- 每次被审计的工具调用都必须生成并持久化 W5.0 `ToolAuditRef`，且 `ToolResult.audit_ref` 必须能与 `AuditService` 记录一一对应。
 - shell 工具实现 W5.0 定义的 `ToolProtocol` 并注册到 `ToolRegistry`。
+- shell 命令输出必须裁剪、摘要化并限制大小；异常堆栈和环境变量不得泄漏凭据、API Key、Cookie、授权头或私钥。
+- shell 工作目录、命令、退出码、耗时、输出摘要、错误摘要、`trace_id`、`correlation_id` 和 `span_id` 必须进入运行日志。
+- 会改变工作区、执行测试、触发外部服务或可能影响交付目标的 shell 调用必须写入审计记录。
 - 测试不执行破坏真实仓库的命令。
 
 **测试方法**：
@@ -186,6 +200,7 @@
 - ChangeSet 能表达变更文件、变更类型、diff 引用和上下文引用。
 - ContextReference 预留 `page_selection`、`dom_anchor`、`preview_snapshot`。
 - 功能一不实现功能二的圈选交互。
+- ChangeSet 计算和 diff 引用必须默认排除 `.runtime/logs` 与平台运行数据目录。
 
 **测试方法**：
 - `pytest backend/tests/domain/test_change_set.py -v`
@@ -242,6 +257,7 @@
 - snapshot 必须包含 `delivery_mode`、`scm_provider_type`、`repository_identifier`、`default_branch`、`code_review_request_type`、`credential_ref`、`credential_status`、`readiness_status`、`readiness_message` 与 `last_validated_at`。
 - Delivery Integration 阶段不再次弹出配置阻塞。
 - 本切片不重新定义快照固化规则，只实现交付工具读取规则。
+- 读取交付快照必须写入运行日志；缺失快照、快照字段不完整和凭据状态不可用必须写入审计记录。
 
 **测试方法**：
 - `pytest backend/tests/delivery/test_read_delivery_channel_tool.py -v`
@@ -269,6 +285,8 @@
 - Git 操作通过本地 `git CLI` 适配层执行，不使用 GitPython。
 - prepare_branch 基于 fixture 仓库创建受控分支。
 - create_commit 基于工作区变更创建提交。
+- prepare_branch 与 create_commit 必须写入运行日志和审计记录，记录分支名、提交引用、结果状态、错误摘要和关联 `delivery_record_id`。
+- Git 操作不得把 `.runtime/logs` 或平台运行数据目录纳入 diff、提交或交付结果统计。
 - 测试使用 fixture 仓库，不影响真实仓库。
 
 **测试方法**：
@@ -298,6 +316,8 @@
 - create_code_review_request 支持 `pull_request` 与 `merge_request` 类型。
 - 远端托管平台调用使用 mock client 测试。
 - 工具返回 MR/PR 稳定引用和错误信息。
+- push_branch 与 create_code_review_request 必须写入运行日志和审计记录，记录远端目标摘要、MR/PR 引用、失败步骤和外部服务错误摘要。
+- 审计记录不得包含访问令牌、授权头、Cookie 或真实密钥。
 
 **测试方法**：
 - `pytest backend/tests/delivery/test_push_branch_create_review_request.py -v`
@@ -328,6 +348,8 @@
 - 本切片不固化 snapshot；snapshot 固化唯一发生在 D4.0 / H4.4 的 `code_review_approval` Approve 路径。
 - Delivery Integration 阶段不再次弹出配置阻塞。
 - 真实交付流程为 `read_delivery_channel -> prepare_branch -> create_commit -> push_branch -> create_code_review_request`。
+- 每个交付步骤必须继承同一 `trace_id` 与交付阶段 `correlation_id`，并具备独立 `span_id`。
+- 交付失败必须能通过日志审计链路定位到失败步骤、错误摘要、审计记录和 DeliveryRecord。
 - 测试使用 fixture 仓库与 mock 远端，不影响真实仓库。
 
 **测试方法**：
@@ -543,6 +565,7 @@
 - `/api/openapi.json` 覆盖所有核心 REST 接口。
 - `/api/docs` 可读。
 - OpenAPI 覆盖 `GET /api/sessions/{sessionId}/events/stream` 的事件流端点及其事件载荷结构。
+- OpenAPI 覆盖 `GET /api/runs/{runId}/logs`、`GET /api/stages/{stageRunId}/logs` 与 `GET /api/audit-logs` 的查询参数、响应 Schema 和主要错误响应。
 - V6.4 验证各 API 切片已经提交的 OpenAPI 断言汇总结果，不作为具体路由第一次补齐 OpenAPI 契约的切片。
 - 运行接口与 OpenAPI 文档同版本交付。
 
@@ -595,6 +618,7 @@
 **验收标准**：
 - 关键 API 错误在前端有清晰状态。
 - paused 审批提交、非法重新尝试、DeliveryChannel 未 ready 等错误有稳定错误码。
+- 运行数据目录不可写、审计写入失败、日志查询参数非法和日志载荷被阻断等后端错误有稳定错误码。
 - 前端不展示真实凭据内容。
 
 **前端设计质量门**：
@@ -605,6 +629,67 @@
 **测试方法**：
 - `pytest backend/tests/regression/test_error_contract_regression.py -v`
 - `npm --prefix frontend run test -- ErrorState`
+
+<a id="l61"></a>
+
+## L6.1 日志轮转与保留清理
+
+**计划周期**：Week 12
+**状态**：`[ ]`
+**目标**：补齐平台日志文件轮转、运行日志保留清理和审计保留差异，使运行日志生命周期不会破坏领域对象、投影查询和交付记录。
+**实施计划**：`docs/plans/implementation/l6.1-log-rotation-retention-cleanup.md`
+
+**修改文件列表**：
+- Create: `backend/app/observability/retention.py`
+- Create: `backend/tests/observability/test_log_retention.py`
+
+**实现类/函数**：
+- `LogRetentionService.rotate_if_needed()`
+- `LogRetentionService.cleanup_run_logs()`
+- `LogRetentionService.mark_log_expired()`
+
+**验收标准**：
+- 本地日志文件支持按大小或日期轮转，轮转后的文件命名保留可排序时间或 run 标识。
+- `RunLogEntry` 通过 `log_file_ref`、`line_offset`、`line_number` 与 `log_file_generation` 定位本地 JSONL 日志原文，并在日志轮转后保持定位语义清晰。
+- V1 支持按时间和 run 维度清理本地运行日志文件与 `log.db` 运行日志索引。
+- 审计日志、审计索引和高影响动作记录不得与普通 debug 运行日志使用同一自动清理阈值。
+- 清理运行日志不得删除领域对象、领域事件、阶段产物、审批记录或交付记录。
+- 当日志已过保留期而领域对象仍引用其摘要时，查询必须稳定返回“日志已过保留期”或等价状态，不导致产品查询失败。
+- L6.1 不负责敏感信息裁剪和跨链路日志审计回归；这些验证由 L6.2 覆盖。
+
+**测试方法**：
+- `pytest backend/tests/observability/test_log_retention.py -v`
+
+<a id="l62"></a>
+
+## L6.2 日志审计回归包
+
+**计划周期**：Week 12
+**状态**：`[ ]`
+**目标**：补齐敏感信息裁剪、审计失败回滚、日志查询退化、`.runtime/logs` 排除和跨链路日志审计主路径回归，使日志审计能力达到发布候选要求。
+**实施计划**：`docs/plans/implementation/l6.2-observability-regression-pack.md`
+
+**修改文件列表**：
+- Modify: `backend/app/observability/redaction.py`
+- Create: `backend/tests/observability/test_log_redaction.py`
+- Create: `backend/tests/regression/test_observability_regression.py`
+
+**实现类/函数**：
+- `RedactionPolicy.redact_mapping()`
+- `RedactionPolicy.summarize_payload()`
+- `ObservabilityRegressionScenarios`
+
+**验收标准**：
+- 在 L2.2 基础脱敏策略之上，补齐模型输入输出、工具输入输出、命令输出、异常堆栈和审计元数据的脱敏回归。
+- 字段名命中 `api_key`、`token`、`secret`、`password`、`authorization`、`cookie`、`private_key`、`credential` 或等价敏感含义时，字段值必须持续阻断写入日志。
+- 模型输入输出、工具输入输出、命令输出和异常堆栈必须先摘要化、裁剪并限制长度。
+- 测试必须断言 `.runtime/logs` 不被工作区工具、diff、Git 自动交付或交付结果统计当作目标项目内容处理。
+- 审计台账写入失败时，高影响动作必须拒绝或回滚；普通运行日志失败不得破坏已提交领域状态。
+- run/stage 日志查询和审计日志查询在日志已过保留期、查询参数非法、日志索引缺失和载荷被阻断时必须返回稳定错误或退化状态。
+
+**测试方法**：
+- `pytest backend/tests/observability/test_log_redaction.py -v`
+- `pytest backend/tests/regression/test_observability_regression.py -v`
 
 <a id="v67"></a>
 
@@ -630,6 +715,7 @@
 - 投影和 SSE 不出现重复条目或状态倒退。
 - 回归清单覆盖产品、前端、后端三份规格的核心验收项。
 - 发布候选验收清单完成。
+- 发布候选验收清单覆盖日志审计基础能力：JSONL 写入、`log.db` 索引、审计记录、TraceContext、日志查询、审计查询、轮转、保留、裁剪、`.runtime/logs` 排除和审计失败回滚。
 
 **前端设计质量门**：
 - 不新增风格输入；只允许修正一致性、状态覆盖和可用性问题。

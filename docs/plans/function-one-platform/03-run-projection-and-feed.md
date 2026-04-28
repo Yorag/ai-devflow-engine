@@ -8,6 +8,8 @@
 查询投影必须基于 EventStore、领域对象、StageArtifact 和稳定引用组装，不允许先从业务表临时拼出一套独立 Narrative Feed 语义。
 凡本分卷修改 `backend/app/api/routes/*` 的 API 或 SSE 切片，对应 API 测试必须在本切片内断言新增或修改的 path、method、请求 Schema、响应 Schema、SSE 事件说明和主要错误响应已进入 `/api/openapi.json`；V6.4 只做全局覆盖回归。
 
+Run 主链必须嵌入日志审计关联语义。首个 run 启动时必须生成贯穿该 run 的 `trace_id`；同一用户动作触发的领域事件、运行日志、审计记录、SSE 增量和查询投影更新必须共享 `correlation_id`。日志审计记录不得替代 EventStore、Narrative Feed、StageArtifact 或 Inspector 投影。
+
 <a id="r31"></a>
 
 ## R3.1 Run 状态机纯领域规则
@@ -68,6 +70,7 @@
 - `new_requirement`、审批结果、澄清结果、控制条目、交付结果和终态状态都进入同一条会话事件流。
 - EventStore 是 Narrative Feed 查询投影和 SSE 增量事件的共同来源。
 - 原始 LangGraph 事件不直接作为对外领域事件暴露。
+- `EventStore.append()` 必须接收或继承当前 `TraceContext`，并把 `correlation_id` 写入可追踪元数据；领域事件仍是产品事实真源，日志审计只记录运行观察事实和审计事实。
 - 事件口径矩阵必须明确内部领域事件 PascalCase、SSE `event_type` snake_case、Narrative Feed 条目类型和投影更新目标之间的一一映射。
 - 事件口径矩阵必须逐项固定终态映射：`DeliveryPrepared` 或等价交付完成事件生成 `delivery_result`，`RunCompleted` 只更新 run / session 状态且不生成 `system_status`，`RunFailed` 与 `RunTerminated` 生成顶层 `system_status`。
 - 测试必须覆盖 `PipelineRunCreated -> pipeline_run_created`、`ApprovalApproved/ApprovalRejected -> approval_result`、`DeliveryPrepared -> delivery_result`、`RunCompleted -> session_status_changed`、`RunFailed/RunTerminated -> system_status` 的映射，不允许前端 reducer 自行发明第二套事件语义。
@@ -107,6 +110,9 @@
 - 首条用户消息通过 EventStore 追加为顶层 `user_message` 事件来源。
 - 本切片不得绕过 EventStore 直接写入第二套 Narrative Feed 来源。
 - 非 draft Session 调用 `new_requirement` 被拒绝。
+- 首个 run 启动必须生成新的 `trace_id`，并继承当前请求的 `request_id` 与 `correlation_id`。
+- run 创建成功、非 draft 调用被拒绝、模板快照或 GraphDefinition 编译失败必须写入运行日志和审计记录。
+- 运行日志和审计记录不得替代 `PipelineRun`、模板快照、GraphDefinition、首条消息事件或初始 StageRun。
 - API 测试必须断言 `POST /api/sessions/{sessionId}/messages` 的 `new_requirement` 请求/响应 Schema、非法状态错误响应和 OpenAPI path/method 已进入 `/api/openapi.json`。
 
 **测试方法**：
@@ -138,6 +144,7 @@
 - 内部创建基础必须能计算新 run 的 attempt index、`trigger_source` 和从 `requirement_analysis` 重新开始的初始字段；V1 合法机器值为 `initial_requirement`、`retry`、`ops_restart`。
 - 内部创建基础不得暴露 `POST /api/sessions/{sessionId}/runs`，不得追加 `pipeline_run_created` 事件，也不得更新前端 run boundary metadata。
 - 外部用户重新尝试命令、事件、投影和 API 路由统一由 H4.7 交付；运维重启只保留领域枚举和内部创建能力，不提供 V1 前端入口。
+- 内部重新尝试准备必须定义新旧 `trace_id`、旧 run id、新 run 预期关联关系的记录口径，但不在本切片写外部命令审计记录。
 - 新 run 不继承旧 run 未交付的工作区改动引用；实际工作区创建由 W5.1 验证。
 - `control_item(type=retry)` 只用于当前 run 内自动回归或阶段内再次尝试。
 
@@ -202,6 +209,7 @@
 - GraphDefinition 必须包含后续 StateGraph 构建所需的稳定节点 key、阶段节点组、条件路由标识和中断点标识。
 - GraphDefinition 不保存 LangGraph compiled graph 实例，只保存可持久化、可重建的领域图定义。
 - `source_node_group -> stage_type` 映射必须支持后续 LangGraph node event 到 `StageRun` / `StageArtifact` 的转换。
+- 图编译成功、编译失败和非法模板快照输入必须写入运行日志摘要，且不得把 GraphDefinition 内容只保存在日志中。
 
 **测试方法**：
 - `pytest backend/tests/services/test_graph_compiler.py -v`
@@ -231,6 +239,7 @@
 - 审批等待或澄清等待时，`current_stage_type` 保持源阶段不变。
 - `solution_design_approval` 和 `code_review_approval` 不创建独立 StageRun。
 - StageRun 记录开始时间、结束时间、状态和 attempt index。
+- StageRun 开始、等待、完成和失败必须继承当前 `TraceContext` 并写入运行日志摘要；StageRun 状态仍以 runtime 领域模型为准。
 
 **测试方法**：
 - `pytest backend/tests/services/test_stage_run_store.py -v`
@@ -260,6 +269,7 @@
 - StageRun 的输入输出通过稳定引用读取。
 - Inspector 不需要从 LangGraph 原始状态回填关键事实。
 - 结构化产物索引留在 runtime 职责边界内。
+- 产物写入失败、载荷裁剪和指标写入必须写入运行日志；完整阶段过程不得只存在于日志中。
 
 **测试方法**：
 - `pytest backend/tests/services/test_artifact_store.py -v`
@@ -290,6 +300,7 @@
 - 同一 Session 下的多个 run 按启动时间顺序返回。
 - `composer_state.bound_run_id` 始终指向当前活动 run。
 - 投影不暴露 raw graph state。
+- Workspace projection 可以包含与当前对象直接相关的日志摘要引用或诊断定位信息，但不得通过 `RunLogEntry` 拼装 Narrative Feed。
 - API 测试必须断言 `GET /api/sessions/{sessionId}/workspace` 的响应 Schema、主要错误响应和 OpenAPI path/method 已进入 `/api/openapi.json`。
 
 **测试方法**：
@@ -351,6 +362,7 @@
 - 投影内容来自领域对象、StageArtifact 和稳定引用，不由前端回填关键事实。
 - `approval_result` 关联信息可通过所属阶段 Inspector 读取。
 - 投影不暴露 raw graph state。
+- Inspector 可以展示与当前阶段直接相关的 `log_id`、裁剪日志片段或诊断定位信息，但阶段完整输入、过程、输出、产物和指标必须来自领域对象、StageArtifact 和稳定引用。
 - API 测试必须断言 `GET /api/stages/{stageRunId}/inspector` 的响应 Schema、主要错误响应和 OpenAPI path/method 已进入 `/api/openapi.json`。
 
 **测试方法**：
@@ -410,10 +422,46 @@
 - payload 中的 feed 条目语义与查询投影一致。
 - 断线后可通过 workspace 快照 + `EventStore.list_after()` 重建一致状态。
 - SSE 只传递增量，不定义第二套产品语义。
+- SSE payload 可携带 `correlation_id` 便于诊断关联，但前端 reducer 不得依赖日志审计接口合并产品状态。
 - API 测试必须断言 `GET /api/sessions/{sessionId}/events/stream` 的 SSE 响应说明、主要错误响应和 OpenAPI path/method 已进入 `/api/openapi.json`。
 
 **测试方法**：
 - `pytest backend/tests/api/test_sse_stream.py -v`
+
+<a id="l31"></a>
+
+## L3.1 Run 与 Stage 日志轻查询 API
+
+**计划周期**：Week 5
+**状态**：`[ ]`
+**目标**：实现 run 级和 stage 级运行日志只读轻查询，使后端诊断工具可按对象聚焦查看裁剪后的日志摘要，而不把日志查询接入前端主路径。
+**实施计划**：`docs/plans/implementation/l3.1-run-stage-log-query-api.md`
+
+**修改文件列表**：
+- Create: `backend/app/observability/log_query.py`
+- Modify: `backend/app/api/routes/query.py`
+- Create: `backend/tests/observability/test_log_query_service.py`
+- Modify: `backend/tests/api/test_query_api.py`
+
+**实现类/函数**：
+- `LogQueryService.list_run_logs()`
+- `LogQueryService.list_stage_logs()`
+- `LogQueryService.encode_cursor()`
+- `LogQueryService.decode_cursor()`
+
+**验收标准**：
+- `GET /api/runs/{runId}/logs` 返回该 run 关联的运行日志分页结果，不返回其他 run 的日志。
+- `GET /api/stages/{stageRunId}/logs` 返回该阶段关联的运行日志分页结果，不返回同一 run 中其他阶段的日志。
+- 查询参数至少支持 `level`、`category`、`source`、`since`、`until`、`cursor`、`limit`。
+- 日志分页使用稳定游标，稳定顺序基于 `created_at + log_id` 或等价全局稳定顺序，不只依赖 offset。
+- 响应返回 `entries`、`next_cursor`、`has_more` 与查询条件回显。
+- 响应不得返回完整大载荷，只能返回 `message`、`payload_excerpt`、`payload_size_bytes`、`redaction_status`、`log_file_ref`、`line_offset`、`line_number`、`log_file_generation` 和关联标识。
+- 日志查询接口不得作为 Narrative Feed、Inspector、审批块或交付结果投影的依赖接口。
+- API 测试必须断言 `GET /api/runs/{runId}/logs` 与 `GET /api/stages/{stageRunId}/logs` 的查询参数、响应 Schema、主要错误响应和 OpenAPI path/method 已进入 `/api/openapi.json`。
+
+**测试方法**：
+- `pytest backend/tests/observability/test_log_query_service.py -v`
+- `pytest backend/tests/api/test_query_api.py -v`
 
 <a id="f31"></a>
 

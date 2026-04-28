@@ -18,6 +18,7 @@ backend/
     schemas/
     services/
       projections/
+    observability/
     runtime/
     providers/
     tools/
@@ -30,6 +31,7 @@ backend/
     domain/
     e2e/
     events/
+    observability/
     projections/
     providers/
     regression/
@@ -82,14 +84,15 @@ README.md
 | `backend/alembic/` | Alembic env 与迁移脚本，负责数据库结构演进 |
 | `backend/app/api/` | API router 聚合、API 层错误契约与 OpenAPI 暴露入口 |
 | `backend/app/api/routes/` | FastAPI 路由层，只做请求解析、响应返回和服务调用 |
-| `backend/app/core/` | 配置、日志、错误模型、应用级依赖 |
+| `backend/app/core/` | 配置、错误模型、应用级依赖与通用中间件挂载 |
 | `backend/app/db/` | SQLAlchemy session、数据库角色、多 SQLite 绑定 |
-| `backend/app/db/models/` | control、runtime、graph、event 四类模型 |
+| `backend/app/db/models/` | control、runtime、graph、event、log 五类模型 |
 | `backend/app/domain/` | 领域枚举、状态机、GraphDefinition、ChangeSet 等纯领域对象 |
 | `backend/app/repositories/` | SQLAlchemy 持久化访问适配层，只封装查询和写入，不承载业务状态机、审批语义或投影组装 |
 | `backend/app/schemas/` | Pydantic v2 请求、响应、投影与事件 Schema |
 | `backend/app/services/` | Project、Session、Run、Approval、Artifact、Delivery 等业务服务 |
 | `backend/app/services/projections/` | Workspace、Timeline、Inspector 投影组装 |
+| `backend/app/observability/` | 平台运行数据目录、JSONL 日志、日志索引、审计记录、TraceContext、裁剪、轮转、保留与日志诊断查询服务 |
 | `backend/app/runtime/` | deterministic runtime、LangGraph runtime、自动回归 |
 | `backend/app/providers/` | Provider registry 与 LangChain 适配 |
 | `backend/app/tools/` | ToolProtocol、ToolRegistry、工具输入输出、错误结构、审计记录和审计引用等跨工具契约 |
@@ -99,6 +102,7 @@ README.md
 | `backend/tests/api/` | FastAPI 路由、错误响应与 OpenAPI 契约测试 |
 | `backend/tests/db/` | 多 SQLite 绑定、SQLAlchemy 模型和迁移边界测试 |
 | `backend/tests/e2e/` | 后端 API/runtime 端到端测试，不启动浏览器 |
+| `backend/tests/observability/` | 运行数据目录、日志写入、日志索引、审计记录、TraceContext、裁剪、轮转、保留与诊断查询测试 |
 | `backend/tests/regression/` | 发布候选前跨切片回归测试，不替代单切片测试 |
 | `backend/tests/tools/` | 抽象工具协议、注册表和跨工具契约测试 |
 | `frontend/src/api/` | API client、TanStack Query hooks、接口类型 |
@@ -164,6 +168,13 @@ README.md
 - 具体实现代码
 - 命令与预期输出
 - 完成前验证清单
+
+涉及用户命令接口、运行生命周期推进、runtime 节点执行、模型调用、工具调用、工作区写入、shell 命令、Git 交付、远端交付、配置变更或安全敏感失败的实施计划还必须包含 `Log & Audit Integration` 小节：
+- 明确本切片产生的运行日志类别、审计动作、关联对象和失败结果。
+- 明确 `request_id`、`trace_id`、`correlation_id`、`span_id` 与 `parent_span_id` 的生成或继承方式。
+- 明确敏感字段裁剪、阻断、摘要化与载荷大小限制。
+- 明确本切片的日志写入失败、审计写入失败和 `log.db` 索引失败处理方式。
+- 明确本切片测试如何断言日志记录不替代领域对象、领域事件、Narrative Feed、Inspector 或产品状态真源。
 
 涉及 `backend/app/api/routes/*` 的实施计划还必须包含本切片 API 测试与 `/api/openapi.json` 断言，覆盖新增或修改的 path、method、请求 Schema、响应 Schema 和主要错误响应；V6.4 只做全局汇总回归，不替代本地 API 契约断言。
 

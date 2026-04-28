@@ -2,9 +2,9 @@
 
 ## 范围
 
-本分卷覆盖 Week 1-2 的工程基线、后端契约、前端基线和持久化边界。完成后，前后端具备可运行项目骨架、基础测试命令、领域枚举、投影 Schema、事件载荷 Schema 和多 SQLite 职责拆分。
+本分卷覆盖 Week 1-2 的工程基线、后端契约、前端基线和持久化边界。完成后，前后端具备可运行项目骨架、基础测试命令、领域枚举、投影 Schema、事件载荷 Schema、日志审计契约和多 SQLite 职责拆分。
 
-本分卷的拆分目标是先锁定契约，再进入控制面与 Run 主链。每个契约切片只处理一组稳定字段，避免单次任务同时修改所有 Schema。
+本分卷的拆分目标是先锁定契约，再进入控制面与 Run 主链。每个契约切片只处理一组稳定字段，避免单次任务同时修改所有 Schema。日志审计能力在本分卷只固定启动前置条件、Schema、TraceContext、`log.db` 边界和 `event.db` 分离边界；具体采集点随后续控制面、Run、runtime、工具和交付切片嵌入实现。
 
 <a id="b01"></a>
 
@@ -75,6 +75,36 @@
 - `pytest backend/tests/api/test_health.py -v`
 - `pytest backend/tests/api/test_error_contract.py -v`
 - `python -m uvicorn backend.app.main:app --reload`
+
+<a id="l01"></a>
+
+## L0.1 运行数据目录与日志启动预检
+
+**计划周期**：Week 1
+**状态**：`[ ]`
+**目标**：建立平台运行数据根目录和 `.runtime/logs` 启动预检，使后端在接受用户命令前确认日志目录存在且可写。
+**实施计划**：`docs/plans/implementation/l0.1-runtime-data-log-preflight.md`
+
+**修改文件列表**：
+- Modify: `backend/app/core/config.py`
+- Create: `backend/app/observability/runtime_data.py`
+- Create: `backend/tests/observability/test_runtime_data_preflight.py`
+
+**实现类/函数**：
+- `RuntimeDataSettings`
+- `RuntimeDataPreflight.ensure_runtime_data_ready()`
+- `RuntimeDataPreflight.resolve_logs_dir()`
+- `RuntimeDataPreflight.assert_writable()`
+
+**验收标准**：
+- 平台运行数据根目录可通过配置指定；未配置时默认使用服务当前运行目录下的 `.runtime`。
+- 启动前必须确保运行数据目录、`.runtime/logs` 与 `.runtime/logs/runs` 存在且可写。
+- 目录不可创建或不可写时，后端不得进入可接受用户命令的正常运行状态。
+- `.runtime/logs` 被明确标记为平台运行期私有数据，不属于目标项目工作区内容。
+- 本切片不实现日志写入、日志索引、审计记录或日志查询 API。
+
+**测试方法**：
+- `pytest backend/tests/observability/test_runtime_data_preflight.py -v`
 
 <a id="f01"></a>
 
@@ -285,7 +315,7 @@
 
 **计划周期**：Week 2
 **状态**：`[ ]`
-**目标**：建立 control、runtime、graph、event 多 SQLite 连接管理和 SQLAlchemy session 边界，不创建完整业务模型。
+**目标**：建立 control、runtime、graph、event、log 多 SQLite 连接管理和 SQLAlchemy session 边界，不创建完整业务模型。
 **实施计划**：`docs/plans/implementation/c1.5-multi-sqlite-session-management.md`
 
 **修改文件列表**：
@@ -302,12 +332,14 @@
 - `get_runtime_session()`
 - `get_graph_session()`
 - `get_event_session()`
+- `get_log_session()`
 
 **验收标准**：
-- 四类数据库角色可独立解析连接 URL。
-- 测试环境可为四类数据库创建临时 SQLite 文件。
+- 五类数据库角色可独立解析连接 URL。
+- 测试环境可为五类数据库创建临时 SQLite 文件。
 - session helper 不混用数据库角色。
 - Alembic 环境能识别多数据库迁移目标。
+- `log.db` 只用于日志轻量索引、审计台账、日志文件位置、载荷摘要、裁剪状态与关联标识，不承载领域事件或 Narrative Feed 投影来源数据。
 
 **测试方法**：
 - `pytest backend/tests/db/test_database_sessions.py -v`
@@ -338,7 +370,7 @@
 - `control.db` 承载 Project、Session、PipelineTemplate、Provider、DeliveryChannel 与项目级配置。
 - `Session` 规范实体只存在于 control 模型。
 - `DeliveryChannel` 属于项目级配置，不属于 Session、模板或 runtime 模型。
-- control 模型不包含 PipelineRun、StageRun、GraphThread、DomainEvent 或 AuditRecord。
+- control 模型不包含 PipelineRun、StageRun、GraphThread、DomainEvent、RunLogEntry、AuditLogEntry 或 LogPayload。
 
 **测试方法**：
 - `pytest backend/tests/db/test_control_model_boundary.py -v`
@@ -416,29 +448,99 @@
 
 <a id="c19"></a>
 
-## C1.9 event 与 audit 模型边界
+## C1.9 event 模型边界
 
 **计划周期**：Week 2
 **状态**：`[ ]`
-**目标**：建立 `event.db` 的领域事件、Narrative Feed 投影来源数据和审计记录边界，使查询投影与 SSE 增量共享同一事件来源。
-**实施计划**：`docs/plans/implementation/c1.9-event-audit-model-boundary.md`
+**目标**：建立 `event.db` 的领域事件和 Narrative Feed 投影来源数据边界，使查询投影与 SSE 增量共享同一事件来源，并明确审计记录不属于 `event.db`。
+**实施计划**：`docs/plans/implementation/c1.9-event-model-boundary.md`
 
 **修改文件列表**：
 - Create: `backend/app/db/models/event.py`
-- Create: `backend/tests/db/test_event_audit_model_boundary.py`
+- Create: `backend/tests/db/test_event_model_boundary.py`
 
 **实现类/函数**：
 - `EventBase`
 - `DomainEventModel`
-- `AuditRecordModel`
 
 **验收标准**：
-- `event.db` 承载领域事件日志、Narrative Feed 投影来源数据与审计记录。
+- `event.db` 承载领域事件记录与 Narrative Feed 投影来源数据。
 - DomainEvent 至少记录 `event_id`、`session_id`、`run_id`、`event_type`、`occurred_at`、`payload`。
 - 对外事件与 SSE payload 必须能映射到 C1.3 定义的同名投影条目。
-- 审计记录不替代领域事件，也不作为 Narrative Feed 顶层条目来源。
+- `event.db` 不包含 `AuditLogEntry`、`RunLogEntry` 或 `LogPayload`。
+- 审计记录不替代领域事件，也不作为 Narrative Feed 顶层条目来源；审计记录由 `log.db` 的 L1.2 负责。
 - 原始 LangGraph 事件不得直接写成对外 DomainEvent payload。
 
 **测试方法**：
-- `pytest backend/tests/db/test_event_audit_model_boundary.py -v`
+- `pytest backend/tests/db/test_event_model_boundary.py -v`
+- `alembic -c backend/alembic.ini upgrade head`
+
+<a id="l11"></a>
+
+## L1.1 日志审计 Schema 与 TraceContext 契约
+
+**计划周期**：Week 2
+**状态**：`[ ]`
+**目标**：定义日志审计查询投影、日志审计枚举、查询参数和跨层 TraceContext，使后续 API、runtime、工具和交付切片共享同一关联语义。
+**实施计划**：`docs/plans/implementation/l1.1-log-audit-schema-trace-context.md`
+
+**修改文件列表**：
+- Create: `backend/app/schemas/observability.py`
+- Create: `backend/app/domain/trace_context.py`
+- Create: `backend/tests/schemas/test_observability_schemas.py`
+
+**实现类/函数**：
+- `RunLogEntryProjection`
+- `AuditLogEntryProjection`
+- `RunLogQuery`
+- `AuditLogQuery`
+- `LogLevel`
+- `LogCategory`
+- `AuditActorType`
+- `AuditResult`
+- `RedactionStatus`
+- `TraceContext`
+
+**验收标准**：
+- `RunLogEntryProjection` 覆盖 `log_id`、对象关联标识、`source`、`category`、`level`、`message`、文件定位、载荷摘要、裁剪状态、关联标识和时间字段。
+- `AuditLogEntryProjection` 覆盖 `audit_id`、动作主体、目标、结果、原因、元数据摘要、关联标识和时间字段。
+- `RunLogQuery` 支持 `level`、`category`、`source`、`since`、`until`、`cursor`、`limit`。
+- `AuditLogQuery` 支持 `actor_type`、`action`、`target_type`、`target_id`、`run_id`、`result`、`since`、`until`、`cursor`、`limit`。
+- `TraceContext` 固定 `request_id`、`trace_id`、`correlation_id`、`span_id`、`parent_span_id` 与产品对象标识字段。
+- 日志审计 Schema 不包含完整大载荷详情查询字段；V1 不定义 `GET /api/log-payloads/{payloadId}`。
+- 测试必须断言日志审计投影不等同于 `FeedEntry`、`StageInspectorProjection` 或领域事件 payload。
+
+**测试方法**：
+- `pytest backend/tests/schemas/test_observability_schemas.py -v`
+
+<a id="l12"></a>
+
+## L1.2 log 模型与迁移边界
+
+**计划周期**：Week 2
+**状态**：`[ ]`
+**目标**：建立 `log.db` 的运行日志轻量索引、审计台账、载荷摘要和关联标识模型边界，使日志审计独立于领域事件与产品状态真源。
+**实施计划**：`docs/plans/implementation/l1.2-log-model-boundary.md`
+
+**修改文件列表**：
+- Create: `backend/app/db/models/log.py`
+- Create: `backend/tests/db/test_log_model_boundary.py`
+
+**实现类/函数**：
+- `LogBase`
+- `RunLogEntryModel`
+- `AuditLogEntryModel`
+- `LogPayloadModel`
+
+**验收标准**：
+- `log.db` 承载 RunLogEntry、AuditLogEntry、LogPayload 或等价结构化载荷摘要。
+- `RunLogEntryModel` 保存本地 JSONL 文件定位字段：`log_file_ref`、`line_offset`、`line_number`、`log_file_generation`。
+- `RunLogEntryModel` 保存 `trace_id`、`correlation_id`、`span_id`、`parent_span_id` 和当前可用产品对象标识。
+- `AuditLogEntryModel` 保存动作主体、动作、目标、结果、原因、`request_id`、`correlation_id` 和关联产品对象标识。
+- `LogPayloadModel` 保存载荷类型、摘要、存储引用、内容哈希、裁剪状态和大小，不无界保存大文本。
+- `log.db` 不包含 DomainEvent、Narrative Feed 投影、PipelineRun、StageRun、ApprovalRequest 或 DeliveryRecord。
+- 审计记录写入失败属于安全审计失败，后续命令切片不得降级为普通运行日志失败。
+
+**测试方法**：
+- `pytest backend/tests/db/test_log_model_boundary.py -v`
 - `alembic -c backend/alembic.ini upgrade head`
