@@ -42,7 +42,8 @@
 
 该技术选型必须满足以下规则：
 - `FastAPI` 必须作为 `REST API`、`SSE` 端点与 `OpenAPI` 文档暴露的统一入口
-- `LangGraph + LangChain` 必须作为功能一 V1 的正式执行内核，负责阶段内执行图、节点执行、工具循环、检查点与中断恢复
+- `LangGraph + LangChain` 必须作为功能一 V1 的正式执行内核，其中 `LangGraph` 负责六阶段主链、条件路由、人工中断、检查点与恢复，`LangChain` 负责模型接入、消息对象、工具绑定与结构化输出
+- 阶段内部动态执行必须通过 stage-scoped runner 承载；V1 的复杂研发阶段采用单 Agent ReAct 循环，不通过嵌套业务子图表达每个内部动作
 - 前端控制台只通过本地 Python 服务暴露的 HTTP 能力消费后端，不直接访问工作区文件系统
 - 当前版本不以多服务、分布式队列或远程执行集群作为落地前提
 
@@ -108,8 +109,9 @@
 - `FastAPI`、`Uvicorn`、`Pydantic v2`、`SQLAlchemy 2.x`、`Alembic`、`LangGraph`、`LangChain` 必须共同构成后端主路径，不得在相同职责上再引入第二套并行主框架
 - `REST API`、`SSE` 端点、请求响应 Schema 与 `OpenAPI` 文档必须直接建立在 `FastAPI` 与 `Pydantic v2` 之上，不得额外包裹一层自定义通用接口框架
 - `SQLite` 的访问、会话管理与模型映射必须统一收敛到 `SQLAlchemy 2.x`；数据库结构演进必须通过 `Alembic` 管理，不得以手工散落脚本作为主迁移机制
-- `LangGraph` 必须用于表达固定业务主链的执行图、阶段内子图、条件边、中断点与检查点恢复
-- `LangChain` 必须用于统一封装模型供应商、消息对象、结构化输出与内部工具绑定
+- `LangGraph` 必须用于表达固定业务主链、条件边、人工中断点、检查点与恢复，不得把前端产品语义绑定到 raw graph state
+- `LangChain` 必须用于统一封装模型供应商、消息对象、`ChatOpenAI` 兼容接入、`bind_tools()` 工具绑定与结构化输出
+- Agent 内部工具调用必须使用模型原生 tool/function calling；不得通过自由文本、正则或字符串解析方式模拟工具调用
 - 与模型供应商、远端托管平台或其他 HTTP 服务的交互必须优先使用 `httpx`
 - 与工作区、构建、测试和 Git 交付相关的受控执行必须优先使用标准库 `subprocess` 和本地 `git CLI`
 - `SSE` 实现必须优先采用 `FastAPI` / `Starlette` 原生流式响应能力；只有在原生能力无法满足协议与维护要求时，才允许引入小型专用补充库
@@ -119,7 +121,7 @@
 功能一 V1 的后端技术选型必须遵循以下原则：
 - 以成熟、主流、文档完善、社区使用广泛的通用库为优先，而不是以抽象完整性或框架新颖性为优先
 - 以降低项目开发期的理解成本、调试成本、联调成本与维护成本为优先，而不是为潜在远期扩展预先引入额外基础设施
-- `LangGraph state` 是执行内核真源，`Project`、`Session`、`PipelineRun`、`StageRun`、`ApprovalRequest`、`DeliveryRecord` 是产品级领域真源，两者必须同时存在且职责分离
+- `LangGraph state` 是执行内核恢复真源，`Project`、`Session`、`PipelineRun`、`StageRun`、`ApprovalRequest`、`StageArtifact`、`DeliveryRecord` 是产品级领域真源，两者必须同时存在且职责分离
 - 前端和外部 API 只消费领域对象、领域事件和查询投影，不直接消费 `LangGraph` 原始 `thread`、`checkpoint` 或节点流事件
 - 能直接复用 `FastAPI`、`Pydantic`、`SQLAlchemy`、`Alembic`、`LangGraph`、`LangChain`、`httpx`、标准库 `subprocess` 与本地 `git CLI` 已提供能力的场景，不得重复造轮子
 
@@ -146,11 +148,13 @@
 
 功能一后端采用以下基础结构：
 
-`FastAPI Gateway / Control Plane + LangGraph Agent Orchestration Plane + Projection / Event Plane + Observability / Audit Plane + Workspace / Delivery Adapter`
+`FastAPI Gateway / Control Plane + LangGraph Runtime Plane + Stage Agent Runtime Plane + Context Management Plane + Projection / Event Plane + Observability / Audit Plane + Workspace / Delivery Adapter`
 
 架构边界如下：
 - `Gateway / Control Plane` 负责 REST API、会话管理、模板管理、Provider 管理、审批命令与查询聚合
-- `Agent Orchestration Plane` 负责执行图编译、节点执行、中断恢复、检查点持久化与阶段内 Agent 编排
+- `LangGraph Runtime Plane` 负责六阶段业务主链、条件路由、人工中断、检查点、暂停恢复与重新尝试边界
+- `Stage Agent Runtime Plane` 负责在单个正式业务阶段内驱动 stage-scoped Agent 执行，包括 ReAct 循环、模型调用、工具调用、结构化输出校验与阶段结果生成
+- `Context Management Plane` 负责在每次阶段执行或模型调用前解析、组装、排序、裁剪、折叠、压缩并留痕上下文
 - `Projection / Event Plane` 负责把执行图事件翻译为领域事件、Narrative Feed 条目与查询投影
 - `Observability / Audit Plane` 负责记录运行日志、审计日志、诊断上下文、关联标识与日志查询投影
 - `Workspace & Delivery Adapter` 负责与代码仓库、测试环境和托管平台交互
@@ -163,51 +167,59 @@
 负责管理流程模板、固定业务阶段骨架、阶段角色绑定、审批检查点配置与自动回归配置。
 
 2. `Graph Compiler`
-负责把模板快照编译成 `GraphDefinition`，并生成业务阶段节点组、内部子图、条件边与中断点。
+负责把模板快照编译成 `GraphDefinition`，并生成六阶段主链、阶段执行模式、条件边、审批中断点与交付分流定义。
 
 3. `Run Lifecycle Service`
 负责创建 `PipelineRun`、启动 `GraphThread`、维护 run 状态、处理暂停恢复终止与重新尝试。
 
-4. `Agent Orchestration Runtime`
-负责执行 `LangGraph` 节点、驱动阶段内 Agent、执行工具调用、保存检查点并处理中断恢复。
+4. `LangGraph Runtime Engine`
+负责执行六阶段主链、保存检查点、处理中断恢复、驱动阶段节点并维护 `GraphThread`。
 
-5. `Approval & Interrupt Service`
+5. `Stage Agent Runtime`
+负责阶段内 Agent 执行，V1 中包括结构化 LLM 调用、stage-scoped ReAct 循环、validation pass、结构化输出修复和阶段产物提交。
+
+6. `Context Management Service`
+负责构建 `ContextEnvelope`、生成 `ContextManifest`、执行上下文尺寸守卫、触发上下文压缩并把上下文使用记录写入阶段过程记录。
+
+7. `Approval & Interrupt Service`
 负责创建审批对象、处理中断载荷、记录审批决策、回写拒绝理由并恢复执行图。
 
-6. `Run Context / Artifact Store`
+8. `Run Context / Artifact Store`
 负责持久化运行上下文、阶段输入输出、结构化产物与共享引用。
 
-7. `Projection & Event Translator`
+9. `Projection & Event Translator`
 负责把执行图内部事件翻译成领域事件、Narrative Feed 条目、Inspector 投影与会话级状态摘要。
 
-8. `Log & Audit Service`
+10. `Log & Audit Service`
 负责统一采集、裁剪、关联、持久化和查询平台运行日志、安全审计记录、工具执行日志、模型调用日志、外部命令日志与错误诊断记录。
 
-9. `LLM Provider Adapter`
-负责统一封装模型供应商接入与切换逻辑。
+11. `LLM Provider Adapter`
+负责通过 LangChain `ChatOpenAI` 兼容接口统一封装模型供应商接入、模型对象创建、tool/function calling 绑定与结构化输出声明；不负责业务阶段流转和上下文拼装。
 
-10. `Workspace & Tool Service`
+12. `Workspace & Tool Service`
 负责工作区隔离、文件读取、代码修改、命令执行、diff 生成与工具接口管理。
 
-11. `SCM & Delivery Adapter`
+13. `SCM & Delivery Adapter`
 负责封装本地 Git、远端托管平台、交付通道与 MR/PR 创建能力。
 
-12. `REST API + Query Layer`
+14. `REST API + Query Layer`
 负责暴露命令接口、查询接口、事件流接口与 OpenAPI 文档。
 
 ### 4.2 实施原则
 
 后端实现必须遵循以下原则：
 - `图驱动执行`
-  正式业务主链、阶段内子步骤、审批中断、回退与重试都必须由显式执行图表达。
+  正式业务主链、阶段切换、审批中断、回退路由、自动回归路由、暂停恢复与重新尝试边界必须由显式执行图表达；阶段内部动态工作由 stage runner 和阶段过程记录表达。
 - `领域契约先于框架细节`
   `LangGraph` 是执行内核，不是产品 API；产品级外部契约仍由领域对象和投影定义。
 - `产物驱动`
   后续阶段只能依赖持久化产物和契约化上下文，不允许依赖运行期隐式记忆。
+- `上下文显式管理`
+  Agent 每次模型调用前必须通过 Context Management 组装上下文；上下文来源、排序、裁剪、折叠、压缩和传输结果必须形成可回看的过程记录。
 - `API First`
   前端控制台只能通过命令接口、查询接口和事件流消费后端能力。
 - `工具统一抽象`
-  文件系统、命令执行、分支准备和代码评审请求都必须通过统一工具协议暴露。
+  文件系统、命令执行、分支准备和代码评审请求都必须通过统一工具协议暴露，并通过模型原生 tool/function calling 触发。
 - `日志审计独立建模`
   运行日志、安全审计与诊断记录必须通过专门的日志审计契约采集和查询，不得散落为各模块私有文本输出。
 - `前后端解耦`
@@ -410,6 +422,7 @@ V1 运行环境必须满足以下约束：
 - `api_key_ref`
 - `default_model_id`
 - `supported_model_ids`
+- `runtime_capabilities`
 - `created_at`
 - `updated_at`
 
@@ -424,21 +437,30 @@ V1 运行环境必须满足以下约束：
 - V1 允许用户新增 `custom` Provider
 - `custom` Provider 在 V1 统一使用 `openai_completions_compatible` 协议接入
 - `OpenAI Completions compatible` 是自定义 Provider 的接入协议，不是独立 Provider 名称
+- 后端运行时模型对象必须由 `LLMProviderAdapter` 通过 LangChain `ChatOpenAI` 兼容接口创建
+- 内置 Provider 与自定义 Provider 的协议差异只能存在于 `LLMProviderAdapter` 内部，不得泄漏到阶段编排、上下文管理、工具调用或查询投影
+- `LLMProvider` 运行时能力快照必须至少表达 `context_window_tokens`、`max_output_tokens`、`supports_tool_calling`、`supports_structured_output`、`supports_native_reasoning`
+- 需要 ReAct 或工具调用的阶段不得绑定不支持 tool/function calling 的 Provider；模板保存或 run 启动时必须拒绝不兼容绑定
+- 上下文压缩、结构化输出修复与 validation pass 使用同一 Provider 接入抽象，并通过 `model_call_type` 区分调用目的
 
 6. `GraphDefinition`
 表示由某次模板快照编译得到的正式执行图定义，至少包含：
 - `graph_definition_id`
 - `template_snapshot_ref`
 - `graph_version`
-- `stage_node_groups`
+- `stage_nodes`
+- `stage_execution_modes`
 - `interrupt_policy`
 - `retry_policy`
+- `delivery_routing_policy`
 - `created_at`
 
 `GraphDefinition` 必须满足以下规则：
 - 每次 `PipelineRun` 启动前都必须生成一份绑定该次模板快照的 `GraphDefinition`
-- `GraphDefinition` 必须显式表达六个正式业务阶段对应的节点组、阶段内子图、条件边与中断点
-- `GraphDefinition` 可以在底层包含多个节点，但这些节点必须可映射回正式业务阶段
+- `GraphDefinition` 必须显式表达六个正式业务阶段对应的主链节点、条件边、审批中断点、自动回归路由与交付模式分流
+- `GraphDefinition` 不表达每个阶段内部的全部 ReAct 步骤、工具调用、文件编辑或模型调用；这些动态过程由 `StageRun`、`StageArtifact.process` 与执行日志承载
+- `stage_execution_modes` 必须记录每个正式业务阶段采用的执行模式，V1 至少支持：`structured_llm`、`read_only_react`、`write_enabled_react`、`write_execute_react`、`review_react`、`deterministic_adapter`
+- `Solution Validation` 不作为独立 `GraphDefinition` 阶段节点；它是 `solution_design` 阶段执行模式中的 validation pass
 - `GraphDefinition` 不直接暴露给前端作为产品查询对象
 
 7. `GraphThread`
@@ -549,7 +571,8 @@ V1 运行环境必须满足以下约束：
 - `ended_at`
 - `input_ref`
 - `output_ref`
-- `source_node_group`
+- `graph_node_key`
+- `stage_execution_mode`
 
 `stage_type` 在功能一 V1 中必须统一使用以下机器可读枚举：
 - `requirement_analysis`
@@ -572,6 +595,8 @@ V1 运行环境必须满足以下约束：
 - `StageRun` 不暴露仅属于底层节点装配过程的 `pending`
 - 当运行进入审批等待时，保持触发审批的源阶段 `StageRun` 处于 `waiting_approval`
 - 当同一业务阶段因回退或重试再次执行时，必须创建新的 `StageRun` 记录；被替换的旧尝试可标记为 `superseded`
+- `stage_execution_mode` 必须来自本次 `GraphDefinition.stage_execution_modes`
+- 阶段内部 ReAct iteration、tool/function call、模型调用、上下文压缩、文件编辑与结构化输出修复不创建新的 `StageRun`
 
 ### 5.3 产物、控制与审批对象
 
@@ -584,6 +609,10 @@ V1 运行环境必须满足以下约束：
 - 如无特别说明，`StageRun.input_ref`、`StageRun.output_ref`、`GraphInterrupt.payload_ref` 与 `ApprovalRequest.payload_ref` 默认指向 `StageArtifact` 或其派生快照记录
 - `StageArtifact` 可通过 `artifact_ref`、`attachments_ref`、`delivery_record_ref` 等查询层稳定引用被前端或其他领域对象间接访问
 - `StageArtifact` 必须能够承载供 Inspector 打开的原始阶段信息，包括输入快照、过程记录、输出快照、附件引用与量化信息
+- `StageArtifact.process` 必须承载标准化阶段过程记录，而不是只保存最终摘要
+- `StageArtifact.process` 在 V1 中至少支持以下过程记录类型：`context_manifest`、`reasoning_trace`、`decision_trace`、`tool_trace`、`model_call_trace`、`file_edit_trace`、`validation_trace`、`compressed_context_block`、`structured_output_repair_trace`
+- `StageArtifact.process` 中的过程记录可以引用完整大载荷、工具结果、日志定位或附件，但不得只把关键过程信息留在运行日志中
+- `StageArtifact.process` 中的上下文压缩块、工具观察预览和截断片段不得替代其对应原始记录或稳定引用
 
 13. `ClarificationRecord`
 表示 `Requirement Analysis` 阶段内部的澄清问答记录，至少包含：
@@ -668,10 +697,29 @@ V1 运行环境必须满足以下约束：
 表示一次代码变更结果的统一抽象对象，未来功能二的页面驱动改动也必须统一落到该对象。
 
 19. `ContextReference`
-表示跨阶段、跨运行的上下文引用对象，未来必须能够扩展：
+表示跨阶段、跨运行、跨工具观察的上下文引用对象，是 Context Management、阶段产物、代码变更和未来功能二页面驱动改动之间共享的稳定引用边界。
+
+`ContextReference` 在功能一 V1 中至少必须能够表达：
+- 用户原始需求引用
+- 结构化需求与验收标准引用
+- 澄清结论引用
+- 方案产物引用
+- 审批反馈引用
+- 工具观察引用
+- 文件路径、目录路径、文件片段与文件版本引用
+- diff、测试结果、评审意见与变更集引用
+- 上下文压缩块的完整原始过程引用
+
+未来必须能够扩展：
 - `page_selection`
 - `dom_anchor`
 - `preview_snapshot`
+
+`ContextReference` 必须满足以下规则：
+- 不得用自由文本替代可解析引用；每个引用必须包含可定位的来源类型、来源对象标识或路径信息
+- 引用本身不复制完整大载荷；完整内容应由 `StageArtifact`、工具结果、附件、工作区文件或日志定位等稳定来源提供
+- `ContextReference` 可以跨阶段传递，但新的 `PipelineRun` 不得继承旧 run 未交付工作区改动引用
+- `ContextReference` 不替代 `StageArtifact`、`ChangeSet`、`DeliveryRecord` 或日志审计对象，只表达上下文来源关系
 
 20. `PreviewTarget`
 表示可供前端查询的预览对象。V1 只定义对象和查询接口，不实现预览启动与热更新。
@@ -854,7 +902,7 @@ V1 运行环境必须满足以下约束：
 6. `delivery_integration`
 
 其中：
-- `Solution Validation` 是 `solution_design` 阶段内部的第二个执行节点组，不形成独立 `StageRun`
+- `Solution Validation` 是 `solution_design` 阶段内部的 validation pass，不形成独立 `StageRun`
 - `solution_design_approval` 与 `code_review_approval` 是固定审批中断点，位于对应源阶段完成之后，不属于正式业务阶段
 - 回退、重试、暂停、恢复与终止属于运行控制语义，不属于正式业务阶段
 
@@ -862,13 +910,15 @@ V1 运行环境必须满足以下约束：
 
 模板编译必须满足以下规则：
 - 每次 `PipelineRun` 启动前，必须基于该次模板快照编译出一份 `GraphDefinition`
-- `GraphDefinition` 必须显式表达六个正式业务阶段对应的节点组
-- `Requirement Analysis` 子图必须支持“分析 -> 需要澄清时中断 -> 恢复后继续分析”的循环
-- `Solution Design` 子图必须支持“方案生成 -> 方案校验 -> 校验失败回到设计 -> 校验通过进入审批中断”的循环
+- `GraphDefinition` 必须显式表达六个正式业务阶段对应的主链节点、条件边、固定审批中断点、自动回归路由与交付分流
+- `GraphDefinition` 必须为每个正式业务阶段记录 `stage_execution_mode`
+- `Requirement Analysis` 阶段必须支持“分析 -> 需要澄清时中断 -> 恢复后继续分析”的同阶段继续执行语义
+- `Solution Design` 阶段必须支持“方案生成 -> validation pass -> 校验失败后在同一阶段重新生成 -> 校验通过进入审批中断”的同阶段订正语义
 - `Code Generation`、`Test Generation & Execution`、`Code Review` 必须保持业务阶段串行推进
-- `Code Review` 子图必须支持自动回归路由
-- `Delivery Integration` 子图必须支持按交付模式分流
-- 图编译结果必须记录稳定的 `source_node_group` 到 `stage_type` 映射关系
+- `Code Review` 完成后必须由主链条件边决定是否触发自动回归并回到 `Code Generation`
+- `Delivery Integration` 必须由主链条件边按交付模式分流到对应交付适配器
+- 阶段内部 ReAct iteration、tool/function call、模型调用、文件编辑、上下文压缩与结构化输出修复不进入 `GraphDefinition`；这些过程必须通过 `StageArtifact.process`、运行日志和审计记录留痕
+- 图编译结果必须记录稳定的 `graph_node_key` 到 `stage_type` 映射关系
 
 ### 6.3 Requirement Analysis 生命周期
 
@@ -879,21 +929,24 @@ V1 运行环境必须满足以下约束：
 - 前端通过会话消息接口提交补充信息
 - 补充信息回写到同一个业务阶段上下文并恢复同一个 `GraphThread`
 - 本阶段恢复执行后继续分析，直到产出完整结果
+- 本阶段默认采用 `structured_llm` 执行模式；当需要读取代码库上下文时，允许受控使用只读工具辅助分析
+- 本阶段产生的推理片段、澄清判断、上下文引用和最终结构化输出必须进入 `StageArtifact`
 
 本阶段禁止创建 `ApprovalRequest`。
 
 ### 6.4 Solution Design 生命周期
 
 `Solution Design` 必须按以下规则运行：
-- 本阶段内部必须采用 `Solution Design Agent -> Solution Validation Agent` 的串行结构
-- `Solution Design Agent` 先产出技术方案、影响范围与关键设计决策
-- `Solution Validation Agent` 在同一个业务阶段内对方案做独立校验
+- 本阶段默认采用 `read_only_react` 执行模式，通过只读工具读取仓库结构、关键文件、相关 API 与前序产物
+- 本阶段必须先产出技术方案、影响范围、关键设计决策、文件变更清单、接口设计与风险分析
+- 本阶段必须执行 validation pass，对方案合理性、需求覆盖、影响范围、接口设计、代码安全与测试充分性进行独立校验
 - 方案校验结果必须作为 `Solution Design` 阶段产物的一部分持久化
-- 校验失败时，不得创建新的独立 `Solution Validation` 阶段；系统必须依据校验结论重新进入 `Solution Design` 阶段内部的设计节点
+- 校验失败时，不得创建新的独立 `Solution Validation` 阶段；系统必须依据校验结论在同一个 `solution_design` 阶段内订正方案
 - 校验通过后，创建 `ApprovalRequest(type=solution_design_approval)` 与对应 `GraphInterrupt`
 - 创建审批请求后，当前 `solution_design` 的 `StageRun.status` 必须置为 `waiting_approval`
 - 审批通过后，进入 `Code Generation`
 - 审批拒绝后，记录拒绝理由并回到 `Solution Design`
+- 本阶段的架构分析、设计取舍、validation pass、工具观察、上下文清单和压缩块必须进入 `StageArtifact.process`
 
 ### 6.5 Code Generation 到 Code Review 生命周期
 
@@ -901,6 +954,26 @@ V1 运行环境必须满足以下约束：
 - 先执行代码生成
 - 再执行测试生成与执行
 - 最后执行代码评审
+
+`Code Generation` 必须满足以下规则：
+- 本阶段默认采用 `write_enabled_react` 执行模式，V1 只使用单 Agent ReAct，不引入 subagent
+- 本阶段必须基于已批准或当前有效的技术方案、需求产物、上下文引用和目标仓库工作区执行
+- 文件改写前必须读取当前文件内容或具备等价的文件版本引用
+- 文件写入、编辑、diff 生成与变更记录必须通过受控 workspace tool 完成
+- `ChangeSet` 必须由实际工作区 diff、文件编辑记录和上下文引用计算或构建，不得只由模型自由文本声明
+- 每个文件编辑必须形成可追踪的 `file_edit_trace` 或等价过程记录
+
+`Test Generation & Execution` 必须满足以下规则：
+- 本阶段默认采用 `write_execute_react` 执行模式
+- 本阶段必须基于代码变更集、需求验收标准和相关上下文引用生成或修改测试
+- 测试命令执行必须通过受控 shell tool 完成
+- 测试 stdout / stderr、退出码、失败项、修复尝试和测试缺口必须形成结构化过程记录或稳定引用
+
+`Code Review` 必须满足以下规则：
+- 本阶段默认采用 `review_react` 执行模式，只允许读取方案、变更集、测试结果、相关文件和必要上下文
+- 本阶段必须从正确性、安全性、规范性、需求覆盖、测试充分性和交付风险等维度形成评审报告
+- 评审报告必须包含问题列表、严重程度、证据引用和修复要求
+- 自动回归判定必须基于评审证据，而不是模型任意继续优化的偏好
 
 `Code Review` 完成后：
 - 若需要自动回归，则统一回退到 `Code Generation`
@@ -920,6 +993,7 @@ V1 运行环境必须满足以下约束：
 - 当 `delivery_mode = git_auto_delivery` 时，必须执行真实交付流程：`read_delivery_channel -> prepare_branch -> create_commit -> push_branch -> create_code_review_request`
 - 按交付策略生成 MR/PR 信息或交付描述
 - 产出 `DeliveryRecord`
+- 本阶段采用 `deterministic_adapter` 执行模式；模型可辅助生成说明文本、提交信息预览或交付摘要，但不得主导真实 Git 写动作
 
 本阶段不创建新的人工审批检查点。
 
@@ -979,49 +1053,225 @@ V1 运行环境必须满足以下约束：
 
 ### 7.5 Agent 编排与执行约束
 
+Agent 编排采用 `LangGraph 主链 + stage-scoped runner` 的结构。
+
+`LangGraph` 只负责以下运行边界：
+- 六个正式业务阶段的主链推进
+- 条件路由、自动回归路由和交付分流
+- 澄清、审批等人工中断
+- pause / resume / terminate / rerun 的检查点与恢复
+
+`Stage Agent Runtime` 负责单个正式业务阶段内部的动态执行。阶段内部执行不得直接修改 `PipelineRun` 主链状态；阶段 runner 只能通过结构化阶段结果、领域事件、控制记录、审批对象或交付记录影响后续流程。
+
+功能一 V1 的阶段执行模式固定如下：
+
+| 阶段 | 执行模式 | 规则 |
+| --- | --- | --- |
+| `requirement_analysis` | `structured_llm` | 以结构化需求产出为主，必要时可使用只读工具辅助分析，并支持澄清中断 |
+| `solution_design` | `read_only_react` | 使用只读 ReAct 读取仓库上下文、分析架构、形成方案，并执行 validation pass |
+| `code_generation` | `write_enabled_react` | 使用单 Agent ReAct 读取方案、逐文件修改、应用 patch、检查 diff 并形成 `ChangeSet` |
+| `test_generation_execution` | `write_execute_react` | 使用单 Agent ReAct 生成或修改测试、执行测试命令、分析失败并修正 |
+| `code_review` | `review_react` | 使用只读 ReAct 审查方案、变更集和测试结果，并基于证据判定是否自动回归 |
+| `delivery_integration` | `deterministic_adapter` | 由交付适配器执行 demo 或真实 Git 交付，模型只辅助说明文本 |
+
+V1 明确不引入代码生成 subagent。后续如支持 subagent，必须先扩展上下文隔离、文件所有权、冲突处理、过程投影和审计边界。
+
 Agent 编排必须满足以下规则：
 
 1. `阶段角色明确`
-每个正式业务阶段都必须配置明确的 `AgentRole`。
+每个正式业务阶段都必须配置明确的 `AgentRole`，运行时实际使用的角色绑定、`system_prompt` 和 Provider 必须来自 `template_snapshot_ref`。
 
-功能一 V1 的核心 Agent 固定为：
-- `Requirement Analysis Agent`
-- `Solution Design Agent`
-- `Solution Validation Agent`
-- `Code Generation Agent`
-- `Test Generation & Execution Agent`
-- `Code Review Agent`
-- `Delivery Integration Agent`
-
-2. `上下文感知能力`
-Agent 至少支持以下上下文输入方式：
-- 目标仓库路径
-- 指定目录路径
-- 指定文件路径
-- 前序阶段产物引用
-- 结构化验收标准引用
-- 需求澄清结论引用
-- 设计审批反馈引用
-- 历史评审意见引用
+2. `Context Management 先于模型调用`
+每次阶段执行、ReAct iteration、结构化输出修复、validation pass 或上下文压缩调用前，必须先通过 Context Management 生成 `ContextEnvelope`。
 
 3. `工具调用模型`
-Agent 不直接绑定零散函数签名，而是通过统一 `Tool` 协议调用能力。
+Agent 内部工具调用必须使用模型原生 tool/function calling。LangChain 侧必须通过 `ChatOpenAI` 兼容接口和 `bind_tools()` 绑定由 `ToolProtocol` 派生的工具 schema。
+
+工具调用必须满足以下规则：
+- 模型只产生 tool call request，不直接执行工具
+- 实际工具执行必须经过 `ToolRegistry`、阶段工具权限、工作区边界、输入 Schema 校验和审计策略
+- 模型不得动态声明新工具或绕过工具注册表调用本地函数
+- 禁止使用自由文本、正则匹配、字符串命令解析或 JSON 猜测来模拟工具调用
+- 工具结果必须返回结构化 `ToolResult`，并形成 `tool_trace`
 
 4. `模型供应商可切换`
 - V1 默认内置两个 `builtin` Provider：`火山引擎`、`DeepSeek`
 - V1 允许用户新增 `custom` Provider
 - `custom` Provider 的接入协议统一采用 `OpenAI Completions compatible`
+- 后端运行时通过 LangChain `ChatOpenAI` 兼容接口创建模型对象
 - Provider 绑定单位是 `AgentRole`
 - Provider 差异不得泄漏到上层业务流程逻辑
 
 5. `输出结构化`
 - Agent 输出必须转换为结构化领域对象
-- 必须执行格式校验与错误处理
+- 必须执行 Schema 校验、格式修复与错误处理
 - 非法输出不得直接推进下一阶段
+- 结构化输出修复必须作为独立 `model_call_type = structured_output_repair` 的模型调用或等价可追踪过程记录
 
-6. `执行与查询解耦`
-- `LangGraph` 负责执行内核状态
-- 领域对象与投影负责对外查询契约
+6. `推理与过程可见`
+- Provider 返回的原生推理、模型输出中的可展示推理、决策片段、工具调用过程和平台过程记录必须按规则进入 `StageArtifact.process`
+- 如果 Provider 不返回原生推理内容，系统不得伪造 raw chain-of-thought
+- 前端中栏可以展示截断推理片段，Inspector 必须能查看当前对象相关的完整或更完整过程记录及其稳定引用
+
+7. `循环边界`
+阶段内 ReAct 和修复循环必须受控。V1 默认值与平台硬上限如下：
+
+| 配置 | 默认值 | 平台硬上限 |
+| --- | ---: | ---: |
+| `max_react_iterations_per_stage` | 30 | 50 |
+| `max_tool_calls_per_stage` | 80 | 150 |
+| `max_file_edit_count` | 20 | 40 |
+| `max_patch_attempts_per_file` | 3 | 5 |
+| `max_structured_output_repair_attempts` | 3 | 5 |
+| `max_auto_regression_retries` | 2 | 3 |
+| `max_clarification_rounds` | 5 | 8 |
+
+超过循环边界时，阶段必须输出明确失败、风险状态或等待人工处理的结构化结果，不得静默继续执行。
+
+8. `执行与查询解耦`
+`LangGraph Runtime`、`Stage Agent Runtime`、`LLMProviderAdapter` 和工具调用产生的内部事件必须转换为领域对象、领域事件、`StageArtifact` 过程记录或稳定引用后才能进入查询投影。前端不得直接消费 raw graph state、raw node event、raw tool event 或 raw model adapter 对象。
+
+### 7.6 Context Management
+
+Context Management 是 Agent Runtime 在每次模型调用或阶段执行前对提示词、阶段目标、阶段产物、工具描述、推理轨迹、工具观察结果和上下文引用进行解析、组装、排序、尺寸守卫与留痕的运行时能力。
+
+Context Management 不作为新的产品状态真源。可回看的产品事实仍以 `StageArtifact`、`ContextReference`、`TraceContext`、`ToolProtocol`、领域事件、审批对象、变更集与交付记录为准。
+
+Context Management 至少包含以下对象和能力：
+- `ContextEnvelope`
+- `ContextManifest`
+- `ContextSourceResolver`
+- `ContextEnvelopeBuilder`
+- `ContextSizeGuard`
+- `ContextCompressionRunner`
+- `CompressedContextBlock`
+- `ContextTokenEstimator`
+
+#### 7.6.1 ContextEnvelope
+
+`ContextEnvelope` 表示一次模型调用前实际传递给模型的上下文封装。它是短生命周期运行时结构，不直接作为产品查询真源。
+
+`ContextEnvelope` 必须按以下顺序组装：
+1. `runtime_instructions`
+2. `agent_role_prompt`
+3. `stage_contract`
+4. `task_objective`
+5. `specified_action`
+6. `input_artifact_refs`
+7. `context_references`
+8. `working_observations`
+9. `reasoning_trace`
+10. `available_tools`
+11. `recent_observations`
+12. `response_schema`
+13. `trace_context`
+
+其中：
+- `agent_role_prompt` 必须来自当前 run 的 `template_snapshot_ref`，不得读取最新 `AgentRole` 运行外状态
+- `stage_contract` 必须包含阶段职责、输入契约、输出契约、工具权限和结构化产物要求
+- `available_tools` 必须来自 `ToolRegistry`，并按阶段权限过滤
+- `reasoning_trace` 只包含当前阶段已产生且允许继续传输的推理或过程记录
+- `response_schema` 必须明确当前模型调用预期返回工具调用、结构化阶段结果、澄清请求、失败原因或其他受控结果
+
+#### 7.6.2 ContextManifest
+
+每次构建 `ContextEnvelope` 都必须生成 `ContextManifest`，并以 `context_manifest` 过程记录形式写入 `StageArtifact.process` 或其稳定引用。
+
+`ContextManifest` 至少记录：
+- 所属 `session_id`、`run_id`、`stage_run_id`、`trace_id`、`correlation_id`、`span_id`
+- envelope 构建时间
+- 使用的 `template_snapshot_ref`
+- 使用的 `system_prompt` 快照引用
+- 使用的阶段契约和输出 Schema
+- 可用工具集及其 schema 版本
+- 每块上下文的来源类型、来源对象标识、文件路径、hash 或版本信息
+- 是否发生截断、折叠或压缩
+- 完整内容的稳定引用
+- 估算 token 或字符规模
+
+`ContextManifest` 不重复保存所有大文本；大文本必须通过稳定引用、附件、工具结果或阶段产物访问。
+
+#### 7.6.3 Context Source Resolution
+
+Context Management 至少支持以下上下文来源：
+- 用户原始需求
+- 结构化需求、验收标准、约束与假设
+- 澄清问题、用户回复与澄清结论
+- 技术方案、影响范围、设计决策、API 设计和文件变更清单
+- 审批理由与拒绝反馈
+- ChangeSet、diff、文件编辑记录与代码引用
+- 测试代码、测试命令、测试输出、失败项和测试缺口
+- 代码评审意见、问题证据和自动回归记录
+- 工具观察结果、模型过程记录、推理轨迹和上下文压缩块
+- 当前 run 的隔离工作区路径和工作区快照引用
+
+日志文件和 `log.db` 查询结果不得作为默认业务上下文来源。只有诊断工具或明确的后端日志查询能力可以按日志审计契约读取日志。
+
+raw `LangGraph` state、raw checkpoint payload、raw node event 和 raw thread 对象不得进入 `ContextEnvelope`。
+
+#### 7.6.4 Context Size Guard
+
+`ContextSizeGuard` 负责在不限制 Agent 可读取文件数量的前提下，控制单次模型调用的上下文窗口、payload 大小、超长文本截断和长链路延续。
+
+功能一 V1 采用三级尺寸守卫：
+
+1. `Observation Budgeting`
+大文件读取、搜索结果、测试输出、diff、shell stdout / stderr 和工具错误不得无界进入 `ContextEnvelope`。Envelope 中保留预览、摘要字段、路径、hash、行号、退出码、错误摘要和稳定引用；完整内容由 `StageArtifact.process`、工具结果、附件或文件引用提供。
+
+2. `Sliding Working Window`
+阶段内 ReAct 循环只在 `ContextEnvelope` 中保留最近若干轮完整过程，包括最近工具调用、最近错误、当前 patch、当前文件任务、最近 reasoning / CoT 片段和最近模型响应。更早过程必须转为结构化索引或引用，不删除原始过程记录。
+
+3. `LLM Context Compression`
+当前两级处理后仍接近模型窗口上限时，`ContextCompressionRunner` 必须调用 LLM 生成 `CompressedContextBlock`。压缩使用平台默认 `compression_model_binding` 与平台默认 `compression_prompt`，二者属于后端平台配置，不进入普通模板编辑 UI。压缩调用必须经过 `LLMProviderAdapter`，并生成 `model_call_type = context_compression` 的模型调用记录。压缩输出必须满足结构化 Schema，不允许自由文本摘要作为唯一结果。
+
+`pinned_context` 永不压缩，至少包括：
+- `runtime_instructions`
+- `stage_contract`
+- `task_objective`
+- `response_schema`
+- `system_prompt` 快照引用
+- 结构化需求和验收标准
+- 已批准或当前有效的技术方案
+- 当前审批或拒绝理由
+- 当前 active file task
+- 可用工具 schema
+
+#### 7.6.5 CompressedContextBlock
+
+`CompressedContextBlock` 表示由上下文压缩模型生成的结构化压缩块，至少包含：
+- `compressed_context_id`
+- `stage_run_id`
+- `covered_step_range`
+- `compression_trigger_reason`
+- `compression_prompt_id`
+- `compression_prompt_version`
+- `model_call_ref`
+- `summary`
+- `decisions_made`
+- `files_observed`
+- `files_modified`
+- `failed_attempts`
+- `open_issues`
+- `evidence_refs`
+- `full_trace_ref`
+- `created_at`
+
+`CompressedContextBlock` 必须满足以下规则：
+- 不得替代原始过程记录、工具结果、文件内容、测试结果、评审意见、`ChangeSet` 或审批记录
+- 必须保留 `full_trace_ref`，使 Inspector 能回到压缩前完整过程
+- 压缩调用必须使用 `model_call_type = context_compression`
+- 压缩失败不得伪造摘要；若仍能构建 envelope，必须记录 warning 并继续；若无法构建 envelope，阶段必须进入明确的 `context_overflow` 错误或失败状态
+- 连续压缩失败必须触发熔断，不得无限重试
+
+#### 7.6.6 模型调用类型
+
+所有模型调用必须标记调用类型。V1 至少支持：
+- `stage_agent_call`
+- `context_compression`
+- `structured_output_repair`
+- `validation_pass`
+
+模型调用必须继承当前 `TraceContext`，并形成 `model_call_trace` 或等价过程记录。模型输入输出进入日志前必须按日志审计契约裁剪、摘要或阻断。
 
 ## 8. 前端查询投影契约
 
@@ -1123,8 +1373,10 @@ Narrative Feed 顶层条目必须至少支持以下类型：
 
 `items` 至少支持以下内部条目类型：
 - `dialogue`
+- `context`
 - `reasoning`
 - `decision`
+- `model_call`
 - `tool_call`
 - `diff_preview`
 - `result`
@@ -1147,6 +1399,8 @@ Inspector 投影必须满足以下总规则：
 - Inspector 投影必须以适合前端呈现的分组方式，近乎无损地暴露当前对象的 `input`、`process`、`output`、`artifacts` 与 `metrics`
 - 前端不负责为 Inspector 回填关键事实；与当前对象直接相关的关键原始信息必须已经包含在 Inspector 投影或其稳定引用中
 - 上述规则不等同于直接暴露 `LangGraph` 原始状态、原始 thread 对象或原始节点事件流；执行内核内部状态仍需先转换为领域层稳定记录后才能进入 Inspector 投影
+- 当中栏 Narrative Feed 对 reasoning、工具结果、diff、测试输出或模型过程记录做截断展示时，Inspector 必须提供完整内容、完整内容稳定引用、截断状态和脱敏状态
+- Inspector 可以展示 `ContextManifest`、`CompressedContextBlock`、working window、`pinned_context` 引用、tool trace、model call trace、file edit trace、validation trace 和 reasoning trace，但这些内容必须来自 `StageArtifact.process` 或稳定引用
 
 `StageInspectorProjection` 必须至少按以下分组提供内容：
 - `identity`
@@ -1154,7 +1408,7 @@ Inspector 投影必须满足以下总规则：
 - `input`
   至少包含本阶段接收的原始输入快照、上下文引用与前序产物引用
 - `process`
-  至少包含本阶段的原始过程记录，如推理、决策、工具调用、校验、diff、测试执行、评审或交付步骤记录
+  至少包含本阶段的原始过程记录，如上下文清单、压缩上下文块、模型调用、推理、决策、工具调用、文件编辑、校验、diff、测试执行、评审或交付步骤记录
 - `output`
   至少包含本阶段的完整结构化输出、结果快照与结果引用
 - `artifacts`
@@ -1695,9 +1949,11 @@ SSE 事件至少包含：
 
 ## 13. 工作区、工具与交付适配
 
-后端必须通过统一工具接口暴露能力，分为两类。
+后端必须通过统一工具协议暴露受控能力。模型不得直接访问本地函数、文件系统、命令执行器、Git CLI 或远端交付接口。
 
-工具协议必须先于具体工具实例稳定。`ToolProtocol` 至少定义工具名称、类别、输入 Schema、结果载荷、错误结构、审计引用和可绑定的工具描述。LangGraph runtime、LangChain Provider adapter 与后续交付适配器只能依赖该抽象协议和工具注册契约；不得直接绑定尚未实现的具体 delivery tool 实例。
+工具协议必须先于具体工具实例稳定。`ToolProtocol` 至少定义工具名称、类别、描述、输入 Schema、结果 Schema、错误结构、权限边界、副作用等级、超时策略、审计策略、schema 版本和可绑定的工具描述。`LangGraph Runtime`、`Stage Agent Runtime`、`LLMProviderAdapter` 与后续交付适配器只能依赖该抽象协议和工具注册契约；不得直接绑定尚未实现的具体 delivery tool 实例。
+
+`ToolProtocol` 必须能够转换为 LangChain `bind_tools()` 可接受的工具 schema，并最终通过模型原生 tool/function calling 暴露给模型。工具调用不得通过自由文本、正则、字符串命令解析或 JSON 猜测方式触发。
 
 ### 13.1 Workspace Tools
 
@@ -1723,15 +1979,38 @@ V1 仅实现以下五个核心工具：
 工具接口必须统一表达：
 - 工具名称与描述
 - 输入参数 Schema
+- 结果 Schema
 - 执行结果载荷
-- 错误信息
-- 审计记录
+- 结构化错误信息
+- 权限边界与副作用等级
+- 审计记录和稳定引用
+
+工具调用链路必须统一为：
+1. `ContextEnvelope` 写入当前阶段允许使用的工具清单及其 schema 版本
+2. `LLMProviderAdapter` 通过 LangChain `ChatOpenAI` 兼容接口和 `bind_tools()` 绑定工具
+3. 模型返回原生 tool call request
+4. `Stage Agent Runtime` 将 tool call request 交给 `ToolRegistry`
+5. `ToolRegistry` 校验工具名称、阶段权限、输入 Schema、工作区边界、超时策略与审计策略
+6. 具体工具执行并返回结构化 `ToolResult`
+7. `ToolResult` 写入运行日志、审计日志、`tool_trace` 和下一轮 `ContextEnvelope` 的工具观察
+
+`ToolResult` 至少包含：
+- `tool_name`
+- `call_id`
+- `status`
+- `output_payload`
+- `output_preview`
+- `error`
+- `artifact_refs`
+- `audit_ref`
+- `trace_context`
 
 所有工具调用必须接入日志审计契约：
 - 每次工具调用必须产生运行日志，记录工具名称、输入摘要、输出摘要、耗时、结果状态与错误摘要
 - 每次会造成工作区、Git、远端交付或配置状态变化的工具调用必须产生审计日志
 - 工具结果中的 `审计记录` 字段必须引用 `AuditLogEntry` 或其稳定引用，不得只是自由文本
 - 工具日志必须继承当前 `trace_id`、`correlation_id` 与 `span_id`
+- 工具的完整输入、完整输出或超长错误不得无界进入 `ContextEnvelope`；进入模型上下文的只能是预览、摘要、关键结构字段和稳定引用
 
 ## 14. 为功能二预留的接口边界
 
