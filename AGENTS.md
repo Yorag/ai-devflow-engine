@@ -28,6 +28,9 @@ Feature one work must preserve reusable backend concepts and APIs for future sup
 4. Write specifications in neutral, explicit project language.
 Do not use competition-facing phrasing such as "for judges", "for contest demo", or "for defense". Do not use uncertain wording such as `建议`, `推荐`, `尽量`, or similar language in formal spec documents.
 
+5. Prefer correction over patching before implementation.
+When a project area or feature has not been formally implemented, revise planning and specification documents directly for coherent structure, wording, and semantics instead of layering patch-style notes, provided the revision does not change approved functional intent.
+
 ## Frontend Skill Usage
 
 1. For frontend UI/UX design, implementation, review, polish, or hardening work, Codex agents may use the global `impeccable` skill as an auxiliary design quality tool.
