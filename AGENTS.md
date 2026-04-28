@@ -28,6 +28,12 @@ Feature one work must preserve reusable backend concepts and APIs for future sup
 4. Write specifications in neutral, explicit project language.
 Do not use competition-facing phrasing such as "for judges", "for contest demo", or "for defense". Do not use uncertain wording such as `建议`, `推荐`, `尽量`, or similar language in formal spec documents.
 
+## Frontend Skill Usage
+
+1. For frontend UI/UX design, implementation, review, polish, or hardening work, Codex agents may use the global `impeccable` skill as an auxiliary design quality tool.
+
+2. Impeccable output must not override product semantics, stage semantics, backend API contracts, projection contracts, event semantics, or test requirements. Frontend work remains governed by the current split specifications and verified by the repository's normal test and review commands.
+
 ## Current Working Agreement
 
 - Archived reference documents only:

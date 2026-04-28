@@ -65,6 +65,11 @@
 - `running` 且 `current_stage_type = requirement_analysis` 时，Composer 输入不承担发送动作，右端按钮切回暂停语义。
 - 发送后内容追加到 Narrative Feed 的用户输入或澄清回复语义中。
 
+**前端设计质量门**：
+- 继承项目级前端主基调，不单独询问 Composer 风格。
+- 实现后必须检查 draft、澄清等待、运行中 requirement_analysis 的输入态、禁用态、按钮层级和窄屏固定底部布局。
+- Composer 必须清楚区分普通需求输入、澄清回复和运行控制，不得用视觉样式暗示 running 状态仍可发送普通消息。
+
 **测试方法**：
 - `npm --prefix frontend run test -- Composer`
 
@@ -253,6 +258,11 @@
 - 一旦进入 `solution_design` 及之后的正式研发链路，运行期持续保持暂停语义。
 - failed、terminated、completed 保留禁用按钮。
 
+**前端设计质量门**：
+- 继承项目级前端主基调。
+- 实现后必须检查发送、暂停、恢复、禁用按钮的视觉层级、可访问名称、焦点态和移动端可触达性。
+- 按钮状态必须与当前活动 run 绑定，历史 run 或终态 run 不得出现可执行样式。
+
 **测试方法**：
 - `npm --prefix frontend run test -- composer-state`
 
@@ -283,6 +293,11 @@
 - 终止动作位于中栏右上工具区。
 - 终止只作用于当前活动 run。
 - 历史 run 不展示可执行暂停、恢复或终止操作。
+
+**前端设计质量门**：
+- 继承项目级前端主基调。
+- 实现后必须检查暂停、恢复、终止入口的危险层级、确认状态、禁用态、焦点态和窄屏可用性。
+- 终止入口必须可见但不过度抢占主流程，不得与普通发送按钮混用。
 
 **测试方法**：
 - `npm --prefix frontend run test -- RunControlButtons`
@@ -315,6 +330,12 @@
 - `git_auto_delivery` 未 ready 时阻塞 Approve 并提供打开设置入口。
 - `demo_delivery` 不因远端配置缺失阻塞 Approve。
 
+**前端设计质量门**：
+- 继承项目级前端主基调，不单独询问审批块风格。
+- 实现前必须梳理审批请求、Approve/Reject、拒绝理由、交付就绪阻塞和设置入口的信息层级。
+- 实现后必须检查禁用态、历史态、错误态、长拒绝理由、键盘操作和可访问性。
+- Approval Block 必须是 Narrative Feed 内联决策块，不得转成首选 modal，也不得改变 `approval_request` / `approval_result` 的顶层条目语义。
+
 **测试方法**：
 - `npm --prefix frontend run test -- ApprovalBlock`
 
@@ -342,6 +363,11 @@
 - 重新尝试触发前明确提示新 run 从 Requirement Analysis 重新开始，且不继承旧 run 未交付工作区改动。
 - 历史 run 的审批块为只读历史态，不提供可点击 Approve / Reject。
 - 当前活动 run 已 terminated 时，原待处理审批块退化为不可提交状态。
+
+**前端设计质量门**：
+- 继承项目级前端主基调。
+- 实现后必须检查 retry 入口、历史审批只读态、失败原因、新 run 分界提示、禁用态和误操作风险。
+- Retry UI 必须清楚表达新 run 从 Requirement Analysis 重新开始，不得暗示暂停后的继续执行或继承旧 run 未交付改动。
 
 **测试方法**：
 - `npm --prefix frontend run test -- RetryRunAction`

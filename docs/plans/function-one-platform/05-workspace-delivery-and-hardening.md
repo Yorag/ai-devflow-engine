@@ -314,6 +314,12 @@
 - 工具调用展示命令、状态、耗时和输出摘要。
 - 完整 diff、测试记录和工具过程可通过 Inspector 深看。
 
+**前端设计质量门**：
+- 继承项目级前端主基调，并在主基调内采用高密度工程工具呈现。
+- 实现前必须梳理工具调用、diff、测试结果、摘要与 Inspector 深看的层级关系。
+- 实现后必须检查长文件路径、长日志、失败输出、横向滚动、代码块对比度、窄屏布局和可复制性。
+- diff 与测试结果必须保留工程信息密度，不得用装饰性卡片网格替代实际输出。
+
 **测试方法**：
 - `npm --prefix frontend run test -- ToolDiffTestItems`
 
@@ -340,6 +346,12 @@
 - `delivery_result` 可打开 Inspector 查看完整交付详情。
 - `delivery_integration` 阶段展示交付执行过程，`delivery_result` 作为最终结果条目。
 - 不适用的交付字段隐藏，不显示空占位。
+
+**前端设计质量门**：
+- 继承项目级前端主基调，不单独询问交付结果风格。
+- 实现前必须梳理 `demo_delivery`、`git_auto_delivery`、DeliveryRecord、code review 链接、失败原因和历史回看的信息层级。
+- 实现后必须检查交付模式区分、长目标地址、产物列表、失败态、空字段隐藏和 Inspector 深看入口。
+- `delivery_result` 必须作为最终顶层结果条目呈现，不得替代 `delivery_integration` 阶段过程展示。
 
 **测试方法**：
 - `npm --prefix frontend run test -- DeliveryResultBlock`
@@ -390,6 +402,11 @@
 - 前端显示与后端投影一致。
 - Narrative Feed、Run Switcher、Composer 和 Inspector 关键交互可用。
 
+**前端设计质量门**：
+- 不新增风格输入；验证完整流程继承同一项目级主基调。
+- 成功路径必须检查 Narrative Feed、Run Switcher、Composer、Approval Block、Inspector 和 DeliveryResultBlock 的 UI 状态一致性。
+- Playwright 断言或截图检查必须覆盖关键 UI 状态稳定性、文本不溢出、窄屏可用性和焦点路径。
+
 **测试方法**：
 - `npm --prefix e2e run test -- function-one-full-flow.spec.ts`
 
@@ -413,6 +430,11 @@
 - 可覆盖暂停后审批禁用，恢复后继续等待同一审批。
 - 可覆盖终止后尾部 `system_status`。
 - 可覆盖重新尝试创建新 run 并移动焦点。
+
+**前端设计质量门**：
+- 不新增风格输入；验证人工介入路径继承同一项目级主基调。
+- 人工介入路径必须检查拒绝回退、暂停恢复、终止、retry 和历史审批禁用态。
+- Playwright 断言或截图检查必须覆盖危险操作层级、禁用态、历史态、错误态和新 run 分界。
 
 **测试方法**：
 - `npm --prefix e2e run test -- function-one-control-flow.spec.ts`
@@ -492,6 +514,11 @@
 - paused 审批提交、非法 retry、DeliveryChannel 未 ready 等错误有稳定错误码。
 - 前端不展示真实凭据内容。
 
+**前端设计质量门**：
+- 不新增风格输入；错误态继承项目级主基调。
+- 实现后必须检查错误标题、错误详情、恢复动作、敏感信息隐藏、长错误消息、焦点恢复和移动端布局。
+- 前端错误态必须解释用户可采取的下一步，不得暴露真实凭据内容或后端内部堆栈。
+
 **测试方法**：
 - `pytest backend/tests/regression/test_error_contract_regression.py -v`
 - `npm --prefix frontend run test -- ErrorState`
@@ -520,6 +547,12 @@
 - 投影和 SSE 不出现重复条目或状态倒退。
 - 回归清单覆盖产品、前端、后端三份规格的核心验收项。
 - 发布候选验收清单完成。
+
+**前端设计质量门**：
+- 不新增风格输入；只允许修正一致性、状态覆盖和可用性问题。
+- 发布候选必须检查空态、错误态、历史回放、响应式、长文本、焦点态和可访问性。
+- 必要时修正视觉一致性，但不得引入新的业务语义或重排已验收流程。
+- 发布候选清单必须记录设计质量门发现项、修复项、保留风险和对应验证命令。
 
 **测试方法**：
 - `pytest backend/tests/regression -v`

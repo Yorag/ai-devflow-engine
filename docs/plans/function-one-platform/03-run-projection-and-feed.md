@@ -466,6 +466,12 @@
 - `system_status` 只作为顶层条目渲染。
 - `completed` run 以 `delivery_result` 收束，不追加完成态 `system_status`。
 
+**前端设计质量门**：
+- 继承项目级前端主基调，不单独询问 Narrative Feed 风格。
+- 实现前必须梳理顶层条目层级、条目密度、时间顺序、可扫描性和窄屏阅读策略。
+- 实现后必须检查文本溢出、对比度、焦点态、屏幕阅读语义和视觉反模式。
+- 顶层 `new_requirement`、`approval_request`、`approval_result`、`delivery_result` 必须可扫描，且不得与阶段内部条目混淆。
+
 **测试方法**：
 - `npm --prefix frontend run test -- FeedEntryRenderer`
 
@@ -493,6 +499,12 @@
 - 阶段内部条目至少支持 `dialogue`、`reasoning`、`decision`、`tool_call`、`diff_preview`、`result`。
 - Requirement Analysis 阶段内澄清问答显示为阶段内部连续对话内容。
 - 阶段结点正文展示高信号指标，完整信息留给 Inspector。
+
+**前端设计质量门**：
+- 继承项目级前端主基调。
+- 实现前必须梳理阶段大框、内部条目、折叠密度和 Inspector 入口的呈现关系。
+- 实现后必须检查阶段内长 reasoning、工具摘要、diff 预览、指标摘要和窄屏布局。
+- 阶段大框必须服务连续阅读，不得形成嵌套卡片堆叠或与顶层 Feed 条目竞争主层级。
 
 **测试方法**：
 - `npm --prefix frontend run test -- StageNode`
@@ -523,6 +535,12 @@
 - Run Switcher 只做页面内定位，不创建会话、不重新运行、不编辑模板。
 - 历史 run 的分界头部只承担信息展示与导航定位。
 
+**前端设计质量门**：
+- 继承项目级前端主基调；若 run 分界需要特殊视觉区分，只在主基调内定义区分规则。
+- 实现前必须梳理多 run 分界、历史态、当前态和页面内定位体验。
+- 实现后必须检查分界可见性、历史 run 可读性、窄屏切换和 Composer 遮挡风险。
+- Run Switcher 的视觉权重必须低于 Narrative Feed 主内容，不得暗示它能触发重新运行或编辑模板。
+
 **测试方法**：
 - `npm --prefix frontend run test -- RunSwitcher`
 
@@ -552,6 +570,12 @@
 - Inspector 不承担审批主操作。
 - `approval_result` 不作为独立右栏打开对象。
 
+**前端设计质量门**：
+- 继承项目级前端主基调，不单独询问 Inspector 风格。
+- 实现前必须梳理右栏打开、关闭、抽屉、固定宽度、焦点回收和深看入口。
+- 实现后必须检查可访问性、键盘关闭、窄屏抽屉、空态和与 Feed 主阅读路径的层级关系。
+- Inspector 必须是深看面板，不承载审批主操作，也不把 `approval_result` 变成独立详情对象。
+
 **测试方法**：
 - `npm --prefix frontend run test -- InspectorPanel`
 
@@ -579,6 +603,11 @@
 - Inspector 中的信息量大于中栏结点正文。
 - 不适用指标隐藏，不使用空模板占位。
 - 前端只做呈现层分组、折叠、排序和语法高亮，不改写语义。
+
+**前端设计质量门**：
+- 继承项目级前端主基调；若 metrics 需要图表呈现，只在主基调内记录图表密度和颜色边界。
+- 实现后必须检查分组节奏、长 artifact 名称、空 metrics、失败 metrics、代码块横向滚动和窄屏可读性。
+- Metrics 和 artifacts 的视觉表达必须保留原始信息边界，不通过文案或颜色改写后端语义。
 
 **测试方法**：
 - `npm --prefix frontend run test -- InspectorSections`
