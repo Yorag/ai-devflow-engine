@@ -4,7 +4,9 @@
 
 本分卷覆盖 Week 4-6 的 Run 生命周期、GraphDefinition、产物存储、查询投影、SSE 和前端 Narrative Feed。完成后，系统具备可回放的 run 主链、可消费的 workspace 快照、可增量更新的前端状态和可深看的 Inspector。
 
-本分卷只处理 Run 主链的骨架与投影，不实现人工介入命令副作用和 runtime 执行内核。暂停、恢复、终止和审批恢复的副作用放在 04 分卷。
+本分卷只处理 Run 主链的骨架、事件来源与投影，不实现人工介入命令副作用和 runtime 执行内核。首个 run 启动必须在同一服务事务中创建 PipelineRun、模板快照、GraphDefinition、首条消息事件和初始 StageRun；暂停、恢复、终止和审批恢复的副作用放在 04 分卷。
+查询投影必须基于 EventStore、领域对象、StageArtifact 和稳定引用组装，不允许先从业务表临时拼出一套独立 Narrative Feed 语义。
+凡本分卷修改 `backend/app/api/routes/*` 的 API 或 SSE 切片，对应 API 测试必须在本切片内断言新增或修改的 path、method、请求 Schema、响应 Schema、SSE 事件说明和主要错误响应已进入 `/api/openapi.json`；V6.4 只做全局覆盖回归。
 
 <a id="r31"></a>
 
@@ -22,7 +24,8 @@
 **实现类/函数**：
 - `RunStateMachine.transition()`
 - `RunStateMachine.assert_can_start_first_run()`
-- `RunStateMachine.assert_can_create_retry_run()`
+- `RunStateMachine.assert_can_create_rerun()`
+- `RunStateMachine.assert_can_create_run_from_source()`
 - `RunStateMachine.project_session_status()`
 
 **验收标准**：
@@ -30,11 +33,47 @@
 - `clarification_reply` 只能在 `waiting_clarification` 使用。
 - `completed` Session 不允许创建新 run。
 - `failed` / `terminated` 当前 run 尾部允许创建新 run。
+- `RunTriggerSource` 覆盖 `initial_requirement`、`retry`、`ops_restart`；外部用户重新尝试只映射为 `retry`。
 - pause / resume 不创建新 run。
 - 本切片不实现 API 命令副作用。
 
 **测试方法**：
 - `pytest backend/tests/domain/test_run_state_machine.py -v`
+
+<a id="e31"></a>
+
+## E3.1 领域事件 Schema 与 EventStore
+
+**计划周期**：Week 4
+**状态**：`[ ]`
+**目标**：建立领域事件日志和事件口径矩阵，使 Run 命令、查询投影和实时增量使用同一事件来源，避免内部领域事件、SSE `event_type` 与 Narrative Feed 条目漂移。
+**实施计划**：`docs/plans/implementation/e3.1-domain-event-store.md`
+
+**修改文件列表**：
+- Create: `backend/app/services/events.py`
+- Create: `backend/tests/events/test_event_store.py`
+
+**实现类/函数**：
+- `DomainEvent`
+- `EventStore.append()`
+- `EventStore.list_after()`
+- `EventStore.list_for_session()`
+- `EventProjectionMatrix`
+- `resolve_sse_event_type()`
+- `resolve_feed_entry_type()`
+
+**验收标准**：
+- 事件记录包含 `event_id`、`session_id`、`run_id`、`event_type`、`occurred_at`、`payload`。
+- 事件类型与正式规格一致。
+- `new_requirement`、审批结果、澄清结果、控制条目、交付结果和终态状态都进入同一条会话事件流。
+- EventStore 是 Narrative Feed 查询投影和 SSE 增量事件的共同来源。
+- 原始 LangGraph 事件不直接作为对外领域事件暴露。
+- 事件口径矩阵必须明确内部领域事件 PascalCase、SSE `event_type` snake_case、Narrative Feed 条目类型和投影更新目标之间的一一映射。
+- 事件口径矩阵必须逐项固定终态映射：`DeliveryPrepared` 或等价交付完成事件生成 `delivery_result`，`RunCompleted` 只更新 run / session 状态且不生成 `system_status`，`RunFailed` 与 `RunTerminated` 生成顶层 `system_status`。
+- 测试必须覆盖 `PipelineRunCreated -> pipeline_run_created`、`ApprovalApproved/ApprovalRejected -> approval_result`、`DeliveryPrepared -> delivery_result`、`RunCompleted -> session_status_changed`、`RunFailed/RunTerminated -> system_status` 的映射，不允许前端 reducer 自行发明第二套事件语义。
+
+**测试方法**：
+- `pytest backend/tests/events/test_event_store.py -v`
 
 <a id="r32"></a>
 
@@ -42,12 +81,13 @@
 
 **计划周期**：Week 4
 **状态**：`[ ]`
-**目标**：实现 `POST /api/sessions/{sessionId}/messages` 中 `new_requirement` 语义，自动创建首个 PipelineRun 并进入 `requirement_analysis`。
+**目标**：实现 `POST /api/sessions/{sessionId}/messages` 中 `new_requirement` 语义，在同一启动事务中创建首个 PipelineRun、模板快照、GraphDefinition、首条消息事件和初始 Requirement Analysis StageRun。
 **实施计划**：`docs/plans/implementation/r3.2-start-first-run.md`
 
 **修改文件列表**：
 - Create: `backend/app/services/runs.py`
 - Modify: `backend/app/services/sessions.py`
+- Modify: `backend/app/services/events.py`
 - Modify: `backend/app/api/routes/sessions.py`
 - Create: `backend/tests/services/test_start_first_run.py`
 - Create: `backend/tests/api/test_session_message_api.py`
@@ -56,12 +96,18 @@
 - `RunLifecycleService.start_first_run()`
 - `SessionService.append_message()`
 - `SessionService.start_run_from_new_requirement()`
+- `TemplateSnapshotBuilder.build_for_run()`
+- `GraphCompiler.compile()`
+- `EventStore.append()`
 
 **验收标准**：
-- `new_requirement` 创建 `PipelineRun`、回写 `Session.current_run_id`，并将 Session 投影为 `running`。
+- `new_requirement` 创建 `PipelineRun`、固化 `template_snapshot_ref`、编译并绑定 `graph_definition_ref`、回写 `Session.current_run_id`，并将 Session 投影为 `running`。
 - 新 run 的 `current_stage_type = requirement_analysis`。
-- 首条用户消息作为顶层 `user_message` 进入后续投影来源。
+- 首个 `StageRun(requirement_analysis)` 与 run 启动在同一事务中创建。
+- 首条用户消息通过 EventStore 追加为顶层 `user_message` 事件来源。
+- 本切片不得绕过 EventStore 直接写入第二套 Narrative Feed 来源。
 - 非 draft Session 调用 `new_requirement` 被拒绝。
+- API 测试必须断言 `POST /api/sessions/{sessionId}/messages` 的 `new_requirement` 请求/响应 Schema、非法状态错误响应和 OpenAPI path/method 已进入 `/api/openapi.json`。
 
 **测试方法**：
 - `pytest backend/tests/services/test_start_first_run.py -v`
@@ -69,34 +115,34 @@
 
 <a id="r33"></a>
 
-## R3.3 retry run 创建规则
+## R3.3 重新尝试领域规则与内部创建基础
 
 **计划周期**：Week 4
 **状态**：`[ ]`
-**目标**：实现显式重新尝试命令的基础创建规则，使 failed / terminated run 可在同一 Session 下生成新 PipelineRun。
-**实施计划**：`docs/plans/implementation/r3.3-retry-run-creation.md`
+**目标**：实现重新尝试的纯领域规则和内部创建基础，使 failed / terminated run 后的新 PipelineRun 语义先被状态机约束，但不提前暴露不完整外部命令。
+**实施计划**：`docs/plans/implementation/r3.3-rerun-creation.md`
 
 **修改文件列表**：
 - Modify: `backend/app/services/runs.py`
-- Create: `backend/app/api/routes/runs.py`
-- Create: `backend/tests/services/test_retry_run_creation.py`
-- Create: `backend/tests/api/test_retry_run_api.py`
+- Create: `backend/tests/services/test_rerun_creation.py`
 
 **实现类/函数**：
-- `RunLifecycleService.create_retry_run()`
+- `RunLifecycleService.prepare_rerun_creation()`
 - `RunLifecycleService.assert_single_active_run()`
-- `register_run_routes(router: APIRouter) -> None`
+- `RunLifecycleService.build_next_attempt_index()`
+- `RunLifecycleService.prepare_run_creation_from_source()`
 
 **验收标准**：
-- `POST /api/sessions/{sessionId}/runs` 对应显式重新尝试，不对应暂停后的继续执行。
 - 只有前一个活动 run 处于 `failed` 或 `terminated` 后允许创建新 run。
 - `completed` 表示会话链路已完成，不允许同一 Session 创建新 run。
-- 新 run 从 `requirement_analysis` 重新开始。
-- 新 run 不继承旧 run 未交付的工作区改动引用。
+- 内部创建基础必须能计算新 run 的 attempt index、`trigger_source` 和从 `requirement_analysis` 重新开始的初始字段；V1 合法机器值为 `initial_requirement`、`retry`、`ops_restart`。
+- 内部创建基础不得暴露 `POST /api/sessions/{sessionId}/runs`，不得追加 `pipeline_run_created` 事件，也不得更新前端 run boundary metadata。
+- 外部用户重新尝试命令、事件、投影和 API 路由统一由 H4.7 交付；运维重启只保留领域枚举和内部创建能力，不提供 V1 前端入口。
+- 新 run 不继承旧 run 未交付的工作区改动引用；实际工作区创建由 W5.1 验证。
+- `control_item(type=retry)` 只用于当前 run 内自动回归或阶段内再次尝试。
 
 **测试方法**：
-- `pytest backend/tests/services/test_retry_run_creation.py -v`
-- `pytest backend/tests/api/test_retry_run_api.py -v`
+- `pytest backend/tests/services/test_rerun_creation.py -v`
 
 <a id="r34"></a>
 
@@ -119,7 +165,7 @@
 
 **验收标准**：
 - 每次 run 启动前固化模板快照。
-- 快照包含固定阶段序列、角色槽位、`system_prompt`、Provider 绑定、自动回归开关和最大重试次数。
+- 快照包含固定阶段序列、阶段槽位最终生效的 `role_id`、`system_prompt`、`provider_id`、自动回归开关和最大重试次数。
 - 后续模板修改不得回写影响已启动 run。
 - 快照不包含项目级 DeliveryChannel 配置。
 
@@ -231,6 +277,7 @@
 - Create: `backend/app/services/projections/workspace.py`
 - Create: `backend/app/api/routes/query.py`
 - Create: `backend/tests/projections/test_workspace_projection.py`
+- Create: `backend/tests/api/test_query_api.py`
 
 **实现类/函数**：
 - `WorkspaceProjectionService.get_session_workspace()`
@@ -239,12 +286,15 @@
 
 **验收标准**：
 - workspace projection 包含项目摘要、会话状态、项目级交付配置摘要、run summaries、narrative feed、composer state。
+- narrative feed 必须从 EventStore、领域对象、StageArtifact 和稳定引用组装，不得定义第二套投影来源语义。
 - 同一 Session 下的多个 run 按启动时间顺序返回。
 - `composer_state.bound_run_id` 始终指向当前活动 run。
 - 投影不暴露 raw graph state。
+- API 测试必须断言 `GET /api/sessions/{sessionId}/workspace` 的响应 Schema、主要错误响应和 OpenAPI path/method 已进入 `/api/openapi.json`。
 
 **测试方法**：
 - `pytest backend/tests/projections/test_workspace_projection.py -v`
+- `pytest backend/tests/api/test_query_api.py -v`
 
 <a id="q32"></a>
 
@@ -259,6 +309,7 @@
 - Create: `backend/app/services/projections/timeline.py`
 - Modify: `backend/app/api/routes/query.py`
 - Create: `backend/tests/projections/test_timeline_projection.py`
+- Modify: `backend/tests/api/test_query_api.py`
 
 **实现类/函数**：
 - `TimelineProjectionService.get_run_timeline()`
@@ -269,9 +320,11 @@
 - `entries` 按发生时间顺序返回该 run 的全部顶层 Narrative Feed 条目。
 - `entries[].type` 只允许正式顶层条目枚举。
 - 条目语义与 `SessionWorkspaceProjection.narrative_feed` 保持一致。
+- API 测试必须断言 `GET /api/runs/{runId}/timeline` 的响应 Schema、主要错误响应和 OpenAPI path/method 已进入 `/api/openapi.json`。
 
 **测试方法**：
 - `pytest backend/tests/projections/test_timeline_projection.py -v`
+- `pytest backend/tests/api/test_query_api.py -v`
 
 <a id="q33"></a>
 
@@ -286,6 +339,7 @@
 - Create: `backend/app/services/projections/inspector.py`
 - Modify: `backend/app/api/routes/query.py`
 - Create: `backend/tests/projections/test_stage_inspector_projection.py`
+- Modify: `backend/tests/api/test_query_api.py`
 
 **实现类/函数**：
 - `InspectorProjectionService.get_stage_inspector()`
@@ -297,66 +351,41 @@
 - 投影内容来自领域对象、StageArtifact 和稳定引用，不由前端回填关键事实。
 - `approval_result` 关联信息可通过所属阶段 Inspector 读取。
 - 投影不暴露 raw graph state。
+- API 测试必须断言 `GET /api/stages/{stageRunId}/inspector` 的响应 Schema、主要错误响应和 OpenAPI path/method 已进入 `/api/openapi.json`。
 
 **测试方法**：
 - `pytest backend/tests/projections/test_stage_inspector_projection.py -v`
+- `pytest backend/tests/api/test_query_api.py -v`
 
 <a id="q34"></a>
 
-## Q3.4 ControlItem 与 Delivery detail 投影
+## Q3.4 ControlItemInspectorProjection
 
 **计划周期**：Week 5
 **状态**：`[ ]`
-**目标**：实现控制型条目和交付结果详情投影，使回退、重试、澄清等待和交付结果可以被右栏深看。
-**实施计划**：`docs/plans/implementation/q3.4-control-delivery-detail-projections.md`
+**目标**：实现控制型条目详情投影，使回退、重试和澄清等待可以被右栏深看；本切片不涉及交付结果详情。
+**实施计划**：`docs/plans/implementation/q3.4-control-item-inspector-projection.md`
 
 **修改文件列表**：
 - Modify: `backend/app/services/projections/inspector.py`
 - Modify: `backend/app/api/routes/query.py`
-- Create: `backend/tests/projections/test_control_delivery_detail_projection.py`
+- Create: `backend/tests/projections/test_control_item_detail_projection.py`
+- Modify: `backend/tests/api/test_query_api.py`
 
 **实现类/函数**：
 - `InspectorProjectionService.get_control_item_detail()`
-- `InspectorProjectionService.get_delivery_record_detail()`
 - `InspectorProjectionService.build_control_item_sections()`
-- `InspectorProjectionService.build_delivery_result_sections()`
 
 **验收标准**：
 - `GET /api/control-records/{controlRecordId}` 返回完整控制条目详情，不退化为摘要文本。
-- `GET /api/delivery-records/{deliveryRecordId}` 返回完整交付结果详情。
 - `system_status` 终态条目不作为 `control_item.control_type` 持久化。
-- `delivery_result` 详情包含交付模式、变更结果、测试结论、评审结论、产物与量化信息。
+- 本切片不实现 `GET /api/delivery-records/{deliveryRecordId}`，不伪造 DeliveryRecord，不定义临时交付详情投影语义。
+- `DeliveryResultDetailProjection` 的 Schema 由 C1.4 保留，正式查询实现由 D4.3 基于 DeliveryRecord 交付。
+- API 测试必须断言 `GET /api/control-records/{controlRecordId}` 的响应 Schema、主要错误响应和 OpenAPI path/method 已进入 `/api/openapi.json`。
 
 **测试方法**：
-- `pytest backend/tests/projections/test_control_delivery_detail_projection.py -v`
-
-<a id="e31"></a>
-
-## E3.1 领域事件 Schema 与 EventStore
-
-**计划周期**：Week 5
-**状态**：`[ ]`
-**目标**：建立领域事件日志，使查询投影和实时增量使用同一事件来源。
-**实施计划**：`docs/plans/implementation/e3.1-domain-event-store.md`
-
-**修改文件列表**：
-- Create: `backend/app/services/events.py`
-- Create: `backend/tests/events/test_event_store.py`
-
-**实现类/函数**：
-- `DomainEvent`
-- `EventStore.append()`
-- `EventStore.list_after()`
-- `EventStore.list_for_session()`
-
-**验收标准**：
-- 事件记录包含 `event_id`、`session_id`、`run_id`、`event_type`、`occurred_at`、`payload`。
-- 事件类型与正式规格一致。
-- 审批结果与澄清结果进入同一条会话事件流。
-- 原始 LangGraph 事件不直接作为对外领域事件暴露。
-
-**测试方法**：
-- `pytest backend/tests/events/test_event_store.py -v`
+- `pytest backend/tests/projections/test_control_item_detail_projection.py -v`
+- `pytest backend/tests/api/test_query_api.py -v`
 
 <a id="e32"></a>
 
@@ -375,13 +404,13 @@
 **实现类/函数**：
 - `SseEventEncoder.encode()`
 - `stream_session_events()`
-- `register_event_routes(router: APIRouter) -> None`
 
 **验收标准**：
 - `GET /api/sessions/{sessionId}/events/stream` 提供会话级 SSE。
 - payload 中的 feed 条目语义与查询投影一致。
 - 断线后可通过 workspace 快照 + `EventStore.list_after()` 重建一致状态。
 - SSE 只传递增量，不定义第二套产品语义。
+- API 测试必须断言 `GET /api/sessions/{sessionId}/events/stream` 的 SSE 响应说明、主要错误响应和 OpenAPI path/method 已进入 `/api/openapi.json`。
 
 **测试方法**：
 - `pytest backend/tests/api/test_sse_stream.py -v`

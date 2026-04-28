@@ -4,34 +4,41 @@
 
 本分卷覆盖 Week 2-4 的控制面 API 与前端工作台外壳。完成后，前端可基于真实或 mock 契约完成 Project、Session、Template、Provider、DeliveryChannel、设置弹窗和模板空态的主要交互。
 
-本分卷按依赖顺序拆分：先建立默认 Project 与系统模板，再创建 draft Session；DeliveryChannel 与 Provider 作为独立控制面能力落地，避免一个任务同时吞掉全部控制面。
+本分卷按依赖顺序拆分：先建立默认 Project 与最小默认 `demo_delivery` 通道，再建立系统模板并创建 draft Session；DeliveryChannel 的查询、保存与 readiness 校验作为独立控制面能力落地，避免一个任务同时吞掉全部控制面。
+
+凡本分卷修改 `backend/app/api/routes/*` 的 API 切片，对应 API 测试必须在本切片内断言新增或修改的 path、method、请求 Schema、响应 Schema 和主要错误响应已进入 `/api/openapi.json`；V6.4 只做全局覆盖回归，不作为这些路由第一次发现 OpenAPI 漂移的入口。
 
 <a id="c21"></a>
 
-## C2.1 默认 Project 与项目列表
+## C2.1 默认 Project、项目加载与项目列表
 
 **计划周期**：Week 3
 **状态**：`[ ]`
-**目标**：实现默认项目登记和项目列表查询，使系统首次启动后具备稳定项目上下文。
+**目标**：实现默认项目登记、本地项目加载、项目列表查询和最小默认 `demo_delivery` 通道创建，使系统首次启动后具备稳定项目上下文、可切换项目列表与默认交付通道引用。
 **实施计划**：`docs/plans/implementation/c2.1-default-projects.md`
 
 **修改文件列表**：
 - Create: `backend/app/services/projects.py`
+- Create: `backend/app/services/delivery_channels.py`
 - Create: `backend/app/api/routes/projects.py`
 - Create: `backend/tests/services/test_project_service.py`
 - Create: `backend/tests/api/test_project_api.py`
 
 **实现类/函数**：
 - `ProjectService.ensure_default_project()`
+- `DeliveryChannelService.ensure_default_channel()`
 - `ProjectService.list_projects()`
 - `ProjectService.create_project()`
-- `register_project_routes(router: APIRouter) -> None`
+- `ProjectService.load_project()`
 
 **验收标准**：
 - 首次启动存在默认项目，绑定平台仓库自身路径。
 - `GET /api/projects` 在未手动加载项目时也返回默认项目。
-- 新建 Project 记录 `root_path`、`name`、`default_delivery_channel_id` 和时间戳。
-- 本切片不实现 Session、Template 或 DeliveryChannel 业务。
+- `POST /api/projects` 支持通过本地 `root_path` 加载新项目，并返回可用于左栏切换的项目摘要。
+- 默认 Project 创建时通过 `DeliveryChannelService.ensure_default_channel()` 同步创建最小项目级默认 `DeliveryChannel(delivery_mode=demo_delivery, credential_status=ready, readiness_status=ready, readiness_message=null)`。
+- 新建 Project 记录 `root_path`、`name`、`default_delivery_channel_id` 和时间戳，且 `default_delivery_channel_id` 指向可解析的默认通道。
+- 本切片不实现 Session、Template 或 DeliveryChannel 查询、保存、readiness 校验业务。
+- API 测试必须断言 `GET /api/projects`、`POST /api/projects` 及其请求/响应 Schema 和主要错误响应已进入 `/api/openapi.json`。
 
 **测试方法**：
 - `pytest backend/tests/services/test_project_service.py -v`
@@ -53,6 +60,7 @@
 - Create: `backend/app/api/routes/providers.py`
 - Create: `backend/tests/services/test_template_seed.py`
 - Create: `backend/tests/services/test_provider_seed.py`
+- Create: `backend/tests/api/test_template_provider_seed_api.py`
 
 **实现类/函数**：
 - `TemplateService.seed_system_templates()`
@@ -65,13 +73,15 @@
 - 系统模板包含 `Bug 修复流程`、`新功能开发流程`、`重构流程`。
 - 默认模板为 `新功能开发流程`。
 - 三个系统模板共享固定六阶段骨架。
-- 三个系统模板差异只体现在角色槽位、`system_prompt`、Provider 绑定和自动回归默认策略。
+- 三个系统模板差异只体现在阶段槽位默认绑定的 `AgentRole`、槽位内最终生效的 `system_prompt`、Provider 绑定和自动回归默认策略。
 - Provider 默认包含 `火山引擎`、`DeepSeek`。
 - `OpenAI Completions compatible` 只作为 custom Provider 接入协议，不作为内置 Provider 名称。
+- API 测试必须断言 `GET /api/pipeline-templates`、`GET /api/pipeline-templates/{templateId}`、`GET /api/providers` 及其响应 Schema 和主要错误响应已进入 `/api/openapi.json`。
 
 **测试方法**：
 - `pytest backend/tests/services/test_template_seed.py -v`
 - `pytest backend/tests/services/test_provider_seed.py -v`
+- `pytest backend/tests/api/test_template_provider_seed_api.py -v`
 
 <a id="c23"></a>
 
@@ -100,6 +110,7 @@
 - 只有 `draft` 且尚未创建 run 的 Session 允许更新 `selected_template_id`。
 - `latest_stage_type` 在 draft 状态下为 `null`。
 - 同一 Project 下可列出近期 Session。
+- API 测试必须断言 `POST /api/projects/{projectId}/sessions`、`GET /api/projects/{projectId}/sessions`、`GET /api/sessions/{sessionId}`、`PUT /api/sessions/{sessionId}/template` 及其请求/响应 Schema 和主要错误响应已进入 `/api/openapi.json`。
 
 **测试方法**：
 - `pytest backend/tests/services/test_session_service.py -v`
@@ -129,9 +140,11 @@
 **验收标准**：
 - `system_template` 允许选择和另存，不允许直接覆盖或删除。
 - `user_template` 支持覆盖、另存和删除。
-- 模板编辑只允许修改角色槽位、`system_prompt`、Provider 绑定、自动回归开关和最大重试次数。
+- 模板编辑只允许选择每个阶段槽位绑定的已有 `AgentRole`，并修改该槽位最终生效的 `system_prompt`、`provider_id`、自动回归开关和最大重试次数。
+- 模板保存必须固化各阶段槽位最终生效的 `role_id`、`system_prompt` 与 `provider_id`，不得修改共享 `AgentRole.role_name`。
 - 用户不能通过模板删除、禁用、重排核心阶段，不能关闭两个必需审批检查点。
 - 删除当前选中的用户模板后，调用方可回退到默认系统模板。
+- API 测试必须断言 `POST /api/pipeline-templates`、`PATCH /api/pipeline-templates/{templateId}`、`POST /api/pipeline-templates/{templateId}/save-as`、`DELETE /api/pipeline-templates/{templateId}` 及其请求/响应 Schema 和主要错误响应已进入 `/api/openapi.json`。
 
 **测试方法**：
 - `pytest backend/tests/services/test_user_template_service.py -v`
@@ -162,6 +175,7 @@
 - custom Provider 使用用户自定义展示名。
 - custom Provider 接入协议为 `OpenAI Completions compatible`。
 - API 返回 Provider 状态，不返回真实密钥内容。
+- API 测试必须断言 `POST /api/providers`、`PATCH /api/providers/{providerId}`、`GET /api/providers/{providerId}` 及其请求/响应 Schema 和主要错误响应已进入 `/api/openapi.json`。
 
 **测试方法**：
 - `pytest backend/tests/services/test_custom_provider_service.py -v`
@@ -173,11 +187,11 @@
 
 **计划周期**：Week 3
 **状态**：`[ ]`
-**目标**：实现项目级默认 DeliveryChannel 的查询和保存，使交付配置独立于 Session 与模板。
+**目标**：实现项目级默认 DeliveryChannel 的查询和保存，使交付配置独立于 Session 与模板，并复用 C2.1 已创建的默认通道。
 **实施计划**：`docs/plans/implementation/c2.6-delivery-channel-crud.md`
 
 **修改文件列表**：
-- Create: `backend/app/services/delivery_channels.py`
+- Modify: `backend/app/services/delivery_channels.py`
 - Modify: `backend/app/api/routes/projects.py`
 - Create: `backend/tests/services/test_delivery_channel_service.py`
 - Create: `backend/tests/api/test_delivery_channel_api.py`
@@ -189,10 +203,12 @@
 
 **验收标准**：
 - 每个 Project 在 V1 只维护一个项目级默认 DeliveryChannel。
+- `get_project_channel()` 必须返回 C2.1 创建的默认通道，不得在查询时隐式创建第二条通道。
 - 未配置远端交付条件时默认回落到 `demo_delivery`。
 - `demo_delivery` 下 Git 字段允许为 `null`。
 - `git_auto_delivery` 保存时接收托管平台类型、仓库标识、默认分支、代码评审请求类型和 `credential_ref`。
 - DeliveryChannel 配置不属于 Session 或模板。
+- API 测试必须断言 `GET /api/projects/{projectId}/delivery-channel`、`PUT /api/projects/{projectId}/delivery-channel` 及其请求/响应 Schema 和主要错误响应已进入 `/api/openapi.json`。
 
 **测试方法**：
 - `pytest backend/tests/services/test_delivery_channel_service.py -v`
@@ -224,6 +240,7 @@
 - `git_auto_delivery` 缺少可用凭据时 `credential_status` 为 `unbound` 或 `invalid`，且 `readiness_status != ready`。
 - 校验接口不修改已固化到历史 run 的交付快照。
 - 返回的 `readiness_message` 能表达主阻塞原因。
+- API 测试必须断言 `POST /api/projects/{projectId}/delivery-channel/validate` 的请求 Schema、响应 Schema、`validated_at` 字段和主要错误响应已进入 `/api/openapi.json`。
 
 **测试方法**：
 - `pytest backend/tests/services/test_delivery_channel_readiness.py -v`
@@ -245,6 +262,10 @@
 - Create: `frontend/src/api/templates.ts`
 - Create: `frontend/src/api/providers.ts`
 - Create: `frontend/src/api/delivery-channels.ts`
+- Create: `frontend/src/api/runs.ts`
+- Create: `frontend/src/api/approvals.ts`
+- Create: `frontend/src/api/query.ts`
+- Create: `frontend/src/api/events.ts`
 - Create: `frontend/src/api/__tests__/client.test.ts`
 
 **实现类/函数**：
@@ -254,11 +275,26 @@
 - `listPipelineTemplates()`
 - `listProviders()`
 - `getProjectDeliveryChannel()`
+- `updateProjectDeliveryChannel()`
+- `validateProjectDeliveryChannel()`
+- `saveAsPipelineTemplate()`
+- `patchPipelineTemplate()`
+- `deletePipelineTemplate()`
+- `appendSessionMessage()`
+- `pauseRun()`
+- `resumeRun()`
+- `terminateRun()`
+- `createRerun()`
+- `approveApproval()`
+- `rejectApproval()`
+- `getSessionWorkspace()`
+- `getRunTimeline()`
+- `createSessionEventSource()`
 
 **验收标准**：
-- 前端 API client 能消费后端约定路径。
+- 前端 API client 覆盖 `projects`、`sessions`、`templates`、`providers`、`deliveryChannels`、`runs`、`approvals`、`query` 与 `events` 的资源边界。
 - 错误响应进入统一错误处理。
-- 控制面路径不在组件内手写。
+- UI 组件不得直接手写核心 API 路径；后续展示切片只能通过本切片建立的 client 模块补充类型和 hook。
 
 **测试方法**：
 - `npm --prefix frontend run test -- client`
@@ -273,8 +309,6 @@
 **实施计划**：`docs/plans/implementation/f2.2-mock-fixtures-query-hooks.md`
 
 **修改文件列表**：
-- Create: `frontend/src/api/runs.ts`
-- Create: `frontend/src/api/workspace.ts`
 - Create: `frontend/src/api/hooks.ts`
 - Create: `frontend/src/mocks/fixtures.ts`
 - Create: `frontend/src/mocks/handlers.ts`
@@ -313,10 +347,13 @@
 **实现类/函数**：
 - `WorkspaceShell`
 - `ProjectSidebar`
+- `ProjectSwitcher`
+- `LoadProjectEntry`
 - `SessionList`
 
 **验收标准**：
-- 左栏展示 Project、Session 列表和默认交付模式摘要。
+- 左栏展示 Project Switcher、Load Project Entry、当前 Project 摘要、New Session Entry、Session 列表和默认交付模式摘要。
+- 用户加载本地项目后，该项目进入 Project Switcher；切换项目后中栏进入该项目最近会话，若无会话则展示项目空态。
 - 中栏保留 Narrative Workspace 插槽。
 - 右栏保留 Inspector 插槽并默认关闭。
 - 三栏布局在窄屏下可退化为抽屉占位。
@@ -418,7 +455,8 @@
 - `resolveTemplateStartGuard()`
 
 **验收标准**：
-- 模板编辑只开放角色槽位、`system_prompt`、Provider 绑定、自动回归开关、最大重试次数。
+- 模板编辑只开放阶段槽位的 `AgentRole` 选择、槽位内最终生效的 `system_prompt`、`provider_id`、自动回归开关和最大重试次数。
+- 模板编辑不得提供 `AgentRole.role_name` 修改入口，也不得把槽位配置保存为会影响其他模板的共享运行对象。
 - 系统模板修改后只能另存。
 - 用户模板支持覆盖、另存、删除。
 - 脏模板不得直接启动运行。

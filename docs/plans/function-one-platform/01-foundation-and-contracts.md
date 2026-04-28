@@ -2,7 +2,7 @@
 
 ## 范围
 
-本分卷覆盖 Week 1-2 的工程基线、后端契约、前端基线和持久化边界。完成后，前后端具备可运行项目骨架、基础测试命令、OpenAPI 初版、领域枚举、投影 Schema 和多 SQLite 职责拆分。
+本分卷覆盖 Week 1-2 的工程基线、后端契约、前端基线和持久化边界。完成后，前后端具备可运行项目骨架、基础测试命令、领域枚举、投影 Schema、事件载荷 Schema 和多 SQLite 职责拆分。
 
 本分卷的拆分目标是先锁定契约，再进入控制面与 Run 主链。每个契约切片只处理一组稳定字段，避免单次任务同时修改所有 Schema。
 
@@ -66,6 +66,7 @@
 
 **验收标准**：
 - `GET /api/health` 返回服务状态。
+- `build_api_router()` 采用统一路由装配模式：各 `backend/app/api/routes/*.py` 模块导出模块级 `router`，由 `build_api_router()` 统一 `include_router()`；后续切片不得混用额外的 `register_*_routes(router)` 函数模式。
 - 通用错误响应包含稳定错误码、消息和 request id。
 - `GET /api/openapi.json` 可访问。
 - B0.1 中的后端测试命令可继续运行。
@@ -121,11 +122,11 @@
 
 <a id="c11"></a>
 
-## C1.1 状态枚举与阶段类型契约
+## C1.1 全局枚举与状态契约
 
 **计划周期**：Week 2
 **状态**：`[ ]`
-**目标**：固化功能一 V1 的状态枚举、阶段枚举、顶层条目枚举和交付模式枚举，为后续 Schema、投影和前端状态提供单一契约来源。
+**目标**：固化功能一 V1 的状态、阶段、模板、Provider、交付、事件和运行触发枚举，为后续 Schema、投影、事件矩阵和前端状态提供单一 machine value 来源。
 **实施计划**：`docs/plans/implementation/c1.1-enum-contracts.md`
 
 **修改文件列表**：
@@ -144,12 +145,35 @@
 - `DeliveryMode`
 - `DeliveryReadinessStatus`
 - `CredentialStatus`
+- `TemplateSource`
+- `ProviderSource`
+- `ProviderProtocolType`
+- `ScmProviderType`
+- `CodeReviewRequestType`
+- `RunTriggerSource`
+- `ApprovalStatus`
+- `StageItemType`
+- `SseEventType`
 
 **验收标准**：
 - `StageType` 只包含 `requirement_analysis`、`solution_design`、`code_generation`、`test_generation_execution`、`code_review`、`delivery_integration`。
 - `FeedEntryType` 只包含 `user_message`、`stage_node`、`approval_request`、`control_item`、`approval_result`、`delivery_result`、`system_status`。
 - `ApprovalType` 只包含 `solution_design_approval` 与 `code_review_approval`。
-- `SessionStatus` 与 `RunStatus` 至少覆盖 `draft`、`running`、`paused`、`waiting_clarification`、`waiting_approval`、`completed`、`failed`、`terminated`。
+- `SessionStatus` 覆盖 `draft`、`running`、`paused`、`waiting_clarification`、`waiting_approval`、`completed`、`failed`、`terminated`。
+- `RunStatus` 只覆盖 `running`、`paused`、`waiting_clarification`、`waiting_approval`、`completed`、`failed`、`terminated`。
+- `StageStatus` 只覆盖 `running`、`waiting_clarification`、`waiting_approval`、`completed`、`failed`、`superseded`，不得包含底层装配态 `pending`。
+- `ControlItemType` 至少包含 `clarification_wait`、`rollback`、`retry`；`retry` 只表示当前 run 内自动回归或阶段内再次尝试。
+- `TemplateSource` 只包含 `system_template`、`user_template`。
+- `ProviderSource` 只包含 `builtin`、`custom`。
+- `ProviderProtocolType` 至少包含 `openai_completions_compatible`。
+- `ScmProviderType` 至少包含 `github`、`gitlab`。
+- `CodeReviewRequestType` 只包含 `pull_request`、`merge_request`。
+- `RunTriggerSource` 只包含 `initial_requirement`、`retry`、`ops_restart`；用户可见的“重新尝试”映射为机器值 `retry`。
+- `ApprovalStatus` 至少包含 `pending`、`approved`、`rejected`、`cancelled`，其中 `pending` 只属于审批对象，不属于 `RunStatus` 或 `StageStatus`。
+- `StageItemType` 至少包含 `dialogue`、`reasoning`、`decision`、`tool_call`、`diff_preview`、`result`。
+- `SseEventType` 覆盖正式后端规格中的会话级 SSE 事件类型，不允许前端 reducer 自行发明第二套事件名。
+- `draft` 只表示尚未创建首个 `PipelineRun` 的 `Session`，不得出现在 `RunStatus` 中。
+- 测试必须断言 `RunStatus` 不包含 `draft`，`RunStatus` 与 `StageStatus` 不包含 `pending`，`system_status` 不属于 `ControlItemType`。
 
 **测试方法**：
 - `pytest backend/tests/schemas/test_enum_contracts.py -v`
@@ -182,9 +206,10 @@
 **验收标准**：
 - `Project` 包含默认交付通道引用。
 - `Session` 包含 `status`、`selected_template_id`、`current_run_id`、`latest_stage_type`。
-- `PipelineTemplate` 区分 `system_template` 与 `user_template`，并包含固定阶段骨架与自动回归配置。
+- `PipelineTemplate` 区分 `system_template` 与 `user_template`，并包含固定阶段骨架、阶段槽位到 AgentRole 的绑定、槽位内最终生效的 `role_id` / `system_prompt` / `provider_id` 和自动回归配置。
+- `AgentRoleConfig` 返回 `role_name` 作为展示标签；V1 不提供 `role_name` 修改字段。
 - `Provider` 区分内置 Provider 与 custom Provider，且不暴露真实密钥。
-- `DeliveryChannel` 包含 `credential_ref`、`credential_status`、`readiness_status` 和 `readiness_message`。
+- `DeliveryChannel` 包含 `credential_ref`、`credential_status`、`readiness_status`、`readiness_message` 和 `last_validated_at`。
 
 **测试方法**：
 - `pytest backend/tests/schemas/test_control_plane_schemas.py -v`
@@ -290,43 +315,130 @@
 
 <a id="c16"></a>
 
-## C1.6 control/runtime/graph/event 模型与迁移边界
+## C1.6 control 模型与迁移边界
 
 **计划周期**：Week 2
 **状态**：`[ ]`
-**目标**：建立四类数据库的首批模型和迁移边界，确保规范实体、运行记录、执行图状态和事件日志职责分离。
-**实施计划**：`docs/plans/implementation/c1.6-persistence-model-boundaries.md`
+**目标**：建立 `control.db` 的首批规范模型和迁移边界，确保项目、会话、模板、Provider 与项目级交付配置只在控制面持久化。
+**实施计划**：`docs/plans/implementation/c1.6-control-model-boundary.md`
 
 **修改文件列表**：
 - Create: `backend/app/db/models/control.py`
-- Create: `backend/app/db/models/runtime.py`
-- Create: `backend/app/db/models/graph.py`
-- Create: `backend/app/db/models/event.py`
-- Create: `backend/tests/db/test_database_boundaries.py`
+- Create: `backend/tests/db/test_control_model_boundary.py`
 
 **实现类/函数**：
 - `ControlBase`
-- `RuntimeBase`
-- `GraphBase`
-- `EventBase`
 - `ProjectModel`
 - `SessionModel`
+- `PipelineTemplateModel`
+- `ProviderModel`
+- `DeliveryChannelModel`
+
+**验收标准**：
+- `control.db` 承载 Project、Session、PipelineTemplate、Provider、DeliveryChannel 与项目级配置。
+- `Session` 规范实体只存在于 control 模型。
+- `DeliveryChannel` 属于项目级配置，不属于 Session、模板或 runtime 模型。
+- control 模型不包含 PipelineRun、StageRun、GraphThread、DomainEvent 或 AuditRecord。
+
+**测试方法**：
+- `pytest backend/tests/db/test_control_model_boundary.py -v`
+- `alembic -c backend/alembic.ini upgrade head`
+
+<a id="c17"></a>
+
+## C1.7 runtime 模型与迁移边界
+
+**计划周期**：Week 2
+**状态**：`[ ]`
+**目标**：建立 `runtime.db` 的运行领域模型和迁移边界，确保 run、阶段、产物、审批、控制记录和交付记录作为产品级领域真源存在。
+**实施计划**：`docs/plans/implementation/c1.7-runtime-model-boundary.md`
+
+**修改文件列表**：
+- Create: `backend/app/db/models/runtime.py`
+- Create: `backend/tests/db/test_runtime_model_boundary.py`
+
+**实现类/函数**：
+- `RuntimeBase`
 - `PipelineRunModel`
 - `StageRunModel`
+- `StageArtifactModel`
+- `ClarificationRecordModel`
+- `ApprovalRequestModel`
+- `ApprovalDecisionModel`
+- `RunControlRecordModel`
+- `DeliveryChannelSnapshotModel`
+- `DeliveryRecordModel`
+
+**验收标准**：
+- `runtime.db` 承载 PipelineRun、StageRun、StageArtifact、ClarificationRecord、ApprovalRequest、ApprovalDecision、RunControlRecord、DeliveryChannelSnapshot、DeliveryRecord、结构化产物索引与运行摘要。
+- runtime 模型通过 `session_id` 关联 control Session，不复制 `Session` 实体。
+- `PipelineRunModel.delivery_channel_snapshot_ref` 必须指向 `DeliveryChannelSnapshotModel` 或等价结构化快照记录，不得只是无所有权的 opaque string。
+- `DeliveryChannelSnapshotModel` 必须包含 `delivery_mode`、`scm_provider_type`、`repository_identifier`、`default_branch`、`code_review_request_type`、`credential_ref`、`credential_status`、`readiness_status`、`readiness_message` 与 `last_validated_at`。
+- `StageRun.stage_type` 只允许六个正式业务阶段。
+- `RunControlRecord.control_type` 至少支持 `clarification_wait`、`rollback`、`retry`。
+- run 尾部 `system_status` 不作为 `RunControlRecord.control_type` 持久化。
+- `DeliveryRecord` 是正式领域对象，不由临时交付详情投影替代。
+
+**测试方法**：
+- `pytest backend/tests/db/test_runtime_model_boundary.py -v`
+- `alembic -c backend/alembic.ini upgrade head`
+
+<a id="c18"></a>
+
+## C1.8 graph 模型与迁移边界
+
+**计划周期**：Week 2
+**状态**：`[ ]`
+**目标**：建立 `graph.db` 的执行图状态模型和迁移边界，确保 GraphDefinition、GraphThread、GraphCheckpoint 与 GraphInterrupt 独立于产品领域模型存在。
+**实施计划**：`docs/plans/implementation/c1.8-graph-model-boundary.md`
+
+**修改文件列表**：
+- Create: `backend/app/db/models/graph.py`
+- Create: `backend/tests/db/test_graph_model_boundary.py`
+
+**实现类/函数**：
+- `GraphBase`
 - `GraphDefinitionModel`
 - `GraphThreadModel`
 - `GraphCheckpointModel`
 - `GraphInterruptModel`
-- `DomainEventModel`
 
 **验收标准**：
-- `control.db` 承载 Project、Session、模板、Provider 与项目级配置。
-- `runtime.db` 承载 PipelineRun、StageRun、审批对象、结构化产物索引、控制条目与运行摘要。
 - `graph.db` 承载 GraphDefinition、GraphThread、GraphCheckpoint、GraphInterrupt。
-- `graph.db` 中的 GraphDefinition、GraphThread、GraphCheckpoint、GraphInterrupt 均有独立模型，不以单个 GraphThreadModel 或序列化 blob 替代执行图对象边界。
-- `event.db` 承载领域事件日志、Narrative Feed 投影来源数据与审计记录。
-- `Session` 规范实体只存在于 control 模型；runtime 模型通过 `session_id` 关联，不复制 `Session` 实体。
+- GraphDefinition、GraphThread、GraphCheckpoint、GraphInterrupt 均有独立模型，不以单个 GraphThreadModel 或序列化 blob 替代执行图对象边界。
+- `graph.db` 不替代 PipelineRun、StageRun、ApprovalRequest 或 DeliveryRecord 的产品级领域建模。
+- GraphCheckpoint 只保存可恢复执行引用，不作为前端投影来源。
+- GraphInterrupt 能表达澄清与审批中断类型，并可关联 runtime 领域对象。
 
 **测试方法**：
-- `pytest backend/tests/db/test_database_boundaries.py -v`
+- `pytest backend/tests/db/test_graph_model_boundary.py -v`
+- `alembic -c backend/alembic.ini upgrade head`
+
+<a id="c19"></a>
+
+## C1.9 event 与 audit 模型边界
+
+**计划周期**：Week 2
+**状态**：`[ ]`
+**目标**：建立 `event.db` 的领域事件、Narrative Feed 投影来源数据和审计记录边界，使查询投影与 SSE 增量共享同一事件来源。
+**实施计划**：`docs/plans/implementation/c1.9-event-audit-model-boundary.md`
+
+**修改文件列表**：
+- Create: `backend/app/db/models/event.py`
+- Create: `backend/tests/db/test_event_audit_model_boundary.py`
+
+**实现类/函数**：
+- `EventBase`
+- `DomainEventModel`
+- `AuditRecordModel`
+
+**验收标准**：
+- `event.db` 承载领域事件日志、Narrative Feed 投影来源数据与审计记录。
+- DomainEvent 至少记录 `event_id`、`session_id`、`run_id`、`event_type`、`occurred_at`、`payload`。
+- 对外事件与 SSE payload 必须能映射到 C1.3 定义的同名投影条目。
+- 审计记录不替代领域事件，也不作为 Narrative Feed 顶层条目来源。
+- 原始 LangGraph 事件不得直接写成对外 DomainEvent payload。
+
+**测试方法**：
+- `pytest backend/tests/db/test_event_audit_model_boundary.py -v`
 - `alembic -c backend/alembic.ini upgrade head`

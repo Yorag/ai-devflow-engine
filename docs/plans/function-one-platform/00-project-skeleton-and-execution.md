@@ -6,6 +6,7 @@
 
 ```text
 backend/
+  alembic/
   app/
     api/
       routes/
@@ -13,14 +14,15 @@ backend/
     db/
       models/
     domain/
+    repositories/
     schemas/
     services/
       projections/
     runtime/
     providers/
+    tools/
     workspace/
     delivery/
-  alembic/
   tests/
     api/
     db/
@@ -30,11 +32,16 @@ backend/
     events/
     projections/
     providers/
+    regression/
     runtime/
     schemas/
     services/
+    tools/
     workspace/
 frontend/
+  package.json
+  tsconfig.json
+  vite.config.ts
   src/
     api/
     app/
@@ -53,36 +60,65 @@ frontend/
     pages/
     styles/
 e2e/
+  package.json
+  playwright.config.ts
   tests/
 docs/
   api/
+  architecture/
+  archive/
   plans/
     implementation/
     function-one-platform/
+  specs/
+pyproject.toml
+README.md
 ```
 
 ## 2. 目录职责边界
 
 | 路径 | 职责 |
 | --- | --- |
+| `backend/alembic/` | Alembic env 与迁移脚本，负责数据库结构演进 |
+| `backend/app/api/` | API router 聚合、API 层错误契约与 OpenAPI 暴露入口 |
 | `backend/app/api/routes/` | FastAPI 路由层，只做请求解析、响应返回和服务调用 |
 | `backend/app/core/` | 配置、日志、错误模型、应用级依赖 |
 | `backend/app/db/` | SQLAlchemy session、数据库角色、多 SQLite 绑定 |
 | `backend/app/db/models/` | control、runtime、graph、event 四类模型 |
 | `backend/app/domain/` | 领域枚举、状态机、GraphDefinition、ChangeSet 等纯领域对象 |
+| `backend/app/repositories/` | SQLAlchemy 持久化访问适配层，只封装查询和写入，不承载业务状态机、审批语义或投影组装 |
 | `backend/app/schemas/` | Pydantic v2 请求、响应、投影与事件 Schema |
 | `backend/app/services/` | Project、Session、Run、Approval、Artifact、Delivery 等业务服务 |
 | `backend/app/services/projections/` | Workspace、Timeline、Inspector 投影组装 |
 | `backend/app/runtime/` | deterministic runtime、LangGraph runtime、自动回归 |
 | `backend/app/providers/` | Provider registry 与 LangChain 适配 |
+| `backend/app/tools/` | ToolProtocol、ToolRegistry、工具输入输出、错误结构、审计记录和审计引用等跨工具契约 |
 | `backend/app/workspace/` | 隔离工作区、文件工具、shell 工具 |
 | `backend/app/delivery/` | demo_delivery、git_auto_delivery、SCM 适配 |
+| `backend/tests/` | pytest 测试根目录，按 API、领域、服务、runtime、delivery、workspace 等行为边界分组 |
+| `backend/tests/api/` | FastAPI 路由、错误响应与 OpenAPI 契约测试 |
+| `backend/tests/db/` | 多 SQLite 绑定、SQLAlchemy 模型和迁移边界测试 |
+| `backend/tests/e2e/` | 后端 API/runtime 端到端测试，不启动浏览器 |
+| `backend/tests/regression/` | 发布候选前跨切片回归测试，不替代单切片测试 |
+| `backend/tests/tools/` | 抽象工具协议、注册表和跨工具契约测试 |
 | `frontend/src/api/` | API client、TanStack Query hooks、接口类型 |
 | `frontend/src/app/` | Router、QueryClient、全局 Provider、测试工具 |
 | `frontend/src/features/` | 以产品能力拆分的前端功能模块 |
 | `frontend/src/mocks/` | mock fixtures 与 mock handlers |
+| `frontend/src/pages/` | 路由级页面组合层，不承载可复用业务组件实现 |
+| `frontend/src/styles/` | 全局样式、基础 CSS 和主题变量，不承载组件私有状态 |
+| `frontend/src/**/__tests__/` | 前端就近单元测试和组件测试 |
+| `e2e/` | Playwright 工程配置、脚本与跨端浏览器测试项目 |
 | `e2e/tests/` | Playwright 跨端测试 |
+| `docs/api/` | API 文档补充说明和 OpenAPI 相关说明 |
+| `docs/architecture/` | 结构性架构说明，如目录结构、存储分层和运行拓扑 |
+| `docs/archive/` | 历史规格和历史设计参考，不作为当前实现依据 |
 | `docs/plans/implementation/` | 单个子任务的 Superpowers 实施计划 |
+| `docs/plans/function-one-platform/` | 功能一平台级分卷计划与子任务列表 |
+| `docs/specs/` | 当前有效规格文档，实施计划必须以这里和当前计划为依据 |
+| `pyproject.toml` | 后端依赖、pytest 配置与 Python 工程入口配置 |
+| `frontend/package.json` | 前端依赖和 `dev`、`build`、`test` 脚本 |
+| `e2e/package.json` | Playwright 跨端测试依赖和测试脚本 |
 
 <a id="b00"></a>
 
@@ -119,6 +155,8 @@ docs/
 - 执行技能：`superpowers:subagent-driven-development` 或 `superpowers:executing-plans`
 - 完成验证：`superpowers:verification-before-completion`
 
+`docs/plans/implementation/*.md` 是执行期下钻计划，可以在对应子任务开始时创建，不要求在当前总计划评审阶段预先存在。创建实施计划前，必须先核对总计划、对应分卷、三份当前 split specs 和本文件的执行规则；实施计划只能细化执行步骤、测试代码和命令，不能改变任务边界、规格语义、文件责任、事件口径或 API 契约。
+
 实施计划必须包含：
 - 文件列表
 - TDD 红绿步骤
@@ -126,6 +164,8 @@ docs/
 - 具体实现代码
 - 命令与预期输出
 - 完成前验证清单
+
+涉及 `backend/app/api/routes/*` 的实施计划还必须包含本切片 API 测试与 `/api/openapi.json` 断言，覆盖新增或修改的 path、method、请求 Schema、响应 Schema 和主要错误响应；V6.4 只做全局汇总回归，不替代本地 API 契约断言。
 
 ## 5. Git 边界
 
