@@ -56,11 +56,32 @@
 - `graph.db`
   承载 `GraphDefinition`、`GraphThread`、`GraphCheckpoint`、`GraphInterrupt` 以及执行图状态引用
 - `event.db`
-  承载领域事件日志、Narrative Feed 投影来源数据与审计记录
+  承载领域事件记录与 Narrative Feed 投影来源数据
+- `log.db`
+  承载平台级运行日志轻量索引、安全审计记录、日志文件位置引用、载荷摘要、裁剪状态与跨层关联标识
+
+功能一 V1 必须同时使用本地日志文件作为运行时观察载体：
+- `.runtime/logs/app.jsonl`
+  承载服务级运行日志
+- `.runtime/logs/runs/{run_id}.jsonl`
+  承载单次 run 的运行日志
+- `.runtime/logs/audit.jsonl`
+  承载安全审计日志的本地文件副本
+
+上述 `.runtime/logs` 表示平台后端服务的运行数据目录，不表示被操作项目的业务工作区目录。V1 本地部署时如果该目录落在平台仓库路径下，后端必须把该目录视为运行期私有数据，默认排除出项目文件索引、工作区工具扫描、代码变更 diff、Git 自动交付与交付结果统计。
+
+平台运行数据根目录必须可配置；未配置时默认使用平台服务当前运行目录下的 `.runtime`。后端启动时必须确保运行数据目录和日志子目录存在且可写；若目录无法创建或不可写，后端不得进入可接受用户命令的正常运行状态。
 
 该存储策略必须满足以下规则：
 - 不允许把全部领域对象、运行记录、执行图状态与事件流混入同一个 `SQLite` 文件
 - `graph.db` 只承载执行内核相关对象，不直接充当对前端暴露的产品级查询真源
+- `event.db` 记录可驱动产品投影和状态回放的领域事实
+- 本地 JSONL 日志文件记录平台运行观察事实与审计事实的运行时文本流
+- `log.db` 记录可查询的轻量索引、审计台账、文件位置、裁剪状态和关联标识
+- `event.db` 与 `log.db` 不得互相替代
+- `log.db` 中的日志记录不得反向作为 `PipelineRun`、`StageRun`、`ApprovalRequest`、`DeliveryRecord`、Narrative Feed 或 Inspector 的产品状态真源
+- 本地日志文件不得作为产品状态真源，也不得由前端直接读取
+- 本地日志文件不得作为 Agent、工具或交付适配器的默认可读业务上下文；只有诊断工具或后端日志查询能力可以按日志审计契约读取
 - 领域拆分必须服务于后续迁移到更重数据库时的平滑替换，而不是只为当前版本制造额外复杂度
 - 各库之间的边界以职责分离为目标，不要求当前版本过度追求数据库级分布式事务
 - `runtime.db` 不重复持有第二份规范 `Session` 实体；其会话相关数据通过 `session_id` 关联到 `PipelineRun`、`StageRun`、审批对象与运行记录
@@ -116,6 +137,7 @@
 - 把模板编译为固定业务主链对应的执行图定义
 - 管理 run 生命周期、中断点、检查点、暂停恢复与终止
 - 持久化阶段输入、阶段输出、结构化产物、控制条目与审批记录
+- 记录平台级运行日志、安全审计记录、工具执行诊断、模型调用诊断与系统错误诊断
 - 提供前端控制台所需的查询投影与实时更新能力
 - 管理工作区读取、代码修改、命令执行、测试运行与交付通道适配
 - 为功能二保留 `ChangeSet`、`ContextReference`、`PreviewTarget`、`DeliveryRecord` 的复用边界
@@ -124,12 +146,13 @@
 
 功能一后端采用以下基础结构：
 
-`FastAPI Gateway / Control Plane + LangGraph Agent Orchestration Plane + Projection / Event Plane + Workspace / Delivery Adapter`
+`FastAPI Gateway / Control Plane + LangGraph Agent Orchestration Plane + Projection / Event Plane + Observability / Audit Plane + Workspace / Delivery Adapter`
 
 架构边界如下：
 - `Gateway / Control Plane` 负责 REST API、会话管理、模板管理、Provider 管理、审批命令与查询聚合
 - `Agent Orchestration Plane` 负责执行图编译、节点执行、中断恢复、检查点持久化与阶段内 Agent 编排
 - `Projection / Event Plane` 负责把执行图事件翻译为领域事件、Narrative Feed 条目与查询投影
+- `Observability / Audit Plane` 负责记录运行日志、审计日志、诊断上下文、关联标识与日志查询投影
 - `Workspace & Delivery Adapter` 负责与代码仓库、测试环境和托管平台交互
 
 ### 4.1 系统模块划分
@@ -157,16 +180,19 @@
 7. `Projection & Event Translator`
 负责把执行图内部事件翻译成领域事件、Narrative Feed 条目、Inspector 投影与会话级状态摘要。
 
-8. `LLM Provider Adapter`
+8. `Log & Audit Service`
+负责统一采集、裁剪、关联、持久化和查询平台运行日志、安全审计记录、工具执行日志、模型调用日志、外部命令日志与错误诊断记录。
+
+9. `LLM Provider Adapter`
 负责统一封装模型供应商接入与切换逻辑。
 
-9. `Workspace & Tool Service`
+10. `Workspace & Tool Service`
 负责工作区隔离、文件读取、代码修改、命令执行、diff 生成与工具接口管理。
 
-10. `SCM & Delivery Adapter`
+11. `SCM & Delivery Adapter`
 负责封装本地 Git、远端托管平台、交付通道与 MR/PR 创建能力。
 
-11. `REST API + Query Layer`
+12. `REST API + Query Layer`
 负责暴露命令接口、查询接口、事件流接口与 OpenAPI 文档。
 
 ### 4.2 实施原则
@@ -182,6 +208,8 @@
   前端控制台只能通过命令接口、查询接口和事件流消费后端能力。
 - `工具统一抽象`
   文件系统、命令执行、分支准备和代码评审请求都必须通过统一工具协议暴露。
+- `日志审计独立建模`
+  运行日志、安全审计与诊断记录必须通过专门的日志审计契约采集和查询，不得散落为各模块私有文本输出。
 - `前后端解耦`
   前端定义交互语义，后端负责投影与载荷；双方不得在另一侧重复定义一套口径。
 
@@ -647,6 +675,170 @@ V1 运行环境必须满足以下约束：
 
 20. `PreviewTarget`
 表示可供前端查询的预览对象。V1 只定义对象和查询接口，不实现预览启动与热更新。
+
+### 5.5 平台日志审计对象
+
+21. `RunLogEntry`
+表示一次平台运行观察记录的结构化轻索引，用于后端排障、诊断分析、性能分析与执行复盘，至少包含：
+- `log_id`
+- `session_id`
+- `run_id`
+- `stage_run_id`
+- `approval_id`
+- `delivery_record_id`
+- `graph_thread_id`
+- `source`
+- `category`
+- `level`
+- `message`
+- `log_file_ref`
+- `line_offset`
+- `line_number`
+- `log_file_generation`
+- `payload_ref`
+- `payload_excerpt`
+- `payload_size_bytes`
+- `redaction_status`
+- `correlation_id`
+- `trace_id`
+- `span_id`
+- `parent_span_id`
+- `created_at`
+
+`RunLogEntry.category` 在功能一 V1 中至少支持：
+- `runtime`
+- `agent`
+- `tool`
+- `model`
+- `workspace`
+- `delivery`
+- `api`
+- `security`
+- `error`
+
+`RunLogEntry.level` 在功能一 V1 中至少支持：
+- `debug`
+- `info`
+- `warning`
+- `error`
+- `critical`
+
+`RunLogEntry` 必须满足以下规则：
+- `session_id`、`run_id`、`stage_run_id`、`approval_id`、`delivery_record_id`、`graph_thread_id` 允许按上下文为空，但凡运行上下文已经存在，必须写入对应关联标识
+- `message` 必须是便于排障阅读的短文本，不得承载完整大载荷
+- 完整日志原文必须优先写入本地 JSONL 日志文件，并通过 `log_file_ref` 与 `line_offset` 建立定位关系
+- `log_file_ref` 必须是相对平台运行数据目录的稳定文件路径，不得保存本机绝对路径作为主引用
+- `line_offset` 表示该 JSONL 记录在目标日志文件中的起始字节偏移；`line_number` 表示该记录在目标日志文件中的行号
+- `log_file_generation` 表示日志文件轮转后的代际或文件名标识；未发生轮转时允许为空
+- 命令输出、模型请求响应、工具输入输出与异常堆栈必须先裁剪或摘要化；V1 允许只在本地日志文件中保留裁剪后的文本，不要求把完整载荷写入 `log.db`
+- `payload_ref` 用于指向额外结构化载荷或后续日志存储位置；V1 不要求为每条运行日志创建独立 `LogPayload`
+- 日志记录必须追加写入，不得通过更新原记录改写历史事实；如需修正分类或说明，必须追加新的修正日志
+- 日志记录不得作为产品状态推进的输入，不得驱动 `PipelineRun.status`、`StageRun.status`、审批状态或交付状态流转
+
+22. `AuditLogEntry`
+表示一次平台审计记录，用于追踪用户动作、系统控制动作、安全敏感动作、配置变更与交付动作，至少包含：
+- `audit_id`
+- `actor_type`
+- `actor_id`
+- `action`
+- `target_type`
+- `target_id`
+- `session_id`
+- `run_id`
+- `stage_run_id`
+- `approval_id`
+- `delivery_record_id`
+- `request_id`
+- `correlation_id`
+- `result`
+- `reason`
+- `metadata_ref`
+- `created_at`
+
+`AuditLogEntry.actor_type` 在功能一 V1 中至少支持：
+- `user`
+- `system`
+- `agent`
+- `tool`
+
+`AuditLogEntry.result` 在功能一 V1 中至少支持：
+- `accepted`
+- `rejected`
+- `succeeded`
+- `failed`
+- `blocked`
+
+`AuditLogEntry` 必须覆盖以下动作：
+- 会话创建、首条需求提交、澄清回复提交
+- run 创建、暂停、恢复、终止、重新尝试与运维重启
+- 审批提交、审批拒绝、审批因暂停或状态不匹配被拒绝
+- 模板创建、覆盖、另存、删除与运行快照固化
+- Provider 创建、修改与凭据引用变更
+- 项目级 `DeliveryChannel` 修改、校验与运行交付快照固化
+- 工作区写入、文件编辑、命令执行、测试执行、Git 分支创建、提交创建与 MR/PR 创建
+- 权限、凭据、路径、外部服务与交付相关的安全敏感失败
+
+`AuditLogEntry` 必须满足以下规则：
+- 审计记录必须追加写入，不得物理覆盖或静默删除
+- 审计记录必须保存动作主体、动作目标、动作结果与原因摘要
+- 对用户可触发的命令接口，后端必须为成功、失败与被拒绝三类结果写入审计记录
+- 对系统自动执行的高影响动作，后端必须以 `actor_type = system`、`agent` 或 `tool` 写入审计记录
+- 审计记录不得替代领域对象；例如审批提交仍必须创建 `ApprovalDecision`，审计记录只证明该命令何时由谁触发以及结果如何
+
+23. `LogPayload`
+表示日志或审计记录可选引用的结构化载荷摘要或后续存储位置，至少包含：
+- `payload_id`
+- `payload_type`
+- `storage_ref`
+- `summary`
+- `content_hash`
+- `redaction_status`
+- `size_bytes`
+- `created_at`
+
+`LogPayload.payload_type` 在功能一 V1 中至少支持：
+- `tool_input`
+- `tool_output`
+- `model_request`
+- `model_response`
+- `command_output`
+- `exception`
+- `http_request`
+- `http_response`
+- `audit_metadata`
+
+`LogPayload.redaction_status` 在功能一 V1 中至少支持：
+- `not_required`
+- `redacted`
+- `blocked`
+
+`LogPayload` 必须满足以下规则：
+- 载荷写入前必须完成敏感信息裁剪或阻断
+- 明文凭据、访问令牌、API Key、私钥、Cookie、授权头与本机敏感路径不得进入可查询日志载荷
+- 当载荷因安全策略不能保存时，必须写入 `redaction_status = blocked` 的占位记录，并保留阻断原因摘要
+- 大文本、命令输出和模型响应必须支持长度上限与截断标记，不得无界写入 SQLite
+- `content_hash` 用于辅助完整性校验和重复排查，不作为安全签名替代
+- V1 的 `LogPayload` 是可选扩展对象；基础运行日志不得依赖 `LogPayload` 才能被本地检查
+
+24. `TraceContext`
+表示跨 API、run、stage、graph node、tool、model call 与 delivery action 的关联上下文，至少包含：
+- `trace_id`
+- `correlation_id`
+- `request_id`
+- `session_id`
+- `run_id`
+- `stage_run_id`
+- `approval_id`
+- `delivery_record_id`
+- `graph_thread_id`
+- `created_at`
+
+`TraceContext` 必须满足以下规则：
+- 每个外部 API 请求必须具备 `request_id`
+- 每个 `PipelineRun` 必须具备贯穿该 run 的 `trace_id`
+- 同一用户动作触发的领域事件、运行日志、审计日志与查询投影更新必须共享可追踪的 `correlation_id`
+- 工具调用、模型调用、命令执行和交付动作必须继承当前 `trace_id` 与 `correlation_id`
+- 当后台恢复、运维重启或重新尝试创建新的执行上下文时，必须记录新旧 `trace_id` 与 `run_id` 的关联关系
 
 ## 6. 模板编译、执行图与运行生命周期
 
@@ -1164,10 +1356,13 @@ Inspector 投影必须满足以下总规则：
 - `GET /api/sessions/{sessionId}/workspace`
 - `GET /api/runs/{runId}`
 - `GET /api/runs/{runId}/timeline`
+- `GET /api/runs/{runId}/logs`
 - `GET /api/stages/{stageRunId}/inspector`
+- `GET /api/stages/{stageRunId}/logs`
 - `GET /api/control-records/{controlRecordId}`
 - `GET /api/delivery-records/{deliveryRecordId}`
 - `GET /api/preview-targets/{previewTargetId}`
+- `GET /api/audit-logs`
 
 其中：
 - `GET /api/sessions/{sessionId}/workspace` 返回完整会话工作台视图，而不是 raw graph state
@@ -1179,6 +1374,20 @@ Inspector 投影必须满足以下总规则：
 - `GET /api/control-records/{controlRecordId}` 用于控制型条目的详情查看
 - `GET /api/control-records/{controlRecordId}` 返回的详情不得退化为仅摘要文本；必须包含与该控制条目直接相关的原始上下文、过程记录、结果与引用
 - `GET /api/delivery-records/{deliveryRecordId}` 必须返回完整交付结果详情，不得只返回最终摘要
+- `GET /api/runs/{runId}/logs` 返回该 run 关联的运行日志分页结果，不返回其他 run 的日志
+- `GET /api/stages/{stageRunId}/logs` 返回该阶段关联的运行日志分页结果，不返回同一 run 中其他阶段的日志
+- `GET /api/audit-logs` 返回平台审计日志分页结果，必须支持按动作、主体、目标、run、时间范围与结果过滤
+
+日志与审计查询接口必须满足以下规则：
+- `GET /api/runs/{runId}/logs`、`GET /api/stages/{stageRunId}/logs` 与 `GET /api/audit-logs` 是后端诊断与本地运维只读接口，不属于前端工作台主路径依赖
+- 日志分页必须使用稳定游标，不得只依赖 offset 扫描
+- 日志分页的稳定顺序必须基于 `created_at + log_id` 或等价全局稳定顺序
+- `GET /api/runs/{runId}/logs` 与 `GET /api/stages/{stageRunId}/logs` 至少支持 `level`、`category`、`source`、`since`、`until`、`cursor`、`limit` 查询参数
+- `GET /api/audit-logs` 至少支持 `actor_type`、`action`、`target_type`、`target_id`、`run_id`、`result`、`since`、`until`、`cursor`、`limit` 查询参数
+- 日志查询响应必须返回 `entries`、`next_cursor`、`has_more` 与查询条件回显
+- 日志查询响应不得返回完整大载荷，只能返回 `message`、`payload_excerpt`、`payload_size_bytes`、`redaction_status`、`log_file_ref` 与 `line_offset`
+- 日志查询接口不得作为 Narrative Feed、Inspector、审批块或交付结果投影的依赖接口
+- V1 不要求提供完整日志载荷详情查询接口；后续平台运维能力可以在权限、脱敏与归档策略成熟后补充 `GET /api/log-payloads/{payloadId}` 或等价接口
 
 ### 9.4 API 文档契约
 
@@ -1191,7 +1400,7 @@ Inspector 投影必须满足以下总规则：
 并满足以下规则：
 - `GET /api/openapi.json` 必须返回与当前服务实现一致的 machine-readable OpenAPI 文档
 - `GET /api/docs` 必须提供 human-readable API 文档页面
-- OpenAPI 文档必须覆盖功能一全部核心 REST 接口，包括 `Project`、`Session`、`PipelineTemplate`、`Provider`、项目级 `DeliveryChannel`、`PipelineRun` 生命周期、审批、控制条目、Inspector、交付结果与预览目标查询
+- OpenAPI 文档必须覆盖功能一全部核心 REST 接口，包括 `Project`、`Session`、`PipelineTemplate`、`Provider`、项目级 `DeliveryChannel`、`PipelineRun` 生命周期、审批、控制条目、Inspector、交付结果、预览目标查询、运行日志轻查询与审计日志查询
 - OpenAPI 文档必须覆盖 `GET /api/sessions/{sessionId}/events/stream` 的事件流端点及其事件载荷结构
 - API 文档必须定义请求参数、请求体 Schema、响应体 Schema、枚举值、通用错误响应与关键接口示例
 - 运行接口与 OpenAPI 文档必须同版本交付，不允许文档落后于已发布接口
@@ -1288,7 +1497,7 @@ SSE 事件至少包含：
 - `GraphResumed`
 - `GraphFailed`
 
-执行图内部事件用于驱动内部执行与审计，不直接作为前端产品事件暴露。
+执行图内部事件用于驱动内部执行、内部追踪与日志审计采集，不直接作为前端产品事件暴露。
 
 ### 11.2 对外领域事件
 
@@ -1327,14 +1536,170 @@ SSE 事件至少包含：
 - 事件既服务于查询投影，也服务于前端增量更新
 - 事件必须能映射到 Narrative Feed 条目或状态变化
 - 审批结果与澄清结果必须进入同一条会话事件流
+- 对外领域事件不得被运行日志或审计日志替代；同一动作需要同时形成产品事实和审计事实时，必须分别写入领域事件与审计日志
 
-## 12. 工作区、工具与交付适配
+## 12. 平台日志审计契约
+
+功能一 V1 的日志审计能力定位为平台级运行治理能力，服务于后端排障、运行复盘、安全追踪、审计问责、容量与性能分析、后续运维面板和系统稳定性演进。
+
+日志审计能力必须满足以下总边界：
+- 日志审计不是 Narrative Feed；Narrative Feed 只呈现面向用户的主链路叙事与高信号执行投影
+- 日志审计不是 Inspector；Inspector 展示产品对象的完整输入、过程、输出、引用与指标，日志审计展示平台运行观察记录与审计记录
+- 日志审计不是领域事件；领域事件记录产品事实并驱动投影，日志审计记录运行观察事实、安全事实与诊断上下文
+- 日志审计不是 `LangGraph` 原始事件直通；底层事件进入日志前必须经过平台统一采集、分类、裁剪与关联
+- 日志审计不得成为执行推进条件，不得被 Agent 当作业务上下文直接读取并影响阶段产物
+- 功能一 V1 的运行时观察主载体是本地 JSONL 日志文件；`log.db` 只承担轻量索引、审计台账与关联元数据职责
+- 功能一 V1 不提供前端全量日志控制台，不实现复杂全文检索，不要求完整日志载荷查询 API
+
+### 12.1 日志分类与采集范围
+
+日志文件写入规则如下：
+- 服务级日志必须写入 `.runtime/logs/app.jsonl`
+- run 级日志必须写入 `.runtime/logs/runs/{run_id}.jsonl`
+- 安全审计日志必须写入 `.runtime/logs/audit.jsonl`，并同步写入 `AuditLogEntry`
+- 每行日志必须是一个完整 JSON 对象，不得跨行写入同一条日志
+- 每行日志必须至少包含 `schema_version`、`log_id`、`created_at`、`level`、`category`、`source`、`message`、`request_id`、`trace_id`、`correlation_id`、`span_id`、`parent_span_id`、`duration_ms`、`error_code`、`redaction_status` 以及当前可用的产品对象标识
+- 每行日志中的产品对象标识至少包括当前可用的 `session_id`、`run_id`、`stage_run_id`、`approval_id`、`delivery_record_id` 与 `graph_thread_id`
+- `schema_version` 在 V1 固定为 `1`；后续变更 JSONL 字段含义时必须递增版本，不得静默改变既有字段语义
+- `created_at` 必须使用统一时区和可排序时间格式；`log_id` 必须全局唯一，并能与 `created_at` 共同形成稳定排序键
+- 文件写入失败不得静默吞掉；后端必须至少向服务级错误通道记录日志写入失败，并避免影响已经持久化的领域状态
+- 运行日志文件写入失败不得阻断已经完成的领域事务；安全审计日志写入 `AuditLogEntry` 失败时，后端必须拒绝或回滚对应高影响动作，并返回明确错误
+- 安全审计 JSONL 文件副本写入失败但 `AuditLogEntry` 已持久化时，后端必须追加服务级错误日志，并在审计记录中保留文件副本失败标记或等价元数据
+- 普通运行日志写入本地文件成功但 `log.db` 轻量索引写入失败时，不得阻断已经完成的领域事务，但必须追加服务级错误日志并保留可诊断线索
+- 审计索引或审计台账写入失败时，必须按安全审计失败处理，不得降级为普通运行日志失败
+
+后端必须统一采集以下运行日志：
+- API 请求进入、参数校验失败、响应错误与异常返回
+- run 创建、图编译、线程启动、节点执行、中断、恢复、暂停、终止、失败与完成
+- 阶段开始、阶段更新、阶段完成、阶段失败与阶段重试
+- Agent 调用、模型请求、模型响应、结构化输出解析、模型错误与重试
+- 工具调用、工具输入摘要、工具输出摘要、工具错误与工具耗时
+- 工作区文件读写、搜索、diff 生成、命令执行、测试执行与命令输出摘要
+- 交付通道读取、配置校验、分支准备、提交创建、推送、MR/PR 创建与交付失败
+- 后台恢复、运维重启、旧 run 终态确认、新 run 创建与新旧运行关联
+- 安全策略阻断、敏感信息裁剪、凭据不可用、路径越界、权限拒绝与外部服务鉴权失败
+
+后端必须统一采集以下审计日志：
+- 所有用户可触发命令接口的接受、拒绝、成功与失败结果
+- 所有会改变模板、Provider、交付配置、会话状态、run 状态、审批状态、工作区内容或交付目标的动作
+- 所有系统自动执行的高影响动作，包括文件写入、命令执行、Git 写操作与远端交付动作
+- 所有安全敏感失败和凭据相关动作
+
+日志采集必须满足以下规则：
+- 运行日志记录“系统发生了什么、在哪里发生、耗时多久、失败原因是什么”
+- 审计日志记录“谁或什么主体对哪个目标执行了什么动作、系统是否接受、结果是什么”
+- 同一动作可以同时产生领域事件、运行日志和审计日志，但三者职责必须分离
+- 低层调试日志可以裁剪或降采样，高影响审计日志不得被采样丢弃
+- 工具、模型、命令和交付适配器不得绕过 `Log & Audit Service` 自行写散落日志
+- `log.db` 中的 `RunLogEntry` 可以只保存 warning、error、critical、审计关联、阶段边界、工具调用摘要、模型调用摘要与交付关键动作；debug 级细节允许只保存在本地 JSONL 文件中
+- 日志采集不得扩大功能一 V1 的产品范围；日志文件、日志索引与审计记录只服务运行治理、诊断和追踪，不作为前端主功能或用户业务产物
+
+### 12.2 关联标识与可追踪性
+
+日志审计必须建立跨层关联能力。
+
+关联规则如下：
+- 每个外部 HTTP 请求必须生成或继承 `request_id`
+- 每个 `PipelineRun` 必须生成贯穿运行生命周期的 `trace_id`
+- 同一用户动作触发的命令处理、领域事件、运行日志、审计日志、SSE 增量与查询投影更新必须共享 `correlation_id`
+- 每个工具调用、模型调用、命令执行和交付动作必须具备 `span_id`，并通过 `parent_span_id` 关联到上游 stage、graph node 或 command
+- 所有可映射到产品对象的日志必须写入可用的 `session_id`、`run_id`、`stage_run_id`、`approval_id`、`delivery_record_id` 或等价目标标识
+- 运行失败、终止、重试与运维重启必须能通过日志审计链路定位到直接失败点、上游触发点与后续处理结果
+
+### 12.3 安全、裁剪与保留策略
+
+日志审计必须默认安全。
+
+敏感信息规则如下：
+- 明文凭据、API Key、访问令牌、私钥、Cookie、授权头、系统环境密钥与用户私密配置不得写入可查询日志
+- 模型请求与响应进入日志前必须经过敏感信息裁剪；裁剪后仍可能泄露敏感内容的载荷必须阻断保存
+- 命令输出、测试输出和异常堆栈必须支持长度上限、截断标记与敏感片段裁剪
+- 本地绝对路径可以在开发期用于排障，但必须通过字段标记其敏感级别；后续多项目和多用户场景不得把本机敏感路径直接暴露给无关主体
+- 日志载荷必须保存裁剪状态，查询方必须能区分完整载荷、裁剪载荷与被阻断载荷
+- 字段名命中 `api_key`、`token`、`secret`、`password`、`authorization`、`cookie`、`private_key`、`credential` 或等价敏感含义时，字段值必须阻断写入日志
+- 模型输入、模型输出、工具输入、工具输出和命令输出必须先生成摘要，再按长度上限写入裁剪后片段
+- 路径、仓库地址、分支名、提交哈希与 MR/PR 链接可写入日志，但必须标记敏感级别；后续权限模型不得把这些字段直接暴露给无关主体
+
+保留策略规则如下：
+- V1 必须提供按时间和 run 维度清理本地运行日志文件与 `log.db` 运行日志索引的内部能力，避免运行数据无界增长
+- 审计日志的保留周期必须长于普通运行日志；V1 不实现复杂归档系统，但不得把审计日志和普通 debug 日志使用同一清理策略
+- 清理运行日志不得删除领域对象、领域事件、阶段产物、审批记录或交付记录
+- 当某条日志被清理而 Inspector 或领域对象仍引用其摘要时，引用必须降级为“日志已过保留期”或等价稳定状态，不得导致产品查询失败
+- 本地日志文件必须支持按大小或日期轮转；轮转后的文件命名必须保留可排序时间或 run 标识
+- 清理优先级必须为：debug 运行日志先于 info 运行日志，普通运行日志先于 error 与 critical 日志，运行日志先于审计日志
+- 审计日志、审计索引和高影响动作记录不得和普通运行日志使用同一自动清理阈值
+
+### 12.4 与 Inspector、Narrative Feed 和领域事件的边界
+
+日志审计与产品投影必须遵守以下边界：
+- Narrative Feed 的条目只能来自领域对象、领域事件和查询投影，不得直接读取 `RunLogEntry` 拼装
+- Inspector 中的完整阶段过程必须来自标准化阶段产物、过程记录、稳定引用或领域对象，不得只存在于日志
+- Inspector 可以展示与当前对象直接相关的 `log_id`、日志摘要、裁剪片段或日志查询锚点
+- 当日志与 Inspector 对同一事实存在表达差异时，以领域对象、阶段产物和 Inspector 投影为产品语义准绳；日志只用于诊断差异来源
+- 领域事件必须可独立支撑产品状态回放；日志审计必须可独立支撑运行诊断和审计复盘
+
+### 12.5 日志审计查询投影
+
+`RunLogEntryProjection` 至少包含：
+- `log_id`
+- `session_id`
+- `run_id`
+- `stage_run_id`
+- `approval_id`
+- `delivery_record_id`
+- `graph_thread_id`
+- `source`
+- `category`
+- `level`
+- `message`
+- `log_file_ref`
+- `line_offset`
+- `line_number`
+- `log_file_generation`
+- `payload_ref`
+- `payload_excerpt`
+- `payload_size_bytes`
+- `redaction_status`
+- `correlation_id`
+- `trace_id`
+- `span_id`
+- `created_at`
+
+`AuditLogEntryProjection` 至少包含：
+- `audit_id`
+- `actor_type`
+- `actor_id`
+- `action`
+- `target_type`
+- `target_id`
+- `session_id`
+- `run_id`
+- `stage_run_id`
+- `approval_id`
+- `delivery_record_id`
+- `request_id`
+- `result`
+- `reason`
+- `metadata_ref`
+- `metadata_excerpt`
+- `correlation_id`
+- `created_at`
+
+日志审计查询投影必须满足以下规则：
+- 默认按 `created_at` 与稳定游标倒序返回，便于排障查看最近记录
+- 必须支持按 run 和 stage 聚焦查询，避免前端或诊断工具在全局日志中自行筛选
+- 必须返回本地日志文件定位信息、裁剪状态、载荷大小和摘要，不返回完整大载荷
+- 必须支持通过 `correlation_id` 查看同一动作相关的领域事件、运行日志和审计日志关联线索
+- 查询投影必须是只读视图，不提供修改、重放或删除日志的前端命令
+- 全文检索、错误聚合、日志趋势统计、trace 可视化和运维审计控制台属于后续平台运维能力，不属于功能一 V1 必需实现范围
+
+## 13. 工作区、工具与交付适配
 
 后端必须通过统一工具接口暴露能力，分为两类。
 
 工具协议必须先于具体工具实例稳定。`ToolProtocol` 至少定义工具名称、类别、输入 Schema、结果载荷、错误结构、审计引用和可绑定的工具描述。LangGraph runtime、LangChain Provider adapter 与后续交付适配器只能依赖该抽象协议和工具注册契约；不得直接绑定尚未实现的具体 delivery tool 实例。
 
-### 12.1 Workspace Tools
+### 13.1 Workspace Tools
 
 V1 仅实现以下六个核心工具：
 - `read_file`
@@ -1344,7 +1709,7 @@ V1 仅实现以下六个核心工具：
 - `search`
 - `shell`
 
-### 12.2 SCM / Delivery Tools
+### 13.2 SCM / Delivery Tools
 
 V1 仅实现以下五个核心工具：
 - `prepare_branch`
@@ -1362,7 +1727,13 @@ V1 仅实现以下五个核心工具：
 - 错误信息
 - 审计记录
 
-## 13. 为功能二预留的接口边界
+所有工具调用必须接入日志审计契约：
+- 每次工具调用必须产生运行日志，记录工具名称、输入摘要、输出摘要、耗时、结果状态与错误摘要
+- 每次会造成工作区、Git、远端交付或配置状态变化的工具调用必须产生审计日志
+- 工具结果中的 `审计记录` 字段必须引用 `AuditLogEntry` 或其稳定引用，不得只是自由文本
+- 工具日志必须继承当前 `trace_id`、`correlation_id` 与 `span_id`
+
+## 14. 为功能二预留的接口边界
 
 功能一后端必须保留以下复用边界：
 
@@ -1381,7 +1752,7 @@ V1 仅定义对象和查询接口，不实现预览启动与热更新。
 4. `DeliveryRecord`
 统一文本需求驱动与未来页面交互驱动的交付出口。
 
-## 14. 后端验收标准
+## 15. 后端验收标准
 
 功能一后端至少满足以下验收标准：
 
@@ -1400,4 +1771,12 @@ V1 仅定义对象和查询接口，不实现预览启动与热更新。
 13. 能提供与运行接口一致的 `OpenAPI` 文档 JSON 与可读 API 文档页。
 14. 当 `delivery_mode = demo_delivery` 时，能生成仅用于展示的分支信息与提交说明预览，而不执行真实 Git 写操作。
 15. 当 `delivery_mode = git_auto_delivery` 时，能自动创建分支、创建提交并发起 MR/PR。
-16. 能为功能二保留 `ChangeSet`、`ContextReference`、`PreviewTarget`、`DeliveryRecord` 的复用边界。
+16. 能把服务级、run 级与审计日志写入本地 JSONL 日志文件，并支持按时间或大小轮转。
+17. 能通过 `log.db` 记录运行日志轻量索引、审计记录、日志文件位置、载荷摘要、裁剪状态与跨层关联标识，并提供按 run、stage、动作、主体、结果与时间范围过滤的只读轻查询能力。
+18. 能对日志文件内容、日志索引与审计记录执行敏感信息裁剪、阻断与保留策略控制，且日志审计记录不得替代领域事件、Narrative Feed、Inspector 或产品状态真源。
+19. 能确保 `.runtime/logs` 属于平台运行数据目录，不被工作区工具、代码 diff、Git 自动交付或交付结果统计当作目标项目内容处理。
+20. 能在 `RunLogEntry` 中通过 `log_file_ref`、`line_offset`、`line_number` 与 `log_file_generation` 定位到本地 JSONL 日志原文，并在日志轮转后保持定位语义清晰。
+21. 能在安全审计记录写入失败时拒绝或回滚高影响动作；普通运行日志写入失败不得静默吞掉，也不得破坏已持久化的领域状态。
+22. 能在启动时校验平台运行数据目录和日志子目录可用；目录不可用时不得进入可接受用户命令的正常运行状态。
+23. 能把日志诊断查询接口保持为后端诊断与本地运维只读能力，不作为前端工作台主路径依赖。
+24. 能为功能二保留 `ChangeSet`、`ContextReference`、`PreviewTarget`、`DeliveryRecord` 的复用边界。
