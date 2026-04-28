@@ -263,7 +263,8 @@ V1 运行环境必须满足以下约束：
 - 当 `delivery_mode = git_auto_delivery` 时，`scm_provider_type`、`repository_identifier`、`default_branch`、`code_review_request_type` 与 `credential_ref` 都必须具备有效值，且 `credential_status = ready` 才能使 `readiness_status = ready`
 - `readiness_status` 是项目级交付配置对外暴露的统一就绪状态；审批阻塞判断与设置页状态展示都必须使用同一状态语义
 - `readiness_message` 用于返回当前配置的主阻塞原因或校验结果摘要
-- 当前 run 固化的 `delivery_channel_snapshot_ref` 必须至少包含 `delivery_mode`、`scm_provider_type`、`repository_identifier`、`default_branch`、`code_review_request_type` 与 `credential_ref`
+- 当前 run 固化的 `delivery_channel_snapshot_ref` 必须包含 `delivery_mode`、`scm_provider_type`、`repository_identifier`、`default_branch`、`code_review_request_type`、`credential_ref`、`credential_status`、`readiness_status`、`readiness_message` 与 `last_validated_at`
+- 项目级校验接口响应中的动作时间字段使用 `validated_at`；一旦写入交付快照，字段名统一固化为 `last_validated_at`
 
 2. `Session`
 表示项目下的一次需求会话，至少包含：
@@ -490,7 +491,8 @@ V1 运行环境必须满足以下约束：
 - 每次运行开始前都必须从模板快照编译出一份 `GraphDefinition`
 - 交付通道快照不在 run 启动时固化，而是在最终人工审批通过后、进入 `Delivery Integration` 前固化
 - 运行期间实际读取的角色绑定、Provider 绑定和自动回归配置必须来自模板快照
-- `Delivery Integration` 阶段实际读取的 `delivery_mode`、仓库标识、默认分支与代码评审请求类型必须来自 `delivery_channel_snapshot_ref`
+- `Delivery Integration` 阶段实际读取的 `delivery_mode`、仓库标识、默认分支、代码评审请求类型、凭据状态与配置就绪状态必须来自 `delivery_channel_snapshot_ref`
+- `delivery_channel_snapshot_ref` 必须指向 runtime 侧正式持久化的 `DeliveryChannelSnapshot` 或等价结构化快照记录，不得只是无所有权的 opaque string
 - 模板快照、执行图定义与交付通道快照一旦绑定到某次运行，不得再被运行外部修改
 - `trigger_source` 在 V1 只允许：`initial_requirement`、`retry`、`ops_restart`
 - 会话首个 run 的 `trigger_source` 必须为 `initial_requirement`
@@ -713,8 +715,8 @@ V1 运行环境必须满足以下约束：
 - 回退与重试必须记录 `RunControlRecord`
 - 自动回归循环结束且得到稳定评审产物后，创建 `ApprovalRequest(type=code_review_approval)`
 - 创建审批请求后，当前 `code_review` 的 `StageRun.status` 必须置为 `waiting_approval`
-- 当当前项目 `delivery_mode = git_auto_delivery` 时，审批通过前必须校验交付配置与凭据是否达到 `ready`；通过后先固化 `delivery_channel_snapshot_ref`，再进入 `Delivery Integration`
-- 当当前项目 `delivery_mode = demo_delivery` 时，不执行上述交付配置阻塞校验；审批通过后直接进入 `Delivery Integration`
+- 当当前项目 `delivery_mode = git_auto_delivery` 时，审批通过前必须校验交付配置与凭据是否达到 `ready`；通过时必须在同一服务事务中完成审批决策、顶层 `approval_result` 事件、完整 `delivery_channel_snapshot_ref` 固化与进入 `Delivery Integration` 的执行恢复，外部不得观察到已通过审批但交付快照尚未固化的中间态
+- 当当前项目 `delivery_mode = demo_delivery` 时，不执行上述交付配置阻塞校验；审批通过后仍必须在同一公开语义中固化交付快照，再进入 `Delivery Integration`
 - 审批拒绝后，记录拒绝理由并回退到 `Code Generation`
 
 ### 6.6 Delivery Integration 生命周期
@@ -723,7 +725,7 @@ V1 运行环境必须满足以下约束：
 - 汇总最终变更结果、测试结论与评审结论
 - 读取当前 run 已固化的交付通道快照信息
 - 当 `delivery_mode = demo_delivery` 时，仅生成用于演示的交付说明、分支信息展示和 `commit_message_preview`，不得执行真实提交、推送或 MR/PR 创建
-- 当 `delivery_mode = git_auto_delivery` 时，必须执行真实交付流程：`prepare_branch -> create_commit -> push_branch -> create_code_review_request`
+- 当 `delivery_mode = git_auto_delivery` 时，必须执行真实交付流程：`read_delivery_channel -> prepare_branch -> create_commit -> push_branch -> create_code_review_request`
 - 按交付策略生成 MR/PR 信息或交付描述
 - 产出 `DeliveryRecord`
 
@@ -954,7 +956,7 @@ Inspector 投影必须满足以下总规则：
 - 前端不负责为 Inspector 回填关键事实；与当前对象直接相关的关键原始信息必须已经包含在 Inspector 投影或其稳定引用中
 - 上述规则不等同于直接暴露 `LangGraph` 原始状态、原始 thread 对象或原始节点事件流；执行内核内部状态仍需先转换为领域层稳定记录后才能进入 Inspector 投影
 
-`StageInspectorProjection` 至少应按以下分组提供内容：
+`StageInspectorProjection` 必须至少按以下分组提供内容：
 - `identity`
   至少包含阶段标识、所属 run、状态、开始时间、结束时间
 - `input`
@@ -968,7 +970,7 @@ Inspector 投影必须满足以下总规则：
 - `metrics`
   至少包含适用的全量量化指标
 
-`ControlItemInspectorProjection` 至少应按以下分组提供内容：
+`ControlItemInspectorProjection` 必须至少按以下分组提供内容：
 - `identity`
   至少包含控制条目标识、所属 run、控制类型与时间信息
 - `input`
@@ -982,7 +984,7 @@ Inspector 投影必须满足以下总规则：
 - `metrics`
   至少包含适用的全量量化指标
 
-`DeliveryResultDetailProjection` 至少应按以下分组提供内容：
+`DeliveryResultDetailProjection` 必须至少按以下分组提供内容：
 - `identity`
   至少包含交付结果标识、所属 run 与时间信息
 - `input`
@@ -1124,7 +1126,7 @@ Inspector 投影必须满足以下总规则：
 - 新需求输入
 - 澄清回复
 
-当消息语义为 `new_requirement` 时，只允许在 `Session.status = draft` 且 `current_run_id = null` 时调用；后端必须基于当前 `selected_template_id` 创建 `PipelineRun`、模板快照与 `GraphDefinition`，并进入 `requirement_analysis`。
+当消息语义为 `new_requirement` 时，只允许在 `Session.status = draft` 且 `current_run_id = null` 时调用；后端必须在同一服务事务中基于当前 `selected_template_id` 创建 `PipelineRun`、模板快照、`GraphDefinition`、首条消息事件与初始 `requirement_analysis` StageRun。
 
 当消息语义为 `clarification_reply` 时，只允许在当前会话处于 `waiting_clarification` 且当前阶段为 `requirement_analysis` 时调用；后端必须把补充信息回写到当前澄清中断并恢复同一个 `GraphThread`。
 
@@ -1145,7 +1147,7 @@ Inspector 投影必须满足以下总规则：
 - `POST /api/approvals/{approvalId}/reject`
 
 其中：
-- `POST /api/sessions/{sessionId}/runs` 对应显式重新尝试，不对应暂停后的继续执行
+- `POST /api/sessions/{sessionId}/runs` 对应显式重新尝试，不对应暂停后的继续执行；后端必须确认旧 run 的 `GraphThread` 已处于终态，创建新的 `PipelineRun` 与新的 `GraphThread`，不得恢复或复用旧 `GraphThread`
 - `POST /api/runs/{runId}/pause` 必须暂停当前 `GraphThread` 并保存可恢复 checkpoint
 - `POST /api/runs/{runId}/resume` 必须从最近 checkpoint 恢复同一个 `GraphThread`；若该 run 在暂停前停留于审批等待，则恢复后必须重新进入同一个 `waiting_approval` 检查点
 - `POST /api/approvals/{approvalId}/approve` 与 `POST /api/approvals/{approvalId}/reject` 在 run 未暂停时，必须通过恢复对应 `GraphInterrupt` 来继续执行图
@@ -1329,6 +1331,8 @@ SSE 事件至少包含：
 ## 12. 工作区、工具与交付适配
 
 后端必须通过统一工具接口暴露能力，分为两类。
+
+工具协议必须先于具体工具实例稳定。`ToolProtocol` 至少定义工具名称、类别、输入 Schema、结果载荷、错误结构、审计引用和可绑定的工具描述。LangGraph runtime、LangChain Provider adapter 与后续交付适配器只能依赖该抽象协议和工具注册契约；不得直接绑定尚未实现的具体 delivery tool 实例。
 
 ### 12.1 Workspace Tools
 

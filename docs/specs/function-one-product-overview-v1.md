@@ -231,7 +231,7 @@
 
 职责：
 - 审查代码变更、测试结果、测试缺口与方案一致性
-- 输出评审报告、问题列表、回退建议与风险判断
+- 输出评审报告、问题列表、回退目标判断与风险判断
 
 边界：
 - 评审阶段允许先进行自动回归与返修循环
@@ -350,7 +350,7 @@
 9. 阶段产物与控制产物可被查询、展示、回看与追溯。
 10. 最终交付结果能够关联需求、方案、代码、测试与评审结论。
 11. 系统支持 `demo_delivery` 与 `git_auto_delivery` 两类交付模式，并能对平台自身仓库完成至少一次真实端到端演示。
-12. 支持在项目级配置默认 `DeliveryChannel`，并在最终人工审批通过后、进入 `Delivery Integration` 前固化为交付快照；该配置至少覆盖 `delivery_mode`，并在 `delivery_mode = git_auto_delivery` 时覆盖托管平台类型、仓库标识、默认分支、代码评审请求类型、`credential_ref`、`credential_status` 与配置就绪状态。
+12. 支持在项目级配置默认 `DeliveryChannel`，并在最终人工审批通过后、进入 `Delivery Integration` 前固化为交付快照；正式快照字段与时间字段命名以后端规格为准，必须覆盖 `delivery_mode`，并在 `delivery_mode = git_auto_delivery` 时覆盖托管平台类型、仓库标识、默认分支、代码评审请求类型、`credential_ref`、`credential_status` 与配置就绪状态。
 13. 所有核心命令与查询通过 REST API 暴露，会话级实时增量更新通过 SSE 提供，并提供完整 OpenAPI 文档。
 14. 功能二所需的核心扩展对象在后端规格层具备明确预留边界。
 
