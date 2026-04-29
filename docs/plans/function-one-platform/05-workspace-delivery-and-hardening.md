@@ -4,11 +4,11 @@
 
 本分卷覆盖 Week 7-12 的工作区工具、功能二扩展边界、`git_auto_delivery` 真实 Git 交付适配、前端交付展示、端到端测试、OpenAPI 一致性与系统硬化。完成后，系统具备平台级 V1 发布候选条件。
 
-本分卷把抽象工具协议、Workspace Tools 与 Delivery Tools 拆成独立适配器切片。W5.0 必须先固定 `ToolProtocol` 与工具注册表，W5.2-W5.4 只实现 workspace 具体工具，D5.1-D5.4 再实现 delivery 具体工具，避免 runtime、Provider adapter 或交付适配层先使用临时工具接口。Workspace tools 的工作方式参考 Claude Code，正式工具契约名固定为 `bash`、`read_file`、`edit_file`、`write_file`、`glob`、`grep`。`demo_delivery` 已在 Week 7 作为正式无 Git 写动作交付适配器落地；本分卷只实现 `git_auto_delivery` 的真实 Git 交付能力，并在回归阶段验证配置边界与运行快照不会被后续热重载或前端设置破坏。真实 Git 操作只在 `git_auto_delivery` 适配层中发生，并且测试必须使用 fixture 仓库和 mock 远端。
+本分卷把抽象工具协议、Workspace Tools 与 Delivery Tools 拆成独立适配器切片。W5.0 必须先固定 `ToolProtocol` 与工具注册表，W5.0c 必须先固定 fake provider、fake tool 与 fixture 契约，W5.0d 再固定工具风险分级和高风险确认门禁，W5.2-W5.4 只实现 workspace 具体工具，D5.1-D5.4 再实现 delivery 具体工具，避免 runtime、Provider adapter 或交付适配层先使用临时工具接口。Workspace tools 的工作方式参考 Claude Code，正式工具契约名固定为 `bash`、`read_file`、`edit_file`、`write_file`、`glob`、`grep`。`demo_delivery` 已在 Week 7 作为正式无 Git 写动作交付适配器落地；本分卷只实现 `git_auto_delivery` 的真实 Git 交付能力，并在回归阶段验证配置边界与运行快照不会被后续热重载或前端设置破坏。真实 Git 操作只在 `git_auto_delivery` 适配层中发生，并且测试必须使用 fixture 仓库和 mock 远端。
 
 凡本分卷修改 `backend/app/api/routes/*` 的 API 切片，对应 API 测试必须在本切片内断言新增或修改的 path、method、请求 Schema、响应 Schema 和主要错误响应已进入 `/api/openapi.json`；V6.4 只做全局覆盖回归，不替代本地 API 契约断言。
 
-工作区、工具、Git 交付和硬化任务必须嵌入日志审计要求。`.runtime/logs` 属于平台运行数据目录，不属于被操作项目工作区；工作区工具、`glob`、`grep`、diff、Git 自动交付、交付结果统计和 ChangeSet 计算必须默认排除该目录。所有工具调用必须通过统一 Log & Audit Service 记录运行日志；会造成工作区、Git、远端交付或配置状态变化的工具调用必须写入审计记录。
+工作区、工具、Git 交付和硬化任务必须嵌入日志审计要求。`.runtime/logs` 属于平台运行数据目录，不属于被操作项目工作区；工作区工具、`glob`、`grep`、diff、Git 自动交付、交付结果统计和 ChangeSet 计算必须默认排除该目录。所有工具调用必须通过统一 Log & Audit Service 记录运行日志；会造成工作区、Git、远端交付或配置状态变化的工具调用必须写入审计记录；高风险工具动作必须先创建 `ToolConfirmationRequest` 并等待用户允许，`blocked` 工具动作必须结构化拒绝且不得创建可允许的确认请求。
 
 <a id="w50"></a>
 
@@ -30,18 +30,21 @@
 - `ToolResult`
 - `ToolError`
 - `ToolAuditRef`
+- `ToolRiskLevel`
+- `ToolRiskCategory`
 - `ToolRegistry`
 - `ToolRegistry.register()`
 - `ToolRegistry.resolve()`
 - `ToolRegistry.list_bindable_tools()`
 
 **验收标准**：
-- `ToolProtocol` 定义工具名称、类别、输入 Schema、结果载荷、错误结构、审计引用和可绑定工具描述。
+- `ToolProtocol` 定义工具名称、类别、输入 Schema、结果载荷、错误结构、风险等级、风险分类、权限边界、副作用等级、审计引用和可绑定工具描述。
 - `ToolRegistry` 能按工具类别和名称注册、解析、列出工具，并拒绝重复注册和未知工具解析。
 - LangGraph runtime、LangChain Provider adapter、workspace 工具和后续 delivery 工具只能依赖该抽象协议与注册表。
 - 本切片不实现文件、`glob`、`grep`、`bash` 或 delivery 具体工具，不绑定具体业务函数。
 - ToolProtocol 的审计引用必须能引用 `AuditLogEntry` 或其稳定引用，不能只是自由文本。
-- ToolResult 必须能承载 `trace_id`、`correlation_id`、`span_id`、`audit_ref`、`coordination_key`、`side_effect_refs` 与 `reconciliation_status`。
+- ToolResult 必须能承载 `trace_id`、`correlation_id`、`span_id`、`audit_ref`、`coordination_key`、`tool_confirmation_ref`、`side_effect_refs` 与 `reconciliation_status`。
+- `ToolRiskLevel` 固定为 `read_only`、`low_risk_write`、`high_risk`、`blocked`；`ToolRiskCategory` 与 C1.1 保持同一枚举来源。
 - 具有副作用的工具调用必须先形成调用意图记录，后续文件、`bash` 与 delivery 工具不得在 W5.0 抽象之外自建副作用协调字段。
 
 **测试方法**：
@@ -75,7 +78,7 @@
 **验收标准**：
 - 所有对外 API 错误、`ToolError`、delivery tool 错误和日志审计查询错误必须使用 B0.2 `backend/app/api/error_codes.py` 中的稳定 `error_code`。
 - 错误码体系必须记录错误码、分类、默认 HTTP 状态、是否可重试、是否可向用户展示、默认安全标题和默认安全说明。
-- 错误码体系至少覆盖 `tool_unknown`、`tool_not_allowed`、`tool_input_schema_invalid`、`tool_workspace_boundary_violation`、`tool_timeout`、`tool_audit_required_failed`、`bash_command_not_allowed`、`delivery_snapshot_missing`、`delivery_snapshot_not_ready`、`delivery_git_cli_failed`、`delivery_remote_request_failed`、`runtime_data_dir_unavailable`、`audit_write_failed`、`log_query_invalid`、`log_payload_blocked`、`config_snapshot_mutation_blocked`。
+- 错误码体系至少覆盖 `tool_unknown`、`tool_not_allowed`、`tool_input_schema_invalid`、`tool_workspace_boundary_violation`、`tool_timeout`、`tool_audit_required_failed`、`tool_confirmation_required`、`tool_confirmation_denied`、`tool_confirmation_not_actionable`、`tool_risk_blocked`、`bash_command_not_allowed`、`provider_retry_exhausted`、`provider_circuit_open`、`delivery_snapshot_missing`、`delivery_snapshot_not_ready`、`delivery_git_cli_failed`、`delivery_remote_request_failed`、`runtime_data_dir_unavailable`、`audit_write_failed`、`log_query_invalid`、`log_payload_blocked`、`config_snapshot_mutation_blocked`。
 - `ToolError` 只引用错误码、结构化安全详情、`trace_id`、`correlation_id`、`span_id` 和审计引用；不得把异常堆栈、凭据、授权头、Cookie、API Key 或私钥放入错误详情。
 - API 错误响应必须包含稳定 `error_code`、安全 `message`、可选 `detail_ref` 和 trace 关联字段；HTTP 状态只表达传输层结果，不替代领域错误码。
 - 本切片不得创建与 B0.2 并行的第二套错误码模块、第二个 `ErrorCode` 枚举或第二套 API 错误响应模型。
@@ -146,6 +149,7 @@
 - execution gate 必须基于当前 `GraphDefinition.stage_contracts[stage_type].allowed_tools` 校验阶段工具权限；`allowed_tools = []` 时不得执行任何工具调用，未列入 `allowed_tools` 的工具不得进入 `available_tools` 或执行路径。
 - execution gate 必须在工具执行前校验输入 Schema；缺失字段、额外字段、类型错误和不满足约束的值必须返回 `tool_input_schema_invalid`，不得把无效输入交给具体工具自行解释。
 - 对 workspace tools，execution gate 必须调用 WorkspaceManager 的工作区边界校验，阻止绝对路径越界、相对路径逃逸、平台运行数据目录和 `.runtime/logs` 访问。
+- execution gate 必须预留 W5.0d 的 `ToolRiskClassifier` 调用点；本切片只固定执行门入口、校验顺序和可测试端口，不实现风险分级规则。
 - execution gate 必须从当前 run 的 `RuntimeLimitSnapshot`、工具默认值和平台硬上限解析工具调用超时；超时必须返回 `tool_timeout` 并写入运行日志摘要。
 - execution gate 必须在有副作用或高影响工具执行前解析审计策略并形成调用意图；审计策略要求写入但审计不可用时，工具不得执行，必须返回 `tool_audit_required_failed`。
 - `bash` 命令白名单校验仍属于 W5.4 的 `BashCommandAllowlist`；本切片只校验 `bash` 工具是否允许被调用、输入是否符合 `bash` 工具 Schema、工作区和超时是否合规，并把具体命令交给 W5.4 白名单校验。
@@ -196,10 +200,50 @@
 - fixture 仓库必须在临时目录初始化，包含可提交基线、工作区变更样本、`.runtime/logs` 排除样本和 mock remote；测试结束后不得影响真实仓库。
 - delivery fixture 必须能构造已固化的 delivery channel snapshot、未 ready snapshot、缺失 snapshot、mock remote 成功和 mock remote 失败场景，且字段形状与 D4.0 / D5.1 使用的正式 snapshot 一致。
 - fixture 数据必须来源于后端 Schema、领域对象和投影契约；不得创建仅测试可见的状态枚举、事件类型、投影字段或阶段语义。
-- fixture 契约必须支持 W5.0b、D5.2-D5.4、A4.8c-A4.9d、V6.1、V6.6、V6.8 和 L6.2 复用。
+- fixture 契约必须支持 W5.0b、W5.0d、D5.2-D5.4、A4.8c-A4.9e、V6.1、V6.6、V6.8 和 L6.2 复用。
 
 **测试方法**：
 - `pytest backend/tests/fixtures/test_fixture_contracts.py -v`
+
+<a id="w50d"></a>
+
+## W5.0d Tool risk classifier 与 confirmation gate
+
+**计划周期**：Week 7-8
+**状态**：`[ ]`
+**目标**：实现工具风险分级和高风险确认门禁，使所有工具动作在执行前统一判定 `read_only`、`low_risk_write`、`high_risk` 或 `blocked`，并把高风险动作转入 H4.4a 工具确认流程。
+**实施计划**：`docs/plans/implementation/w5.0d-tool-risk-confirmation-gate.md`
+
+**修改文件列表**：
+- Modify: `backend/app/tools/protocol.py`
+- Modify: `backend/app/tools/execution_gate.py`
+- Create: `backend/app/tools/risk.py`
+- Modify: `backend/app/services/tool_confirmations.py`
+- Create: `backend/tests/tools/test_tool_risk_classifier.py`
+- Modify: `backend/tests/tools/test_tool_execution_gate.py`
+
+**实现类/函数**：
+- `ToolRiskClassifier`
+- `ToolRiskAssessment`
+- `ToolRiskClassifier.classify()`
+- `ToolExecutionGate.require_confirmation_if_high_risk()`
+- `ToolExecutionGate.block_if_disallowed()`
+- `ToolExecutionGate.attach_tool_confirmation_ref()`
+
+**验收标准**：
+- `read_only` 覆盖工作区内只读读取、`glob`、`grep` 和不产生副作用的查询动作。
+- `low_risk_write` 覆盖精确、小范围、命中阶段允许范围且目标明确的文件写入或编辑动作。
+- 安装或升级依赖、联网下载、删除或移动文件、大范围生成或覆盖文件、数据库迁移、修改锁文件、修改环境配置、执行不在项目说明或脚本配置中的未知命令，必须判定为 `high_risk`。
+- 读取凭据、泄露密钥、越权访问工作区外路径、修改平台运行数据目录、绕过 `ToolRegistry`、绕过审计或绕过工具确认边界的动作必须判定为 `blocked`。
+- `high_risk` 工具动作在执行前必须通过 H4.4a 创建 `ToolConfirmationRequest`，返回等待状态并写入 `tool_confirmation_ref`；用户允许前不得执行具体工具。
+- `blocked` 工具动作不得创建可允许的工具确认请求，必须返回 `tool_risk_blocked` 并写入安全审计记录。
+- 用户允许后，execution gate 只能执行该确认请求覆盖的同一个工具名称、输入摘要、目标资源和风险评估结果；任一字段漂移必须拒绝执行。
+- 风险分级测试必须使用 W5.0c 的 fake tool、settings override 和受控 fixture，不得在测试内创建第二套临时工具协议或临时执行入口。
+- 风险分级过程必须写入 `tool_trace` 或 `tool_confirmation_trace`，并继承 `TraceContext`。
+
+**测试方法**：
+- `pytest backend/tests/tools/test_tool_risk_classifier.py -v`
+- `pytest backend/tests/tools/test_tool_execution_gate.py -v`
 
 <a id="w52"></a>
 
@@ -227,7 +271,7 @@
 
 **验收标准**：
 - 文件工具必须实现 W5.0 定义的 `ToolProtocol` 并注册到 `ToolRegistry`。
-- 文件工具执行必须经过 W5.0b execution gate 的工具名、阶段 `allowed_tools`、输入 Schema、工作区边界、超时和审计策略校验。
+- 文件工具执行必须经过 W5.0b execution gate 与 W5.0d 风险门禁的工具名、阶段 `allowed_tools`、输入 Schema、工作区边界、风险分级、超时和审计策略校验。
 - 工具只允许访问当前 run 的隔离工作区。
 - 正式工具契约名必须为 `read_file`、`write_file`、`edit_file`、`glob`；`FileReadTool`、`FileWriteTool`、`FileEditTool`、`GlobTool` 只作为实现类名或参考工具名。
 - `read_file` 只读取文本和代码类文件，不处理图片、PDF、压缩包、音视频或其他二进制 / 富媒体内容。
@@ -267,7 +311,7 @@
 
 **验收标准**：
 - `grep` 工具必须实现 W5.0 定义的 `ToolProtocol` 并注册到 `ToolRegistry`。
-- `grep` 执行必须经过 W5.0b execution gate 的工具名、阶段 `allowed_tools`、输入 Schema、工作区边界、超时和审计策略校验。
+- `grep` 执行必须经过 W5.0b execution gate 与 W5.0d 风险门禁的工具名、阶段 `allowed_tools`、输入 Schema、工作区边界、风险分级、超时和审计策略校验。
 - `grep` 只扫描当前 run 隔离工作区。
 - `grep` 基于 `ripgrep` 执行正则内容搜索。
 - `grep` 初始化、健康检查或运行前检查必须校验本地 `rg` 可用；缺失时返回结构化 readiness 错误，不得静默降级为未受控搜索实现。
@@ -308,7 +352,10 @@
 - `bash` 命令通过受控子进程执行。
 - `bash` 是正式工具契约名，底层实现是平台受控子进程 / 命令适配器；实现不得假定运行环境一定存在 Unix bash，也不得把 PowerShell、cmd 或其他 shell 的自由能力直接暴露给模型。
 - `bash` 命令必须经过命令白名单校验。
-- `bash` 工具执行必须先通过 W5.0b execution gate 的工具名、阶段 `allowed_tools`、输入 Schema、工作区边界、超时和审计策略校验；W5.4 只实现命令级 allowlist 与受控子进程执行，不另建并行工具权限表。
+- `bash` 工具执行必须先通过 W5.0b execution gate 与 W5.0d 风险门禁的工具名、阶段 `allowed_tools`、输入 Schema、工作区边界、风险分级、工具确认门禁、超时和审计策略校验；W5.4 只实现命令级 allowlist 与受控子进程执行，不另建并行工具权限表。
+- `BashCommandAllowlist` 必须能从项目 README、package 脚本、依赖声明、测试配置或等价项目说明中识别测试、构建、格式化和环境探测命令；不在项目说明或脚本配置中的未知命令必须进入 `unknown_command` 风险分类。
+- 安装或升级依赖、联网下载、删除或移动文件、数据库迁移、修改锁文件、修改环境配置和大范围生成或覆盖文件的 `bash` 命令必须判定为 `high_risk`，执行前必须获得 H4.4a 工具确认。
+- 读取凭据、输出密钥、越权访问工作区外路径、修改平台运行数据目录、绕过 ToolRegistry、绕过审计或绕过工具确认的 `bash` 命令必须判定为 `blocked`，不得创建可允许的工具确认请求。
 - `bash` 工作目录被限制在当前 run 工作区。
 - 命令输出、退出码、耗时和错误被结构化记录。
 - 工具调用产生日志和审计记录。
@@ -319,7 +366,7 @@
 - `bash` 命令输出必须裁剪、摘要化并限制大小；异常堆栈和环境变量不得泄漏凭据、API Key、Cookie、授权头或私钥。
 - `bash` 工作目录、命令、退出码、耗时、输出摘要、错误摘要、`trace_id`、`correlation_id` 和 `span_id` 必须进入运行日志。
 - 会改变工作区、执行测试、触发外部服务或可能影响交付目标的 `bash` 调用必须写入审计记录。
-- allowlist 拒绝、命令超时、工作区越界、审计必需但写入失败和输出被阻断必须返回 W5.0a 统一错误码。
+- allowlist 拒绝、命令超时、工作区越界、高风险确认未允许、blocked 风险、审计必需但写入失败和输出被阻断必须返回 W5.0a 统一错误码。
 - 测试不执行破坏真实仓库的命令。
 
 **测试方法**：
@@ -402,7 +449,7 @@
 
 **验收标准**：
 - `read_delivery_snapshot` 必须实现 W5.0 定义的 `ToolProtocol` 并注册到 `ToolRegistry`。
-- `read_delivery_snapshot` 执行必须经过 W5.0b execution gate；Delivery Integration 阶段的 `allowed_tools` 未包含该工具时必须拒绝执行并返回统一错误码。
+- `read_delivery_snapshot` 执行必须经过 W5.0b execution gate 与 W5.0d 风险门禁；Delivery Integration 阶段的 `allowed_tools` 未包含该工具时必须拒绝执行并返回统一错误码。
 - `read_delivery_snapshot` 读取 D4.0 已固化到当前 run 的 delivery channel snapshot。
 - 不从项目级最新 DeliveryChannel 重新读取覆盖历史 run。
 - snapshot 必须包含 `delivery_mode`、`scm_provider_type`、`repository_identifier`、`default_branch`、`code_review_request_type`、`credential_ref`、`credential_status`、`readiness_status`、`readiness_message` 与 `last_validated_at`。
@@ -433,7 +480,7 @@
 
 **验收标准**：
 - `prepare_branch` 与 `create_commit` 必须实现 W5.0 定义的 `ToolProtocol` 并注册到 `ToolRegistry`。
-- `prepare_branch` 与 `create_commit` 执行必须经过 W5.0b execution gate 的工具名、阶段 `allowed_tools`、输入 Schema、工作区边界、超时和审计策略校验。
+- `prepare_branch` 与 `create_commit` 执行必须经过 W5.0b execution gate 与 W5.0d 风险门禁的工具名、阶段 `allowed_tools`、输入 Schema、工作区边界、风险分级、工具确认门禁、超时和审计策略校验。
 - Git 操作通过本地 `git CLI` 适配层执行，不使用 GitPython。
 - prepare_branch 基于 fixture 仓库创建受控分支。
 - create_commit 基于工作区变更创建提交。
@@ -464,7 +511,7 @@
 
 **验收标准**：
 - `push_branch` 与 `create_code_review_request` 必须实现 W5.0 定义的 `ToolProtocol` 并注册到 `ToolRegistry`。
-- `push_branch` 与 `create_code_review_request` 执行必须经过 W5.0b execution gate；不得绕过注册表直接调用 Git CLI 或远端托管平台客户端。
+- `push_branch` 与 `create_code_review_request` 执行必须经过 W5.0b execution gate 与 W5.0d 风险门禁；不得绕过注册表直接调用 Git CLI 或远端托管平台客户端。
 - push_branch 使用受控 Git CLI。
 - create_code_review_request 支持 `pull_request` 与 `merge_request` 类型。
 - 远端托管平台调用使用 mock client 测试。
@@ -502,7 +549,7 @@
 - 本切片不固化 snapshot；snapshot 固化唯一发生在 D4.0 / H4.4 的 `code_review_approval` Approve 路径。
 - Delivery Integration 阶段不再次弹出配置阻塞。
 - 真实交付流程为 `read_delivery_snapshot -> prepare_branch -> create_commit -> push_branch -> create_code_review_request`。
-- `git_auto_delivery` 编排每一步都必须通过 `ToolRegistry.execute()` 调用 delivery tool，并使用当前阶段 `allowed_tools`、工具输入 Schema、超时策略和审计策略执行门；不得直接调用 `ScmDeliveryAdapter` 私有方法、Git CLI 或远端 client。
+- `git_auto_delivery` 编排每一步都必须通过 `ToolRegistry.execute()` 调用 delivery tool，并使用当前阶段 `allowed_tools`、工具输入 Schema、W5.0d 风险分级、工具确认门禁、超时策略和审计策略执行门；不得直接调用 `ScmDeliveryAdapter` 私有方法、Git CLI 或远端 client。
 - 每个交付步骤必须继承同一 `trace_id` 与交付阶段 `correlation_id`，并具备独立 `span_id`。
 - 交付失败必须能通过日志审计链路定位到失败步骤、错误摘要、审计记录和 DeliveryRecord。
 - 测试使用 W5.0c fixture 仓库与 mock 远端，不影响真实仓库。
@@ -633,6 +680,8 @@
 **验收标准**：
 - 可从新建 Session 完整走到 `delivery_result`。
 - API 返回的 Session、Run、Timeline、Inspector 和 DeliveryRecord 投影一致。
+- API flow 必须覆盖 `tool_confirmation` 顶层条目、工具确认 allow / deny API 和 `ToolConfirmationInspectorProjection` 的基本一致性。
+- API flow 必须覆盖 Provider 重试或熔断过程记录能进入阶段投影或 Inspector。
 - 不依赖真实模型和真实远端托管平台。
 
 **测试方法**：
@@ -675,24 +724,26 @@
 
 **计划周期**：Week 11
 **状态**：`[ ]`
-**目标**：建立跨端人工介入 E2E，覆盖拒绝回退、暂停恢复、终止和重新尝试。
+**目标**：建立跨端人工介入与工具确认 E2E，覆盖拒绝回退、高风险工具确认、暂停恢复、终止和重新尝试。
 **实施计划**：`docs/plans/implementation/v6.3-playwright-control-flow.md`
 
 **修改文件列表**：
 - Create: `e2e/tests/function-one-control-flow.spec.ts`
 
 **实现类/函数**：
-- Playwright scenarios for reject rollback, pause, resume, terminate, rerun.
+- Playwright scenarios for reject rollback, tool confirmation allow/deny, pause, resume, terminate, rerun.
 
 **验收标准**：
 - 可覆盖审批拒绝回退到正确阶段。
+- 可覆盖高风险工具确认允许和拒绝，且拒绝不展示审批回退语义。
 - 可覆盖暂停后审批禁用，恢复后继续等待同一审批。
+- 可覆盖暂停后工具确认禁用，恢复后继续等待同一工具确认。
 - 可覆盖终止后尾部 `system_status`。
 - 可覆盖重新尝试创建新 run 并移动焦点。
 
 **前端设计质量门**：
 - 不新增风格输入；验证人工介入路径继承同一项目级主基调。
-- 人工介入路径必须检查拒绝回退、暂停恢复、终止、重新尝试和历史审批禁用态。
+- 人工介入路径必须检查拒绝回退、高风险工具确认、暂停恢复、终止、重新尝试、历史审批禁用态和历史工具确认禁用态。
 - Playwright 断言或截图检查必须覆盖危险操作层级、禁用态、历史态、错误态和新 run 分界。
 
 **测试方法**：
@@ -720,6 +771,7 @@
 - `/api/openapi.json` 覆盖所有核心 REST 接口。
 - `/api/docs` 可读。
 - OpenAPI 覆盖 `GET /api/sessions/{sessionId}/events/stream` 的事件流端点及其事件载荷结构。
+- OpenAPI 覆盖 `POST /api/tool-confirmations/{toolConfirmationId}/allow`、`POST /api/tool-confirmations/{toolConfirmationId}/deny` 与 `GET /api/tool-confirmations/{toolConfirmationId}` 的请求、响应、错误和详情投影 Schema。
 - OpenAPI 覆盖 `GET /api/runs/{runId}/logs`、`GET /api/stages/{stageRunId}/logs` 与 `GET /api/audit-logs` 的查询参数、响应 Schema 和主要错误响应。
 - V6.4 验证各 API 切片已经提交的 OpenAPI 断言汇总结果，不作为具体路由第一次补齐 OpenAPI 契约的切片。
 - 运行接口与 OpenAPI 文档同版本交付。
@@ -776,7 +828,7 @@
 - 关键 API 错误在前端有清晰状态。
 - paused 审批提交、非法重新尝试、DeliveryChannel 未 ready 等错误有稳定错误码。
 - 运行数据目录不可写、审计写入失败、日志查询参数非法和日志载荷被阻断等后端错误有稳定错误码。
-- ToolRegistry 拒绝、工具输入 Schema 非法、工作区越界、工具超时、bash allowlist 拒绝、delivery snapshot 缺失 / 未 ready、Git CLI 失败和远端交付请求失败必须进入 W5.0a 统一错误码回归。
+- ToolRegistry 拒绝、工具输入 Schema 非法、工作区越界、工具超时、高风险工具确认未允许、工具确认不可提交、blocked 风险、bash allowlist 拒绝、Provider 重试耗尽、Provider 熔断开启、delivery snapshot 缺失 / 未 ready、Git CLI 失败和远端交付请求失败必须进入 W5.0a 统一错误码回归。
 - 错误码回归必须断言每个错误响应的 `error_code` 已注册、HTTP 状态匹配字典、用户可见消息不包含堆栈或凭据，且 trace 关联字段保留。
 - 前端不展示真实凭据内容。
 
@@ -826,6 +878,7 @@
 - 已启动 run 的 `ContextManifest`、压缩过程记录和模型调用过程必须能通过提示词版本引用、`content_hash` 与 `render_hash` 解释；最新提示词资产版本不得改变既有 run 的模板快照、ContextManifest 或压缩记录语义。
 - `PromptRegistry` 不接受环境变量、平台运行设置、前端设置、模板编辑字段或用户消息作为系统内置提示词资产来源。
 - W5.0c `settings_override_fixture()` 只能影响测试创建的新 app/session/run 依赖图；不得改变正式配置 API、前端设置字段、环境变量语义或已启动 run 的快照。
+- 新建 `Session` 不得自动读取其他会话的历史 run、历史产物、历史审批、历史工具确认、历史工具过程或历史 Provider 过程作为 Agent 长期记忆；历史会话只作为回看、追溯、诊断和审计对象。
 - 已加载且未移除的 Project 与未删除 Session 在重启后仍可见；Session 重命名只改变展示名。
 - Session 删除和 Project 移除只改变产品历史可见性、常规查询入口和对应查询投影，不删除运行记录、产物、交付记录或审计事实。
 - 存在活动 run 的 Session 删除和 Project 移除必须被拒绝；默认 Project 移除必须被拒绝。

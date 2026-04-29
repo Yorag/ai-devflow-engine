@@ -1,13 +1,13 @@
-# 04 人工介入与执行内核
+# 04 人工介入、工具确认与执行内核
 
 ## 范围
 
-本分卷覆盖 Week 6-9 的人工介入、运行控制、前端交互状态、`deterministic test runtime`、demo_delivery、LangGraph runtime、Stage Agent Runtime、Context Management、Provider adapter 和自动回归。完成后，系统可以用 `deterministic test runtime` 跑通 `demo_delivery` 全链路，并具备正式 LangGraph 编排路径。
+本分卷覆盖 Week 6-9 的人工介入、工具确认、运行控制、前端交互状态、`deterministic test runtime`、demo_delivery、LangGraph runtime、Stage Agent Runtime、Context Management、Provider adapter 和自动回归。完成后，系统可以用 `deterministic test runtime` 跑通 `demo_delivery` 全链路，并具备正式 LangGraph 编排路径。
 
-本分卷承接 03 分卷的 Run 状态机和投影基础，负责运行中断、恢复、人工决策和执行内核副作用。每个任务只处理一个控制行为或 runtime 能力。
+本分卷承接 03 分卷的 Run 状态机和投影基础，负责运行中断、恢复、人工决策、工具确认和执行内核副作用。每个任务只处理一个控制行为或 runtime 能力。
 凡本分卷修改 `backend/app/api/routes/*` 的 API 切片，对应 API 测试必须在本切片内断言新增或修改的 path、method、请求 Schema、响应 Schema 和主要错误响应已进入 `/api/openapi.json`；V6.4 只做全局覆盖回归。
 
-人工介入、运行控制、runtime、Provider 和交付前置动作必须嵌入日志审计能力。用户可触发命令必须为接受、拒绝、成功和失败结果写入审计记录；系统自动执行的高影响动作必须以 `system`、`agent` 或 `tool` 主体写入审计记录。审计记录写入失败时，高影响动作必须拒绝或回滚；普通运行日志失败不得破坏已持久化领域状态。
+人工介入、工具确认、运行控制、runtime、Provider 和交付前置动作必须嵌入日志审计能力。用户可触发命令必须为接受、拒绝、成功和失败结果写入审计记录；高风险工具确认请求与用户决定必须写入审计记录；系统自动执行的高影响动作必须以 `system`、`agent` 或 `tool` 主体写入审计记录。审计记录写入失败时，高影响动作必须拒绝或回滚；普通运行日志失败不得破坏已持久化领域状态。
 
 <a id="a40"></a>
 
@@ -15,7 +15,7 @@
 
 **计划周期**：Week 6
 **状态**：`[ ]`
-**目标**：在人工介入命令落地前固定运行编排边界，使澄清、审批、暂停、恢复和终止都通过统一 runtime boundary 与领域服务协作；重新尝试只验证旧 GraphThread 已终结并创建新的 PipelineRun，不恢复或复用旧执行图。
+**目标**：在人工介入命令和工具确认命令落地前固定运行编排边界，使澄清、审批、工具确认、暂停、恢复和终止都通过统一 runtime boundary 与领域服务协作；重新尝试只验证旧 GraphThread 已终结并创建新的 PipelineRun，不恢复或复用旧执行图。
 **实施计划**：`docs/plans/implementation/a4.0-runtime-orchestration-boundary.md`
 
 **修改文件列表**：
@@ -31,7 +31,9 @@
 - `RuntimeCommandPort`
 - `CheckpointPort`
 - `RuntimeOrchestrationService.create_interrupt()`
+- `RuntimeOrchestrationService.create_tool_confirmation_interrupt()`
 - `RuntimeOrchestrationService.resume_interrupt()`
+- `RuntimeOrchestrationService.resume_tool_confirmation()`
 - `RuntimeOrchestrationService.pause_thread()`
 - `RuntimeOrchestrationService.resume_thread()`
 - `RuntimeOrchestrationService.terminate_thread()`
@@ -40,10 +42,12 @@
 **验收标准**：
 - 人工介入命令只依赖 `RuntimeOrchestrationService` 与领域对象，不直接读取或写入 raw graph state。
 - 澄清、审批等待必须能通过 `GraphInterruptRef` 关联到源 run、源 StageRun 和源阶段类型。
+- 工具确认等待必须能通过 `GraphInterruptRef(type=tool_confirmation)` 关联到 `ToolConfirmationRequest`、源 run、源 StageRun、源阶段类型和待执行工具动作。
 - pause / resume / terminate 必须作用于当前活动 run 对应的 `GraphThreadRef`。
+- 当 run 在暂停前停留于工具确认等待时，resume 后必须恢复到同一个 `waiting_tool_confirmation` 检查点，不创建新的工具确认请求。
 - rerun 必须只确认旧 run 对应 `GraphThreadRef` 已处于终态，不得调用 `resume_interrupt()`，不得复用旧 `GraphThreadRef` 创建新 run。
 - A4.0 只定义 orchestration boundary 和可 fake 的端口，不实现 deterministic 或 LangGraph 具体 runtime。
-- 后续 H4.1、H4.3、H4.4、H4.5、H4.6、H4.7 不得绕过该边界直接推进或复用执行图状态。
+- 后续 H4.1、H4.3、H4.4、H4.4a、H4.5、H4.6、H4.7 不得绕过该边界直接推进或复用执行图状态。
 - orchestration boundary 必须传递 `TraceContext`，为 interrupt、resume、pause、terminate、rerun terminal check 分配或继承 `span_id`。
 
 **测试方法**：
@@ -302,13 +306,57 @@
 - `pytest backend/tests/services/test_approval_commands.py -v`
 - `pytest backend/tests/api/test_approval_api.py -v`
 
+<a id="h44a"></a>
+
+## H4.4a ToolConfirmationRequest 与工具确认命令
+
+**计划周期**：Week 6-7
+**状态**：`[ ]`
+**目标**：实现高风险工具确认的领域对象、命令入口和 runtime 恢复语义，使工具确认作为运行时权限控制点独立于人工审批检查点。
+**实施计划**：`docs/plans/implementation/h4.4a-tool-confirmation-commands.md`
+
+**修改文件列表**：
+- Create: `backend/app/services/tool_confirmations.py`
+- Modify: `backend/app/services/control_records.py`
+- Modify: `backend/app/services/runtime_orchestration.py`
+- Create: `backend/app/api/routes/tool_confirmations.py`
+- Create: `backend/tests/services/test_tool_confirmation_commands.py`
+- Create: `backend/tests/api/test_tool_confirmation_api.py`
+
+**实现类/函数**：
+- `ToolConfirmationService.create_request()`
+- `ToolConfirmationService.allow()`
+- `ToolConfirmationService.deny()`
+- `ToolConfirmationService.cancel_for_terminal_run()`
+- `ToolConfirmationService.build_projection()`
+- `ControlRecordService.append_tool_confirmation_record()`
+- `RuntimeOrchestrationService.create_tool_confirmation_interrupt()`
+- `RuntimeOrchestrationService.resume_tool_confirmation()`
+
+**验收标准**：
+- 创建高风险工具确认时，必须同时创建 `ToolConfirmationRequest`、`GraphInterruptRef(type=tool_confirmation)`、`RunControlRecord(control_type=tool_confirmation)` 过程留痕和 `tool_confirmation_requested` 领域事件。
+- 创建后必须把当前 `PipelineRun.status` 与当前 `StageRun.status` 投影为 `waiting_tool_confirmation`。
+- `POST /api/tool-confirmations/{toolConfirmationId}/allow` 只能执行该确认请求覆盖的具体工具动作，不得扩大到同类命令、同类路径或后续工具调用。
+- `POST /api/tool-confirmations/{toolConfirmationId}/deny` 必须记录用户决定和后续处理结果；存在低风险替代路径时恢复运行到替代路径，不存在替代路径时进入结构化失败或等待用户显式暂停、终止。
+- 工具确认允许或拒绝都必须生成 `tool_confirmation_result` 领域事件，并更新顶层 `tool_confirmation` 投影。
+- 工具确认不得创建 `ApprovalRequest`、`ApprovalDecision` 或顶层 `approval_result`，也不得触发审批 Reject 的 rollback 语义。
+- paused run 拒绝 allow / deny 提交并返回稳定错误；resume 后恢复到同一个 `waiting_tool_confirmation` 检查点。
+- terminated、failed、completed run 下的待处理工具确认必须变为只读不可提交状态，历史记录保留；若服务层需要关闭待处理请求，必须使用 `ToolConfirmationStatus.cancelled`，不得写成允许或拒绝。
+- 工具确认请求、允许、拒绝、取消、低风险替代路径判断、无替代失败和 runtime resume 失败必须写入审计记录与运行日志摘要。
+- 审计写入失败时不得提交工具确认决定、`tool_confirmation_result` 事件或执行对应工具动作。
+- API 测试必须断言 `POST /api/tool-confirmations/{toolConfirmationId}/allow`、`POST /api/tool-confirmations/{toolConfirmationId}/deny` 的请求/响应 Schema、paused 错误、终态错误和 OpenAPI path/method 已进入 `/api/openapi.json`。
+
+**测试方法**：
+- `pytest backend/tests/services/test_tool_confirmation_commands.py -v`
+- `pytest backend/tests/api/test_tool_confirmation_api.py -v`
+
 <a id="h45"></a>
 
 ## H4.5 Pause/Resume checkpoint 语义
 
 **计划周期**：Week 6
 **状态**：`[ ]`
-**目标**：实现暂停和恢复命令副作用，使 running、waiting_clarification、waiting_approval 都能保存可恢复状态。
+**目标**：实现暂停和恢复命令副作用，使 running、waiting_clarification、waiting_approval、waiting_tool_confirmation 都能保存可恢复状态。
 **实施计划**：`docs/plans/implementation/h4.5-pause-resume-checkpoint.md`
 
 **修改文件列表**：
@@ -327,12 +375,14 @@
 - `RuntimeOrchestrationService.resume_thread()`
 
 **验收标准**：
-- pause 可发生在 `running`、`waiting_clarification`、`waiting_approval`。
+- pause 可发生在 `running`、`waiting_clarification`、`waiting_approval`、`waiting_tool_confirmation`。
 - pause 调用成功后通过 A4.0 runtime boundary 保存可恢复 checkpoint 与工作区快照引用。
 - H4.5 创建 `backend/app/api/routes/runs.py` 并注册 run 控制路由，后续 H4.6/H4.7 在同一路由文件扩展终止与重新尝试命令。
 - waiting_approval 下暂停后审批不可提交，投影 `is_actionable = false`。
+- waiting_tool_confirmation 下暂停后工具确认不可提交，投影 `is_actionable = false`。
 - resume 继续同一 run 和同一 GraphThreadRef，不创建新 run。
 - 若 run 暂停前停留于审批等待，resume 后恢复到同一个 `waiting_approval` 检查点。
+- 若 run 暂停前停留于工具确认等待，resume 后恢复到同一个 `waiting_tool_confirmation` 检查点。
 - pause 接受、pause 成功、resume 接受、resume 成功、非法状态拒绝和 checkpoint 保存失败必须写入审计记录和运行日志。
 - API 测试必须断言 `POST /api/runs/{runId}/pause`、`POST /api/runs/{runId}/resume` 的请求/响应 Schema、非法状态错误响应和 OpenAPI path/method 已进入 `/api/openapi.json`。
 
@@ -368,6 +418,7 @@
 - failed 与 terminated 的顶层 `system_status` 必须由同一个 `TerminalStatusProjector.append_terminal_system_status()` 生成，不得分散在不同服务中各自拼装。
 - `system_status` 不属于 `control_item.control_type`。
 - terminated run 中仍待处理的审批块退化为不可提交状态。
+- terminated run 中仍待处理的工具确认块退化为不可提交状态，并保留历史确认对象和风险信息；若后端取消待处理确认，请求状态使用 `cancelled`。
 - terminate 接受、terminate 成功、非法状态拒绝和 runtime terminate 失败必须写入审计记录和运行日志。
 - API 测试必须断言 `POST /api/runs/{runId}/terminate` 的请求/响应 Schema、非法状态错误响应和 OpenAPI path/method 已进入 `/api/openapi.json`。
 
@@ -436,7 +487,8 @@
 **验收标准**：
 - draft 与 `waiting_clarification` 支持发送。
 - `running` 且 `current_stage_type = requirement_analysis` 时显示暂停语义。
-- `waiting_approval` 时输入框不承担聊天输入，右端按钮保持暂停语义。
+- `waiting_approval` 与 `waiting_tool_confirmation` 时输入框不承担聊天输入，右端按钮保持暂停语义。
+- 工具确认的允许或拒绝主操作只出现在 Narrative Feed 中的工具确认块内，不由 Composer 承担。
 - 一旦进入 `solution_design` 及之后的正式研发链路，运行期持续保持暂停语义。
 - failed、terminated、completed 保留禁用按钮。
 
@@ -521,6 +573,48 @@
 **测试方法**：
 - `npm --prefix frontend run test -- ApprovalBlock`
 
+<a id="f43a"></a>
+
+## F4.3a Tool Confirmation Block 与确认交互
+
+**计划周期**：Week 6-7
+**状态**：`[ ]`
+**目标**：实现 Narrative Feed 中的高风险工具确认块，使用户可以针对具体工具动作允许或拒绝本次执行，并与 Approval Block 保持交互和文案边界。
+**实施计划**：`docs/plans/implementation/f4.3a-tool-confirmation-block.md`
+
+**修改文件列表**：
+- Create: `frontend/src/features/feed/ToolConfirmationBlock.tsx`
+- Create: `frontend/src/features/tool-confirmations/tool-confirmation-actions.ts`
+- Modify: `frontend/src/features/workspace/event-reducer.ts`
+- Create: `frontend/src/features/feed/__tests__/ToolConfirmationBlock.test.tsx`
+- Create: `frontend/src/features/tool-confirmations/__tests__/tool-confirmation-actions.test.ts`
+
+**实现类/函数**：
+- `ToolConfirmationBlock`
+- `resolveToolConfirmationActions()`
+- `submitToolConfirmationDecision()`
+- `applyToolConfirmationEvent()`
+
+**验收标准**：
+- `tool_confirmation` 以 Narrative Feed 顶层交互块展示，不渲染为 Approval Block、Control Item 或阶段内部条目。
+- 工具确认块必须展示工具名称、命令或参数摘要、目标资源、风险等级、风险分类、预期副作用、替代路径摘要和当前状态。
+- 主操作文案使用 `允许本次执行` / `拒绝本次执行` 或等价权限动作，不使用 `Approve` / `Reject`。
+- paused、历史 run、terminated、failed、completed 状态下的工具确认块不可提交，并展示稳定禁用原因。
+- 拒绝工具动作后，前端不得展示审批拒绝、方案回退或 rollback 文案；后端进入替代路径、失败或等待运行控制时，按对应投影展示。
+- 允许动作提交后只更新该 `tool_confirmation_id` 覆盖的条目，不批量允许后续同类工具调用。
+- 点击工具确认块可打开 `ToolConfirmationInspectorProjection`，主操作仍保留在 Feed 块内。
+- 组件测试必须覆盖 pending、allowed、denied、paused、历史态、终态、API 错误、重复事件合并和文案边界。
+
+**前端设计质量门**：
+- 继承项目级前端主基调，不单独询问工具确认块风格。
+- 实现前必须梳理风险摘要、具体动作、目标资源、允许/拒绝按钮、禁用态和 Inspector 入口的信息层级。
+- 实现后必须检查长命令、长路径、风险分类换行、危险动作层级、焦点态、移动端布局和可访问名称。
+- Tool Confirmation Block 必须显著表达权限确认，不得表现为阶段质量审批或普通错误提示。
+
+**测试方法**：
+- `npm --prefix frontend run test -- ToolConfirmationBlock`
+- `npm --prefix frontend run test -- tool-confirmation-actions`
+
 <a id="f44"></a>
 
 ## F4.4 重新尝试 UI 与历史审批禁用态
@@ -581,7 +675,7 @@
 - `deterministic test runtime` 只作为稳定测试、前端联调和可重复端到端验收路径；正式 Agent 编排路径由 LangGraph runtime 承担。
 - `RuntimeEngine` 接口不得要求调用方识别 deterministic 或 LangGraph 的内部状态结构。
 - runtime 接口必须接收并传递 `TraceContext`，运行步骤结果必须允许返回日志摘要引用和审计引用，但不得要求调用方读取日志来推进状态。
-- `RuntimeExecutionContext` 必须携带 `template_snapshot_ref`、Provider/模型绑定快照引用、`runtime_limit_snapshot_ref`、`graph_definition_ref` 和必要的交付快照引用；runtime 不得读取最新 Provider、模板或平台运行设置来改变当前 run。
+- `RuntimeExecutionContext` 必须携带 `template_snapshot_ref`、Provider/模型绑定快照引用、`runtime_limit_snapshot_ref`、`provider_call_policy_snapshot_ref`、`graph_definition_ref` 和必要的交付快照引用；runtime 不得读取最新 Provider、模板或平台运行设置来改变当前 run。
 
 **测试方法**：
 - `pytest backend/tests/runtime/test_runtime_engine_contract.py -v`
@@ -618,11 +712,11 @@
 
 <a id="a43"></a>
 
-## A4.3 deterministic test runtime 澄清与审批中断
+## A4.3 deterministic test runtime 澄清、审批与工具确认中断
 
 **计划周期**：Week 7
 **状态**：`[ ]`
-**目标**：为 `deterministic test runtime` 增加可配置澄清、方案审批和代码评审审批中断路径。
+**目标**：为 `deterministic test runtime` 增加可配置澄清、方案审批、代码评审审批和工具确认中断路径。
 **实施计划**：`docs/plans/implementation/a4.3-deterministic-interrupts.md`
 
 **修改文件列表**：
@@ -633,14 +727,17 @@
 - `DeterministicRuntimeEngine.configure_interrupts()`
 - `DeterministicRuntimeEngine.resume_from_interrupt()`
 - `DeterministicRuntimeEngine.emit_approval_request()`
+- `DeterministicRuntimeEngine.emit_tool_confirmation_request()`
 
 **验收标准**：
 - 可配置触发澄清。
 - 可配置触发 solution design approval。
 - 可配置触发 code review approval。
+- 可配置触发高风险工具确认，生成 `ToolConfirmationRequest`、`GraphInterruptRef(type=tool_confirmation)` 和顶层 `tool_confirmation` 投影。
 - 中断恢复必须通过 A4.0 runtime boundary 继续同一个 run、同一个 GraphThreadRef 和同一个源阶段。
 - 审批拒绝按规格回到目标阶段。
-- deterministic 中断、恢复、审批请求生成和恢复失败必须写入运行日志，并继承同一 `trace_id` 与 `correlation_id`。
+- 工具确认拒绝不得触发审批 rollback；存在低风险替代路径时继续当前阶段，不存在替代路径时进入失败或等待用户显式运行控制。
+- deterministic 中断、恢复、审批请求生成、工具确认请求生成和恢复失败必须写入运行日志，并继承同一 `trace_id` 与 `correlation_id`。
 
 **测试方法**：
 - `pytest backend/tests/runtime/test_deterministic_interrupts.py -v`
@@ -818,7 +915,7 @@
 
 **计划周期**：Week 8
 **状态**：`[ ]`
-**目标**：实现 LangGraph 澄清中断、审批中断和恢复，使正式 runtime 符合人工介入语义。
+**目标**：实现 LangGraph 澄清中断、审批中断、工具确认中断和恢复，使正式 runtime 符合人工介入与运行时权限控制语义。
 **实施计划**：`docs/plans/implementation/a4.6-langgraph-interrupt-resume.md`
 
 **修改文件列表**：
@@ -834,12 +931,15 @@
 **验收标准**：
 - 澄清中断可恢复同一 GraphThread。
 - 审批中断可恢复同一 GraphThread。
+- 工具确认中断可恢复同一 GraphThread，并关联同一个 `ToolConfirmationRequest`。
 - run 在暂停前停留于审批等待时，resume 后重新进入同一个 `waiting_approval` 检查点。
+- run 在暂停前停留于工具确认等待时，resume 后重新进入同一个 `waiting_tool_confirmation` 检查点。
 - 审批命令在 run 未暂停时通过恢复对应 GraphInterrupt 继续执行图。
-- 澄清与审批等待必须通过 LangGraph interrupt payload 表达，并持久化为 `GraphInterrupt`。
+- 工具确认命令在 run 未暂停时通过恢复对应 `GraphInterrupt(type=tool_confirmation)` 继续执行图。
+- 澄清、审批与工具确认等待必须通过 LangGraph interrupt payload 表达，并持久化为 `GraphInterrupt`。
 - resume 必须使用同一 `thread_id` 和对应 resume command 继续执行。
-- `clarification_reply`、`approval approve/reject` 必须通过 A4.0 runtime boundary 进入 LangGraph resume，不得由 API 或领域服务直接调用 LangGraph internals。
-- `clarification_reply`、`approval approve/reject` 不得绕过 `GraphInterrupt` 直接推进阶段状态。
+- `clarification_reply`、`approval approve/reject`、`tool_confirmation allow/deny` 必须通过 A4.0 runtime boundary 进入 LangGraph resume，不得由 API 或领域服务直接调用 LangGraph internals。
+- `clarification_reply`、`approval approve/reject`、`tool_confirmation allow/deny` 不得绕过 `GraphInterrupt` 直接推进阶段状态。
 - pause 后 resume 不创建新的 `GraphThread`，也不创建新的 `PipelineRun`。
 - LangGraph interrupt、resume command、resume success 和 resume failure 必须写入运行日志；审批或澄清命令审计仍由对应 H4 命令切片负责。
 
@@ -1107,8 +1207,8 @@
 - 工具绑定对象来自 W5.0 定义的抽象 `ToolProtocol` 与工具注册表；Week 8 只能绑定已注册 `bash`、`read_file`、`edit_file`、`write_file`、`glob`、`grep` 或 fake 工具，不得在 D5.1-D5.4 前绑定具体 delivery tool 实例。
 - 结构化输出失败必须返回可处理错误，不得直接推进 LangGraph 节点成功完成。
 - `ModelCallResult` 必须返回原始响应引用、结构化输出候选、tool call request 候选、Provider 错误、token 用量摘要和 `model_call_trace` 写入所需元数据；不得把自由文本直接标记为阶段成功。
-- 模型请求、模型响应、结构化输出解析、模型错误和重试必须写入运行日志摘要；模型输入输出进入日志前必须裁剪、阻断敏感字段并限制长度。
-- Provider 请求超时、网络错误重试次数、限流重试次数和退避上限必须来自当前 run 的 `RuntimeLimitSnapshot` 或其引用的配置版本，不得读取最新 `PlatformRuntimeSettings`。
+- 模型请求、模型响应、结构化输出解析和模型错误必须写入运行日志摘要；模型输入输出进入日志前必须裁剪、阻断敏感字段并限制长度。
+- Provider 调用策略参数必须来自当前 run 的 `RuntimeLimitSnapshot` 或其引用的配置版本，不得读取最新 `PlatformRuntimeSettings`；指数退避重试和熔断由 A4.9e 在本适配器边界上实现。
 - 上下文压缩使用系统内置 `compression_prompt`；Adapter 只能记录系统内置提示词资产的 prompt id/version 引用，不得把 `compression_prompt` 作为用户配置、环境变量或热重载设置读取。
 
 **测试方法**：
@@ -1146,7 +1246,9 @@
 - Builder 必须消费 A4.8b `ContextEnvelope` / `ContextManifest` Schema，不得输出临时 dict 或前端投影专用载荷。
 - Builder 必须通过 A4.8d `PromptRenderer` 渲染 `runtime_instructions`、阶段提示词固定片段、结构化输出修复提示词和工具使用说明；不得在 builder 内临时拼接系统内置提示词正文。
 - Builder 必须从 R3.5 `GraphDefinition.stage_contracts` 读取当前阶段职责、输入契约、输出契约、`allowed_tools`、结构化产物要求和运行上限引用；不得再引入 `stage_execution_mode` 或并行权限表。
-- Builder 必须从 R3.7 `StageArtifact`、`ContextReference`、ClarificationRecord、ApprovalDecision、工具结果、ChangeSet 和工作区稳定引用解析上下文来源；不得从运行日志反推业务事实。
+- Builder 必须从 R3.7 `StageArtifact`、`ContextReference`、ClarificationRecord、ApprovalDecision、`SolutionDesignArtifact.implementation_plan`、工具结果、ChangeSet 和工作区稳定引用解析上下文来源；不得从运行日志反推业务事实。
+- `code_generation`、`test_generation_execution` 和 `code_review` 阶段的 `ContextEnvelope` 必须包含已批准方案中的 `implementation_plan` 稳定引用、任务标识、任务顺序和依赖关系。
+- Builder 不得把其他 Session 的历史 run、历史产物、历史审批、历史工具确认或历史工具过程作为新 Session 的隐式长期记忆来源；同一 Session 下历史 run 只能按当前需求链路和稳定引用显式进入上下文。
 - `agent_role_prompt` 必须来自已通过 A4.8a PromptValidation 并固化到当前 run `template_snapshot_ref` 的提示词；Builder 不得读取最新模板或最新 AgentRole 配置。
 - `available_tools` 必须通过 W5.0 `ToolRegistry.list_bindable_tools()` 按当前 `stage_contract.allowed_tools` 过滤生成；未注册工具、未授权工具和具体工具实例不得进入 `ContextEnvelope`。
 - 用户消息、澄清回复、审批反馈、附件、仓库文件、测试输出、工具观察和外部交付返回必须作为不可信 `ContextBlock` 进入，并记录来源标识、可信级别、边界说明和稳定引用。
@@ -1157,6 +1259,48 @@
 **测试方法**：
 - `pytest backend/tests/context/test_context_source_resolver.py -v`
 - `pytest backend/tests/context/test_context_envelope_builder.py -v`
+
+<a id="a49e"></a>
+
+## A4.9e Provider retry、backoff 与 circuit breaker
+
+**计划周期**：Week 8
+**状态**：`[ ]`
+**目标**：实现 Provider 调用失败的指数退避重试、连续失败熔断和过程记录，使 Provider 失败可解释、可投影，并且不改变已启动 run 的 Provider 快照语义。
+**实施计划**：`docs/plans/implementation/a4.9e-provider-retry-circuit-breaker.md`
+
+**修改文件列表**：
+- Create: `backend/app/providers/retry_policy.py`
+- Modify: `backend/app/providers/langchain_adapter.py`
+- Modify: `backend/app/services/artifacts.py`
+- Create: `backend/tests/providers/test_provider_retry_policy.py`
+- Create: `backend/tests/providers/test_provider_circuit_breaker.py`
+- Modify: `backend/tests/providers/test_langchain_adapter.py`
+
+**实现类/函数**：
+- `ProviderCallPolicySnapshot`
+- `ProviderRetryPolicy`
+- `ProviderCircuitBreaker`
+- `ProviderRetryDecision`
+- `ProviderCircuitBreakerState`
+- `LangChainProviderAdapter.invoke_with_retry()`
+- `ArtifactStore.append_provider_retry_trace()`
+- `ArtifactStore.append_provider_circuit_breaker_trace()`
+
+**验收标准**：
+- A4.9e 必须在 A4.9 `LangChainProviderAdapter` 和 W5.0c `FakeProvider` / `FakeChatModel` 可用后实施；它是 A4.9b 上下文压缩模型调用和 A4.9d Stage Agent Runtime 模型调用的前置，不是 A4.9a ContextEnvelope Builder 的前置。
+- Provider 请求超时、网络错误和限流错误必须按当前 run 固化的 `ProviderCallPolicySnapshot` 执行指数退避重试。
+- 重试次数、退避基准、退避上限、下一次尝试等待摘要和最终状态必须写入 `provider_retry_trace` 与运行日志摘要。
+- 连续失败达到熔断阈值时必须打开 `ProviderCircuitBreaker`，写入 `provider_circuit_breaker_trace`，并阻止当前阶段继续调用同一已熔断模型绑定。
+- 熔断恢复条件只来自当前 run 固化的策略快照；不得读取最新 `PlatformRuntimeSettings` 或运行外 Provider 配置改变当前 run。
+- 鉴权失败、模型不存在、能力不支持、模型绑定快照不可解析、空响应和无法解析结构化输出不得进入可恢复重试循环，必须形成结构化失败。
+- Provider 重试和熔断结果必须能通过 Q3.3 / F3.4 / F3.7 进入阶段内部 `provider_call` 状态和 Inspector，不得只停留在日志中。
+- 不得自动切换到运行外最新 Provider、模型或凭据；同一 run 内的替代调用路径只能来自本次快照已定义且阶段允许的配置。
+
+**测试方法**：
+- `pytest backend/tests/providers/test_provider_retry_policy.py -v`
+- `pytest backend/tests/providers/test_provider_circuit_breaker.py -v`
+- `pytest backend/tests/providers/test_langchain_adapter.py -v`
 
 <a id="a49b"></a>
 
@@ -1220,6 +1364,7 @@
 - `AgentDecision`
 - `AgentDecisionType`
 - `ToolCallDecision`
+- `ToolConfirmationDecision`
 - `SubmitStageArtifactDecision`
 - `ClarificationDecision`
 - `StructuredRepairDecision`
@@ -1230,13 +1375,14 @@
 - `AgentDecisionParser.validate_against_stage_contract()`
 
 **验收标准**：
-- `AgentDecision.decision_type` 至少支持 `request_tool_call`、`submit_stage_artifact`、`request_clarification`、`repair_structured_output`、`retry_with_revised_plan` 和 `fail_stage`。
+- `AgentDecision.decision_type` 至少支持 `request_tool_call`、`request_tool_confirmation`、`submit_stage_artifact`、`request_clarification`、`repair_structured_output`、`retry_with_revised_plan` 和 `fail_stage`。
 - 解析器必须消费 A4.9 `ModelCallResult` 的结构化输出候选和 tool call request 候选；不得用自由文本、正则、字符串命令解析或 JSON 猜测触发工具、推进状态、创建审批或交付动作。
 - `request_tool_call` 只能引用当前 `ContextEnvelope.available_tools` 中存在的工具名称和 schema 版本；未知工具、未授权工具、schema 不匹配或重复无效 tool call 不得执行，必须形成结构化模型调用错误。
+- `request_tool_confirmation` 只能引用当前阶段允许的工具动作，必须携带工具名称、命令或参数摘要、目标资源、风险等级、风险分类、预期副作用和替代路径判断；解析器不得把该决策直接转成工具执行。
 - `submit_stage_artifact` 必须按 R3.5 当前 `stage_contract` 的输出契约和 R3.7 `StageArtifact.output` 要求校验证据引用、失败/风险字段和必填结构化产物；缺失时只能进入结构化输出修复或阶段失败。
 - `request_clarification` 只允许在当前阶段契约声明可澄清且缺失信息阻塞阶段输出时使用，并必须携带缺失事实、影响范围、关联引用和回答后需更新的结构化字段。
 - `fail_stage` 必须携带失败原因、已执行证据引用、未完成事项和可展示错误摘要；不得只返回模型自由文本。
-- 解析成功、解析失败、结构化输出修复请求、非法 tool call 和无效阶段产物提交必须写入 `decision_trace` 或 `model_call_trace` 过程记录引用。
+- 解析成功、解析失败、结构化输出修复请求、非法 tool call、工具确认请求和无效阶段产物提交必须写入 `decision_trace` 或 `model_call_trace` 过程记录引用。
 
 **测试方法**：
 - `pytest backend/tests/runtime/test_agent_decision_parser.py -v`
@@ -1274,14 +1420,19 @@
 - 每次阶段执行、ReAct iteration、结构化输出修复、validation pass 或上下文压缩调用前，必须通过 A4.8d/A4.9a/A4.9b 生成 `ContextEnvelope` 和 `ContextManifest`。
 - 模型调用必须通过 A4.9 `LangChainProviderAdapter`，并使用 A4.9c `AgentDecisionParser` 解析决策；自由文本不得作为运行时状态推进、工具执行、审批创建或交付动作依据。
 - 工具执行必须经过 W5.0 `ToolRegistry`、当前 `stage_contract.allowed_tools`、输入 Schema、工作区边界、超时策略和审计策略校验；模型不得动态声明新工具或绕过工具注册表调用本地函数。
+- 当工具风险分级结果为 `high_risk`，`StageAgentRuntime` 必须转交 H4.4a 创建 `ToolConfirmationRequest` 并进入 `waiting_tool_confirmation`，不得直接执行工具。
+- 当工具风险分级结果为 `blocked`，`StageAgentRuntime` 必须记录结构化拒绝错误、安全审计和 `tool_trace`，不得创建可允许的工具确认请求。
 - 阶段结果必须写入 R3.7 `StageArtifact.input`、`StageArtifact.process`、`StageArtifact.output`、metrics 和稳定引用；下游阶段不得只依赖上一阶段摘要文本。
 - `StageArtifact.process` 必须记录 `context_manifest`、`reasoning_trace`、`decision_trace`、`tool_trace`、`model_call_trace`、`file_edit_trace`、`command_trace`、`validation_trace`、`compressed_context_block`、`structured_output_repair_trace`、`recovery_checkpoint`、`side_effect_reconciliation_trace` 和 `untrusted_context_trace` 中本阶段实际发生的记录类型。
-- `request_clarification` 决策必须转交 H4.1 澄清服务和 A4.0 runtime boundary；`submit_stage_artifact` 达到审批点时必须转交 H4.3 审批对象创建或 LangGraph 后续路由，不得由 Stage Agent Runtime 自建审批状态。
+- `StageArtifact.process` 必须记录 `tool_confirmation_trace`、`provider_retry_trace` 和 `provider_circuit_breaker_trace` 中本阶段实际发生的记录类型。
+- `request_clarification` 决策必须转交 H4.1 澄清服务和 A4.0 runtime boundary；`request_tool_confirmation` 或 execution gate 判定的高风险工具动作必须转交 H4.4a 工具确认服务和 A4.0 runtime boundary；`submit_stage_artifact` 达到审批点时必须转交 H4.3 审批对象创建或 LangGraph 后续路由，不得由 Stage Agent Runtime 自建审批状态或工具确认状态。
 - `delivery_integration` 的确定性交付执行不得由模型自由文本决定真实 Git 写动作；真实交付工具仍由后续 D5.1-D5.4 通过 W5.0 ToolProtocol 实现。
+- `test_generation_execution` 阶段必须通过项目 README、依赖声明和脚本配置识别测试环境与依赖缺失；安装依赖、联网下载、数据库迁移、锁文件或环境配置修改等高风险命令必须先进入工具确认。
+- `code_generation`、`test_generation_execution` 和 `code_review` 阶段必须按 `SolutionDesignArtifact.implementation_plan` 的稳定任务标识、顺序和依赖关系推进，不得把模型自由生成的临时计划替代已批准方案产物。
 - ReAct iteration、tool call 数、文件编辑次数、结构化输出修复次数、自动回归次数和无进展次数必须受当前 run `RuntimeLimitSnapshot` 约束，超限后进入结构化失败或 run failed 语义。
 - 每次 iteration 完成后必须持久化 `StageRecoveryCursor`、最近 `ContextManifest`、工具结果引用、模型调用引用、文件编辑引用和 `recovery_checkpoint`；恢复时不得重新执行已确认成功且具有副作用的工具调用。
 - 无法协调的工具副作用、文件写入、`bash` 命令或交付动作必须记录 `side_effect_reconciliation_trace`，并使当前 `StageRun.status` 与 `PipelineRun.status` 进入 `failed`。
-- Stage Agent 执行开始、模型调用、工具调用、阶段产物提交、结构化修复、澄清请求、失败、恢复和副作用协调必须写入运行日志摘要并继承 `TraceContext`；审计记录仍由对应工具、命令或交付适配器负责。
+- Stage Agent 执行开始、模型调用、Provider 重试与熔断、工具调用、工具确认、阶段产物提交、结构化修复、澄清请求、失败、恢复和副作用协调必须写入运行日志摘要并继承 `TraceContext`；审计记录仍由对应工具、命令、工具确认或交付适配器负责。
 
 **测试方法**：
 - `pytest backend/tests/runtime/test_stage_agent_runtime.py -v`

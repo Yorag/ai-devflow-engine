@@ -196,7 +196,7 @@
 
 **计划周期**：Week 2
 **状态**：`[ ]`
-**目标**：固化功能一 V1 的状态、阶段、模板、Provider、交付、事件和运行触发枚举，为后续 Schema、投影、事件矩阵和前端状态提供单一 machine value 来源。
+**目标**：固化功能一 V1 的状态、阶段、模板、Provider、交付、工具确认、工具风险、事件和运行触发枚举，为后续 Schema、投影、事件矩阵和前端状态提供单一 machine value 来源。
 **实施计划**：`docs/plans/implementation/c1.1-enum-contracts.md`
 
 **修改文件列表**：
@@ -211,6 +211,7 @@
 - `StageType`
 - `FeedEntryType`
 - `ControlItemType`
+- `RunControlRecordType`
 - `ApprovalType`
 - `DeliveryMode`
 - `DeliveryReadinessStatus`
@@ -222,17 +223,22 @@
 - `CodeReviewRequestType`
 - `RunTriggerSource`
 - `ApprovalStatus`
+- `ToolConfirmationStatus`
+- `ToolRiskLevel`
+- `ToolRiskCategory`
+- `ProviderCircuitBreakerStatus`
 - `StageItemType`
 - `SseEventType`
 
 **验收标准**：
 - `StageType` 只包含 `requirement_analysis`、`solution_design`、`code_generation`、`test_generation_execution`、`code_review`、`delivery_integration`。
-- `FeedEntryType` 只包含 `user_message`、`stage_node`、`approval_request`、`control_item`、`approval_result`、`delivery_result`、`system_status`。
+- `FeedEntryType` 只包含 `user_message`、`stage_node`、`approval_request`、`tool_confirmation`、`control_item`、`approval_result`、`delivery_result`、`system_status`。
 - `ApprovalType` 只包含 `solution_design_approval` 与 `code_review_approval`。
-- `SessionStatus` 覆盖 `draft`、`running`、`paused`、`waiting_clarification`、`waiting_approval`、`completed`、`failed`、`terminated`。
-- `RunStatus` 只覆盖 `running`、`paused`、`waiting_clarification`、`waiting_approval`、`completed`、`failed`、`terminated`。
-- `StageStatus` 只覆盖 `running`、`waiting_clarification`、`waiting_approval`、`completed`、`failed`、`superseded`，不得包含底层装配态 `pending`。
-- `ControlItemType` 至少包含 `clarification_wait`、`rollback`、`retry`；`retry` 只表示当前 run 内自动回归或阶段内再次尝试。
+- `SessionStatus` 覆盖 `draft`、`running`、`paused`、`waiting_clarification`、`waiting_approval`、`waiting_tool_confirmation`、`completed`、`failed`、`terminated`。
+- `RunStatus` 只覆盖 `running`、`paused`、`waiting_clarification`、`waiting_approval`、`waiting_tool_confirmation`、`completed`、`failed`、`terminated`。
+- `StageStatus` 只覆盖 `running`、`waiting_clarification`、`waiting_approval`、`waiting_tool_confirmation`、`completed`、`failed`、`terminated`、`superseded`，不得包含底层装配态 `pending`。
+- `ControlItemType` 至少包含 `clarification_wait`、`rollback`、`retry`；`retry` 只表示当前 run 内自动回归或阶段内再次尝试；`tool_confirmation` 不属于可见 `control_item` 顶层条目。
+- `RunControlRecordType` 至少包含 `clarification_wait`、`rollback`、`retry`、`tool_confirmation`；其中 `tool_confirmation` 只作为运行过程留痕，不改变 `FeedEntryType.tool_confirmation` 的独立顶层交互语义。
 - `TemplateSource` 只包含 `system_template`、`user_template`。
 - `ProviderSource` 只包含 `builtin`、`custom`。
 - `ProviderProtocolType` 至少包含 `openai_completions_compatible`。
@@ -240,10 +246,14 @@
 - `CodeReviewRequestType` 只包含 `pull_request`、`merge_request`。
 - `RunTriggerSource` 只包含 `initial_requirement`、`retry`、`ops_restart`；用户可见的“重新尝试”映射为机器值 `retry`。
 - `ApprovalStatus` 至少包含 `pending`、`approved`、`rejected`、`cancelled`，其中 `pending` 只属于审批对象，不属于 `RunStatus` 或 `StageStatus`。
-- `StageItemType` 至少包含 `dialogue`、`reasoning`、`decision`、`tool_call`、`diff_preview`、`result`。
+- `ToolConfirmationStatus` 只表达 `pending`、`allowed`、`denied`、`cancelled`；不得复用 `ApprovalStatus`。
+- `ToolRiskLevel` 只表达 `read_only`、`low_risk_write`、`high_risk`、`blocked`。
+- `ToolRiskCategory` 至少覆盖 `dependency_change`、`network_download`、`file_delete_or_move`、`broad_write`、`database_migration`、`lockfile_change`、`environment_config_change`、`unknown_command`、`credential_access`、`path_escape`、`platform_runtime_mutation`、`registry_or_audit_bypass`。
+- `ProviderCircuitBreakerStatus` 至少覆盖 `closed`、`open`、`half_open`。
+- `StageItemType` 至少包含 `dialogue`、`reasoning`、`decision`、`provider_call`、`tool_call`、`diff_preview`、`result`。
 - `SseEventType` 覆盖正式后端规格中的会话级 SSE 事件类型，不允许前端 reducer 自行发明第二套事件名。
 - `draft` 只表示尚未创建首个 `PipelineRun` 的 `Session`，不得出现在 `RunStatus` 中。
-- 测试必须断言 `RunStatus` 不包含 `draft`，`RunStatus` 与 `StageStatus` 不包含 `pending`，`system_status` 不属于 `ControlItemType`。
+- 测试必须断言 `RunStatus` 不包含 `draft`，`RunStatus` 与 `StageStatus` 不包含 `pending`，`system_status` 与 `tool_confirmation` 不属于 `ControlItemType`，`ToolConfirmationStatus` 不包含 `approved` 或 `rejected`。
 
 **测试方法**：
 - `pytest backend/tests/schemas/test_enum_contracts.py -v`
@@ -311,13 +321,20 @@
 - `SessionWorkspaceProjection`
 - `ComposerStateProjection`
 - `FeedEntry`
+- `ToolConfirmationFeedEntry`
+- `ProviderCallStageItem`
+- `SolutionDesignArtifactRead`
 - `ExecutionNodeProjection`
 - `SessionEvent`
 
 **验收标准**：
 - `SessionWorkspaceProjection` 包含项目摘要、会话状态、run summaries、按 run 归属可分段的 Narrative Feed 和 Composer 状态。
 - `RunTimelineProjection.entries[].type` 只允许正式顶层条目枚举。
-- SSE `payload` 中的 `message_item`、`stage_node`、`approval_request`、`approval_result`、`control_item`、`delivery_result`、`system_status` 与查询投影同语义。
+- SSE `payload` 中的 `message_item`、`stage_node`、`approval_request`、`approval_result`、`tool_confirmation`、`control_item`、`delivery_result`、`system_status` 与查询投影同语义。
+- `SolutionDesignArtifactRead` 必须包含 `implementation_plan`，并能表达稳定任务标识、任务顺序、依赖关系、修改范围、测试策略和下游引用所需字段；`Code Generation`、`Test Generation & Execution` 与 `Code Review` 的 Schema 必须能引用同一 `implementation_plan`。
+- `tool_confirmation_requested` 与 `tool_confirmation_result` 事件载荷必须携带同名 `tool_confirmation` 投影，不得携带 `approval_id`、`approval_type`、`approve_action` 或 `reject_action`。
+- `tool_confirmation` 必须是独立顶层 Narrative Feed 条目，不得作为 `approval_request` 或 `control_item` 的替代结构。
+- 阶段内部 `provider_call` 条目必须能表达 Provider 调用状态、重试次数、指数退避等待摘要、熔断状态、失败原因摘要和对应过程记录引用。
 - Requirement Analysis 阶段内澄清问答通过阶段内部条目表达，不提升为审批条目。
 
 **测试方法**：
@@ -340,6 +357,7 @@
 **实现类/函数**：
 - `StageInspectorProjection`
 - `ControlItemInspectorProjection`
+- `ToolConfirmationInspectorProjection`
 - `DeliveryResultDetailProjection`
 - `MetricSet`
 - `InspectorSection`
@@ -348,6 +366,8 @@
 - Inspector 投影按 `identity/input/process/output/artifacts/metrics` 分组。
 - `StageInspectorProjection.stage_type` 只允许六个正式业务阶段。
 - `ControlItemInspectorProjection.control_type` 只允许控制型条目语义。
+- `ToolConfirmationInspectorProjection` 只用于高风险工具确认详情，不得返回 `ApprovalRequest` 或 `ControlItemInspectorProjection` 的替代结构。
+- `StageInspectorProjection` 必须能展示 `SolutionDesignArtifact.implementation_plan`、`tool_confirmation_trace`、`provider_retry_trace` 与 `provider_circuit_breaker_trace` 的稳定引用。
 - `approval_result` 不作为独立右栏对象时，其详情可通过所属阶段 Inspector 中的关联审批信息读取。
 - 不适用指标允许缺省，不使用统一空值占位。
 
@@ -452,25 +472,31 @@
 - `ClarificationRecordModel`
 - `ApprovalRequestModel`
 - `ApprovalDecisionModel`
+- `ToolConfirmationRequestModel`
 - `RunControlRecordModel`
 - `RuntimeLimitSnapshotModel`
+- `ProviderCallPolicySnapshotModel`
 - `ProviderSnapshotModel`
 - `ModelBindingSnapshotModel`
 - `DeliveryChannelSnapshotModel`
 - `DeliveryRecordModel`
 
 **验收标准**：
-- `runtime.db` 承载 PipelineRun、StageRun、StageArtifact、ClarificationRecord、ApprovalRequest、ApprovalDecision、RunControlRecord、DeliveryChannelSnapshot、DeliveryRecord、结构化产物索引与运行摘要。
+- `runtime.db` 承载 PipelineRun、StageRun、StageArtifact、ClarificationRecord、ApprovalRequest、ApprovalDecision、ToolConfirmationRequest、RunControlRecord、DeliveryChannelSnapshot、DeliveryRecord、结构化产物索引与运行摘要。
 - runtime 模型通过 `session_id` 关联 control Session，不复制 `Session` 实体。
 - `PipelineRunModel.delivery_channel_snapshot_ref` 必须指向 `DeliveryChannelSnapshotModel` 结构化快照记录，不得只是无所有权的 opaque string。
 - `DeliveryChannelSnapshotModel` 必须包含 `delivery_mode`、`scm_provider_type`、`repository_identifier`、`default_branch`、`code_review_request_type`、`credential_ref`、`credential_status`、`readiness_status`、`readiness_message` 与 `last_validated_at`。
 - `StageRun.stage_type` 只允许六个正式业务阶段。
-- `RunControlRecord.control_type` 至少支持 `clarification_wait`、`rollback`、`retry`。
+- `StageRun.status` 必须支持 C1.1 定义的全部 `StageStatus`，包括运行终止时使用的 `terminated`。
+- `RunControlRecord.control_type` 至少支持 `clarification_wait`、`rollback`、`retry`、`tool_confirmation`；`tool_confirmation` 只作为过程留痕，不作为可见 `ControlItemType`。
+- `ToolConfirmationRequestModel` 必须记录确认对象、工具名称、命令或参数摘要、目标资源、风险等级、风险分类、预期副作用、替代路径判断、用户决定、状态、关联 StageRun、关联 GraphInterrupt、审计引用和过程记录引用。
+- `ToolConfirmationRequestModel.status` 使用 `ToolConfirmationStatus`，不得复用 `ApprovalStatus` 或创建 `ApprovalDecisionModel`。
 - run 尾部 `system_status` 不作为 `RunControlRecord.control_type` 持久化。
 - `DeliveryRecord` 是正式领域对象，不由临时交付详情投影替代。
 - `PipelineRunModel` 必须包含 `runtime_limit_snapshot_ref`。
-- runtime 模型必须能持久化 `RuntimeLimitSnapshotModel`、`ProviderSnapshotModel` 与 `ModelBindingSnapshotModel` 结构化快照；`PipelineRunModel` 持久化指向这些结构化快照的外键引用。
+- runtime 模型必须能持久化 `RuntimeLimitSnapshotModel`、`ProviderCallPolicySnapshotModel`、`ProviderSnapshotModel` 与 `ModelBindingSnapshotModel` 结构化快照；`PipelineRunModel` 持久化指向这些结构化快照的外键引用。
 - `RuntimeLimitSnapshotModel` 必须保存实际生效值、来源配置版本、平台硬上限版本、schema 版本和固化时间，不读取或引用最新 `PlatformRuntimeSettingsModel` 来解释历史 run。
+- `ProviderCallPolicySnapshotModel` 必须保存请求超时、网络错误重试次数、限流重试次数、指数退避基准、指数退避上限、连续失败熔断阈值、熔断恢复条件、来源配置版本和 schema 版本。
 - `ProviderSnapshotModel` 与 `ModelBindingSnapshotModel` 只保存凭据引用和能力声明快照，不保存真实密钥。
 
 **测试方法**：
@@ -502,7 +528,8 @@
 - GraphDefinition、GraphThread、GraphCheckpoint、GraphInterrupt 均有独立模型，不以单个 GraphThreadModel 或序列化 blob 替代执行图对象边界。
 - `graph.db` 不替代 PipelineRun、StageRun、ApprovalRequest 或 DeliveryRecord 的产品级领域建模。
 - GraphCheckpoint 只保存可恢复执行引用，不作为前端投影来源。
-- GraphInterrupt 能表达澄清与审批中断类型，并可关联 runtime 领域对象。
+- GraphInterrupt 能表达澄清、审批与工具确认中断类型，并可关联 runtime 领域对象。
+- `GraphInterrupt.interrupt_type = tool_confirmation` 必须能关联 `ToolConfirmationRequestModel`，不得关联 `ApprovalRequestModel` 或 `ApprovalDecisionModel`。
 
 **测试方法**：
 - `pytest backend/tests/db/test_graph_model_boundary.py -v`
@@ -559,6 +586,7 @@
 - `PlatformRuntimeSettingsVersion`
 - `AgentRuntimeLimits`
 - `ProviderCallPolicy`
+- `ProviderCallPolicySnapshotRead`
 - `ContextLimits`
 - `LogPolicy`
 - `PlatformHardLimits`
@@ -569,13 +597,14 @@
 **验收标准**：
 - `PlatformRuntimeSettingsRead` 至少包含 `agent_limits`、`provider_call_policy`、`context_limits`、`log_policy` 四个分组。
 - `agent_limits` 至少包含 `max_react_iterations_per_stage`、`max_tool_calls_per_stage`、`max_file_edit_count`、`max_patch_attempts_per_file`、`max_structured_output_repair_attempts`、`max_auto_regression_retries`、`max_clarification_rounds`、`max_no_progress_iterations`。
-- `provider_call_policy` 覆盖 Provider 请求超时、网络错误重试次数、限流重试次数和退避上限。
+- `provider_call_policy` 覆盖 Provider 请求超时、网络错误重试次数、限流重试次数、指数退避基准、指数退避上限、连续失败熔断阈值和熔断恢复条件。
 - `context_limits` 覆盖工具输出、`bash` stdout / stderr、`grep` 返回、文件读取、模型输出进入日志或过程记录的裁剪限制。
 - `log_policy` 覆盖普通运行日志保留周期、审计日志保留周期、日志轮转大小、日志查询默认 `limit` 与最大 `limit`。
 - 所有可写运行上限 Schema 均表达平台硬上限校验所需字段，超过硬上限时由 C2.8 拒绝保存。
 - `PlatformRuntimeSettingsRead` 必须包含当前配置版本、schema 版本、平台硬上限版本、更新时间和只读硬上限摘要；`PlatformRuntimeSettingsUpdate` 必须支持携带期望配置版本用于并发冲突检测。
 - `RuntimeSettingsErrorCode` 必须复用 B0.2 的错误码体系，并固定 `config_invalid_value`、`config_hard_limit_exceeded`、`config_version_conflict`、`config_storage_unavailable`、`config_snapshot_unavailable`。
 - `RuntimeLimitSnapshotRead` 记录实际生效值、来源配置版本和平台硬上限版本。
+- `ProviderCallPolicySnapshotRead` 记录本次 run 固化的请求超时、重试次数、指数退避参数、熔断阈值、熔断恢复条件、来源配置版本和 schema 版本。
 - `ProviderSnapshotRead` 与 `ModelBindingSnapshotRead` 能表达 run 启动时实际使用的 Provider、模型、凭据引用、能力声明和 schema 版本。
 - `compression_prompt` 不出现在 `EnvironmentSettings`、`PlatformRuntimeSettingsRead`、`PlatformRuntimeSettingsUpdate` 或前端可写配置 Schema 中；若压缩过程需要记录提示词，只能记录系统内置提示词资产版本引用。
 
