@@ -4,7 +4,7 @@
 
 本分卷覆盖 Week 7-12 的工作区工具、功能二扩展边界、`git_auto_delivery` 真实 Git 交付适配、前端交付展示、端到端测试、OpenAPI 一致性与系统硬化。完成后，系统具备平台级 V1 发布候选条件。
 
-本分卷把抽象工具协议、Workspace Tools 与 Delivery Tools 拆成独立适配器切片。W5.0 必须先固定 `ToolProtocol` 与工具注册表，W5.2-W5.4 只实现 workspace 具体工具，D5.1-D5.4 再实现 delivery 具体工具，避免 runtime、Provider adapter 或交付适配层先使用临时工具接口。Workspace tools 的工作方式参考 Claude Code，正式工具契约名固定为 `bash`、`read_file`、`edit_file`、`write_file`、`glob`、`grep`。`demo_delivery` 已在 Week 7 作为正式无 Git 写动作交付适配器落地；本分卷只实现 `git_auto_delivery` 的真实 Git 交付能力。真实 Git 操作只在 `git_auto_delivery` 适配层中发生，并且测试必须使用 fixture 仓库和 mock 远端。
+本分卷把抽象工具协议、Workspace Tools 与 Delivery Tools 拆成独立适配器切片。W5.0 必须先固定 `ToolProtocol` 与工具注册表，W5.2-W5.4 只实现 workspace 具体工具，D5.1-D5.4 再实现 delivery 具体工具，避免 runtime、Provider adapter 或交付适配层先使用临时工具接口。Workspace tools 的工作方式参考 Claude Code，正式工具契约名固定为 `bash`、`read_file`、`edit_file`、`write_file`、`glob`、`grep`。`demo_delivery` 已在 Week 7 作为正式无 Git 写动作交付适配器落地；本分卷只实现 `git_auto_delivery` 的真实 Git 交付能力，并在回归阶段验证配置边界与运行快照不会被后续热重载或前端设置破坏。真实 Git 操作只在 `git_auto_delivery` 适配层中发生，并且测试必须使用 fixture 仓库和 mock 远端。
 
 凡本分卷修改 `backend/app/api/routes/*` 的 API 切片，对应 API 测试必须在本切片内断言新增或修改的 path、method、请求 Schema、响应 Schema 和主要错误响应已进入 `/api/openapi.json`；V6.4 只做全局覆盖回归，不替代本地 API 契约断言。
 
@@ -47,6 +47,43 @@
 **测试方法**：
 - `pytest backend/tests/tools/test_tool_protocol_registry.py -v`
 
+<a id="w50a"></a>
+
+## W5.0a 统一错误码字典与错误响应契约
+
+**计划周期**：Week 7
+**状态**：`[ ]`
+**目标**：扩展 B0.2 已建立的后端错误码体系，使 API 错误、工具错误、交付错误、日志审计错误和回归断言共享稳定 `error_code` 来源，避免各切片用自由文本或局部常量定义错误兼容边界。
+**实施计划**：`docs/plans/implementation/w5.0a-error-code-catalog-contract.md`
+
+**修改文件列表**：
+- Modify: `backend/app/api/error_codes.py`
+- Modify: `backend/app/api/errors.py`
+- Create: `backend/app/schemas/errors.py`
+- Modify: `backend/app/tools/protocol.py`
+- Create: `backend/tests/errors/test_error_code_catalog.py`
+
+**实现类/函数**：
+- `ErrorCode`
+- `ErrorCategory`
+- `ErrorCatalogEntry`
+- `ApiErrorResponse`
+- `lookup_error_code()`
+- `ToolError.from_code()`
+- `assert_error_code_registered()`
+
+**验收标准**：
+- 所有对外 API 错误、`ToolError`、delivery tool 错误和日志审计查询错误必须使用 B0.2 `backend/app/api/error_codes.py` 中的稳定 `error_code`。
+- 错误码体系必须记录错误码、分类、默认 HTTP 状态、是否可重试、是否可向用户展示、默认安全标题和默认安全说明。
+- 错误码体系至少覆盖 `tool_unknown`、`tool_not_allowed`、`tool_input_schema_invalid`、`tool_workspace_boundary_violation`、`tool_timeout`、`tool_audit_required_failed`、`bash_command_not_allowed`、`delivery_snapshot_missing`、`delivery_snapshot_not_ready`、`delivery_git_cli_failed`、`delivery_remote_request_failed`、`runtime_data_dir_unavailable`、`audit_write_failed`、`log_query_invalid`、`log_payload_blocked`、`config_snapshot_mutation_blocked`。
+- `ToolError` 只引用错误码、结构化安全详情、`trace_id`、`correlation_id`、`span_id` 和审计引用；不得把异常堆栈、凭据、授权头、Cookie、API Key 或私钥放入错误详情。
+- API 错误响应必须包含稳定 `error_code`、安全 `message`、可选 `detail_ref` 和 trace 关联字段；HTTP 状态只表达传输层结果，不替代领域错误码。
+- 本切片不得创建与 B0.2 并行的第二套错误码模块、第二个 `ErrorCode` 枚举或第二套 API 错误响应模型。
+- 错误码扩展不得引入新的阶段状态、投影字段、事件类型或交付语义；只为既有错误场景提供稳定编码。
+
+**测试方法**：
+- `pytest backend/tests/errors/test_error_code_catalog.py -v`
+
 <a id="w51"></a>
 
 ## W5.1 WorkspaceManager 隔离工作区
@@ -77,13 +114,100 @@
 **测试方法**：
 - `pytest backend/tests/workspace/test_workspace_manager.py -v`
 
+<a id="w50b"></a>
+
+## W5.0b ToolRegistry execution gate
+
+**计划周期**：Week 7-8
+**状态**：`[ ]`
+**目标**：在具体 workspace tools、delivery tools、LangGraph runtime 和 Provider adapter 之间建立唯一工具执行入口，集中校验工具名、阶段 `allowed_tools`、输入 Schema、工作区边界、超时策略和审计策略。
+**实施计划**：`docs/plans/implementation/w5.0b-tool-registry-execution-gate.md`
+
+**修改文件列表**：
+- Modify: `backend/app/tools/protocol.py`
+- Modify: `backend/app/tools/registry.py`
+- Create: `backend/app/tools/execution_gate.py`
+- Create: `backend/tests/tools/test_tool_execution_gate.py`
+
+**实现类/函数**：
+- `ToolExecutionRequest`
+- `ToolExecutionContext`
+- `ToolExecutionGate`
+- `ToolExecutionGate.validate()`
+- `ToolExecutionGate.execute()`
+- `ToolInputSchemaValidator`
+- `ToolTimeoutPolicy.resolve_timeout()`
+- `ToolAuditPolicy.resolve_requirement()`
+- `ToolRegistry.execute()`
+
+**验收标准**：
+- LangGraph runtime、Provider adapter、deterministic test runtime、workspace tool 调用方和 delivery adapter 必须通过 `ToolRegistry.execute()` 发起工具执行；不得绕过注册表直接调用具体工具函数、Git CLI 或远端交付接口。
+- execution gate 必须先校验工具名已注册且与 `ToolProtocol.name` 完全一致；未知工具、重复注册冲突和名称大小写漂移必须返回 W5.0a 字典中的结构化错误。
+- execution gate 必须基于当前 `GraphDefinition.stage_contracts[stage_type].allowed_tools` 校验阶段工具权限；`allowed_tools = []` 时不得执行任何工具调用，未列入 `allowed_tools` 的工具不得进入 `available_tools` 或执行路径。
+- execution gate 必须在工具执行前校验输入 Schema；缺失字段、额外字段、类型错误和不满足约束的值必须返回 `tool_input_schema_invalid`，不得把无效输入交给具体工具自行解释。
+- 对 workspace tools，execution gate 必须调用 WorkspaceManager 的工作区边界校验，阻止绝对路径越界、相对路径逃逸、平台运行数据目录和 `.runtime/logs` 访问。
+- execution gate 必须从当前 run 的 `RuntimeLimitSnapshot`、工具默认值和平台硬上限解析工具调用超时；超时必须返回 `tool_timeout` 并写入运行日志摘要。
+- execution gate 必须在有副作用或高影响工具执行前解析审计策略并形成调用意图；审计策略要求写入但审计不可用时，工具不得执行，必须返回 `tool_audit_required_failed`。
+- `bash` 命令白名单校验仍属于 W5.4 的 `BashCommandAllowlist`；本切片只校验 `bash` 工具是否允许被调用、输入是否符合 `bash` 工具 Schema、工作区和超时是否合规，并把具体命令交给 W5.4 白名单校验。
+- delivery tools 的执行同样经过 execution gate；Delivery Integration 阶段只能调用 `read_delivery_snapshot`、`prepare_branch`、`create_commit`、`push_branch`、`create_code_review_request` 中已注册且列入 `allowed_tools` 的工具。
+- 所有拒绝执行的结果必须使用 W5.0a 错误码、保留 trace 关联字段，并写入运行日志；安全敏感拒绝必须写入审计记录。
+
+**测试方法**：
+- `pytest backend/tests/tools/test_tool_execution_gate.py -v`
+
+<a id="w50c"></a>
+
+## W5.0c 后端测试 fixture、fake provider 与 fake tool 契约
+
+**计划周期**：Week 7-8
+**状态**：`[ ]`
+**目标**：建立后端跨切片测试 fixture 契约，使 deterministic test runtime、Provider adapter、ToolRegistry、workspace tools、delivery tools、配置快照回归和完整 API flow 测试共享正式抽象，不再各自定义临时 fake 字段、临时设置入口或临时工具调用路径。
+**实施计划**：`docs/plans/implementation/w5.0c-backend-test-fixtures-contract.md`
+
+**修改文件列表**：
+- Create: `backend/tests/fixtures/__init__.py`
+- Create: `backend/tests/fixtures/settings.py`
+- Create: `backend/tests/fixtures/providers.py`
+- Create: `backend/tests/fixtures/tools.py`
+- Create: `backend/tests/fixtures/workspace.py`
+- Create: `backend/tests/fixtures/delivery.py`
+- Modify: `backend/tests/conftest.py`
+- Create: `backend/tests/fixtures/test_fixture_contracts.py`
+
+**实现类/函数**：
+- `settings_override_fixture()`
+- `runtime_settings_snapshot_fixture()`
+- `fake_provider_fixture()`
+- `FakeProvider`
+- `FakeChatModel`
+- `fake_tool_fixture()`
+- `FakeTool`
+- `fixture_workspace_repo()`
+- `fixture_git_repository()`
+- `mock_remote_delivery_client()`
+- `delivery_channel_snapshot_fixture()`
+
+**验收标准**：
+- 所有 fake provider 必须消费正式 Provider registry、ProviderSnapshot、ModelBindingSnapshot 和 LangChain adapter 边界；不得定义临时模型字段、临时能力字段或绕过 Provider 能力校验。
+- `FakeProvider` 必须能模拟结构化输出成功、结构化输出失败、tool call 请求、Provider 超时、限流和网络错误，并返回 W5.0a 统一错误码或正式 Provider 错误结构。
+- 所有 fake tool 必须实现 W5.0 `ToolProtocol` 并注册到 `ToolRegistry`；测试调用 fake tool 时仍必须经过 W5.0b execution gate 的工具名、阶段 `allowed_tools`、输入 Schema、超时和审计策略校验。
+- fake tool 只能用于测试未落地的下游工具或隔离上游 runtime 行为；不得成为 runtime、Provider adapter、workspace tools 或 delivery adapter 的生产替代路径。
+- `settings_override_fixture()` 只能在测试中覆盖数据库路径、平台运行数据根目录、工作区根目录、日志落点、凭据引用解析和本次测试需要的运行设置版本；不得把这些 override 暴露到正式配置 API、前端设置或普通环境变量语义中。
+- fixture 仓库必须在临时目录初始化，包含可提交基线、工作区变更样本、`.runtime/logs` 排除样本和 mock remote；测试结束后不得影响真实仓库。
+- delivery fixture 必须能构造已固化的 delivery channel snapshot、未 ready snapshot、缺失 snapshot、mock remote 成功和 mock remote 失败场景，且字段形状与 D4.0 / D5.1 使用的正式 snapshot 一致。
+- fixture 数据必须来源于后端 Schema、领域对象和投影契约；不得创建仅测试可见的状态枚举、事件类型、投影字段或阶段语义。
+- fixture 契约必须支持 W5.0b、D5.2-D5.4、A4.9、V6.1、V6.6、V6.8 和 L6.2 复用。
+
+**测试方法**：
+- `pytest backend/tests/fixtures/test_fixture_contracts.py -v`
+
 <a id="w52"></a>
 
 ## W5.2 文件工具 read_file/write_file/edit_file/glob
 
-**计划周期**：Week 7
+**计划周期**：Week 7-8
 **状态**：`[ ]`
-**目标**：基于 W5.0 `ToolProtocol` 实现核心文件工具，使 deterministic runtime、LangGraph runtime 与 Provider adapter 可以在隔离工作区中读取文本代码文件、创建或覆盖文件、精确编辑文件并按模式匹配路径，且不需要临时工具接口。
+**目标**：基于 W5.0 `ToolProtocol` 实现核心文件工具，使 `deterministic test runtime`、LangGraph runtime 与 Provider adapter 可以在隔离工作区中读取文本代码文件、创建或覆盖文件、精确编辑文件并按模式匹配路径，且不需要临时工具接口。
 **实施计划**：`docs/plans/implementation/w5.2-workspace-file-tools.md`
 
 **修改文件列表**：
@@ -103,6 +227,7 @@
 
 **验收标准**：
 - 文件工具必须实现 W5.0 定义的 `ToolProtocol` 并注册到 `ToolRegistry`。
+- 文件工具执行必须经过 W5.0b execution gate 的工具名、阶段 `allowed_tools`、输入 Schema、工作区边界、超时和审计策略校验。
 - 工具只允许访问当前 run 的隔离工作区。
 - 正式工具契约名必须为 `read_file`、`write_file`、`edit_file`、`glob`；`FileReadTool`、`FileWriteTool`、`FileEditTool`、`GlobTool` 只作为实现类名或参考工具名。
 - `read_file` 只读取文本和代码类文件，不处理图片、PDF、压缩包、音视频或其他二进制 / 富媒体内容。
@@ -116,6 +241,7 @@
 - 文件工具必须默认排除 `.runtime/logs` 和平台运行数据目录，不能把日志文件作为业务文件读写、编辑、列出或纳入变更引用。
 - 每次文件工具调用必须写入运行日志；`write_file` 与 `edit_file` 必须写入审计记录。
 - 文件工具输入输出摘要必须裁剪敏感字段和大文本。
+- 文件不存在、路径越界、二进制文件拒绝、输入 Schema 非法、写入冲突和审计必需但写入失败必须返回 W5.0a 统一错误码。
 
 **测试方法**：
 - `pytest backend/tests/workspace/test_workspace_file_tools.py -v`
@@ -141,6 +267,7 @@
 
 **验收标准**：
 - `grep` 工具必须实现 W5.0 定义的 `ToolProtocol` 并注册到 `ToolRegistry`。
+- `grep` 执行必须经过 W5.0b execution gate 的工具名、阶段 `allowed_tools`、输入 Schema、工作区边界、超时和审计策略校验。
 - `grep` 只扫描当前 run 隔离工作区。
 - `grep` 基于 `ripgrep` 执行正则内容搜索。
 - `grep` 初始化、健康检查或运行前检查必须校验本地 `rg` 可用；缺失时返回结构化 readiness 错误，不得静默降级为未受控搜索实现。
@@ -149,6 +276,7 @@
 - `grep` 错误返回结构化错误信息。
 - `grep` 必须默认排除 `.runtime/logs`、平台运行数据目录、依赖目录和构建产物。
 - `grep` 调用必须写入运行日志摘要；路径越界、权限拒绝和敏感信息阻断必须写入审计记录。
+- `rg` 缺失、输入 Schema 非法、路径越界、超时和结果被裁剪必须返回 W5.0a 统一错误码或结构化裁剪状态。
 
 **测试方法**：
 - `pytest backend/tests/workspace/test_workspace_grep_tool.py -v`
@@ -180,6 +308,7 @@
 - `bash` 命令通过受控子进程执行。
 - `bash` 是正式工具契约名，底层实现是平台受控子进程 / 命令适配器；实现不得假定运行环境一定存在 Unix bash，也不得把 PowerShell、cmd 或其他 shell 的自由能力直接暴露给模型。
 - `bash` 命令必须经过命令白名单校验。
+- `bash` 工具执行必须先通过 W5.0b execution gate 的工具名、阶段 `allowed_tools`、输入 Schema、工作区边界、超时和审计策略校验；W5.4 只实现命令级 allowlist 与受控子进程执行，不另建并行工具权限表。
 - `bash` 工作目录被限制在当前 run 工作区。
 - 命令输出、退出码、耗时和错误被结构化记录。
 - 工具调用产生日志和审计记录。
@@ -190,6 +319,7 @@
 - `bash` 命令输出必须裁剪、摘要化并限制大小；异常堆栈和环境变量不得泄漏凭据、API Key、Cookie、授权头或私钥。
 - `bash` 工作目录、命令、退出码、耗时、输出摘要、错误摘要、`trace_id`、`correlation_id` 和 `span_id` 必须进入运行日志。
 - 会改变工作区、执行测试、触发外部服务或可能影响交付目标的 `bash` 调用必须写入审计记录。
+- allowlist 拒绝、命令超时、工作区越界、审计必需但写入失败和输出被阻断必须返回 W5.0a 统一错误码。
 - 测试不执行破坏真实仓库的命令。
 
 **测试方法**：
@@ -272,6 +402,7 @@
 
 **验收标准**：
 - `read_delivery_snapshot` 必须实现 W5.0 定义的 `ToolProtocol` 并注册到 `ToolRegistry`。
+- `read_delivery_snapshot` 执行必须经过 W5.0b execution gate；Delivery Integration 阶段的 `allowed_tools` 未包含该工具时必须拒绝执行并返回统一错误码。
 - `read_delivery_snapshot` 读取 D4.0 已固化到当前 run 的 delivery channel snapshot。
 - 不从项目级最新 DeliveryChannel 重新读取覆盖历史 run。
 - snapshot 必须包含 `delivery_mode`、`scm_provider_type`、`repository_identifier`、`default_branch`、`code_review_request_type`、`credential_ref`、`credential_status`、`readiness_status`、`readiness_message` 与 `last_validated_at`。
@@ -302,12 +433,13 @@
 
 **验收标准**：
 - `prepare_branch` 与 `create_commit` 必须实现 W5.0 定义的 `ToolProtocol` 并注册到 `ToolRegistry`。
+- `prepare_branch` 与 `create_commit` 执行必须经过 W5.0b execution gate 的工具名、阶段 `allowed_tools`、输入 Schema、工作区边界、超时和审计策略校验。
 - Git 操作通过本地 `git CLI` 适配层执行，不使用 GitPython。
 - prepare_branch 基于 fixture 仓库创建受控分支。
 - create_commit 基于工作区变更创建提交。
 - prepare_branch 与 create_commit 必须写入运行日志和审计记录，记录分支名、提交引用、结果状态、错误摘要和关联 `delivery_record_id`。
 - Git 操作不得把 `.runtime/logs` 或平台运行数据目录纳入 diff、提交或交付结果统计。
-- 测试使用 fixture 仓库，不影响真实仓库。
+- 测试使用 W5.0c fixture 仓库，不影响真实仓库。
 
 **测试方法**：
 - `pytest backend/tests/delivery/test_prepare_branch_create_commit.py -v`
@@ -332,12 +464,14 @@
 
 **验收标准**：
 - `push_branch` 与 `create_code_review_request` 必须实现 W5.0 定义的 `ToolProtocol` 并注册到 `ToolRegistry`。
+- `push_branch` 与 `create_code_review_request` 执行必须经过 W5.0b execution gate；不得绕过注册表直接调用 Git CLI 或远端托管平台客户端。
 - push_branch 使用受控 Git CLI。
 - create_code_review_request 支持 `pull_request` 与 `merge_request` 类型。
 - 远端托管平台调用使用 mock client 测试。
 - 工具返回 MR/PR 稳定引用和错误信息。
 - push_branch 与 create_code_review_request 必须写入运行日志和审计记录，记录远端目标摘要、MR/PR 引用、失败步骤和外部服务错误摘要。
 - 审计记录不得包含访问令牌、授权头、Cookie 或真实密钥。
+- 测试使用 W5.0c mock remote delivery client，不调用真实托管平台。
 
 **测试方法**：
 - `pytest backend/tests/delivery/test_push_branch_create_review_request.py -v`
@@ -368,9 +502,10 @@
 - 本切片不固化 snapshot；snapshot 固化唯一发生在 D4.0 / H4.4 的 `code_review_approval` Approve 路径。
 - Delivery Integration 阶段不再次弹出配置阻塞。
 - 真实交付流程为 `read_delivery_snapshot -> prepare_branch -> create_commit -> push_branch -> create_code_review_request`。
+- `git_auto_delivery` 编排每一步都必须通过 `ToolRegistry.execute()` 调用 delivery tool，并使用当前阶段 `allowed_tools`、工具输入 Schema、超时策略和审计策略执行门；不得直接调用 `ScmDeliveryAdapter` 私有方法、Git CLI 或远端 client。
 - 每个交付步骤必须继承同一 `trace_id` 与交付阶段 `correlation_id`，并具备独立 `span_id`。
 - 交付失败必须能通过日志审计链路定位到失败步骤、错误摘要、审计记录和 DeliveryRecord。
-- 测试使用 fixture 仓库与 mock 远端，不影响真实仓库。
+- 测试使用 W5.0c fixture 仓库与 mock 远端，不影响真实仓库。
 
 **测试方法**：
 - `pytest backend/tests/delivery/test_git_auto_delivery.py -v`
@@ -626,6 +761,7 @@
 **实施计划**：`docs/plans/implementation/v6.6-error-states-regression.md`
 
 **修改文件列表**：
+- Modify: `backend/app/api/error_codes.py`
 - Create: `backend/tests/regression/test_error_contract_regression.py`
 - Create: `frontend/src/features/errors/ErrorState.tsx`
 - Create: `frontend/src/features/errors/__tests__/ErrorState.test.tsx`
@@ -634,11 +770,14 @@
 - `ErrorState`
 - `formatApiError()`
 - `assertApiErrorContractStable()`
+- `assertErrorCodeCatalogCoversRuntimeAndToolErrors()`
 
 **验收标准**：
 - 关键 API 错误在前端有清晰状态。
 - paused 审批提交、非法重新尝试、DeliveryChannel 未 ready 等错误有稳定错误码。
 - 运行数据目录不可写、审计写入失败、日志查询参数非法和日志载荷被阻断等后端错误有稳定错误码。
+- ToolRegistry 拒绝、工具输入 Schema 非法、工作区越界、工具超时、bash allowlist 拒绝、delivery snapshot 缺失 / 未 ready、Git CLI 失败和远端交付请求失败必须进入 W5.0a 统一错误码回归。
+- 错误码回归必须断言每个错误响应的 `error_code` 已注册、HTTP 状态匹配字典、用户可见消息不包含堆栈或凭据，且 trace 关联字段保留。
 - 前端不展示真实凭据内容。
 
 **前端设计质量门**：
@@ -649,6 +788,47 @@
 **测试方法**：
 - `pytest backend/tests/regression/test_error_contract_regression.py -v`
 - `npm --prefix frontend run test -- ErrorState`
+
+<a id="v68"></a>
+
+## V6.8 配置边界与运行快照回归
+
+**计划周期**：Week 12
+**状态**：`[ ]`
+**目标**：补齐环境变量、平台运行设置、业务配置、前端设置边界和运行快照的跨链路回归，确保后续热重载或配置变更不破坏已启动 run 的语义。
+**实施计划**：`docs/plans/implementation/v6.8-config-snapshot-regression.md`
+
+**修改文件列表**：
+- Create: `backend/tests/regression/test_config_snapshot_regression.py`
+- Create: `backend/tests/regression/test_project_session_history_regression.py`
+- Create: `frontend/src/features/settings/__tests__/SettingsBoundary.test.tsx`
+- Create: `frontend/src/features/workspace/__tests__/ProjectSessionHistory.test.tsx`
+
+**实现类/函数**：
+- `assertEnvironmentSettingsBoundary()`
+- `assertRuntimeSettingsDoNotMutateStartedRun()`
+- `assertSettingsModalBoundary()`
+- `assertProjectSessionHistoryBoundary()`
+- `assertSettingsOverrideFixtureBoundary()`
+
+**验收标准**：
+- 环境变量只覆盖启动路径、前后端连接、工作区根目录、日志落点和凭据引用解析；不得承载 Provider、DeliveryChannel、模板运行配置、Agent 运行上限、日志策略或 `compression_prompt`。
+- 五类 SQLite 文件路径从平台运行数据根目录默认派生；普通前端设置和用户配置不得逐个配置数据库路径。
+- 更新 `PlatformRuntimeSettings` 后，新 run 使用新版本，已启动 run 继续使用自身 `RuntimeLimitSnapshot`。
+- 更新 Provider 配置、凭据引用或能力声明后，新 run 使用新 Provider/模型绑定快照，已启动 run 不改变 ProviderSnapshot 或 ModelBindingSnapshot。
+- DeliveryChannel 更新只影响后续新启动 run；对尚未固化交付通道快照的当前活动 run，只能用于后续交付就绪校验和交付快照固化。
+- 前端设置弹窗不展示环境变量、平台运行数据目录、SQLite 路径、平台运行上限、日志策略或 `deterministic test runtime`。
+- `compression_prompt` 只作为系统定义提示词版本引用出现在压缩过程记录中，不进入环境变量、配置 API 或前端设置。
+- W5.0c `settings_override_fixture()` 只能影响测试创建的新 app/session/run 依赖图；不得改变正式配置 API、前端设置字段、环境变量语义或已启动 run 的快照。
+- 已加载且未移除的 Project 与未删除 Session 在重启后仍可见；Session 重命名只改变展示名。
+- Session 删除和 Project 移除只改变产品历史可见性、常规查询入口和对应查询投影，不删除运行记录、产物、交付记录或审计事实。
+- 存在活动 run 的 Session 删除和 Project 移除必须被拒绝；默认 Project 移除必须被拒绝。
+
+**测试方法**：
+- `pytest backend/tests/regression/test_config_snapshot_regression.py -v`
+- `pytest backend/tests/regression/test_project_session_history_regression.py -v`
+- `npm --prefix frontend run test -- SettingsBoundary`
+- `npm --prefix frontend run test -- ProjectSessionHistory`
 
 <a id="l61"></a>
 
