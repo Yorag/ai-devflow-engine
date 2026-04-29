@@ -22,17 +22,26 @@ backend/
     runtime/
     context/
     prompts/
+      assets/
+        compression/
+        repairs/
+        roles/
+        runtime/
+        tools/
     providers/
     tools/
     workspace/
     delivery/
   tests/
     api/
+    core/
     db/
     delivery/
     domain/
     e2e/
+    errors/
     events/
+    fixtures/
     observability/
     projections/
     context/
@@ -42,6 +51,7 @@ backend/
     runtime/
     schemas/
     services/
+    support/
     tools/
     workspace/
 frontend/
@@ -61,6 +71,7 @@ frontend/
       runs/
       settings/
       templates/
+      tool-confirmations/
       workspace/
     mocks/
     pages/
@@ -100,22 +111,28 @@ README.md
 | `backend/app/runtime/` | deterministic test runtime、LangGraph runtime、RuntimeLimitSnapshot 消费、自动回归 |
 | `backend/app/context/` | ContextEnvelope、ContextManifest、上下文来源解析、上下文尺寸守卫、压缩过程记录 |
 | `backend/app/prompts/` | 系统内置提示词资产、PromptRegistry、PromptRenderer、提示词版本留痕与渲染辅助 |
+| `backend/app/prompts/assets/` | 系统内置提示词资产正文，按角色、runtime 指令、修复提示、压缩提示和工具提示分组 |
 | `backend/app/providers/` | Provider registry 与 LangChain 适配 |
 | `backend/app/tools/` | ToolProtocol、ToolRegistry、工具输入输出、错误结构、审计记录和审计引用等跨工具契约 |
 | `backend/app/workspace/` | 隔离工作区、`read_file` / `write_file` / `edit_file` / `glob` 文件工具、`grep` 内容搜索工具、`bash` 命令工具 |
 | `backend/app/delivery/` | demo_delivery、git_auto_delivery、SCM 适配 |
 | `backend/tests/` | pytest 测试根目录，按 API、领域、服务、runtime、delivery、workspace 等行为边界分组 |
 | `backend/tests/api/` | FastAPI 路由、错误响应与 OpenAPI 契约测试 |
+| `backend/tests/core/` | EnvironmentSettings、启动配置和应用级依赖边界测试 |
 | `backend/tests/db/` | 多 SQLite 绑定、SQLAlchemy 模型和迁移边界测试 |
 | `backend/tests/e2e/` | 后端 API/runtime 端到端测试，不启动浏览器 |
+| `backend/tests/errors/` | 错误码目录、错误响应结构和跨工具错误契约测试 |
+| `backend/tests/fixtures/` | 后端测试 fake、settings override、fixture 仓库和 mock remote 契约测试资产 |
 | `backend/tests/observability/` | 运行数据目录、日志写入、日志索引、审计记录、TraceContext、裁剪、轮转、保留与诊断查询测试 |
 | `backend/tests/context/` | ContextEnvelope、ContextManifest、上下文来源解析、尺寸守卫与压缩测试 |
 | `backend/tests/prompts/` | PromptAsset Schema、PromptRegistry、PromptRenderer 与内置提示词资产测试 |
 | `backend/tests/regression/` | 发布候选前跨切片回归测试，不替代单切片测试 |
+| `backend/tests/support/` | 跨测试层共享的轻量辅助函数和配置构造，不承载业务 fake 语义 |
 | `backend/tests/tools/` | 抽象工具协议、注册表和跨工具契约测试 |
 | `frontend/src/api/` | API client、TanStack Query hooks、接口类型 |
 | `frontend/src/app/` | Router、QueryClient、全局 Provider、测试工具 |
 | `frontend/src/features/` | 以产品能力拆分的前端功能模块 |
+| `frontend/src/features/tool-confirmations/` | Tool Confirmation 允许 / 拒绝动作、状态辅助和对应测试 |
 | `frontend/src/mocks/` | mock fixtures 与 mock handlers |
 | `frontend/src/pages/` | 路由级页面组合层，不承载可复用业务组件实现 |
 | `frontend/src/styles/` | 全局样式、基础 CSS 和主题变量，不承载组件私有状态 |
