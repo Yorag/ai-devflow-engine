@@ -4,11 +4,11 @@
 
 本分卷覆盖 Week 7-12 的工作区工具、功能二扩展边界、`git_auto_delivery` 真实 Git 交付适配、前端交付展示、端到端测试、OpenAPI 一致性与系统硬化。完成后，系统具备平台级 V1 发布候选条件。
 
-本分卷把抽象工具协议、Workspace Tools 与 Delivery Tools 拆成独立适配器切片。W5.0 必须先固定 `ToolProtocol` 与工具注册表，W5.2-W5.4 只实现 workspace 具体工具，D5.1-D5.4 再实现 delivery 具体工具，避免 runtime、Provider adapter 或交付适配层先使用临时工具接口。`demo_delivery` 已在 Week 7 作为正式无 Git 写动作交付适配器落地；本分卷只实现 `git_auto_delivery` 的真实 Git 交付能力。真实 Git 操作只在 `git_auto_delivery` 适配层中发生，并且测试必须使用 fixture 仓库和 mock 远端。
+本分卷把抽象工具协议、Workspace Tools 与 Delivery Tools 拆成独立适配器切片。W5.0 必须先固定 `ToolProtocol` 与工具注册表，W5.2-W5.4 只实现 workspace 具体工具，D5.1-D5.4 再实现 delivery 具体工具，避免 runtime、Provider adapter 或交付适配层先使用临时工具接口。Workspace tools 的工作方式参考 Claude Code，正式工具契约名固定为 `bash`、`read_file`、`edit_file`、`write_file`、`glob`、`grep`。`demo_delivery` 已在 Week 7 作为正式无 Git 写动作交付适配器落地；本分卷只实现 `git_auto_delivery` 的真实 Git 交付能力。真实 Git 操作只在 `git_auto_delivery` 适配层中发生，并且测试必须使用 fixture 仓库和 mock 远端。
 
 凡本分卷修改 `backend/app/api/routes/*` 的 API 切片，对应 API 测试必须在本切片内断言新增或修改的 path、method、请求 Schema、响应 Schema 和主要错误响应已进入 `/api/openapi.json`；V6.4 只做全局覆盖回归，不替代本地 API 契约断言。
 
-工作区、工具、Git 交付和硬化任务必须嵌入日志审计要求。`.runtime/logs` 属于平台运行数据目录，不属于被操作项目工作区；工作区工具、搜索、diff、Git 自动交付、交付结果统计和 ChangeSet 计算必须默认排除该目录。所有工具调用必须通过统一 Log & Audit Service 记录运行日志；会造成工作区、Git、远端交付或配置状态变化的工具调用必须写入审计记录。
+工作区、工具、Git 交付和硬化任务必须嵌入日志审计要求。`.runtime/logs` 属于平台运行数据目录，不属于被操作项目工作区；工作区工具、`glob`、`grep`、diff、Git 自动交付、交付结果统计和 ChangeSet 计算必须默认排除该目录。所有工具调用必须通过统一 Log & Audit Service 记录运行日志；会造成工作区、Git、远端交付或配置状态变化的工具调用必须写入审计记录。
 
 <a id="w50"></a>
 
@@ -16,7 +16,7 @@
 
 **计划周期**：Week 7
 **状态**：`[ ]`
-**目标**：在 workspace 文件工具、shell 工具、LangGraph runtime、Provider adapter 和后续 delivery tool 之前固定抽象工具协议，使所有工具绑定只依赖 `ToolProtocol` 和注册表。
+**目标**：在 workspace 文件工具、`bash` 工具、LangGraph runtime、Provider adapter 和后续 delivery tool 之前固定抽象工具协议，使所有工具绑定只依赖 `ToolProtocol` 和注册表。
 **实施计划**：`docs/plans/implementation/w5.0-tool-protocol-registry.md`
 
 **修改文件列表**：
@@ -39,9 +39,10 @@
 - `ToolProtocol` 定义工具名称、类别、输入 Schema、结果载荷、错误结构、审计引用和可绑定工具描述。
 - `ToolRegistry` 能按工具类别和名称注册、解析、列出工具，并拒绝重复注册和未知工具解析。
 - LangGraph runtime、LangChain Provider adapter、workspace 工具和后续 delivery 工具只能依赖该抽象协议与注册表。
-- 本切片不实现文件、搜索、shell 或 delivery 具体工具，不绑定具体业务函数。
+- 本切片不实现文件、`glob`、`grep`、`bash` 或 delivery 具体工具，不绑定具体业务函数。
 - ToolProtocol 的审计引用必须能引用 `AuditLogEntry` 或其稳定引用，不能只是自由文本。
-- ToolResult 必须能承载 `trace_id`、`correlation_id`、`span_id` 与 `audit_ref`。
+- ToolResult 必须能承载 `trace_id`、`correlation_id`、`span_id`、`audit_ref`、`coordination_key`、`side_effect_refs` 与 `reconciliation_status`。
+- 具有副作用的工具调用必须先形成调用意图记录，后续文件、`bash` 与 delivery 工具不得在 W5.0 抽象之外自建副作用协调字段。
 
 **测试方法**：
 - `pytest backend/tests/tools/test_tool_protocol_registry.py -v`
@@ -69,7 +70,7 @@
 - 每个 PipelineRun 使用独立工作区。
 - 新 run 从干净基线创建，不继承前一 run 未交付改动。
 - 工作区路径必须处于受控根目录下。
-- 工作区管理不执行业务文件读写或 shell 命令。
+- 工作区管理不执行业务文件读写或 `bash` 命令。
 - 工作区根目录不得包含平台运行数据目录；若平台运行数据目录落在平台仓库路径下，WorkspaceManager 必须把 `.runtime/logs` 标记为排除路径。
 - 工作区创建、定位失败、路径越界和清理必须写入运行日志；路径越界属于安全敏感失败并写入审计记录。
 
@@ -78,11 +79,11 @@
 
 <a id="w52"></a>
 
-## W5.2 文件工具 read/write/edit/list
+## W5.2 文件工具 read_file/write_file/edit_file/glob
 
 **计划周期**：Week 7
 **状态**：`[ ]`
-**目标**：基于 W5.0 `ToolProtocol` 实现核心文件工具，使 deterministic runtime、LangGraph runtime 与 Provider adapter 可以在隔离工作区中读写、编辑和列出文件，且不需要临时工具接口。
+**目标**：基于 W5.0 `ToolProtocol` 实现核心文件工具，使 deterministic runtime、LangGraph runtime 与 Provider adapter 可以在隔离工作区中读取文本代码文件、创建或覆盖文件、精确编辑文件并按模式匹配路径，且不需要临时工具接口。
 **实施计划**：`docs/plans/implementation/w5.2-workspace-file-tools.md`
 
 **修改文件列表**：
@@ -94,14 +95,24 @@
 - `read_file()`
 - `write_file()`
 - `edit_file()`
-- `list_files()`
+- `glob()`
+- `FileReadTool`
+- `FileWriteTool`
+- `FileEditTool`
+- `GlobTool`
 
 **验收标准**：
 - 文件工具必须实现 W5.0 定义的 `ToolProtocol` 并注册到 `ToolRegistry`。
 - 工具只允许访问当前 run 的隔离工作区。
-- `read_file`、`write_file`、`edit_file`、`list_files` 都返回结构化结果和错误信息。
-- 文件编辑可生成变更记录引用，供 StageArtifact 或 ChangeSet 使用。
-- 本切片不重新定义工具协议，不实现搜索、shell 或 delivery 具体工具。
+- 正式工具契约名必须为 `read_file`、`write_file`、`edit_file`、`glob`；`FileReadTool`、`FileWriteTool`、`FileEditTool`、`GlobTool` 只作为实现类名或参考工具名。
+- `read_file` 只读取文本和代码类文件，不处理图片、PDF、压缩包、音视频或其他二进制 / 富媒体内容。
+- `edit_file` 采用精确字符串替换；目标字符串不存在、匹配次数不唯一或替换后内容不一致时必须返回结构化错误，不得执行模糊 patch。
+- `write_file` 只用于创建或完整覆盖文件。
+- `glob` 按路径模式匹配文件，返回相对路径、文件类型和必要排序信息，不读取文件正文。
+- `read_file`、`write_file`、`edit_file`、`glob` 都返回结构化结果和错误信息。
+- `write_file` 与 `edit_file` 必须生成 `file_edit_trace` 或等价稳定过程记录，并把副作用引用写入 `ToolResult.side_effect_refs`。
+- diff 生成、文件 hash 采集和 `ChangeSet` 构建属于 Workspace & Tool Service / ChangeSet 服务侧能力，不作为独立模型可调用工具加入本切片。
+- 本切片不重新定义工具协议，不实现 `grep`、`bash` 或 delivery 具体工具。
 - 文件工具必须默认排除 `.runtime/logs` 和平台运行数据目录，不能把日志文件作为业务文件读写、编辑、列出或纳入变更引用。
 - 每次文件工具调用必须写入运行日志；`write_file` 与 `edit_file` 必须写入审计记录。
 - 文件工具输入输出摘要必须裁剪敏感字段和大文本。
@@ -111,69 +122,78 @@
 
 <a id="w53"></a>
 
-## W5.3 search 工具
+## W5.3 grep 工具
 
 **计划周期**：Week 7-8
 **状态**：`[ ]`
-**目标**：实现工作区 search 工具，使 runtime 可以受控搜索当前 run 工作区内容。
-**实施计划**：`docs/plans/implementation/w5.3-workspace-search-tool.md`
+**目标**：实现基于 ripgrep 的工作区 `grep` 工具，使 runtime 可以受控正则搜索当前 run 工作区内容。
+**实施计划**：`docs/plans/implementation/w5.3-workspace-grep-tool.md`
 
 **修改文件列表**：
 - Modify: `backend/app/workspace/tools.py`
-- Create: `backend/tests/workspace/test_workspace_search_tool.py`
+- Create: `backend/tests/workspace/test_workspace_grep_tool.py`
 
 **实现类/函数**：
-- `search()`
-- `SearchResultItem`
-- `WorkspaceSearchOptions`
+- `grep()`
+- `GrepTool`
+- `GrepResultItem`
+- `WorkspaceGrepOptions`
 
 **验收标准**：
-- search 工具必须实现 W5.0 定义的 `ToolProtocol` 并注册到 `ToolRegistry`。
-- search 只扫描当前 run 隔离工作区。
-- search 返回路径、行号和匹配片段。
-- search 能排除常见构建产物和依赖目录。
-- 搜索错误返回结构化错误信息。
-- search 必须默认排除 `.runtime/logs`、平台运行数据目录、依赖目录和构建产物。
-- search 调用必须写入运行日志摘要；路径越界、权限拒绝和敏感信息阻断必须写入审计记录。
+- `grep` 工具必须实现 W5.0 定义的 `ToolProtocol` 并注册到 `ToolRegistry`。
+- `grep` 只扫描当前 run 隔离工作区。
+- `grep` 基于 `ripgrep` 执行正则内容搜索。
+- `grep` 初始化、健康检查或运行前检查必须校验本地 `rg` 可用；缺失时返回结构化 readiness 错误，不得静默降级为未受控搜索实现。
+- `grep` 返回路径、行号、匹配片段和截断状态。
+- `grep` 能排除常见构建产物和依赖目录。
+- `grep` 错误返回结构化错误信息。
+- `grep` 必须默认排除 `.runtime/logs`、平台运行数据目录、依赖目录和构建产物。
+- `grep` 调用必须写入运行日志摘要；路径越界、权限拒绝和敏感信息阻断必须写入审计记录。
 
 **测试方法**：
-- `pytest backend/tests/workspace/test_workspace_search_tool.py -v`
+- `pytest backend/tests/workspace/test_workspace_grep_tool.py -v`
 
 <a id="w54"></a>
 
-## W5.4 shell 工具与日志审计记录
+## W5.4 bash 工具与白名单审计
 
 **计划周期**：Week 7-8
 **状态**：`[ ]`
-**目标**：实现受控 shell 工具和工具调用日志审计记录，使测试执行和命令执行可追踪。
-**实施计划**：`docs/plans/implementation/w5.4-workspace-shell-audit.md`
+**目标**：实现受控 `bash` 工具、命令白名单和工具调用日志审计记录，使测试执行和命令执行可追踪。
+**实施计划**：`docs/plans/implementation/w5.4-workspace-bash-audit.md`
 
 **修改文件列表**：
-- Create: `backend/app/workspace/shell.py`
+- Create: `backend/app/workspace/bash.py`
 - Modify: `backend/app/observability/audit.py`
-- Create: `backend/tests/workspace/test_workspace_shell.py`
+- Create: `backend/tests/workspace/test_workspace_bash.py`
 - Create: `backend/tests/tools/test_tool_audit.py`
 
 **实现类/函数**：
-- `run_shell_command()`
-- `ShellExecutionResult`
+- `run_bash_command()`
+- `BashTool`
+- `BashExecutionResult`
+- `BashCommandAllowlist`
 - `AuditService.record_tool_call()`
 - `AuditService.record_tool_error()`
 
 **验收标准**：
-- shell 命令通过受控子进程执行。
-- shell 工作目录被限制在当前 run 工作区。
+- `bash` 命令通过受控子进程执行。
+- `bash` 是正式工具契约名，底层实现是平台受控子进程 / 命令适配器；实现不得假定运行环境一定存在 Unix bash，也不得把 PowerShell、cmd 或其他 shell 的自由能力直接暴露给模型。
+- `bash` 命令必须经过命令白名单校验。
+- `bash` 工作目录被限制在当前 run 工作区。
 - 命令输出、退出码、耗时和错误被结构化记录。
 - 工具调用产生日志和审计记录。
 - 每次被审计的工具调用都必须生成并持久化 W5.0 `ToolAuditRef`，且 `ToolResult.audit_ref` 必须能与 `AuditService` 记录一一对应。
-- shell 工具实现 W5.0 定义的 `ToolProtocol` 并注册到 `ToolRegistry`。
-- shell 命令输出必须裁剪、摘要化并限制大小；异常堆栈和环境变量不得泄漏凭据、API Key、Cookie、授权头或私钥。
-- shell 工作目录、命令、退出码、耗时、输出摘要、错误摘要、`trace_id`、`correlation_id` 和 `span_id` 必须进入运行日志。
-- 会改变工作区、执行测试、触发外部服务或可能影响交付目标的 shell 调用必须写入审计记录。
+- `bash` 执行前必须形成调用意图记录与 `coordination_key`；执行后必须写入 `command_trace`、`ToolResult.side_effect_refs` 和 `reconciliation_status`。
+- 当 `bash` 导致工作区内容变化时，执行前后必须采集工作区 diff、受影响文件列表、文件 hash 或等价变更引用，并把变化纳入 `file_edit_trace`、`command_trace` 与 `ChangeSet` 构建输入。
+- `bash` 工具实现 W5.0 定义的 `ToolProtocol` 并注册到 `ToolRegistry`。
+- `bash` 命令输出必须裁剪、摘要化并限制大小；异常堆栈和环境变量不得泄漏凭据、API Key、Cookie、授权头或私钥。
+- `bash` 工作目录、命令、退出码、耗时、输出摘要、错误摘要、`trace_id`、`correlation_id` 和 `span_id` 必须进入运行日志。
+- 会改变工作区、执行测试、触发外部服务或可能影响交付目标的 `bash` 调用必须写入审计记录。
 - 测试不执行破坏真实仓库的命令。
 
 **测试方法**：
-- `pytest backend/tests/workspace/test_workspace_shell.py -v`
+- `pytest backend/tests/workspace/test_workspace_bash.py -v`
 - `pytest backend/tests/tools/test_tool_audit.py -v`
 
 <a id="w55"></a>
@@ -234,25 +254,25 @@
 
 <a id="d51"></a>
 
-## D5.1 read_delivery_channel 与交付快照读取
+## D5.1 read_delivery_snapshot 与交付快照读取
 
 **计划周期**：Week 10
 **状态**：`[ ]`
-**目标**：基于 W5.0 `ToolProtocol` 实现 SCM / Delivery Tools 中的具体 `read_delivery_channel` 工具实例，使真实交付读取已固化的 delivery channel snapshot。
-**实施计划**：`docs/plans/implementation/d5.1-read-delivery-channel-tool.md`
+**目标**：基于 W5.0 `ToolProtocol` 实现 SCM / Delivery Tools 中的具体 `read_delivery_snapshot` 工具实例，使真实交付读取已固化的 delivery channel snapshot。
+**实施计划**：`docs/plans/implementation/d5.1-read-delivery-snapshot-tool.md`
 
 **修改文件列表**：
 - Create: `backend/app/delivery/scm.py`
-- Create: `backend/tests/delivery/test_read_delivery_channel_tool.py`
+- Create: `backend/tests/delivery/test_read_delivery_snapshot_tool.py`
 
 **实现类/函数**：
-- `ScmDeliveryAdapter.read_delivery_channel()`
+- `ScmDeliveryAdapter.read_delivery_snapshot()`
 - `ToolResult`
-- `ReadDeliveryChannelTool`
+- `ReadDeliverySnapshotTool`
 
 **验收标准**：
-- `read_delivery_channel` 必须实现 W5.0 定义的 `ToolProtocol` 并注册到 `ToolRegistry`。
-- `read_delivery_channel` 读取 D4.0 已固化到当前 run 的 delivery channel snapshot。
+- `read_delivery_snapshot` 必须实现 W5.0 定义的 `ToolProtocol` 并注册到 `ToolRegistry`。
+- `read_delivery_snapshot` 读取 D4.0 已固化到当前 run 的 delivery channel snapshot。
 - 不从项目级最新 DeliveryChannel 重新读取覆盖历史 run。
 - snapshot 必须包含 `delivery_mode`、`scm_provider_type`、`repository_identifier`、`default_branch`、`code_review_request_type`、`credential_ref`、`credential_status`、`readiness_status`、`readiness_message` 与 `last_validated_at`。
 - Delivery Integration 阶段不再次弹出配置阻塞。
@@ -260,7 +280,7 @@
 - 读取交付快照必须写入运行日志；缺失快照、快照字段不完整和凭据状态不可用必须写入审计记录。
 
 **测试方法**：
-- `pytest backend/tests/delivery/test_read_delivery_channel_tool.py -v`
+- `pytest backend/tests/delivery/test_read_delivery_snapshot_tool.py -v`
 
 <a id="d52"></a>
 
@@ -328,7 +348,7 @@
 
 **计划周期**：Week 10
 **状态**：`[ ]`
-**目标**：实现 `git_auto_delivery` 编排，把 read channel、prepare branch、commit、push、MR/PR request 串成受控交付路径，并验证交付只依赖已固化 snapshot readiness。
+**目标**：实现 `git_auto_delivery` 编排，把 `read_delivery_snapshot`、prepare branch、commit、push、MR/PR request 串成受控交付路径，并验证交付只依赖已固化 snapshot readiness。
 **实施计划**：`docs/plans/implementation/d5.4-git-auto-delivery-snapshot-readiness.md`
 
 **修改文件列表**：
@@ -347,7 +367,7 @@
 - 本切片不重新读取项目级最新 DeliveryChannel，不重新执行审批就绪校验。
 - 本切片不固化 snapshot；snapshot 固化唯一发生在 D4.0 / H4.4 的 `code_review_approval` Approve 路径。
 - Delivery Integration 阶段不再次弹出配置阻塞。
-- 真实交付流程为 `read_delivery_channel -> prepare_branch -> create_commit -> push_branch -> create_code_review_request`。
+- 真实交付流程为 `read_delivery_snapshot -> prepare_branch -> create_commit -> push_branch -> create_code_review_request`。
 - 每个交付步骤必须继承同一 `trace_id` 与交付阶段 `correlation_id`，并具备独立 `span_id`。
 - 交付失败必须能通过日志审计链路定位到失败步骤、错误摘要、审计记录和 DeliveryRecord。
 - 测试使用 fixture 仓库与 mock 远端，不影响真实仓库。

@@ -607,7 +607,7 @@
 - deterministic runtime 可稳定推进六个业务阶段。
 - 每个阶段写入 StageRun、StageArtifact 和领域事件。
 - Solution Validation 作为 `solution_design` 内部过程记录出现，不形成独立阶段。
-- deterministic runtime 在调用文件、搜索或 shell 能力时必须通过 W5.0 `ToolProtocol` 与 `ToolRegistry`；若本切片尚未调用工具，则只能写入固定结构化产物和领域事件，不得引入临时工具函数。
+- deterministic runtime 在调用 `read_file`、`write_file`、`edit_file`、`glob`、`grep` 或 `bash` 能力时必须通过 W5.0 `ToolProtocol` 与 `ToolRegistry`；若本切片尚未调用工具，则只能写入固定结构化产物和领域事件，不得引入临时工具函数。
 - deterministic runtime 每个阶段推进必须写入运行日志摘要，包含阶段、耗时、结果状态、产物引用和 `span_id`；阶段事实仍由 StageRun、StageArtifact 和领域事件承载。
 - 前端端到端测试可使用固定输出。
 
@@ -927,7 +927,7 @@
 - custom Provider 使用 `OpenAI Completions compatible` 接入协议。
 - 测试使用 fake model，不调用真实远端模型。
 - LangChain adapter 只创建 chat model、绑定工具、声明结构化输出，不表达业务阶段流转。
-- 工具绑定对象来自 W5.0 定义的抽象 `ToolProtocol` 与工具注册表；Week 8 只能绑定已注册 workspace 工具和 fake 工具，不得在 D5.1-D5.4 前绑定具体 delivery tool 实例。
+- 工具绑定对象来自 W5.0 定义的抽象 `ToolProtocol` 与工具注册表；Week 8 只能绑定已注册 `bash`、`read_file`、`edit_file`、`write_file`、`glob`、`grep` 或 fake 工具，不得在 D5.1-D5.4 前绑定具体 delivery tool 实例。
 - 结构化输出失败必须返回可处理错误，不得直接推进 LangGraph 节点成功完成。
 - 模型请求、模型响应、结构化输出解析、模型错误和重试必须写入运行日志摘要；模型输入输出进入日志前必须裁剪、阻断敏感字段并限制长度。
 

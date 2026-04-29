@@ -96,7 +96,7 @@ README.md
 | `backend/app/runtime/` | deterministic runtime、LangGraph runtime、自动回归 |
 | `backend/app/providers/` | Provider registry 与 LangChain 适配 |
 | `backend/app/tools/` | ToolProtocol、ToolRegistry、工具输入输出、错误结构、审计记录和审计引用等跨工具契约 |
-| `backend/app/workspace/` | 隔离工作区、文件工具、shell 工具 |
+| `backend/app/workspace/` | 隔离工作区、`read_file` / `write_file` / `edit_file` / `glob` 文件工具、`grep` 内容搜索工具、`bash` 命令工具 |
 | `backend/app/delivery/` | demo_delivery、git_auto_delivery、SCM 适配 |
 | `backend/tests/` | pytest 测试根目录，按 API、领域、服务、runtime、delivery、workspace 等行为边界分组 |
 | `backend/tests/api/` | FastAPI 路由、错误响应与 OpenAPI 契约测试 |
@@ -169,7 +169,7 @@ README.md
 - 命令与预期输出
 - 完成前验证清单
 
-涉及用户命令接口、运行生命周期推进、runtime 节点执行、模型调用、工具调用、工作区写入、shell 命令、Git 交付、远端交付、配置变更或安全敏感失败的实施计划还必须包含 `Log & Audit Integration` 小节：
+涉及用户命令接口、运行生命周期推进、runtime 节点执行、模型调用、工具调用、工作区写入、`bash` 命令、Git 交付、远端交付、配置变更或安全敏感失败的实施计划还必须包含 `Log & Audit Integration` 小节：
 - 明确本切片产生的运行日志类别、审计动作、关联对象和失败结果。
 - 明确 `request_id`、`trace_id`、`correlation_id`、`span_id` 与 `parent_span_id` 的生成或继承方式。
 - 明确敏感字段裁剪、阻断、摘要化与载荷大小限制。
