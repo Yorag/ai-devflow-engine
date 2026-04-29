@@ -258,6 +258,7 @@
 设置弹窗必须满足以下边界：
 - 不展示或编辑环境变量、平台运行数据目录、SQLite 文件路径、CORS、日志文件路径或 `deterministic test runtime`
 - 不展示或编辑后端平台硬上限、全局 ReAct 循环上限、日志保留策略、日志裁剪策略或诊断查询分页上限
+- 不展示或编辑后端系统内置提示词资产、`prompt_id`、`prompt_version`、`runtime_instructions`、结构化输出修复提示词或 `compression_prompt`
 - 若后端返回配置校验错误或平台硬上限错误，前端必须展示错误原因，但不得把这些平台设置实现为普通用户可编辑表单
 - 除项目级 `DeliveryChannel` 在交付快照固化前可用于当前活动 run 的交付就绪校验外，设置保存不得改变已启动 run 的执行语义；对已固化快照的 run，前端必须按后端返回的只读状态展示，不得暗示配置变更会回写历史 run
 
@@ -367,6 +368,7 @@
 
 模板编辑区在 V1 不支持以下字段：
 - 修改 `AgentRole` 名称
+- 查看、编辑或切换后端系统内置提示词资产、`prompt_id`、`prompt_version`、`runtime_instructions`、结构化输出修复提示词或 `compression_prompt`
 
 这些可编辑字段必须被理解为 `运行配置`：
 - 它们服务于后端后续阶段 Agent 的实际执行行为
@@ -392,6 +394,7 @@ Provider 选择区域必须满足以下规则：
 - 阶段输入输出契约
 - 阶段结构化产物要求
 - 工具权限边界
+- 后端系统内置提示词资产、提示词版本切换、`runtime_instructions`、结构化输出修复提示词或 `compression_prompt`
 - 平台运行上限
 - 环境变量或运行数据目录
 
@@ -1175,7 +1178,7 @@ Narrative Feed 中的条目应遵循以下规则：
 2. 默认存在平台仓库自身项目
 3. 每个项目下支持新建需求会话
 4. 新建会话后的空白会话支持模板选择与允许字段编辑
-5. 模板编辑只开放 `AgentRole` 选择、`system_prompt` 编辑、`AgentRole` 到 `Provider` 绑定、自动回归开关与最大重试次数，不开放 `AgentRole` 名称编辑
+5. 模板编辑只开放 `AgentRole` 选择、`system_prompt` 编辑、`AgentRole` 到 `Provider` 绑定、自动回归开关与最大重试次数，不开放 `AgentRole` 名称编辑，也不开放后端系统内置提示词资产或提示词版本切换
 6. 前端将模板允许字段视为运行配置，并在 run 启动后冻结为只读快照
 7. 系统启动时至少提供 `Bug 修复流程`、`新功能开发流程`、`重构流程` 三个可选系统模板
 8. 新建会话默认预选 `新功能开发流程`
@@ -1222,7 +1225,7 @@ Narrative Feed 中的条目应遵循以下规则：
 49. 项目级 `DeliveryChannel` 配置只出现在设置弹窗的 `通用配置` 页面，不出现在模板配置区
 50. 保存项目级默认 `DeliveryChannel` 配置至少影响后续新启动的 run；对尚未进入 `Delivery Integration` 的当前活动 run，可用于后续交付就绪校验
 51. 设置弹窗中的 `模型提供商` 页面允许新增和编辑 `custom Provider`
-52. 设置弹窗不展示或编辑环境变量、平台运行数据目录、SQLite 文件路径、平台运行上限、日志策略或 `deterministic test runtime`
+52. 设置弹窗不展示或编辑环境变量、平台运行数据目录、SQLite 文件路径、平台运行上限、日志策略、后端系统内置提示词资产或 `deterministic test runtime`
 53. Provider 配置变更只影响后续 run 或尚未启动 run 的模板选择，不改变已经启动 run 的 Provider 与模型绑定快照
 54. 当 `Code Review` 相关审批块对应 `git_auto_delivery` 且当前项目交付配置状态不是 `ready` 时，前端在审批块内阻止 `Approve` 提交，并提供打开 `通用配置` 页面的入口
 
