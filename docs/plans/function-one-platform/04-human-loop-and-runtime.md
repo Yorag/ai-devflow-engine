@@ -961,6 +961,7 @@
 
 **修改文件列表**：
 - Create: `backend/app/context/schemas.py`
+- Modify: `backend/app/schemas/prompts.py`
 - Create: `backend/tests/context/test_context_schemas.py`
 
 **实现类/函数**：
@@ -972,20 +973,109 @@
 - `ContextTrustLevel`
 - `ContextBoundaryAction`
 - `ContextManifestRecord`
+- `PromptSectionRef`
 - `ContextEnvelope.validate_section_order()`
 - `ContextManifest.from_envelope()`
 
 **验收标准**：
 - `ContextEnvelope` Schema 必须按规约顺序表达 `runtime_instructions`、`stage_contract`、`agent_role_prompt`、`task_objective`、`specified_action`、`input_artifact_refs`、`context_references`、`working_observations`、`reasoning_trace`、`available_tools`、`recent_observations`、`response_schema` 和 `trace_context`。
-- `ContextManifest` Schema 必须记录 `session_id`、`run_id`、`stage_run_id`、`trace_id`、`correlation_id`、`span_id`、构建时间、`template_snapshot_ref`、`system_prompt` 快照引用、最终渲染提示词或消息序列引用、hash、模板版本、Provider 与模型绑定快照引用、阶段契约、输出 Schema、可用工具及 schema 版本、来源对象、可信级别、边界处理、裁剪压缩状态、完整内容稳定引用和估算规模。
+- `ContextManifest` Schema 必须记录 `session_id`、`run_id`、`stage_run_id`、`trace_id`、`correlation_id`、`span_id`、构建时间、`template_snapshot_ref`、`system_prompt` 快照引用、系统内置 `prompt_id` / `prompt_version`、提示词资产来源、缓存属性、最终渲染提示词或消息序列引用、hash、模板版本、Provider 与模型绑定快照引用、阶段契约、输出 Schema、可用工具及 schema 版本、来源对象、可信级别、边界处理、裁剪压缩状态、完整内容稳定引用和估算规模。
 - `ContextBlock` 必须区分系统可信上下文、低权威角色配置上下文和不可信业务事实或观察结果；用户消息、澄清回复、审批反馈、附件、仓库文件、测试输出、工具观察和外部交付返回不得覆盖 `runtime_instructions`、`stage_contract`、`allowed_tools` 或 `response_schema`。
 - `available_tools` 只能表达来自 W5.0 `ToolProtocol` / `ToolRegistry` 的工具名称、schema 版本和可绑定描述；不得保存具体工具实例、临时工具函数或未注册工具。
 - Schema 必须支持把 `context_manifest` 作为 R3.7 `StageArtifact.process` 过程记录类型引用，且不把大文本直接复制到 manifest 中。
 - raw LangGraph state、raw checkpoint payload、raw node event、raw thread 对象、raw tool adapter 对象和 raw Provider adapter 对象不得通过 Schema 校验进入 `ContextEnvelope`。
 - 本切片只固定 Schema 和校验，不实现上下文来源解析、尺寸守卫、压缩或模型调用；后续 A4.9a 使用本 Schema 构建实际 envelope。
+- 本切片不得加载提示词文件或渲染最终消息；A4.8c 负责系统提示词资产加载，A4.8d 负责 PromptRenderer。
 
 **测试方法**：
 - `pytest backend/tests/context/test_context_schemas.py -v`
+
+<a id="a48c"></a>
+
+## A4.8c PromptRegistry 与系统提示词资产加载
+
+**计划周期**：Week 8
+**状态**：`[ ]`
+**目标**：实现系统内置提示词资产注册与加载边界，使 runtime、上下文压缩、结构化输出修复和工具使用模板通过统一 `PromptRegistry` 获取版本化提示词资产。
+**实施计划**：`docs/plans/implementation/a4.8c-prompt-registry-assets.md`
+
+**修改文件列表**：
+- Create: `backend/app/prompts/__init__.py`
+- Create: `backend/app/prompts/registry.py`
+- Create: `backend/app/prompts/definitions.py`
+- Create: `backend/app/prompts/assets/runtime/runtime_instructions.md`
+- Create: `backend/app/prompts/assets/repairs/structured_output_repair.md`
+- Create: `backend/app/prompts/assets/compression/compression_context.md`
+- Create: `backend/app/prompts/assets/tools/tool_usage_common.md`
+- Create: `backend/tests/prompts/test_prompt_registry.py`
+- Create: `backend/tests/prompts/test_prompt_asset_loading.py`
+
+**实现类/函数**：
+- `PromptAsset`
+- `PromptRegistry`
+- `PromptRegistry.load_builtin_assets()`
+- `PromptRegistry.get(prompt_id: str, prompt_version: str | None = None)`
+- `PromptRegistry.list_by_type(prompt_type: PromptType)`
+- `PromptRegistry.resolve_version_ref(ref: PromptVersionRef)`
+- `PromptRegistry.compute_content_hash(content: str)`
+- `PromptAssetMetadataError`
+- `PromptAssetNotFoundError`
+
+**验收标准**：
+- `PromptRegistry` 必须消费 C1.10a 的 PromptAsset Schema；不得定义并行字段名或并行 prompt 类型。
+- 内置提示词资产必须以 Markdown 文件维护，并使用 YAML front matter 声明 `prompt_id`、`prompt_version`、`prompt_type`、`authority_level`、`model_call_type`、`cache_scope` 和 `source_ref`；文件名不承载版本号，`prompt_version` 的真源是 front matter。
+- `PromptRegistry` 加载时必须解析并剥离 YAML front matter，把元数据写入 `PromptAsset`，把正文作为 prompt content；导入到模板槽位、PromptRenderer 或模型消息时不得包含 front matter。
+- `PromptRegistry` 加载时必须基于剥离 front matter 后的正文计算 `content_hash`，并拒绝缺失元数据、重复 `prompt_id + prompt_version`、未知 prompt 类型、非法 authority 升级和不匹配的文件路径。
+- `runtime_instructions`、`structured_output_repair`、`compression_prompt`、`tool_usage_template` 必须能通过稳定 `PromptVersionRef` 解析。
+- `agent_role_seed` 资产由 C2.2 使用；A4.8c 只提供加载和校验，不修改模板或用户配置。
+- `PromptRegistry` 不读取环境变量、`PlatformRuntimeSettings`、前端设置或模板编辑字段来选择系统提示词资产版本。
+- 资产加载失败不得退化为内联硬编码提示词；调用方必须收到结构化错误以进入运行失败或启动失败流程。
+- 测试必须覆盖合法加载、front matter 剥离、正文 hash 计算、重复版本、缺失 front matter、非法 `compression_prompt` 配置化、非法 `agent_role_seed` authority 和未知资产引用。
+
+**测试方法**：
+- `pytest backend/tests/prompts/test_prompt_registry.py -v`
+- `pytest backend/tests/prompts/test_prompt_asset_loading.py -v`
+
+<a id="a48d"></a>
+
+## A4.8d PromptRenderer 与消息序列渲染
+
+**计划周期**：Week 8
+**状态**：`[ ]`
+**目标**：实现 PromptRenderer，把系统内置提示词资产、run 快照、阶段契约、工具描述、任务目标和输出 Schema 按 ContextEnvelope 顺序渲染为可追踪的提示词 section 和最终消息序列。
+**实施计划**：`docs/plans/implementation/a4.8d-prompt-renderer.md`
+
+**修改文件列表**：
+- Create: `backend/app/prompts/renderer.py`
+- Modify: `backend/app/context/schemas.py`
+- Create: `backend/tests/prompts/test_prompt_renderer.py`
+- Create: `backend/tests/prompts/test_prompt_renderer_manifest_metadata.py`
+
+**实现类/函数**：
+- `PromptRenderer`
+- `PromptRenderRequest`
+- `PromptRenderResult`
+- `PromptRenderedSection`
+- `PromptRenderer.render_runtime_instructions()`
+- `PromptRenderer.render_stage_contract()`
+- `PromptRenderer.render_tool_usage()`
+- `PromptRenderer.render_structured_output_repair()`
+- `PromptRenderer.render_messages()`
+- `PromptRenderer.compute_render_hash()`
+
+**验收标准**：
+- `PromptRenderer` 必须从 A4.8c `PromptRegistry` 读取系统内置提示词资产，并从 R3.5 `GraphDefinition.stage_contracts` 读取阶段契约；不得维护并行阶段规则、工具权限表或输出 Schema。
+- `PromptRenderer` 只能渲染 A4.8c 已剥离 front matter 的提示词正文；`prompt_id`、`prompt_version`、`source_ref`、`cache_scope`、`content_hash` 和 `render_hash` 只能进入渲染元数据、`ContextManifest` 或过程记录，不得进入模型可见消息正文。
+- 渲染顺序必须保持 `ContextEnvelope` 权威层级：`runtime_instructions` 高于 `stage_contract`，`stage_contract` 高于 `agent_role_prompt`，`agent_role_prompt` 高于业务事实和工具观察。
+- 工具说明必须从 W5.0 `ToolProtocol` / `ToolRegistry` 的可绑定描述渲染；提示词资产只能定义展示模板和通用使用准则，不得授予、扩大或隐藏工具权限。
+- 结构化输出修复提示词必须引用当前 `response_schema`、解析错误和可修复范围；不得允许模型改变阶段契约、关闭结构化输出或修改工具边界。
+- 渲染结果必须返回 section 级 `prompt_id`、`prompt_version`、`source_ref`、`cache_scope`、`content_hash`、`render_hash` 和最终消息序列引用所需元数据。
+- 当提示词资产缺失、版本不可解析、hash 不匹配或与阶段契约冲突时，`PromptRenderer` 必须返回结构化错误，不得回退到内联硬编码提示词。
+- 测试必须覆盖标准 stage agent 调用、结构化输出修复调用、工具描述渲染、PromptRegistry 缺失、阶段契约冲突和 manifest 元数据完整性。
+
+**测试方法**：
+- `pytest backend/tests/prompts/test_prompt_renderer.py -v`
+- `pytest backend/tests/prompts/test_prompt_renderer_manifest_metadata.py -v`
 
 <a id="a49"></a>
 
@@ -1019,7 +1109,7 @@
 - `ModelCallResult` 必须返回原始响应引用、结构化输出候选、tool call request 候选、Provider 错误、token 用量摘要和 `model_call_trace` 写入所需元数据；不得把自由文本直接标记为阶段成功。
 - 模型请求、模型响应、结构化输出解析、模型错误和重试必须写入运行日志摘要；模型输入输出进入日志前必须裁剪、阻断敏感字段并限制长度。
 - Provider 请求超时、网络错误重试次数、限流重试次数和退避上限必须来自当前 run 的 `RuntimeLimitSnapshot` 或其引用的配置版本，不得读取最新 `PlatformRuntimeSettings`。
-- 上下文压缩使用系统内置 `compression_prompt`；Adapter 只能记录系统定义的 prompt id/version 引用，不得把 `compression_prompt` 作为用户配置、环境变量或热重载设置读取。
+- 上下文压缩使用系统内置 `compression_prompt`；Adapter 只能记录系统内置提示词资产的 prompt id/version 引用，不得把 `compression_prompt` 作为用户配置、环境变量或热重载设置读取。
 
 **测试方法**：
 - `pytest backend/tests/providers/test_langchain_adapter.py -v`
@@ -1054,13 +1144,14 @@
 
 **验收标准**：
 - Builder 必须消费 A4.8b `ContextEnvelope` / `ContextManifest` Schema，不得输出临时 dict 或前端投影专用载荷。
+- Builder 必须通过 A4.8d `PromptRenderer` 渲染 `runtime_instructions`、阶段提示词固定片段、结构化输出修复提示词和工具使用说明；不得在 builder 内临时拼接系统内置提示词正文。
 - Builder 必须从 R3.5 `GraphDefinition.stage_contracts` 读取当前阶段职责、输入契约、输出契约、`allowed_tools`、结构化产物要求和运行上限引用；不得再引入 `stage_execution_mode` 或并行权限表。
 - Builder 必须从 R3.7 `StageArtifact`、`ContextReference`、ClarificationRecord、ApprovalDecision、工具结果、ChangeSet 和工作区稳定引用解析上下文来源；不得从运行日志反推业务事实。
 - `agent_role_prompt` 必须来自已通过 A4.8a PromptValidation 并固化到当前 run `template_snapshot_ref` 的提示词；Builder 不得读取最新模板或最新 AgentRole 配置。
 - `available_tools` 必须通过 W5.0 `ToolRegistry.list_bindable_tools()` 按当前 `stage_contract.allowed_tools` 过滤生成；未注册工具、未授权工具和具体工具实例不得进入 `ContextEnvelope`。
 - 用户消息、澄清回复、审批反馈、附件、仓库文件、测试输出、工具观察和外部交付返回必须作为不可信 `ContextBlock` 进入，并记录来源标识、可信级别、边界说明和稳定引用。
 - 每次构建必须生成 `ContextManifest`，并通过 `ArtifactStore.append_context_manifest()` 写入当前 `StageArtifact.process` 或其稳定引用；运行日志只保存摘要和定位信息。
-- Builder 必须记录最终渲染提示词或消息序列引用、hash、模板版本、提示词片段来源、Provider 与模型绑定快照引用和可用工具 schema 版本。
+- Builder 必须记录最终渲染提示词或消息序列引用、hash、模板版本、系统内置 prompt 版本、提示词片段来源、Provider 与模型绑定快照引用和可用工具 schema 版本。
 - raw LangGraph state、raw checkpoint payload、raw node event、raw thread 对象、raw Provider response 和 raw tool adapter 对象不得进入 envelope 或 manifest。
 
 **测试方法**：
@@ -1080,6 +1171,7 @@
 - Create: `backend/app/context/size_guard.py`
 - Create: `backend/app/context/compression.py`
 - Modify: `backend/app/context/builder.py`
+- Modify: `backend/app/prompts/renderer.py`
 - Modify: `backend/app/services/artifacts.py`
 - Create: `backend/tests/context/test_context_size_guard.py`
 - Create: `backend/tests/context/test_context_compression.py`
@@ -1102,6 +1194,7 @@
 - 阶段内 ReAct 循环必须应用滑动工作窗口，保留最近必要过程，并把更早过程转为结构化索引或引用；不得删除 R3.7 `StageArtifact.process` 中的原始过程记录。
 - `pinned_context` 包含 `runtime_instructions`、`stage_contract`、`task_objective`、`response_schema`、`system_prompt` 快照引用、结构化需求、已批准方案、当前审批或拒绝理由、当前 active file task 和可用工具 schema，压缩时不得丢失。
 - 上下文压缩必须通过 A4.9 `LangChainProviderAdapter.invoke_structured()` 发起 `model_call_type = context_compression` 的模型调用，并使用系统内置 `compression_prompt` 引用；不得把压缩提示词作为用户配置、环境变量或热重载设置读取。
+- 上下文压缩必须通过 A4.8d `PromptRenderer.render_messages()` 获取 `compression_prompt` 的版本化消息序列；压缩过程记录必须写入 `compression_prompt_id`、`compression_prompt_version` 和渲染 hash。
 - 压缩输出必须形成结构化 `CompressedContextBlock`，并写入 `StageArtifact.process` 的 `compressed_context_block` 和对应 `model_call_trace`；自由文本摘要不得作为唯一结果。
 - 压缩失败不得伪造摘要；若仍能构建 envelope，必须记录 warning 和 manifest 处理结果；若无法构建 envelope，当前 `StageRun.status` 与 `PipelineRun.status` 必须进入 `failed`，并通过尾部 `system_status` 暴露 `context_overflow` 原因。
 - 连续压缩失败必须按当前 run 的运行上限熔断，不得无限重试。
@@ -1178,7 +1271,7 @@
 
 **验收标准**：
 - `StageAgentRuntime` 必须实现 A4.5 `StageNodeRunnerPort`，由 LangGraph stage node 调用；阶段 runner 不得直接修改 `PipelineRun` 主链状态。
-- 每次阶段执行、ReAct iteration、结构化输出修复、validation pass 或上下文压缩调用前，必须通过 A4.9a/A4.9b 生成 `ContextEnvelope` 和 `ContextManifest`。
+- 每次阶段执行、ReAct iteration、结构化输出修复、validation pass 或上下文压缩调用前，必须通过 A4.8d/A4.9a/A4.9b 生成 `ContextEnvelope` 和 `ContextManifest`。
 - 模型调用必须通过 A4.9 `LangChainProviderAdapter`，并使用 A4.9c `AgentDecisionParser` 解析决策；自由文本不得作为运行时状态推进、工具执行、审批创建或交付动作依据。
 - 工具执行必须经过 W5.0 `ToolRegistry`、当前 `stage_contract.allowed_tools`、输入 Schema、工作区边界、超时策略和审计策略校验；模型不得动态声明新工具或绕过工具注册表调用本地函数。
 - 阶段结果必须写入 R3.7 `StageArtifact.input`、`StageArtifact.process`、`StageArtifact.output`、metrics 和稳定引用；下游阶段不得只依赖上一阶段摘要文本。

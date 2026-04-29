@@ -107,6 +107,7 @@
 - `workspace_root` 未配置时默认派生为 `{platform_runtime_root}/workspaces`。
 - 多 SQLite 职责库路径不逐个暴露为环境变量或用户配置；后续 C1.5 只能从 `platform_runtime_root` 派生默认路径。
 - 不包含 Provider 的 `base_url`、`model_id`、能力声明、模板角色绑定、`system_prompt`、交付仓库、目标分支、代码评审请求类型、交付模式、Agent 循环上限、日志保留策略或 `compression_prompt`。
+- 不包含系统内置提示词正文、提示词资产版本切换、`prompt_id` 或 `prompt_version` 覆盖项。
 - `credential_ref = env:<NAME>` 与 `api_key_ref = env:<NAME>` 只能解析受 `credential_env_prefixes` 允许的环境变量名。
 - `override_environment_settings(**values)` 只能在测试中构造隔离 settings，不作为正式产品 API、环境变量矩阵或前端配置入口。
 - 环境变量变更不要求热重载；测试环境替换路径通过 settings override 或 fixture 完成，并必须在测试结束后恢复全局 settings。
@@ -576,10 +577,51 @@
 - `RuntimeSettingsErrorCode` 必须复用 B0.2 的错误码体系，并固定 `config_invalid_value`、`config_hard_limit_exceeded`、`config_version_conflict`、`config_storage_unavailable`、`config_snapshot_unavailable`。
 - `RuntimeLimitSnapshotRead` 记录实际生效值、来源配置版本和平台硬上限版本。
 - `ProviderSnapshotRead` 与 `ModelBindingSnapshotRead` 能表达 run 启动时实际使用的 Provider、模型、凭据引用、能力声明和 schema 版本。
-- `compression_prompt` 不出现在 `EnvironmentSettings`、`PlatformRuntimeSettingsRead`、`PlatformRuntimeSettingsUpdate` 或前端可写配置 Schema 中；若压缩过程需要记录提示词，只能记录系统定义版本引用。
+- `compression_prompt` 不出现在 `EnvironmentSettings`、`PlatformRuntimeSettingsRead`、`PlatformRuntimeSettingsUpdate` 或前端可写配置 Schema 中；若压缩过程需要记录提示词，只能记录系统内置提示词资产版本引用。
 
 **测试方法**：
 - `pytest backend/tests/schemas/test_runtime_settings_schemas.py -v`
+
+<a id="c110a"></a>
+
+## C1.10a PromptAsset Schema 契约
+
+**计划周期**：Week 2
+**状态**：`[ ]`
+**目标**：固定系统内置提示词资产的结构化 Schema、版本字段、权威级别和缓存属性，使后续 PromptRegistry、模板种子、ContextManifest 和压缩过程引用同一契约。
+**实施计划**：`docs/plans/implementation/c1.10a-prompt-asset-schemas.md`
+
+**修改文件列表**：
+- Create: `backend/app/schemas/prompts.py`
+- Create: `backend/tests/schemas/test_prompt_asset_schemas.py`
+
+**实现类/函数**：
+- `PromptType`
+- `PromptAuthorityLevel`
+- `PromptCacheScope`
+- `ModelCallType`
+- `PromptAssetRef`
+- `PromptAssetRead`
+- `PromptSectionRead`
+- `PromptVersionRef`
+- `PromptRenderMetadata`
+- `PromptAssetRead.validate_prompt_identity()`
+- `PromptAssetRead.validate_system_asset_boundary()`
+
+**验收标准**：
+- `PromptAssetRead` 必须包含 `prompt_id`、`prompt_version`、`prompt_type`、`authority_level`、`model_call_type`、`cache_scope`、`source_ref`、`content_hash` 和可选 `applies_to_stage_types`。
+- Markdown 文件名不承载版本号；`prompt_version` 必须来自 YAML front matter，并作为版本真源进入 `PromptAssetRead`、`PromptVersionRef`、`ContextManifest` 和过程记录。
+- `PromptType` 至少支持 `runtime_instructions`、`stage_prompt_fragment`、`structured_output_repair`、`compression_prompt`、`agent_role_seed`、`tool_usage_template`。
+- `PromptAuthorityLevel` 必须区分 `system_trusted`、`stage_contract_rendered`、`agent_role_prompt`、`tool_description_rendered`。
+- `PromptCacheScope` 至少支持 `global_static`、`run_static`、`dynamic_uncached`，并用于后续 ContextManifest 记录，不作为 Provider cache API 直接承诺。
+- `PromptVersionRef` 必须能进入 run 快照引用、`ContextManifest` 和 `CompressedContextBlock` 过程记录。
+- `content_hash` 必须基于剥离 YAML front matter 后的提示词正文计算；front matter 元数据不得作为模型可见提示词正文导入或渲染。
+- `agent_role_seed` 只能作为系统模板初始化来源；Schema 不允许把用户编辑后的 `system_prompt` 标记为 `system_trusted`。
+- `compression_prompt` 只能通过 `prompt_id` / `prompt_version` 表达；不得出现在 `EnvironmentSettings`、`PlatformRuntimeSettingsRead` 或任何前端可写配置 Schema 中。
+- Schema 测试必须覆盖合法资产、缺失版本、非法 authority 升级、非法 `compression_prompt` 配置化和 `agent_role_seed` 被误标为系统可信的失败场景。
+
+**测试方法**：
+- `pytest backend/tests/schemas/test_prompt_asset_schemas.py -v`
 
 <a id="l11"></a>
 

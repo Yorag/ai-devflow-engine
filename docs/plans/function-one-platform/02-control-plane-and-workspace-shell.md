@@ -173,16 +173,23 @@
 **实施计划**：`docs/plans/implementation/c2.2-system-template-provider-seed.md`
 
 **修改文件列表**：
+- Create: `backend/app/prompts/assets/roles/requirement_analyst.md`
+- Create: `backend/app/prompts/assets/roles/solution_designer.md`
+- Create: `backend/app/prompts/assets/roles/code_generator.md`
+- Create: `backend/app/prompts/assets/roles/test_runner.md`
+- Create: `backend/app/prompts/assets/roles/code_reviewer.md`
 - Create: `backend/app/services/templates.py`
 - Create: `backend/app/services/providers.py`
 - Create: `backend/app/api/routes/templates.py`
 - Create: `backend/app/api/routes/providers.py`
+- Create: `backend/tests/prompts/test_agent_role_seed_assets.py`
 - Create: `backend/tests/services/test_template_seed.py`
 - Create: `backend/tests/services/test_provider_seed.py`
 - Create: `backend/tests/api/test_template_provider_seed_api.py`
 
 **实现类/函数**：
 - `TemplateService.seed_system_templates()`
+- `TemplateService.resolve_default_agent_role_prompt(role_id: str)`
 - `TemplateService.list_templates()`
 - `TemplateService.get_default_template()`
 - `ProviderService.seed_builtin_providers()`
@@ -193,11 +200,15 @@
 - 默认模板为 `新功能开发流程`。
 - 三个系统模板共享固定六阶段骨架。
 - 三个系统模板差异只体现在阶段槽位默认绑定的 `AgentRole`、槽位内最终生效的 `system_prompt`、Provider 绑定和自动回归默认策略。
+- 默认 `AgentRole.system_prompt` 必须来自系统内置 `agent_role_seed` 提示词资产；模板种子写入后，运行时真源是模板槽位内固化的 `system_prompt`，不得在已启动 run 中回读最新提示词资产。
+- `agent_role_seed` 提示词资产必须具有稳定 `prompt_id`、`prompt_version` 和 `content_hash`，并通过 C1.10a Schema 校验。
+- `agent_role_seed` 文件名不承载版本号；`prompt_version` 只从 Markdown front matter 读取，写入模板槽位时只写入剥离元数据后的提示词正文。
 - Provider 默认包含 `火山引擎`、`DeepSeek`。
 - `OpenAI Completions compatible` 只作为 custom Provider 接入协议，不作为内置 Provider 名称。
 - API 测试必须断言 `GET /api/pipeline-templates`、`GET /api/pipeline-templates/{templateId}`、`GET /api/providers` 及其响应 Schema 和主要错误响应已进入 `/api/openapi.json`。
 
 **测试方法**：
+- `pytest backend/tests/prompts/test_agent_role_seed_assets.py -v`
 - `pytest backend/tests/services/test_template_seed.py -v`
 - `pytest backend/tests/services/test_provider_seed.py -v`
 - `pytest backend/tests/api/test_template_provider_seed_api.py -v`
@@ -266,6 +277,7 @@
 - 模板编辑只允许选择每个阶段槽位绑定的已有 `AgentRole`，并修改该槽位最终生效的 `system_prompt`、`provider_id`、自动回归开关和最大重试次数。
 - 模板保存必须固化各阶段槽位最终生效的 `role_id`、`system_prompt` 与 `provider_id`，不得修改共享 `AgentRole.role_name`。
 - 模板保存服务必须在 `system_prompt` 持久化前经过单一边界校验调用点；A4.8a 完成后该调用点由 `PromptValidationService.validate_template_prompts_before_save()` 承接，不得另建绕过该调用点的保存路径。
+- 模板 CRUD 不得写入、覆盖或切换后端系统内置提示词资产；用户编辑后的 `system_prompt` 只保存为模板槽位运行配置。
 - 用户不能通过模板删除、禁用、重排核心阶段，不能关闭两个必需审批检查点。
 - 删除当前选中的用户模板后，调用方可回退到默认系统模板。
 - 用户模板另存、覆盖、删除、非法覆盖系统模板和非法删除系统模板必须继承 L2.1 上下文并通过 L2.4 写入审计记录。
@@ -413,7 +425,7 @@
 - 配置设置变更必须继承 L2.1 上下文，使用 L2.2 裁剪载荷，经由 L2.3 写入运行日志，并通过 L2.4 写入审计记录；审计摘要记录变更字段、旧值摘要、新值摘要、生效范围和 `correlation_id`。
 - 本切片实现后端管理服务和内部管理 API 边界；内部管理 API 必须进入 OpenAPI 并复用统一错误响应，但不得被 F2.4 普通前端设置弹窗调用或展示为用户可编辑表单。
 - API 测试必须断言运行设置读取、更新、硬上限拒绝、版本冲突、非法字段和主要错误响应已进入 `/api/openapi.json`。
-- `compression_prompt` 不属于该服务的可写配置项；系统定义版本引用只由压缩过程记录使用。
+- `compression_prompt` 不属于该服务的可写配置项；系统内置提示词资产版本引用只由压缩过程记录使用。
 
 **测试方法**：
 - `pytest backend/tests/services/test_runtime_settings_service.py -v`
@@ -650,6 +662,7 @@
 - `模型提供商` 页面展示内置 Provider 和 custom Provider。
 - DeliveryChannel 配置不出现在模板编辑区。
 - 设置弹窗不展示或编辑环境变量、平台运行数据目录、SQLite 文件路径、CORS、日志文件路径、后端平台硬上限、全局 ReAct 循环上限、日志保留策略、日志裁剪策略、诊断查询分页上限或 `deterministic test runtime`。
+- 设置弹窗不展示或编辑后端系统内置提示词资产、`prompt_id`、`prompt_version`、`runtime_instructions`、结构化输出修复提示词或 `compression_prompt`。
 - 设置弹窗不得调用 C2.8 的内部运行设置管理 API；若 DeliveryChannel 或 Provider 保存返回配置类错误，只展示后端错误原因，不把平台运行设置补成可编辑入口。
 - Provider 密钥只以 `api_key_ref` 或等价引用形式展示和提交，不展示真实密钥内容。
 - Provider 配置变更的 UI 文案不得暗示会修改已经启动 run 的 Provider 与模型绑定快照。
@@ -723,6 +736,7 @@
 - 脏模板不得直接启动运行。
 - 模板编辑区不暴露阶段顺序、审批检查点、阶段输入输出契约或项目级 DeliveryChannel。
 - 模板编辑区不暴露环境变量、运行数据目录、平台运行上限、日志策略或 `deterministic test runtime`。
+- 模板编辑区不暴露后端系统内置提示词资产、提示词版本切换、`runtime_instructions`、结构化输出修复提示词或 `compression_prompt`。
 - `最大自动回归重试次数` 输入超过后端平台硬上限或保存被拒绝时，前端必须展示明确错误，不得自行截断后保存。
 - 当后端返回 `config_hard_limit_exceeded` 或 `config_invalid_value` 时，模板编辑器只提示当前字段保存失败和后端原因，不展示或编辑 C2.8 的平台硬上限值。
 

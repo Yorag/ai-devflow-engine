@@ -196,7 +196,7 @@
 - fixture 仓库必须在临时目录初始化，包含可提交基线、工作区变更样本、`.runtime/logs` 排除样本和 mock remote；测试结束后不得影响真实仓库。
 - delivery fixture 必须能构造已固化的 delivery channel snapshot、未 ready snapshot、缺失 snapshot、mock remote 成功和 mock remote 失败场景，且字段形状与 D4.0 / D5.1 使用的正式 snapshot 一致。
 - fixture 数据必须来源于后端 Schema、领域对象和投影契约；不得创建仅测试可见的状态枚举、事件类型、投影字段或阶段语义。
-- fixture 契约必须支持 W5.0b、D5.2-D5.4、A4.9、V6.1、V6.6、V6.8 和 L6.2 复用。
+- fixture 契约必须支持 W5.0b、D5.2-D5.4、A4.8c-A4.9d、V6.1、V6.6、V6.8 和 L6.2 复用。
 
 **测试方法**：
 - `pytest backend/tests/fixtures/test_fixture_contracts.py -v`
@@ -795,11 +795,12 @@
 
 **计划周期**：Week 12
 **状态**：`[ ]`
-**目标**：补齐环境变量、平台运行设置、业务配置、前端设置边界和运行快照的跨链路回归，确保后续热重载或配置变更不破坏已启动 run 的语义。
+**目标**：补齐环境变量、平台运行设置、业务配置、系统内置提示词资产、前端设置边界和运行快照的跨链路回归，确保后续热重载或配置变更不破坏已启动 run 的语义。
 **实施计划**：`docs/plans/implementation/v6.8-config-snapshot-regression.md`
 
 **修改文件列表**：
 - Create: `backend/tests/regression/test_config_snapshot_regression.py`
+- Create: `backend/tests/regression/test_prompt_asset_boundary_regression.py`
 - Create: `backend/tests/regression/test_project_session_history_regression.py`
 - Create: `frontend/src/features/settings/__tests__/SettingsBoundary.test.tsx`
 - Create: `frontend/src/features/workspace/__tests__/ProjectSessionHistory.test.tsx`
@@ -807,18 +808,23 @@
 **实现类/函数**：
 - `assertEnvironmentSettingsBoundary()`
 - `assertRuntimeSettingsDoNotMutateStartedRun()`
+- `assertPromptAssetsDoNotMutateStartedRun()`
+- `assertPromptAssetsNotUserConfigurable()`
 - `assertSettingsModalBoundary()`
 - `assertProjectSessionHistoryBoundary()`
 - `assertSettingsOverrideFixtureBoundary()`
 
 **验收标准**：
-- 环境变量只覆盖启动路径、前后端连接、工作区根目录、日志落点和凭据引用解析；不得承载 Provider、DeliveryChannel、模板运行配置、Agent 运行上限、日志策略或 `compression_prompt`。
+- 环境变量只覆盖启动路径、前后端连接、工作区根目录、日志落点和凭据引用解析；不得承载 Provider、DeliveryChannel、模板运行配置、Agent 运行上限、日志策略、系统内置提示词正文、提示词资产版本切换、`prompt_id`、`prompt_version` 或 `compression_prompt`。
 - 五类 SQLite 文件路径从平台运行数据根目录默认派生；普通前端设置和用户配置不得逐个配置数据库路径。
 - 更新 `PlatformRuntimeSettings` 后，新 run 使用新版本，已启动 run 继续使用自身 `RuntimeLimitSnapshot`。
 - 更新 Provider 配置、凭据引用或能力声明后，新 run 使用新 Provider/模型绑定快照，已启动 run 不改变 ProviderSnapshot 或 ModelBindingSnapshot。
 - DeliveryChannel 更新只影响后续新启动 run；对尚未固化交付通道快照的当前活动 run，只能用于后续交付就绪校验和交付快照固化。
-- 前端设置弹窗不展示环境变量、平台运行数据目录、SQLite 路径、平台运行上限、日志策略或 `deterministic test runtime`。
-- `compression_prompt` 只作为系统定义提示词版本引用出现在压缩过程记录中，不进入环境变量、配置 API 或前端设置。
+- 前端设置弹窗不展示环境变量、平台运行数据目录、SQLite 路径、平台运行上限、日志策略、系统内置提示词资产、提示词版本切换、`runtime_instructions`、结构化输出修复提示词、`compression_prompt` 或 `deterministic test runtime`。
+- 模板编辑器不展示系统内置提示词资产、提示词版本切换、`runtime_instructions`、结构化输出修复提示词或 `compression_prompt`；用户编辑的 `system_prompt` 只作为模板槽位运行配置保存。
+- `compression_prompt` 只作为系统内置提示词资产的 `prompt_id`、`prompt_version` 和渲染 hash 出现在压缩过程记录中，不进入环境变量、配置 API、前端设置或模板编辑字段。
+- 已启动 run 的 `ContextManifest`、压缩过程记录和模型调用过程必须能通过提示词版本引用、`content_hash` 与 `render_hash` 解释；最新提示词资产版本不得改变既有 run 的模板快照、ContextManifest 或压缩记录语义。
+- `PromptRegistry` 不接受环境变量、平台运行设置、前端设置、模板编辑字段或用户消息作为系统内置提示词资产来源。
 - W5.0c `settings_override_fixture()` 只能影响测试创建的新 app/session/run 依赖图；不得改变正式配置 API、前端设置字段、环境变量语义或已启动 run 的快照。
 - 已加载且未移除的 Project 与未删除 Session 在重启后仍可见；Session 重命名只改变展示名。
 - Session 删除和 Project 移除只改变产品历史可见性、常规查询入口和对应查询投影，不删除运行记录、产物、交付记录或审计事实。
@@ -826,6 +832,7 @@
 
 **测试方法**：
 - `pytest backend/tests/regression/test_config_snapshot_regression.py -v`
+- `pytest backend/tests/regression/test_prompt_asset_boundary_regression.py -v`
 - `pytest backend/tests/regression/test_project_session_history_regression.py -v`
 - `npm --prefix frontend run test -- SettingsBoundary`
 - `npm --prefix frontend run test -- ProjectSessionHistory`

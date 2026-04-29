@@ -20,6 +20,8 @@ backend/
       projections/
     observability/
     runtime/
+    context/
+    prompts/
     providers/
     tools/
     workspace/
@@ -33,6 +35,8 @@ backend/
     events/
     observability/
     projections/
+    context/
+    prompts/
     providers/
     regression/
     runtime/
@@ -94,6 +98,8 @@ README.md
 | `backend/app/services/projections/` | Workspace、Timeline、Inspector 投影组装 |
 | `backend/app/observability/` | 平台运行数据目录、JSONL 日志、日志索引、审计记录、TraceContext、裁剪、轮转、保留与日志诊断查询服务 |
 | `backend/app/runtime/` | deterministic test runtime、LangGraph runtime、RuntimeLimitSnapshot 消费、自动回归 |
+| `backend/app/context/` | ContextEnvelope、ContextManifest、上下文来源解析、上下文尺寸守卫、压缩过程记录 |
+| `backend/app/prompts/` | 系统内置提示词资产、PromptRegistry、PromptRenderer、提示词版本留痕与渲染辅助 |
 | `backend/app/providers/` | Provider registry 与 LangChain 适配 |
 | `backend/app/tools/` | ToolProtocol、ToolRegistry、工具输入输出、错误结构、审计记录和审计引用等跨工具契约 |
 | `backend/app/workspace/` | 隔离工作区、`read_file` / `write_file` / `edit_file` / `glob` 文件工具、`grep` 内容搜索工具、`bash` 命令工具 |
@@ -103,6 +109,8 @@ README.md
 | `backend/tests/db/` | 多 SQLite 绑定、SQLAlchemy 模型和迁移边界测试 |
 | `backend/tests/e2e/` | 后端 API/runtime 端到端测试，不启动浏览器 |
 | `backend/tests/observability/` | 运行数据目录、日志写入、日志索引、审计记录、TraceContext、裁剪、轮转、保留与诊断查询测试 |
+| `backend/tests/context/` | ContextEnvelope、ContextManifest、上下文来源解析、尺寸守卫与压缩测试 |
+| `backend/tests/prompts/` | PromptAsset Schema、PromptRegistry、PromptRenderer 与内置提示词资产测试 |
 | `backend/tests/regression/` | 发布候选前跨切片回归测试，不替代单切片测试 |
 | `backend/tests/tools/` | 抽象工具协议、注册表和跨工具契约测试 |
 | `frontend/src/api/` | API client、TanStack Query hooks、接口类型 |
@@ -140,16 +148,17 @@ README.md
 
 **实现类/函数**：
 - 无生产代码。
-- 文档需定义 `backend/`、`frontend/`、`e2e/`、`docs/api/`、`docs/plans/implementation/` 的职责。
+- 文档需定义 `backend/`、`frontend/`、`e2e/`、`docs/api/`、`docs/plans/implementation/` 的职责，并覆盖 `backend/app/context/`、`backend/app/prompts/`、`backend/tests/context/` 与 `backend/tests/prompts/` 的落点边界。
 
 **验收标准**：
 - 项目骨架在文档中可追踪。
 - B0.1、B0.2、F0.1 的文件落点与骨架一致。
+- C1.10a、A4.8b-A4.8d 与 A4.9a-A4.9b 的 context/prompts 文件落点与骨架一致。
 - 空目录不作为单独交付物，实际目录随首个源文件或测试文件创建。
 
 **测试方法**：
 - `rg -n "backend/|frontend/|docs/plans/implementation" docs/architecture/project-structure.md README.md`
-- 人工核对 B0.1、B0.2、F0.1 的文件列表与骨架一致。
+- 人工核对 B0.1、B0.2、F0.1、C1.10a、A4.8b-A4.8d 与 A4.9a-A4.9b 的文件列表与骨架一致。
 
 ## 4. Superpowers 执行规则
 
