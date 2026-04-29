@@ -2,7 +2,7 @@
 
 ## 范围
 
-本分卷覆盖 Week 6-9 的人工介入、运行控制、前端交互状态、deterministic runtime、demo_delivery、LangGraph runtime、Provider adapter 和自动回归。完成后，系统可以用 deterministic runtime 跑通 `demo_delivery` 全链路，并具备正式 LangGraph 编排路径。
+本分卷覆盖 Week 6-9 的人工介入、运行控制、前端交互状态、`deterministic test runtime`、demo_delivery、LangGraph runtime、Stage Agent Runtime、Context Management、Provider adapter 和自动回归。完成后，系统可以用 `deterministic test runtime` 跑通 `demo_delivery` 全链路，并具备正式 LangGraph 编排路径。
 
 本分卷承接 03 分卷的 Run 状态机和投影基础，负责运行中断、恢复、人工决策和执行内核副作用。每个任务只处理一个控制行为或 runtime 能力。
 凡本分卷修改 `backend/app/api/routes/*` 的 API 切片，对应 API 测试必须在本切片内断言新增或修改的 path、method、请求 Schema、响应 Schema 和主要错误响应已进入 `/api/openapi.json`；V6.4 只做全局覆盖回归。
@@ -560,7 +560,7 @@
 
 **计划周期**：Week 7
 **状态**：`[ ]`
-**目标**：定义 deterministic runtime 与 LangGraph runtime 的共同接口，使运行生命周期服务不依赖具体执行内核。
+**目标**：定义 `deterministic test runtime` 与 LangGraph runtime 的共同接口，使运行生命周期服务不依赖具体执行内核，并保证两条执行路径只消费 run 已固化的运行快照。
 **实施计划**：`docs/plans/implementation/a4.1-runtime-engine-interface.md`
 
 **修改文件列表**：
@@ -577,21 +577,22 @@
 **验收标准**：
 - runtime 接口支持启动、推进、从中断恢复和终止。
 - runtime 结果只返回领域对象、事件和产物引用，不返回 raw graph state。
-- deterministic 与 LangGraph runtime 必须实现 A4.0 定义的 `RuntimeCommandPort` / `CheckpointPort` 调用边界。
-- deterministic runtime 只作为稳定测试、前端联调和可重复端到端验收路径；正式 Agent 编排路径由 LangGraph runtime 承担。
+- `deterministic test runtime` 与 LangGraph runtime 必须实现 A4.0 定义的 `RuntimeCommandPort` / `CheckpointPort` 调用边界。
+- `deterministic test runtime` 只作为稳定测试、前端联调和可重复端到端验收路径；正式 Agent 编排路径由 LangGraph runtime 承担。
 - `RuntimeEngine` 接口不得要求调用方识别 deterministic 或 LangGraph 的内部状态结构。
 - runtime 接口必须接收并传递 `TraceContext`，运行步骤结果必须允许返回日志摘要引用和审计引用，但不得要求调用方读取日志来推进状态。
+- `RuntimeExecutionContext` 必须携带 `template_snapshot_ref`、Provider/模型绑定快照引用、`runtime_limit_snapshot_ref`、`graph_definition_ref` 和必要的交付快照引用；runtime 不得读取最新 Provider、模板或平台运行设置来改变当前 run。
 
 **测试方法**：
 - `pytest backend/tests/runtime/test_runtime_engine_contract.py -v`
 
 <a id="a42"></a>
 
-## A4.2 deterministic 六阶段推进
+## A4.2 deterministic test runtime 六阶段推进
 
 **计划周期**：Week 7
 **状态**：`[ ]`
-**目标**：实现稳定可控的 deterministic runtime 六阶段推进，使端到端测试和前端联调不依赖真实模型输出。
+**目标**：实现稳定可控的 `deterministic test runtime` 六阶段推进，使端到端测试和前端联调不依赖真实模型输出。
 **实施计划**：`docs/plans/implementation/a4.2-deterministic-six-stage-runtime.md`
 
 **修改文件列表**：
@@ -604,11 +605,12 @@
 - `DeterministicRuntimeEngine.emit_stage_artifacts()`
 
 **验收标准**：
-- deterministic runtime 可稳定推进六个业务阶段。
+- `deterministic test runtime` 可稳定推进六个业务阶段。
 - 每个阶段写入 StageRun、StageArtifact 和领域事件。
 - Solution Validation 作为 `solution_design` 内部过程记录出现，不形成独立阶段。
-- deterministic runtime 在调用 `read_file`、`write_file`、`edit_file`、`glob`、`grep` 或 `bash` 能力时必须通过 W5.0 `ToolProtocol` 与 `ToolRegistry`；若本切片尚未调用工具，则只能写入固定结构化产物和领域事件，不得引入临时工具函数。
-- deterministic runtime 每个阶段推进必须写入运行日志摘要，包含阶段、耗时、结果状态、产物引用和 `span_id`；阶段事实仍由 StageRun、StageArtifact 和领域事件承载。
+- `deterministic test runtime` 在调用 `read_file`、`write_file`、`edit_file`、`glob`、`grep` 或 `bash` 能力时必须通过 W5.0 `ToolProtocol` 与 `ToolRegistry`；若本切片尚未调用工具，则只能写入固定结构化产物和领域事件，不得引入临时工具函数。
+- `deterministic test runtime` 每个阶段推进必须写入运行日志摘要，包含阶段、耗时、结果状态、产物引用和 `span_id`；阶段事实仍由 StageRun、StageArtifact 和领域事件承载。
+- `deterministic test runtime` 必须使用 R3.4、R3.4a、R3.4b 固化的模板、Provider/模型绑定和运行上限快照，不得读取最新配置或暴露为用户可选运行模式。
 - 前端端到端测试可使用固定输出。
 
 **测试方法**：
@@ -616,11 +618,11 @@
 
 <a id="a43"></a>
 
-## A4.3 deterministic 澄清与审批中断
+## A4.3 deterministic test runtime 澄清与审批中断
 
 **计划周期**：Week 7
 **状态**：`[ ]`
-**目标**：为 deterministic runtime 增加可配置澄清、方案审批和代码评审审批中断路径。
+**目标**：为 `deterministic test runtime` 增加可配置澄清、方案审批和代码评审审批中断路径。
 **实施计划**：`docs/plans/implementation/a4.3-deterministic-interrupts.md`
 
 **修改文件列表**：
@@ -645,11 +647,11 @@
 
 <a id="a44"></a>
 
-## A4.4 deterministic 终态控制
+## A4.4 deterministic test runtime 终态控制
 
 **计划周期**：Week 7
 **状态**：`[ ]`
-**目标**：为 deterministic runtime 增加失败和终止路径，使端到端测试能覆盖 run 终态和重新尝试前置条件。
+**目标**：为 `deterministic test runtime` 增加失败和终止路径，使端到端测试能覆盖 run 终态和重新尝试前置条件。
 **实施计划**：`docs/plans/implementation/a4.4-deterministic-terminal-control.md`
 
 **修改文件列表**：
@@ -663,7 +665,7 @@
 - `TerminalStatusProjector.append_terminal_system_status()`
 
 **验收标准**：
-- deterministic runtime 可配置成功、失败和终止路径。
+- `deterministic test runtime` 可配置成功、失败和终止路径。
 - failed / terminated run 尾部生成正确终态来源记录，并统一通过 `TerminalStatusProjector` 追加顶层 `system_status`。
 - 终态记录可支持后续重新尝试 run 创建。
 - 本切片不生成 DeliveryRecord，正式 `demo_delivery` 由 D4.2 负责。
@@ -678,7 +680,7 @@
 
 **计划周期**：Week 7
 **状态**：`[ ]`
-**目标**：建立交付适配器基类和 DeliveryRecord 服务，使 deterministic runtime 能进入正式 demo_delivery 出口；交付通道快照固化已经由 D4.0 负责。
+**目标**：建立交付适配器基类和 DeliveryRecord 服务，使 `deterministic test runtime` 能进入正式 demo_delivery 出口；交付通道快照固化已经由 D4.0 负责。
 **实施计划**：`docs/plans/implementation/d4.1-delivery-base-record.md`
 
 **修改文件列表**：
@@ -730,7 +732,7 @@
 - 不执行真实 Git 写动作。
 - 成功后追加顶层 `delivery_result`。
 - `delivery_result` 详情可通过 DeliveryResultDetailProjection 深看。
-- deterministic runtime 可跑通六阶段到 `demo_delivery` 的完整成功链路。
+- `deterministic test runtime` 可跑通六阶段到 `demo_delivery` 的完整成功链路。
 - `demo_delivery` 必须读取已固化交付快照，不重新读取项目级最新 DeliveryChannel。
 - `demo_delivery` 必须写入运行日志和审计记录，明确其不执行真实 Git 写动作；审计引用进入 DeliveryRecord 或交付过程引用。
 
@@ -775,17 +777,19 @@
 
 **计划周期**：Week 8
 **状态**：`[ ]`
-**目标**：接入 LangGraph 主链和 checkpoint，使正式执行路径具备固定业务阶段编排能力。
+**目标**：接入 LangGraph 主链和 checkpoint，使正式执行路径具备固定业务阶段编排能力，并把单阶段内部执行限定为可替换的 stage runner 调用边界。
 **实施计划**：`docs/plans/implementation/a4.5-langgraph-main-chain-checkpoint.md`
 
 **修改文件列表**：
 - Create: `backend/app/runtime/langgraph_engine.py`
 - Create: `backend/app/runtime/nodes.py`
 - Create: `backend/app/runtime/checkpoints.py`
+- Create: `backend/app/runtime/stage_runner_port.py`
 - Create: `backend/tests/runtime/test_langgraph_engine.py`
 
 **实现类/函数**：
 - `LangGraphRuntimeEngine`
+- `StageNodeRunnerPort`
 - `build_stage_graph()`
 - `run_stage_node()`
 - `save_graph_checkpoint()`
@@ -799,6 +803,8 @@
 - `GraphDefinition` 映射为 LangGraph `StateGraph` 构建输入，运行时编译为 compiled graph。
 - `GraphThread.graph_thread_id` 映射为 LangGraph configurable `thread_id`。
 - 条件路由使用 LangGraph conditional edges 表达，不在 `RunLifecycleService` 中另写一套阶段分支状态机。
+- LangGraph stage node 只把 `run_id`、`stage_run_id`、`stage_contract_ref`、`RuntimeExecutionContext` 和 `TraceContext` 交给 `StageNodeRunnerPort`；不得在 LangGraph node 内直接构建 `ContextEnvelope`、调用 Provider、解析 `AgentDecision` 或执行工具。
+- A4.5 测试可使用 fake stage runner 验证主链和 checkpoint；正式 `Stage Agent Runtime` 由 A4.9d 接入。
 - checkpoint 通过 LangGraph checkpointer 保存，并同步写入 `GraphCheckpoint.checkpoint_ref`。
 - 测试断言 checkpoint 可用于同一 `GraphThread` 恢复，而不是只验证业务状态字段变化。
 - LangGraph graph build、thread start、node start、node completed、checkpoint saved、graph failed 必须写入运行日志摘要，并继承 `TraceContext`。
@@ -879,7 +885,7 @@
 
 **计划周期**：Week 8
 **状态**：`[ ]`
-**目标**：实现 Provider registry，使运行时能从模板快照解析内置 Provider 与 custom Provider。
+**目标**：实现 Provider registry，使运行时能从 R3.4a 固化的 ProviderSnapshot 与 ModelBindingSnapshot 解析内置 Provider 与 custom Provider。
 **实施计划**：`docs/plans/implementation/a4.8-provider-registry.md`
 
 **修改文件列表**：
@@ -892,16 +898,93 @@
 - `ModelProvider`
 - `ProviderRegistry.resolve()`
 - `ProviderRegistry.resolve_from_template_snapshot()`
+- `ProviderRegistry.resolve_from_model_binding_snapshot()`
 
 **验收标准**：
 - 内置 Provider 与 custom Provider 走统一解析路径。
-- 运行时读取模板快照中的 Provider 绑定。
+- 运行时读取 ModelBindingSnapshot 中已固化的 Provider 与模型绑定。
 - Provider 绑定单位是 AgentRole。
 - Provider 配置不直接泄漏密钥内容到前端。
 - Provider 解析成功、解析失败和凭据引用不可用必须写入运行日志；日志和审计摘要不得包含真实密钥。
+- run 启动后 Provider 配置变化、凭据轮换或能力声明变化不得改变当前 run 已固化的模型调用语义。
 
 **测试方法**：
 - `pytest backend/tests/providers/test_provider_registry.py -v`
+
+<a id="a48a"></a>
+
+## A4.8a PromptValidation 边界校验
+
+**计划周期**：Week 8
+**状态**：`[ ]`
+**目标**：实现用户可编辑 `system_prompt` 的边界校验，使模板保存和 run 启动前都能拒绝覆盖平台指令、阶段契约、工具边界、审批边界、交付边界、审计边界或输出 Schema 的提示词。
+**实施计划**：`docs/plans/implementation/a4.8a-prompt-validation-boundaries.md`
+
+**修改文件列表**：
+- Create: `backend/app/runtime/prompt_validation.py`
+- Modify: `backend/app/services/templates.py`
+- Modify: `backend/app/services/runs.py`
+- Create: `backend/tests/runtime/test_prompt_validation.py`
+- Create: `backend/tests/services/test_prompt_validation_integration.py`
+
+**实现类/函数**：
+- `PromptValidationRule`
+- `PromptValidationResult`
+- `PromptValidationError`
+- `PromptValidationService`
+- `PromptValidationService.validate_system_prompt()`
+- `PromptValidationService.validate_template_prompts_before_save()`
+- `PromptValidationService.validate_run_prompt_snapshots()`
+
+**验收标准**：
+- `system_prompt` 保存前必须校验长度上限、上下文预算和平台边界冲突，超过上限时返回明确错误，不得静默截断后保存。
+- run 启动前必须对即将进入 `template_snapshot_ref` 的 `system_prompt` 再次执行同一套 PromptValidation，防止旧模板或并发修改绕过保存时校验。
+- 校验必须拒绝要求忽略平台指令、调用未授权工具、跳过澄清或审批、绕过审计、泄露凭据、泄露 raw chain-of-thought、修改交付模式、关闭结构化输出、覆盖阶段契约或覆盖输出 Schema 的提示词。
+- PromptValidation 必须读取 R3.5 `GraphDefinition.stage_contracts` 或模板编译前等价阶段契约定义来判断冲突；不得新增与 `stage_contracts` 并行的阶段规则表。
+- PromptValidation 只校验提示词与平台边界、阶段契约和安全约束的冲突；不得把语言风格、技术偏好或业务判断质量作为阻塞保存或启动 run 的依据。
+- 用户可编辑 `system_prompt` 通过校验后仍只能作为低权威 `agent_role_prompt` 进入后续 `ContextEnvelope`，不得升级为 `runtime_instructions`。
+- 校验接受、校验拒绝和 run 启动前校验失败必须写入运行日志摘要；涉及用户保存请求的拒绝必须写入审计记录。
+
+**测试方法**：
+- `pytest backend/tests/runtime/test_prompt_validation.py -v`
+- `pytest backend/tests/services/test_prompt_validation_integration.py -v`
+
+<a id="a48b"></a>
+
+## A4.8b ContextEnvelope 与 ContextManifest Schema
+
+**计划周期**：Week 8
+**状态**：`[ ]`
+**目标**：固定 `ContextEnvelope`、`ContextManifest`、上下文块和上下文可信边界的结构化 Schema，使模型调用前的上下文输入与过程记录具备统一数据契约。
+**实施计划**：`docs/plans/implementation/a4.8b-context-envelope-manifest-schema.md`
+
+**修改文件列表**：
+- Create: `backend/app/context/schemas.py`
+- Create: `backend/tests/context/test_context_schemas.py`
+
+**实现类/函数**：
+- `ContextEnvelope`
+- `ContextManifest`
+- `ContextEnvelopeSection`
+- `ContextBlock`
+- `ContextSourceRef`
+- `ContextTrustLevel`
+- `ContextBoundaryAction`
+- `ContextManifestRecord`
+- `ContextEnvelope.validate_section_order()`
+- `ContextManifest.from_envelope()`
+
+**验收标准**：
+- `ContextEnvelope` Schema 必须按规约顺序表达 `runtime_instructions`、`stage_contract`、`agent_role_prompt`、`task_objective`、`specified_action`、`input_artifact_refs`、`context_references`、`working_observations`、`reasoning_trace`、`available_tools`、`recent_observations`、`response_schema` 和 `trace_context`。
+- `ContextManifest` Schema 必须记录 `session_id`、`run_id`、`stage_run_id`、`trace_id`、`correlation_id`、`span_id`、构建时间、`template_snapshot_ref`、`system_prompt` 快照引用、最终渲染提示词或消息序列引用、hash、模板版本、Provider 与模型绑定快照引用、阶段契约、输出 Schema、可用工具及 schema 版本、来源对象、可信级别、边界处理、裁剪压缩状态、完整内容稳定引用和估算规模。
+- `ContextBlock` 必须区分系统可信上下文、低权威角色配置上下文和不可信业务事实或观察结果；用户消息、澄清回复、审批反馈、附件、仓库文件、测试输出、工具观察和外部交付返回不得覆盖 `runtime_instructions`、`stage_contract`、`allowed_tools` 或 `response_schema`。
+- `available_tools` 只能表达来自 W5.0 `ToolProtocol` / `ToolRegistry` 的工具名称、schema 版本和可绑定描述；不得保存具体工具实例、临时工具函数或未注册工具。
+- Schema 必须支持把 `context_manifest` 作为 R3.7 `StageArtifact.process` 过程记录类型引用，且不把大文本直接复制到 manifest 中。
+- raw LangGraph state、raw checkpoint payload、raw node event、raw thread 对象、raw tool adapter 对象和 raw Provider adapter 对象不得通过 Schema 校验进入 `ContextEnvelope`。
+- 本切片只固定 Schema 和校验，不实现上下文来源解析、尺寸守卫、压缩或模型调用；后续 A4.9a 使用本 Schema 构建实际 envelope。
+
+**测试方法**：
+- `pytest backend/tests/context/test_context_schemas.py -v`
 
 <a id="a49"></a>
 
@@ -918,21 +1001,197 @@
 
 **实现类/函数**：
 - `LangChainProviderAdapter`
+- `ModelCallResult`
 - `LangChainProviderAdapter.create_chat_model()`
 - `LangChainProviderAdapter.bind_tools()`
 - `LangChainProviderAdapter.with_structured_output()`
+- `LangChainProviderAdapter.invoke_structured()`
 
 **验收标准**：
 - LangChain 封装模型供应商、消息对象、结构化输出与内部工具绑定。
 - custom Provider 使用 `OpenAI Completions compatible` 接入协议。
 - 测试使用 fake model，不调用真实远端模型。
 - LangChain adapter 只创建 chat model、绑定工具、声明结构化输出，不表达业务阶段流转。
+- LangChain adapter 只消费调用方传入的消息序列、可绑定工具描述和结构化输出 Schema；不得自行解析业务上下文、读取 StageArtifact 或修改 `ContextManifest`。
 - 工具绑定对象来自 W5.0 定义的抽象 `ToolProtocol` 与工具注册表；Week 8 只能绑定已注册 `bash`、`read_file`、`edit_file`、`write_file`、`glob`、`grep` 或 fake 工具，不得在 D5.1-D5.4 前绑定具体 delivery tool 实例。
 - 结构化输出失败必须返回可处理错误，不得直接推进 LangGraph 节点成功完成。
+- `ModelCallResult` 必须返回原始响应引用、结构化输出候选、tool call request 候选、Provider 错误、token 用量摘要和 `model_call_trace` 写入所需元数据；不得把自由文本直接标记为阶段成功。
 - 模型请求、模型响应、结构化输出解析、模型错误和重试必须写入运行日志摘要；模型输入输出进入日志前必须裁剪、阻断敏感字段并限制长度。
+- Provider 请求超时、网络错误重试次数、限流重试次数和退避上限必须来自当前 run 的 `RuntimeLimitSnapshot` 或其引用的配置版本，不得读取最新 `PlatformRuntimeSettings`。
+- 上下文压缩使用系统内置 `compression_prompt`；Adapter 只能记录系统定义的 prompt id/version 引用，不得把 `compression_prompt` 作为用户配置、环境变量或热重载设置读取。
 
 **测试方法**：
 - `pytest backend/tests/providers/test_langchain_adapter.py -v`
+
+<a id="a49a"></a>
+
+## A4.9a ContextEnvelope Builder 与 ContextManifest 记录
+
+**计划周期**：Week 8
+**状态**：`[ ]`
+**目标**：实现上下文来源解析和 `ContextEnvelope` 构建，把阶段契约、角色提示词、阶段产物、工具观察和不可信上下文按固定顺序组装，并把实际上下文使用记录写入 `StageArtifact.process`。
+**实施计划**：`docs/plans/implementation/a4.9a-context-envelope-builder.md`
+
+**修改文件列表**：
+- Create: `backend/app/context/source_resolver.py`
+- Create: `backend/app/context/builder.py`
+- Modify: `backend/app/services/artifacts.py`
+- Create: `backend/tests/context/test_context_source_resolver.py`
+- Create: `backend/tests/context/test_context_envelope_builder.py`
+
+**实现类/函数**：
+- `ContextSourceResolver`
+- `ContextEnvelopeBuilder`
+- `ContextBuildRequest`
+- `ContextBuildResult`
+- `ContextEnvelopeBuilder.build_for_stage_call()`
+- `ContextEnvelopeBuilder.render_messages()`
+- `ContextEnvelopeBuilder.append_manifest_record()`
+- `ContextSourceResolver.resolve_stage_inputs()`
+- `ContextSourceResolver.resolve_context_references()`
+- `ArtifactStore.append_context_manifest()`
+
+**验收标准**：
+- Builder 必须消费 A4.8b `ContextEnvelope` / `ContextManifest` Schema，不得输出临时 dict 或前端投影专用载荷。
+- Builder 必须从 R3.5 `GraphDefinition.stage_contracts` 读取当前阶段职责、输入契约、输出契约、`allowed_tools`、结构化产物要求和运行上限引用；不得再引入 `stage_execution_mode` 或并行权限表。
+- Builder 必须从 R3.7 `StageArtifact`、`ContextReference`、ClarificationRecord、ApprovalDecision、工具结果、ChangeSet 和工作区稳定引用解析上下文来源；不得从运行日志反推业务事实。
+- `agent_role_prompt` 必须来自已通过 A4.8a PromptValidation 并固化到当前 run `template_snapshot_ref` 的提示词；Builder 不得读取最新模板或最新 AgentRole 配置。
+- `available_tools` 必须通过 W5.0 `ToolRegistry.list_bindable_tools()` 按当前 `stage_contract.allowed_tools` 过滤生成；未注册工具、未授权工具和具体工具实例不得进入 `ContextEnvelope`。
+- 用户消息、澄清回复、审批反馈、附件、仓库文件、测试输出、工具观察和外部交付返回必须作为不可信 `ContextBlock` 进入，并记录来源标识、可信级别、边界说明和稳定引用。
+- 每次构建必须生成 `ContextManifest`，并通过 `ArtifactStore.append_context_manifest()` 写入当前 `StageArtifact.process` 或其稳定引用；运行日志只保存摘要和定位信息。
+- Builder 必须记录最终渲染提示词或消息序列引用、hash、模板版本、提示词片段来源、Provider 与模型绑定快照引用和可用工具 schema 版本。
+- raw LangGraph state、raw checkpoint payload、raw node event、raw thread 对象、raw Provider response 和 raw tool adapter 对象不得进入 envelope 或 manifest。
+
+**测试方法**：
+- `pytest backend/tests/context/test_context_source_resolver.py -v`
+- `pytest backend/tests/context/test_context_envelope_builder.py -v`
+
+<a id="a49b"></a>
+
+## A4.9b Context Size Guard 与压缩过程记录
+
+**计划周期**：Week 8
+**状态**：`[ ]`
+**目标**：实现单次模型调用前的上下文尺寸守卫、观察结果预算、滑动工作窗口和上下文压缩记录，防止大文件、工具输出、测试输出或长链路过程无界进入模型上下文。
+**实施计划**：`docs/plans/implementation/a4.9b-context-size-guard.md`
+
+**修改文件列表**：
+- Create: `backend/app/context/size_guard.py`
+- Create: `backend/app/context/compression.py`
+- Modify: `backend/app/context/builder.py`
+- Modify: `backend/app/services/artifacts.py`
+- Create: `backend/tests/context/test_context_size_guard.py`
+- Create: `backend/tests/context/test_context_compression.py`
+
+**实现类/函数**：
+- `ContextTokenEstimator`
+- `ContextSizeGuard`
+- `ContextCompressionRunner`
+- `CompressedContextBlock`
+- `ContextOverflowError`
+- `ContextSizeGuard.apply_observation_budget()`
+- `ContextSizeGuard.apply_sliding_window()`
+- `ContextSizeGuard.ensure_within_model_window()`
+- `ContextCompressionRunner.compress()`
+- `ArtifactStore.append_compressed_context_block()`
+
+**验收标准**：
+- Size guard 必须读取当前 run 的 `RuntimeLimitSnapshot`、Provider 与模型绑定快照能力声明和 A4.9 Provider Adapter 返回的模型窗口信息；不得读取最新 `PlatformRuntimeSettings` 改变当前 run。
+- 大文件读取、`grep` 结果、测试输出、diff、`bash` stdout / stderr、工具错误和远端交付返回进入 `ContextEnvelope` 前必须被预算化，只保留预览、摘要、路径、hash、行号、退出码、错误摘要和稳定引用。
+- 阶段内 ReAct 循环必须应用滑动工作窗口，保留最近必要过程，并把更早过程转为结构化索引或引用；不得删除 R3.7 `StageArtifact.process` 中的原始过程记录。
+- `pinned_context` 包含 `runtime_instructions`、`stage_contract`、`task_objective`、`response_schema`、`system_prompt` 快照引用、结构化需求、已批准方案、当前审批或拒绝理由、当前 active file task 和可用工具 schema，压缩时不得丢失。
+- 上下文压缩必须通过 A4.9 `LangChainProviderAdapter.invoke_structured()` 发起 `model_call_type = context_compression` 的模型调用，并使用系统内置 `compression_prompt` 引用；不得把压缩提示词作为用户配置、环境变量或热重载设置读取。
+- 压缩输出必须形成结构化 `CompressedContextBlock`，并写入 `StageArtifact.process` 的 `compressed_context_block` 和对应 `model_call_trace`；自由文本摘要不得作为唯一结果。
+- 压缩失败不得伪造摘要；若仍能构建 envelope，必须记录 warning 和 manifest 处理结果；若无法构建 envelope，当前 `StageRun.status` 与 `PipelineRun.status` 必须进入 `failed`，并通过尾部 `system_status` 暴露 `context_overflow` 原因。
+- 连续压缩失败必须按当前 run 的运行上限熔断，不得无限重试。
+
+**测试方法**：
+- `pytest backend/tests/context/test_context_size_guard.py -v`
+- `pytest backend/tests/context/test_context_compression.py -v`
+
+<a id="a49c"></a>
+
+## A4.9c AgentDecision Schema 与解析器
+
+**计划周期**：Week 8
+**状态**：`[ ]`
+**目标**：固定 Stage Agent 每轮模型调用的结构化决策协议和解析器，使工具请求、阶段产物提交、澄清请求、结构化修复、重试计划和阶段失败都通过可校验的 `AgentDecision` 表达。
+**实施计划**：`docs/plans/implementation/a4.9c-agent-decision-parser.md`
+
+**修改文件列表**：
+- Create: `backend/app/runtime/agent_decision.py`
+- Create: `backend/tests/runtime/test_agent_decision_parser.py`
+
+**实现类/函数**：
+- `AgentDecision`
+- `AgentDecisionType`
+- `ToolCallDecision`
+- `SubmitStageArtifactDecision`
+- `ClarificationDecision`
+- `StructuredRepairDecision`
+- `RetryWithRevisedPlanDecision`
+- `FailStageDecision`
+- `AgentDecisionParser`
+- `AgentDecisionParser.parse_model_result()`
+- `AgentDecisionParser.validate_against_stage_contract()`
+
+**验收标准**：
+- `AgentDecision.decision_type` 至少支持 `request_tool_call`、`submit_stage_artifact`、`request_clarification`、`repair_structured_output`、`retry_with_revised_plan` 和 `fail_stage`。
+- 解析器必须消费 A4.9 `ModelCallResult` 的结构化输出候选和 tool call request 候选；不得用自由文本、正则、字符串命令解析或 JSON 猜测触发工具、推进状态、创建审批或交付动作。
+- `request_tool_call` 只能引用当前 `ContextEnvelope.available_tools` 中存在的工具名称和 schema 版本；未知工具、未授权工具、schema 不匹配或重复无效 tool call 不得执行，必须形成结构化模型调用错误。
+- `submit_stage_artifact` 必须按 R3.5 当前 `stage_contract` 的输出契约和 R3.7 `StageArtifact.output` 要求校验证据引用、失败/风险字段和必填结构化产物；缺失时只能进入结构化输出修复或阶段失败。
+- `request_clarification` 只允许在当前阶段契约声明可澄清且缺失信息阻塞阶段输出时使用，并必须携带缺失事实、影响范围、关联引用和回答后需更新的结构化字段。
+- `fail_stage` 必须携带失败原因、已执行证据引用、未完成事项和可展示错误摘要；不得只返回模型自由文本。
+- 解析成功、解析失败、结构化输出修复请求、非法 tool call 和无效阶段产物提交必须写入 `decision_trace` 或 `model_call_trace` 过程记录引用。
+
+**测试方法**：
+- `pytest backend/tests/runtime/test_agent_decision_parser.py -v`
+
+<a id="a49d"></a>
+
+## A4.9d Stage Agent Runtime 执行循环
+
+**计划周期**：Week 8
+**状态**：`[ ]`
+**目标**：实现正式阶段内执行循环，把 Context Management、Provider Adapter、AgentDecision、ToolRegistry、StageArtifact 和阶段恢复游标串成单阶段 runner，供 LangGraph stage node 调用。
+**实施计划**：`docs/plans/implementation/a4.9d-stage-agent-runtime-loop.md`
+
+**修改文件列表**：
+- Create: `backend/app/runtime/stage_agent.py`
+- Modify: `backend/app/runtime/stage_runner_port.py`
+- Modify: `backend/app/runtime/nodes.py`
+- Modify: `backend/app/services/artifacts.py`
+- Create: `backend/tests/runtime/test_stage_agent_runtime.py`
+- Create: `backend/tests/runtime/test_stage_agent_process_records.py`
+
+**实现类/函数**：
+- `StageAgentRuntime`
+- `StageExecutionRequest`
+- `StageExecutionResult`
+- `StageRecoveryCursor`
+- `StageAgentRuntime.run_stage()`
+- `StageAgentRuntime.run_iteration()`
+- `StageAgentRuntime.execute_tool_decision()`
+- `StageAgentRuntime.submit_stage_artifact()`
+- `StageAgentRuntime.persist_recovery_checkpoint()`
+
+**验收标准**：
+- `StageAgentRuntime` 必须实现 A4.5 `StageNodeRunnerPort`，由 LangGraph stage node 调用；阶段 runner 不得直接修改 `PipelineRun` 主链状态。
+- 每次阶段执行、ReAct iteration、结构化输出修复、validation pass 或上下文压缩调用前，必须通过 A4.9a/A4.9b 生成 `ContextEnvelope` 和 `ContextManifest`。
+- 模型调用必须通过 A4.9 `LangChainProviderAdapter`，并使用 A4.9c `AgentDecisionParser` 解析决策；自由文本不得作为运行时状态推进、工具执行、审批创建或交付动作依据。
+- 工具执行必须经过 W5.0 `ToolRegistry`、当前 `stage_contract.allowed_tools`、输入 Schema、工作区边界、超时策略和审计策略校验；模型不得动态声明新工具或绕过工具注册表调用本地函数。
+- 阶段结果必须写入 R3.7 `StageArtifact.input`、`StageArtifact.process`、`StageArtifact.output`、metrics 和稳定引用；下游阶段不得只依赖上一阶段摘要文本。
+- `StageArtifact.process` 必须记录 `context_manifest`、`reasoning_trace`、`decision_trace`、`tool_trace`、`model_call_trace`、`file_edit_trace`、`command_trace`、`validation_trace`、`compressed_context_block`、`structured_output_repair_trace`、`recovery_checkpoint`、`side_effect_reconciliation_trace` 和 `untrusted_context_trace` 中本阶段实际发生的记录类型。
+- `request_clarification` 决策必须转交 H4.1 澄清服务和 A4.0 runtime boundary；`submit_stage_artifact` 达到审批点时必须转交 H4.3 审批对象创建或 LangGraph 后续路由，不得由 Stage Agent Runtime 自建审批状态。
+- `delivery_integration` 的确定性交付执行不得由模型自由文本决定真实 Git 写动作；真实交付工具仍由后续 D5.1-D5.4 通过 W5.0 ToolProtocol 实现。
+- ReAct iteration、tool call 数、文件编辑次数、结构化输出修复次数、自动回归次数和无进展次数必须受当前 run `RuntimeLimitSnapshot` 约束，超限后进入结构化失败或 run failed 语义。
+- 每次 iteration 完成后必须持久化 `StageRecoveryCursor`、最近 `ContextManifest`、工具结果引用、模型调用引用、文件编辑引用和 `recovery_checkpoint`；恢复时不得重新执行已确认成功且具有副作用的工具调用。
+- 无法协调的工具副作用、文件写入、`bash` 命令或交付动作必须记录 `side_effect_reconciliation_trace`，并使当前 `StageRun.status` 与 `PipelineRun.status` 进入 `failed`。
+- Stage Agent 执行开始、模型调用、工具调用、阶段产物提交、结构化修复、澄清请求、失败、恢复和副作用协调必须写入运行日志摘要并继承 `TraceContext`；审计记录仍由对应工具、命令或交付适配器负责。
+
+**测试方法**：
+- `pytest backend/tests/runtime/test_stage_agent_runtime.py -v`
+- `pytest backend/tests/runtime/test_stage_agent_process_records.py -v`
 
 <a id="a410"></a>
 
@@ -954,10 +1213,11 @@
 
 **验收标准**：
 - 自动回归配置来自模板快照。
-- 最大重试次数受控，并落在平台定义统一上限内。
+- 最大重试次数同时受模板快照和当前 run 的 `RuntimeLimitSnapshot` 约束，并落在平台定义统一硬上限内。
 - Code Review 相关自动回归统一回到 `code_generation`。
 - 自动回归结束后才能进入 code review approval。
 - 自动回归策略判定、跳过、进入重试和超限必须写入运行日志，并继承当前 run 的 `trace_id`。
+- C2.8 后续热重载运行设置不得改变当前 run 的自动回归上限。
 
 **测试方法**：
 - `pytest backend/tests/runtime/test_auto_regression_policy.py -v`
