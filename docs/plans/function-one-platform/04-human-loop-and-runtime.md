@@ -940,7 +940,8 @@
 - `system_prompt` 保存前必须校验长度上限、上下文预算和平台边界冲突，超过上限时返回明确错误，不得静默截断后保存。
 - run 启动前必须对即将进入 `template_snapshot_ref` 的 `system_prompt` 再次执行同一套 PromptValidation，防止旧模板或并发修改绕过保存时校验。
 - 校验必须拒绝要求忽略平台指令、调用未授权工具、跳过澄清或审批、绕过审计、泄露凭据、泄露 raw chain-of-thought、修改交付模式、关闭结构化输出、覆盖阶段契约或覆盖输出 Schema 的提示词。
-- PromptValidation 必须读取 R3.5 `GraphDefinition.stage_contracts` 或模板编译前等价阶段契约定义来判断冲突；不得新增与 `stage_contracts` 并行的阶段规则表。
+- A4.8a 必须接管 C2.4 模板保存和 R3.2 run 启动预留的 `system_prompt` 边界校验调用点；完成后不得保留仅长度校验、前端校验或绕过 PromptValidation 的保存/启动路径。
+- PromptValidation 必须读取 R3.5 `GraphDefinition.stage_contracts`；模板保存时 `GraphDefinition` 尚未生成，必须读取与 R3.5 `GraphCompiler` 生成 `stage_contracts` 相同的阶段契约来源；不得新增与 `stage_contracts` 并行的阶段规则表。
 - PromptValidation 只校验提示词与平台边界、阶段契约和安全约束的冲突；不得把语言风格、技术偏好或业务判断质量作为阻塞保存或启动 run 的依据。
 - 用户可编辑 `system_prompt` 通过校验后仍只能作为低权威 `agent_role_prompt` 进入后续 `ContextEnvelope`，不得升级为 `runtime_instructions`。
 - 校验接受、校验拒绝和 run 启动前校验失败必须写入运行日志摘要；涉及用户保存请求的拒绝必须写入审计记录。

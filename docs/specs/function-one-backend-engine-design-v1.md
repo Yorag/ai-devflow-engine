@@ -1803,7 +1803,7 @@ Inspector 投影必须满足以下总规则：
 - 新需求输入
 - 澄清回复
 
-当消息语义为 `new_requirement` 时，只允许在 `Session.status = draft` 且 `current_run_id = null` 时调用；后端必须在同一服务事务中基于当前 `selected_template_id` 创建 `PipelineRun`、模板快照、`GraphDefinition`、首条消息事件与初始 `requirement_analysis` StageRun。
+当消息语义为 `new_requirement` 时，只允许在 `Session.status = draft` 且 `current_run_id = null` 时调用；后端必须在同一服务事务中基于当前 `selected_template_id` 创建 `PipelineRun`、模板快照、`ProviderSnapshot`、`ModelBindingSnapshot`、`RuntimeLimitSnapshot`、`GraphDefinition`、首条消息事件与初始 `requirement_analysis` StageRun。
 
 当消息语义为 `clarification_reply` 时，只允许在当前会话处于 `waiting_clarification` 且当前阶段为 `requirement_analysis` 时调用；后端必须把补充信息回写到当前澄清中断并恢复同一个 `GraphThread`。
 

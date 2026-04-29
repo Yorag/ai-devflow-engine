@@ -265,6 +265,7 @@
 - `user_template` 支持覆盖、另存和删除。
 - 模板编辑只允许选择每个阶段槽位绑定的已有 `AgentRole`，并修改该槽位最终生效的 `system_prompt`、`provider_id`、自动回归开关和最大重试次数。
 - 模板保存必须固化各阶段槽位最终生效的 `role_id`、`system_prompt` 与 `provider_id`，不得修改共享 `AgentRole.role_name`。
+- 模板保存服务必须在 `system_prompt` 持久化前经过单一边界校验调用点；A4.8a 完成后该调用点由 `PromptValidationService.validate_template_prompts_before_save()` 承接，不得另建绕过该调用点的保存路径。
 - 用户不能通过模板删除、禁用、重排核心阶段，不能关闭两个必需审批检查点。
 - 删除当前选中的用户模板后，调用方可回退到默认系统模板。
 - 用户模板另存、覆盖、删除、非法覆盖系统模板和非法删除系统模板必须继承 L2.1 上下文并通过 L2.4 写入审计记录。
