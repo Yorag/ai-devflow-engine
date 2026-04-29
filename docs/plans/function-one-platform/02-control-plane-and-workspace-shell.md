@@ -2,13 +2,13 @@
 
 ## 范围
 
-本分卷覆盖 Week 2-4 的控制面 API 与前端工作台外壳。完成后，前端可基于真实或 mock 契约完成 Project、Session、Template、Provider、DeliveryChannel、设置弹窗和模板空态的主要交互。
+本分卷覆盖 Week 2-4 的控制面 API、项目与会话历史管理、平台运行设置管理服务与前端工作台外壳。完成后，前端可基于真实或 mock 契约完成 Project、Session、Template、Provider、DeliveryChannel、设置弹窗和模板空态的主要交互；后端可统一校验和管理 `PlatformRuntimeSettings`，但该能力不进入普通前端设置弹窗。
 
 本分卷按依赖顺序拆分：先建立默认 Project 与最小默认 `demo_delivery` 通道，再建立系统模板并创建 draft Session；DeliveryChannel 的查询、保存与 readiness 校验作为独立控制面能力落地，避免一个任务同时吞掉全部控制面。
 
 凡本分卷修改 `backend/app/api/routes/*` 的 API 切片，对应 API 测试必须在本切片内断言新增或修改的 path、method、请求 Schema、响应 Schema 和主要错误响应已进入 `/api/openapi.json`；V6.4 只做全局覆盖回归，不作为这些路由第一次发现 OpenAPI 漂移的入口。
 
-控制面写操作必须嵌入日志审计要求。Project 加载、Session 创建、模板另存/覆盖/删除、Provider 创建/修改、DeliveryChannel 保存与校验必须继承 L2.1 建立的 request/correlation 上下文，使用 L2.2 的载荷裁剪策略，经由 L2.3 的 JSONL 与索引入口落盘，并通过 L2.4 为成功、失败和被拒绝结果写入审计记录；审计记录不得替代控制面领域对象或 API 响应真源。
+控制面写操作必须嵌入日志审计要求。Project 加载与移除、Session 创建、重命名与删除、模板另存/覆盖/删除、Provider 创建/修改、DeliveryChannel 保存与校验、平台运行设置变更必须继承 L2.1 建立的 request/correlation 上下文，使用 L2.2 的载荷裁剪策略，经由 L2.3 的 JSONL 与索引入口落盘，并通过 L2.4 为成功、失败和被拒绝结果写入审计记录；审计记录不得替代控制面领域对象、配置对象或 API 响应真源。
 
 <a id="l21"></a>
 
@@ -120,7 +120,7 @@
 - 控制面审计记录必须包含动作主体、动作名、目标类型、目标标识摘要、结果、原因摘要、`request_id`、`trace_id`、`correlation_id`、`span_id` 和创建时间。
 - 控制面命令拒绝结果必须具备 `request_id` 与 `correlation_id`，且不能以审计记录替代 API 错误响应或领域状态。
 - 安全审计台账写入失败时，必须向调用方返回明确错误，不得降级为普通运行日志失败。
-- 本切片只建立控制面可复用审计入口；C2.1-C2.7 在各自业务切片中完成具体命令接入，runtime、工具、模型和交付动作在后续阶段接入。
+- 本切片只建立控制面可复用审计入口；C2.1-C2.9b 在各自业务切片中完成具体命令接入，runtime、工具、模型和交付动作在后续阶段接入。
 
 **测试方法**：
 - `pytest backend/tests/observability/test_audit_service.py -v`
@@ -150,11 +150,12 @@
 
 **验收标准**：
 - 首次启动存在默认项目，绑定平台仓库自身路径。
-- `GET /api/projects` 在未手动加载项目时也返回默认项目。
+- `GET /api/projects` 在未手动加载项目时也返回默认项目，并只返回未移除项目。
 - `POST /api/projects` 支持通过本地 `root_path` 加载新项目，并返回可用于左栏切换的项目摘要。
+- 已加载且未移除的 Project 在系统重启后继续出现在项目列表中。
 - 默认 Project 创建时通过 `DeliveryChannelService.ensure_default_channel()` 同步创建最小项目级默认 `DeliveryChannel(delivery_mode=demo_delivery, credential_status=ready, readiness_status=ready, readiness_message=null)`。
 - 新建 Project 记录 `root_path`、`name`、`default_delivery_channel_id` 和时间戳，且 `default_delivery_channel_id` 指向可解析的默认通道。
-- 本切片不实现 Session、Template 或 DeliveryChannel 查询、保存、readiness 校验业务。
+- 本切片不实现 Project 移除、Session、Template 或 DeliveryChannel 查询、保存、readiness 校验业务。
 - 默认 Project 初始化、本地项目加载成功、本地项目加载失败和非法 `root_path` 被拒绝必须继承 L2.1 上下文并通过 L2.4 写入审计记录；审计摘要不得把本机绝对路径作为可查询主引用。
 - API 测试必须断言 `GET /api/projects`、`POST /api/projects` 及其请求/响应 Schema 和主要错误响应已进入 `/api/openapi.json`。
 
@@ -203,11 +204,11 @@
 
 <a id="c23"></a>
 
-## C2.3 draft Session 与模板选择更新
+## C2.3 draft Session、重命名与模板选择更新
 
 **计划周期**：Week 3
 **状态**：`[ ]`
-**目标**：实现项目下 draft Session 创建和运行前模板选择更新，使首条需求前的会话状态符合规格。
+**目标**：实现项目下 draft Session 创建、左栏展示名重命名和运行前模板选择更新，使首条需求前的会话状态符合规格。
 **实施计划**：`docs/plans/implementation/c2.3-draft-session-template-selection.md`
 
 **修改文件列表**：
@@ -218,18 +219,21 @@
 
 **实现类/函数**：
 - `SessionService.create_session()`
+- `SessionService.rename_session()`
 - `SessionService.update_selected_template()`
 - `SessionService.list_project_sessions()`
 - `SessionService.get_session()`
 
 **验收标准**：
 - 新建 Session 时状态为 `draft` 且 `current_run_id = null`。
+- 新建 Session 生成稳定 `display_name`，用于左栏展示和后续重命名。
 - 新建 Session 默认关联 `新功能开发流程` 模板。
 - 只有 `draft` 且尚未创建 run 的 Session 允许更新 `selected_template_id`。
+- `PATCH /api/sessions/{sessionId}` 只允许修改 `display_name`；重命名不得改变原始需求、运行历史、审批记录、产物、交付记录、事件归属或 `PipelineRun` 归属。
 - `latest_stage_type` 在 draft 状态下为 `null`。
-- 同一 Project 下可列出近期 Session。
-- Session 创建、非法模板更新和成功模板更新必须继承 L2.1 上下文并通过 L2.4 写入审计记录，且不以审计记录替代 `Session` 领域状态。
-- API 测试必须断言 `POST /api/projects/{projectId}/sessions`、`GET /api/projects/{projectId}/sessions`、`GET /api/sessions/{sessionId}`、`PUT /api/sessions/{sessionId}/template` 及其请求/响应 Schema 和主要错误响应已进入 `/api/openapi.json`。
+- 同一 Project 下可列出近期未删除 Session。
+- Session 创建、重命名、非法模板更新和成功模板更新必须继承 L2.1 上下文并通过 L2.4 写入审计记录，且不以审计记录替代 `Session` 领域状态。
+- API 测试必须断言 `POST /api/projects/{projectId}/sessions`、`GET /api/projects/{projectId}/sessions`、`GET /api/sessions/{sessionId}`、`PATCH /api/sessions/{sessionId}`、`PUT /api/sessions/{sessionId}/template` 及其请求/响应 Schema 和主要错误响应已进入 `/api/openapi.json`。
 
 **测试方法**：
 - `pytest backend/tests/services/test_session_service.py -v`
@@ -297,6 +301,7 @@
 - API 返回 Provider 状态，不返回真实密钥内容。
 - custom Provider 创建、修改、内置 Provider 修改被拒绝和凭据引用变更必须继承 L2.1 上下文，使用 L2.2 裁剪载荷，并通过 L2.4 写入审计记录；审计摘要不得包含真实密钥。
 - API 测试必须断言 `POST /api/providers`、`PATCH /api/providers/{providerId}`、`GET /api/providers/{providerId}` 及其请求/响应 Schema 和主要错误响应已进入 `/api/openapi.json`。
+- Provider 保存结果只影响后续新建 Session、后续新启动 run 或尚未启动 run 的模板选择；不得回写已启动 run 的 ProviderSnapshot 或 ModelBindingSnapshot。
 
 **测试方法**：
 - `pytest backend/tests/services/test_custom_provider_service.py -v`
@@ -331,6 +336,7 @@
 - DeliveryChannel 配置不属于 Session 或模板。
 - DeliveryChannel 保存成功、保存失败、字段非法和凭据引用变更必须继承 L2.1 上下文，使用 L2.2 裁剪载荷，并通过 L2.4 写入审计记录；审计元数据只保存摘要和凭据引用，不保存真实凭据。
 - API 测试必须断言 `GET /api/projects/{projectId}/delivery-channel`、`PUT /api/projects/{projectId}/delivery-channel` 及其请求/响应 Schema 和主要错误响应已进入 `/api/openapi.json`。
+- DeliveryChannel 保存结果至少影响后续新启动 run；对尚未进入 `Delivery Integration` 且尚未固化交付通道快照的当前活动 run，只能用于后续交付就绪校验和交付快照固化。
 
 **测试方法**：
 - `pytest backend/tests/services/test_delivery_channel_service.py -v`
@@ -369,6 +375,117 @@
 - `pytest backend/tests/services/test_delivery_channel_readiness.py -v`
 - `pytest backend/tests/api/test_delivery_channel_validate_api.py -v`
 
+<a id="c28"></a>
+
+## C2.8 PlatformRuntimeSettings 管理服务
+
+**计划周期**：Week 3
+**状态**：`[ ]`
+**目标**：实现后端统一平台运行设置管理服务，校验运行上限、Provider 调用策略、上下文裁剪限制、日志策略和诊断查询分页上限，并为后续 run 启动快照提供稳定配置版本。
+**实施计划**：`docs/plans/implementation/c2.8-platform-runtime-settings-service.md`
+
+**修改文件列表**：
+- Create: `backend/app/services/runtime_settings.py`
+- Create: `backend/app/repositories/runtime_settings.py`
+- Create: `backend/app/api/routes/runtime_settings.py`
+- Create: `backend/tests/services/test_runtime_settings_service.py`
+- Create: `backend/tests/api/test_runtime_settings_admin_api.py`
+
+**实现类/函数**：
+- `PlatformRuntimeSettingsRepository.get_current()`
+- `PlatformRuntimeSettingsRepository.save_new_version()`
+- `PlatformRuntimeSettingsService.get_current_settings()`
+- `PlatformRuntimeSettingsService.update_settings()`
+- `PlatformRuntimeSettingsService.validate_against_hard_limits()`
+- `PlatformRuntimeSettingsService.current_version()`
+- `build_runtime_settings_router()`
+
+**验收标准**：
+- 服务通过 `PlatformRuntimeSettingsRepository` 读取和保存 C1.6 的 `PlatformRuntimeSettingsModel`，并维护单调递增配置版本。
+- 首次读取时若 control.db 中不存在记录，服务以 C1.10 默认值和当前平台硬上限版本初始化一条设置记录；初始化结果必须持久化，不能每次请求临时拼装。
+- `PlatformRuntimeSettingsModel` 保存 C1.10 定义的 `agent_limits`、`provider_call_policy`、`context_limits`、`log_policy`、schema 版本、配置版本、平台硬上限版本和更新时间。
+- 运行上限、Provider 调用策略、上下文裁剪限制、日志策略和诊断查询分页上限保存前必须校验。
+- 超过平台硬上限时拒绝保存，并返回 `config_hard_limit_exceeded`。
+- 非法字段值、版本冲突和配置存储不可用分别返回 `config_invalid_value`、`config_version_conflict`、`config_storage_unavailable`。
+- 更新接口必须要求或支持 `expected_version`；当客户端基于旧版本提交时不得覆盖最新配置。
+- 配置设置允许热重载，但服务层不得尝试修改已启动 run 的模板快照、Provider 与模型绑定快照、运行上限快照或交付通道快照。
+- 配置设置变更必须继承 L2.1 上下文，使用 L2.2 裁剪载荷，经由 L2.3 写入运行日志，并通过 L2.4 写入审计记录；审计摘要记录变更字段、旧值摘要、新值摘要、生效范围和 `correlation_id`。
+- 本切片实现后端管理服务和内部管理 API 边界；内部管理 API 必须进入 OpenAPI 并复用统一错误响应，但不得被 F2.4 普通前端设置弹窗调用或展示为用户可编辑表单。
+- API 测试必须断言运行设置读取、更新、硬上限拒绝、版本冲突、非法字段和主要错误响应已进入 `/api/openapi.json`。
+- `compression_prompt` 不属于该服务的可写配置项；系统定义版本引用只由压缩过程记录使用。
+
+**测试方法**：
+- `pytest backend/tests/services/test_runtime_settings_service.py -v`
+- `pytest backend/tests/api/test_runtime_settings_admin_api.py -v`
+
+<a id="c29a"></a>
+
+## C2.9a Session 删除命令与历史可见性
+
+**计划周期**：Week 4
+**状态**：`[ ]`
+**目标**：实现无活动 run 的 Session 删除语义，使左栏历史管理只改变产品历史可见性，不替代运行终止、暂停、回退或重新尝试。
+**实施计划**：`docs/plans/implementation/c2.9a-session-delete-history.md`
+
+**修改文件列表**：
+- Modify: `backend/app/services/sessions.py`
+- Modify: `backend/app/api/routes/sessions.py`
+- Create: `backend/tests/services/test_session_history_commands.py`
+- Create: `backend/tests/api/test_session_history_api.py`
+
+**实现类/函数**：
+- `SessionService.delete_session()`
+- `SessionService.assert_session_deletable()`
+- `SessionService.list_visible_sessions()`
+
+**验收标准**：
+- 本切片依赖 R3.1 固定的 run 终态枚举和活动 run 判定，不自行定义第二套活动状态规则。
+- 只有不存在活动 run 的 Session 可以删除；活动 run 指尚未进入 `completed`、`failed` 或 `terminated` 的 `PipelineRun`，draft Session 没有活动 run。
+- 删除 Session 后，该 Session 不再出现在项目会话列表、常规回看入口或 `SessionWorkspaceProjection` 可打开入口中。
+- 删除 Session 不删除 `PipelineRun`、StageArtifact、审批记录、交付记录、领域事件或日志审计记录；后端以软删除产品可见性标记实现。
+- 删除 Session 不得隐式触发 `terminate`、`rollback`、`retry`、暂停或恢复。
+- 删除成功、活动 run 阻塞、Session 不存在和重复删除必须返回稳定错误语义并写入审计记录。
+- API 测试必须断言 `DELETE /api/sessions/{sessionId}` 的请求/响应 Schema 和主要错误响应已进入 `/api/openapi.json`。
+
+**测试方法**：
+- `pytest backend/tests/services/test_session_history_commands.py -v`
+- `pytest backend/tests/api/test_session_history_api.py -v`
+
+<a id="c29b"></a>
+
+## C2.9b Project 移除命令与级联历史可见性
+
+**计划周期**：Week 4
+**状态**：`[ ]`
+**目标**：实现已加载 Project 的移除语义，使非默认项目可从产品历史中移除，并级联隐藏该项目下用于产品回看的 Session 历史。
+**实施计划**：`docs/plans/implementation/c2.9b-project-remove-history.md`
+
+**修改文件列表**：
+- Modify: `backend/app/services/projects.py`
+- Modify: `backend/app/api/routes/projects.py`
+- Modify: `backend/app/services/sessions.py`
+- Create: `backend/tests/services/test_project_remove_history.py`
+- Create: `backend/tests/api/test_project_remove_api.py`
+
+**实现类/函数**：
+- `ProjectService.remove_project()`
+- `ProjectService.assert_project_removable()`
+- `ProjectService.hide_project_sessions()`
+
+**验收标准**：
+- 本切片依赖 R3.1 固定的 run 终态枚举和活动 run 判定，不自行定义第二套活动状态规则。
+- 默认 Project 不允许移除。
+- 存在活动 run 的 Project 不允许移除；活动 run 判定与 C2.9a 一致。
+- Project 移除后不再出现在 Project Switcher、项目列表、常规产品查询和回看入口中；该项目下未删除 Session 一并从产品历史可见性中隐藏。
+- Project 移除不得删除本地项目文件夹、目标仓库文件、远端仓库、远端分支、提交或代码评审请求。
+- Project 移除不得删除日志审计边界要求保留的安全审计事实。
+- 移除成功、默认项目阻塞、活动 run 阻塞、Project 不存在和重复移除必须返回稳定错误语义并写入审计记录。
+- API 测试必须断言 `DELETE /api/projects/{projectId}` 的请求/响应 Schema 和主要错误响应已进入 `/api/openapi.json`。
+
+**测试方法**：
+- `pytest backend/tests/services/test_project_remove_history.py -v`
+- `pytest backend/tests/api/test_project_remove_api.py -v`
+
 <a id="f21"></a>
 
 ## F2.1 API Client 路径与类型入口
@@ -393,8 +510,12 @@
 
 **实现类/函数**：
 - `apiRequest<T>()`
+- `ApiErrorResponse`
 - `listProjects()`
+- `removeProject()`
 - `createSession()`
+- `renameSession()`
+- `deleteSession()`
 - `listPipelineTemplates()`
 - `listProviders()`
 - `getProjectDeliveryChannel()`
@@ -416,7 +537,9 @@
 
 **验收标准**：
 - 前端 API client 覆盖 `projects`、`sessions`、`templates`、`providers`、`deliveryChannels`、`runs`、`approvals`、`query` 与 `events` 的资源边界。
-- 错误响应进入统一错误处理。
+- Project client 覆盖列表、加载和移除路径；Session client 覆盖创建、重命名、删除、模板更新和详情读取路径。
+- 错误响应进入统一错误处理，并保留后端返回的稳定 `code`、`message`、`request_id` 与可选字段错误详情。
+- 前端 API client 必须能识别并透传 `config_invalid_value`、`config_hard_limit_exceeded`、`config_version_conflict`、`config_storage_unavailable`、`config_snapshot_unavailable`，但本切片不新增普通用户可编辑的平台运行设置 client。
 - UI 组件不得直接手写核心 API 路径；后续展示切片只能通过本切片建立的 client 模块补充类型和 hook。
 
 **测试方法**：
@@ -443,10 +566,15 @@
 - `useProjectsQuery()`
 - `useSessionWorkspaceQuery()`
 - `mockSessionWorkspace`
+- `mockProjectList`
+- `mockSessionList`
+- `mockApiError()`
 
 **验收标准**：
 - mock fixtures 覆盖空白会话、运行中会话、等待澄清、等待审批、完成、失败、终止。
+- mock fixtures 覆盖已加载项目、被移除项目不可见、历史 Session、重命名后的 Session 展示名，以及删除后不在常规列表出现的 Session。
 - mock feed 条目类型与 C1.3 契约一致。
+- mock error fixtures 必须覆盖后端配置校验和平台硬上限错误，用于模板编辑、DeliveryChannel 和 Provider 表单展示错误；mock fixtures 不得定义临时配置字段、临时状态或前端专用投影。
 - TanStack Query hooks 可以在无后端时支撑页面开发。
 
 **测试方法**：
@@ -477,6 +605,10 @@
 **验收标准**：
 - 左栏展示 Project Switcher、Load Project Entry、当前 Project 摘要、New Session Entry、Session 列表和默认交付模式摘要。
 - 用户加载本地项目后，该项目进入 Project Switcher；切换项目后中栏进入该项目最近会话，若无会话则展示项目空态。
+- 已加载且未移除的 Project 在刷新或重启后继续展示；移除 Project 后，该 Project 及其 Session 不再出现在常规左栏历史入口。
+- 默认 Project 的移除入口禁用或不展示；存在活动 run 的 Project 移除入口必须进入阻塞态。
+- Session 列表支持重命名展示名和删除没有活动 run 的 Session；存在活动 run 的 Session 删除入口必须进入阻塞态。
+- Session 重命名只改变左栏展示名，不刷新或重建当前运行历史。
 - 中栏保留 Narrative Workspace 插槽。
 - 右栏保留 Inspector 插槽并默认关闭。
 - 三栏布局在窄屏下可退化为抽屉占位。
@@ -516,6 +648,11 @@
 - `通用配置` 页面显示当前 Project，并编辑项目级 DeliveryChannel。
 - `模型提供商` 页面展示内置 Provider 和 custom Provider。
 - DeliveryChannel 配置不出现在模板编辑区。
+- 设置弹窗不展示或编辑环境变量、平台运行数据目录、SQLite 文件路径、CORS、日志文件路径、后端平台硬上限、全局 ReAct 循环上限、日志保留策略、日志裁剪策略、诊断查询分页上限或 `deterministic test runtime`。
+- 设置弹窗不得调用 C2.8 的内部运行设置管理 API；若 DeliveryChannel 或 Provider 保存返回配置类错误，只展示后端错误原因，不把平台运行设置补成可编辑入口。
+- Provider 密钥只以 `api_key_ref` 或等价引用形式展示和提交，不展示真实密钥内容。
+- Provider 配置变更的 UI 文案不得暗示会修改已经启动 run 的 Provider 与模型绑定快照。
+- DeliveryChannel 在交付快照固化前可用于当前活动 run 后续交付就绪校验；已固化快照的 run 必须按只读状态展示。
 
 **前端设计质量门**：
 - 继承项目级前端主基调，不单独询问新的设置页风格。
@@ -584,6 +721,9 @@
 - 用户模板支持覆盖、另存、删除。
 - 脏模板不得直接启动运行。
 - 模板编辑区不暴露阶段顺序、审批检查点、阶段输入输出契约或项目级 DeliveryChannel。
+- 模板编辑区不暴露环境变量、运行数据目录、平台运行上限、日志策略或 `deterministic test runtime`。
+- `最大自动回归重试次数` 输入超过后端平台硬上限或保存被拒绝时，前端必须展示明确错误，不得自行截断后保存。
+- 当后端返回 `config_hard_limit_exceeded` 或 `config_invalid_value` 时，模板编辑器只提示当前字段保存失败和后端原因，不展示或编辑 C2.8 的平台硬上限值。
 
 **前端设计质量门**：
 - 继承项目级前端主基调，不单独询问模板编辑器风格。

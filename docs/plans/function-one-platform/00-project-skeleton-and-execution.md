@@ -84,16 +84,16 @@ README.md
 | `backend/alembic/` | Alembic env 与迁移脚本，负责数据库结构演进 |
 | `backend/app/api/` | API router 聚合、API 层错误契约与 OpenAPI 暴露入口 |
 | `backend/app/api/routes/` | FastAPI 路由层，只做请求解析、响应返回和服务调用 |
-| `backend/app/core/` | 配置、错误模型、应用级依赖与通用中间件挂载 |
+| `backend/app/core/` | EnvironmentSettings、启动配置、错误模型、应用级依赖与通用中间件挂载 |
 | `backend/app/db/` | SQLAlchemy session、数据库角色、多 SQLite 绑定 |
 | `backend/app/db/models/` | control、runtime、graph、event、log 五类模型 |
-| `backend/app/domain/` | 领域枚举、状态机、GraphDefinition、ChangeSet 等纯领域对象 |
+| `backend/app/domain/` | 领域枚举、状态机、GraphDefinition、运行快照、ChangeSet 等纯领域对象 |
 | `backend/app/repositories/` | SQLAlchemy 持久化访问适配层，只封装查询和写入，不承载业务状态机、审批语义或投影组装 |
 | `backend/app/schemas/` | Pydantic v2 请求、响应、投影与事件 Schema |
-| `backend/app/services/` | Project、Session、Run、Approval、Artifact、Delivery 等业务服务 |
+| `backend/app/services/` | Project、Session、Run、Approval、Artifact、Delivery、PlatformRuntimeSettings 等业务与平台运行设置服务 |
 | `backend/app/services/projections/` | Workspace、Timeline、Inspector 投影组装 |
 | `backend/app/observability/` | 平台运行数据目录、JSONL 日志、日志索引、审计记录、TraceContext、裁剪、轮转、保留与日志诊断查询服务 |
-| `backend/app/runtime/` | deterministic runtime、LangGraph runtime、自动回归 |
+| `backend/app/runtime/` | deterministic test runtime、LangGraph runtime、RuntimeLimitSnapshot 消费、自动回归 |
 | `backend/app/providers/` | Provider registry 与 LangChain 适配 |
 | `backend/app/tools/` | ToolProtocol、ToolRegistry、工具输入输出、错误结构、审计记录和审计引用等跨工具契约 |
 | `backend/app/workspace/` | 隔离工作区、`read_file` / `write_file` / `edit_file` / `glob` 文件工具、`grep` 内容搜索工具、`bash` 命令工具 |

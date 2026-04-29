@@ -2,9 +2,9 @@
 
 ## 范围
 
-本分卷覆盖 Week 1-2 的工程基线、后端契约、前端基线和持久化边界。完成后，前后端具备可运行项目骨架、基础测试命令、领域枚举、投影 Schema、事件载荷 Schema、日志审计契约和多 SQLite 职责拆分。
+本分卷覆盖 Week 1-2 的工程基线、后端契约、前端基线、配置边界和持久化边界。完成后，前后端具备可运行项目骨架、基础测试命令、`EnvironmentSettings`、`PlatformRuntimeSettings`、领域枚举、投影 Schema、事件载荷 Schema、日志审计契约和多 SQLite 职责拆分。
 
-本分卷的拆分目标是先锁定契约，再进入控制面与 Run 主链。每个契约切片只处理一组稳定字段，避免单次任务同时修改所有 Schema。日志审计能力在本分卷只固定启动前置条件、Schema、TraceContext、`log.db` 边界和 `event.db` 分离边界；具体采集点随后续控制面、Run、runtime、工具和交付切片嵌入实现。
+本分卷的拆分目标是先锁定契约，再进入控制面与 Run 主链。每个契约切片只处理一组稳定字段，避免单次任务同时修改所有 Schema。配置边界在本分卷只固定启动配置、可热重载运行设置、运行快照 Schema 和校验口径；具体管理服务、快照固化和 runtime 消费由后续分卷实现。日志审计能力在本分卷只固定启动前置条件、Schema、TraceContext、`log.db` 边界和 `event.db` 分离边界；具体采集点随后续控制面、Run、runtime、工具和交付切片嵌入实现。
 
 <a id="b01"></a>
 
@@ -54,6 +54,7 @@
 - Create: `backend/app/main.py`
 - Create: `backend/app/api/router.py`
 - Create: `backend/app/api/errors.py`
+- Create: `backend/app/api/error_codes.py`
 - Create: `backend/app/core/config.py`
 - Create: `backend/tests/api/test_health.py`
 - Create: `backend/tests/api/test_error_contract.py`
@@ -62,12 +63,15 @@
 - `create_app() -> FastAPI`
 - `build_api_router() -> APIRouter`
 - `ApiError`
+- `ErrorCode`
 - `register_error_handlers(app: FastAPI) -> None`
 
 **验收标准**：
 - `GET /api/health` 返回服务状态。
 - `build_api_router()` 采用统一路由装配模式：各 `backend/app/api/routes/*.py` 模块导出模块级 `router`，由 `build_api_router()` 统一 `include_router()`；后续切片不得混用额外的 `register_*_routes(router)` 函数模式。
 - 通用错误响应包含稳定错误码、消息和 request id。
+- 错误码集中定义在 `backend/app/api/error_codes.py`，后续切片只能扩展稳定 machine value，不得在路由中散落字符串错误码。
+- 配置相关错误码预留并测试：`config_invalid_value`、`config_hard_limit_exceeded`、`config_version_conflict`、`config_storage_unavailable`、`config_snapshot_unavailable`、`config_credential_env_not_allowed`。
 - `GET /api/openapi.json` 可访问。
 - B0.1 中的后端测试命令可继续运行。
 
@@ -76,13 +80,47 @@
 - `pytest backend/tests/api/test_error_contract.py -v`
 - `python -m uvicorn backend.app.main:app --reload`
 
+<a id="b03"></a>
+
+## B0.3 EnvironmentSettings 启动配置边界
+
+**计划周期**：Week 1
+**状态**：`[ ]`
+**目标**：建立服务启动前配置加载边界，使环境变量只服务启动、路径落点、前后端连接和凭据引用解析，不承载业务配置或运行上限。
+**实施计划**：`docs/plans/implementation/b0.3-environment-settings.md`
+
+**修改文件列表**：
+- Modify: `backend/app/core/config.py`
+- Create: `backend/tests/support/settings.py`
+- Create: `backend/tests/core/test_environment_settings.py`
+
+**实现类/函数**：
+- `EnvironmentSettings`
+- `EnvironmentSettings.resolve_platform_runtime_root()`
+- `EnvironmentSettings.resolve_workspace_root()`
+- `EnvironmentSettings.is_allowed_credential_env_name(name: str) -> bool`
+- `override_environment_settings(**values)`
+
+**验收标准**：
+- `EnvironmentSettings` 由 `pydantic-settings` 加载。
+- 至少覆盖 `platform_runtime_root`、`default_project_root`、`workspace_root`、`backend_cors_origins`、`frontend_api_base_url`、`credential_env_prefixes`。
+- `workspace_root` 未配置时默认派生为 `{platform_runtime_root}/workspaces`。
+- 多 SQLite 职责库路径不逐个暴露为环境变量或用户配置；后续 C1.5 只能从 `platform_runtime_root` 派生默认路径。
+- 不包含 Provider 的 `base_url`、`model_id`、能力声明、模板角色绑定、`system_prompt`、交付仓库、目标分支、代码评审请求类型、交付模式、Agent 循环上限、日志保留策略或 `compression_prompt`。
+- `credential_ref = env:<NAME>` 与 `api_key_ref = env:<NAME>` 只能解析受 `credential_env_prefixes` 允许的环境变量名。
+- `override_environment_settings(**values)` 只能在测试中构造隔离 settings，不作为正式产品 API、环境变量矩阵或前端配置入口。
+- 环境变量变更不要求热重载；测试环境替换路径通过 settings override 或 fixture 完成，并必须在测试结束后恢复全局 settings。
+
+**测试方法**：
+- `pytest backend/tests/core/test_environment_settings.py -v`
+
 <a id="l01"></a>
 
 ## L0.1 运行数据目录与日志启动预检
 
 **计划周期**：Week 1
 **状态**：`[ ]`
-**目标**：建立平台运行数据根目录和 `.runtime/logs` 启动预检，使后端在接受用户命令前确认日志目录存在且可写。
+**目标**：基于 B0.3 的 `EnvironmentSettings` 建立平台运行数据根目录和 `.runtime/logs` 启动预检，使后端在接受用户命令前确认日志目录存在且可写。
 **实施计划**：`docs/plans/implementation/l0.1-runtime-data-log-preflight.md`
 
 **修改文件列表**：
@@ -98,6 +136,7 @@
 
 **验收标准**：
 - 平台运行数据根目录可通过配置指定；未配置时默认使用服务当前运行目录下的 `.runtime`。
+- 运行数据根目录来源只能是 B0.3 的 `platform_runtime_root`，不读取用户业务配置。
 - 启动前必须确保运行数据目录、`.runtime/logs` 与 `.runtime/logs/runs` 存在且可写。
 - 目录不可创建或不可写时，后端不得进入可接受用户命令的正常运行状态。
 - `.runtime/logs` 被明确标记为平台运行期私有数据，不属于目标项目工作区内容。
@@ -228,14 +267,19 @@
 **实现类/函数**：
 - `ProjectRead`
 - `SessionRead`
+- `SessionRenameRequest`
+- `SessionDeleteResult`
+- `ProjectRemoveResult`
 - `PipelineTemplateRead`
 - `AgentRoleConfig`
 - `ProviderRead`
 - `ProjectDeliveryChannelDetailProjection`
 
 **验收标准**：
-- `Project` 包含默认交付通道引用。
-- `Session` 包含 `status`、`selected_template_id`、`current_run_id`、`latest_stage_type`。
+- `Project` 包含默认交付通道引用、默认项目标识和左栏展示名称；普通项目列表响应不得返回已移除 Project。
+- `Session` 包含 `display_name`、`status`、`selected_template_id`、`current_run_id`、`latest_stage_type`。
+- 会话重命名请求只表达新的 `display_name`，不得携带运行历史、审批记录、产物或 run 归属修改字段。
+- 会话删除和项目移除结果 Schema 必须表达产品历史可见性变化、被活动 run 阻塞时的稳定错误语义，以及不删除本地项目文件夹、目标仓库、远端仓库、远端分支、提交或代码评审请求的边界。
 - `PipelineTemplate` 区分 `system_template` 与 `user_template`，并包含固定阶段骨架、阶段槽位到 AgentRole 的绑定、槽位内最终生效的 `role_id` / `system_prompt` / `provider_id` 和自动回归配置。
 - `AgentRoleConfig` 返回 `role_name` 作为展示标签；V1 不提供 `role_name` 修改字段。
 - `Provider` 区分内置 Provider 与 custom Provider，且不暴露真实密钥。
@@ -323,23 +367,28 @@
 - Create: `backend/app/db/session.py`
 - Create: `backend/alembic.ini`
 - Create: `backend/alembic/env.py`
+- Modify: `backend/tests/support/settings.py`
 - Create: `backend/tests/db/test_database_sessions.py`
 
 **实现类/函数**：
 - `DatabaseRole`
 - `DatabaseManager`
+- `DatabaseManager.from_environment_settings(settings: EnvironmentSettings)`
 - `get_control_session()`
 - `get_runtime_session()`
 - `get_graph_session()`
 - `get_event_session()`
 - `get_log_session()`
+- `runtime_database_paths_fixture`
 
 **验收标准**：
-- 五类数据库角色可独立解析连接 URL。
+- 五类数据库角色可从 B0.3 的 `platform_runtime_root` 默认派生连接 URL，默认文件名为 `control.db`、`runtime.db`、`graph.db`、`event.db` 与 `log.db`。
 - 测试环境可为五类数据库创建临时 SQLite 文件。
 - session helper 不混用数据库角色。
 - Alembic 环境能识别多数据库迁移目标。
 - `log.db` 只用于日志轻量索引、审计台账、日志文件位置、载荷摘要、裁剪状态与关联标识，不承载领域事件或 Narrative Feed 投影来源数据。
+- 正式产品配置面、前端设置和普通环境变量不得要求用户逐个配置五类 SQLite 文件路径；测试替换路径只能通过 fixture 或 settings override。
+- `runtime_database_paths_fixture` 使用 B0.3 的 settings override 派生五类临时数据库路径，不允许引入逐库环境变量或测试专用业务配置字段。
 
 **测试方法**：
 - `pytest backend/tests/db/test_database_sessions.py -v`
@@ -365,10 +414,15 @@
 - `PipelineTemplateModel`
 - `ProviderModel`
 - `DeliveryChannelModel`
+- `PlatformRuntimeSettingsModel`
 
 **验收标准**：
 - `control.db` 承载 Project、Session、PipelineTemplate、Provider、DeliveryChannel 与项目级配置。
+- `control.db` 承载 `PlatformRuntimeSettingsModel`，用于保存当前平台运行设置、配置版本、schema 版本、平台硬上限版本、创建时间、更新时间和审计关联字段。
+- `PlatformRuntimeSettingsModel` 只保存 C1.10 定义的运行设置分组和版本元数据，不保存真实凭据、不保存 `compression_prompt`，也不保存逐库 SQLite 文件路径。
 - `Session` 规范实体只存在于 control 模型。
+- control 模型必须能表达已加载 Project 的产品可见性、默认 Project 不可移除边界、Session 展示名和 Session 产品可见性。
+- 会话删除和项目移除只能改变普通项目/会话历史、回看入口和产品查询投影的可见性；control 模型不得要求删除本地项目文件夹、目标仓库、远端仓库、远端分支、提交、代码评审请求或日志审计记录。
 - `DeliveryChannel` 属于项目级配置，不属于 Session、模板或 runtime 模型。
 - control 模型不包含 PipelineRun、StageRun、GraphThread、DomainEvent、RunLogEntry、AuditLogEntry 或 LogPayload。
 
@@ -398,18 +452,25 @@
 - `ApprovalRequestModel`
 - `ApprovalDecisionModel`
 - `RunControlRecordModel`
+- `RuntimeLimitSnapshotModel`
+- `ProviderSnapshotModel`
+- `ModelBindingSnapshotModel`
 - `DeliveryChannelSnapshotModel`
 - `DeliveryRecordModel`
 
 **验收标准**：
 - `runtime.db` 承载 PipelineRun、StageRun、StageArtifact、ClarificationRecord、ApprovalRequest、ApprovalDecision、RunControlRecord、DeliveryChannelSnapshot、DeliveryRecord、结构化产物索引与运行摘要。
 - runtime 模型通过 `session_id` 关联 control Session，不复制 `Session` 实体。
-- `PipelineRunModel.delivery_channel_snapshot_ref` 必须指向 `DeliveryChannelSnapshotModel` 或等价结构化快照记录，不得只是无所有权的 opaque string。
+- `PipelineRunModel.delivery_channel_snapshot_ref` 必须指向 `DeliveryChannelSnapshotModel` 结构化快照记录，不得只是无所有权的 opaque string。
 - `DeliveryChannelSnapshotModel` 必须包含 `delivery_mode`、`scm_provider_type`、`repository_identifier`、`default_branch`、`code_review_request_type`、`credential_ref`、`credential_status`、`readiness_status`、`readiness_message` 与 `last_validated_at`。
 - `StageRun.stage_type` 只允许六个正式业务阶段。
 - `RunControlRecord.control_type` 至少支持 `clarification_wait`、`rollback`、`retry`。
 - run 尾部 `system_status` 不作为 `RunControlRecord.control_type` 持久化。
 - `DeliveryRecord` 是正式领域对象，不由临时交付详情投影替代。
+- `PipelineRunModel` 必须包含 `runtime_limit_snapshot_ref`。
+- runtime 模型必须能持久化 `RuntimeLimitSnapshotModel`、`ProviderSnapshotModel` 与 `ModelBindingSnapshotModel` 结构化快照；`PipelineRunModel` 持久化指向这些结构化快照的外键引用。
+- `RuntimeLimitSnapshotModel` 必须保存实际生效值、来源配置版本、平台硬上限版本、schema 版本和固化时间，不读取或引用最新 `PlatformRuntimeSettingsModel` 来解释历史 run。
+- `ProviderSnapshotModel` 与 `ModelBindingSnapshotModel` 只保存凭据引用和能力声明快照，不保存真实密钥。
 
 **测试方法**：
 - `pytest backend/tests/db/test_runtime_model_boundary.py -v`
@@ -474,6 +535,51 @@
 **测试方法**：
 - `pytest backend/tests/db/test_event_model_boundary.py -v`
 - `alembic -c backend/alembic.ini upgrade head`
+
+<a id="c110"></a>
+
+## C1.10 PlatformRuntimeSettings 与运行快照 Schema 契约
+
+**计划周期**：Week 2
+**状态**：`[ ]`
+**目标**：定义可热重载平台运行设置、运行上限快照、Provider 快照与模型绑定快照 Schema，使后续控制面、Run 启动和 runtime 消费共享同一配置边界。
+**实施计划**：`docs/plans/implementation/c1.10-platform-runtime-settings-snapshots.md`
+
+**修改文件列表**：
+- Modify: `backend/app/api/error_codes.py`
+- Create: `backend/app/schemas/runtime_settings.py`
+- Modify: `backend/app/schemas/run.py`
+- Create: `backend/tests/schemas/test_runtime_settings_schemas.py`
+
+**实现类/函数**：
+- `RuntimeSettingsErrorCode`
+- `PlatformRuntimeSettingsRead`
+- `PlatformRuntimeSettingsUpdate`
+- `PlatformRuntimeSettingsVersion`
+- `AgentRuntimeLimits`
+- `ProviderCallPolicy`
+- `ContextLimits`
+- `LogPolicy`
+- `PlatformHardLimits`
+- `RuntimeLimitSnapshotRead`
+- `ProviderSnapshotRead`
+- `ModelBindingSnapshotRead`
+
+**验收标准**：
+- `PlatformRuntimeSettingsRead` 至少包含 `agent_limits`、`provider_call_policy`、`context_limits`、`log_policy` 四个分组。
+- `agent_limits` 至少包含 `max_react_iterations_per_stage`、`max_tool_calls_per_stage`、`max_file_edit_count`、`max_patch_attempts_per_file`、`max_structured_output_repair_attempts`、`max_auto_regression_retries`、`max_clarification_rounds`、`max_no_progress_iterations`。
+- `provider_call_policy` 覆盖 Provider 请求超时、网络错误重试次数、限流重试次数和退避上限。
+- `context_limits` 覆盖工具输出、`bash` stdout / stderr、`grep` 返回、文件读取、模型输出进入日志或过程记录的裁剪限制。
+- `log_policy` 覆盖普通运行日志保留周期、审计日志保留周期、日志轮转大小、日志查询默认 `limit` 与最大 `limit`。
+- 所有可写运行上限 Schema 均表达平台硬上限校验所需字段，超过硬上限时由 C2.8 拒绝保存。
+- `PlatformRuntimeSettingsRead` 必须包含当前配置版本、schema 版本、平台硬上限版本、更新时间和只读硬上限摘要；`PlatformRuntimeSettingsUpdate` 必须支持携带期望配置版本用于并发冲突检测。
+- `RuntimeSettingsErrorCode` 必须复用 B0.2 的错误码体系，并固定 `config_invalid_value`、`config_hard_limit_exceeded`、`config_version_conflict`、`config_storage_unavailable`、`config_snapshot_unavailable`。
+- `RuntimeLimitSnapshotRead` 记录实际生效值、来源配置版本和平台硬上限版本。
+- `ProviderSnapshotRead` 与 `ModelBindingSnapshotRead` 能表达 run 启动时实际使用的 Provider、模型、凭据引用、能力声明和 schema 版本。
+- `compression_prompt` 不出现在 `EnvironmentSettings`、`PlatformRuntimeSettingsRead`、`PlatformRuntimeSettingsUpdate` 或前端可写配置 Schema 中；若压缩过程需要记录提示词，只能记录系统定义版本引用。
+
+**测试方法**：
+- `pytest backend/tests/schemas/test_runtime_settings_schemas.py -v`
 
 <a id="l11"></a>
 
