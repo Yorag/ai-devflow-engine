@@ -1,71 +1,71 @@
-# Superpowers Execution Rules Reference
+# Superpowers 执行规则参考
 
-Load this file when the selected slice needs platform-plan Superpowers execution-rule detail, frontend presentation quality checks, API/OpenAPI route checks, or log/audit requirements. Keep the stop rules, Git rules, TDD rules, and verification rules in `SKILL.md` authoritative.
+当已选切片需要 platform plan 中的 Superpowers 执行规则细节、前端呈现质量检查、API/OpenAPI 路由检查，或日志 / 审计要求时，加载本文件。停止规则、Git 规则、TDD 规则和验证规则仍以 `SKILL.md` 为准。
 
-## Independent Plans Or Batches
+## 独立计划或独立 batch
 
-These require independent implementation plans or independent execution batches:
+以下边界需要单独的 implementation plan 或独立执行 batch：
 
-- First pass for data models and enums.
-- First pass for OpenAPI and frontend client generation strategy.
-- First pass for Run lifecycle state machine.
-- First pass for Narrative Feed top-level entry semantics.
-- First pass for DeliveryChannel and final approval blocking semantics.
-- First pass for `PlatformRuntimeSettings` and run snapshot semantics.
-- First pass for `PromptAsset` Schema, built-in prompt asset directory, and PromptRenderer consumption boundary.
-- First pass for LangGraph runtime and `deterministic test runtime` interface boundary.
-- First pass for tool confirmation and human approval boundary.
-- First pass for tool risk classification and execution gate.
+- 数据模型和枚举的第一轮实现。
+- OpenAPI 和前端客户端生成策略的第一轮实现。
+- Run 生命周期状态机的第一轮实现。
+- Narrative Feed 顶层条目语义的第一轮实现。
+- DeliveryChannel 和最终审批阻塞语义的第一轮实现。
+- `PlatformRuntimeSettings` 和 run snapshot 语义的第一轮实现。
+- `PromptAsset` Schema、内置提示词资产目录和 PromptRenderer 消费边界的第一轮实现。
+- LangGraph runtime 和 `deterministic test runtime` 接口边界的第一轮实现。
+- 工具确认和人工审批边界的第一轮实现。
+- 工具风险分类和执行 gate 的第一轮实现。
 
-If a selected slice appears to cross one of these boundaries and the current task does not isolate it, use the Source Trace Conflict Gate in `SKILL.md`.
+如果已选切片看起来跨越上述边界，而当前任务没有隔离该边界，使用 `SKILL.md` 中的 Source Trace Conflict Gate。
 
-## Writing-Plans Overrides
+## Writing-Plans 覆盖规则
 
-When using `superpowers:writing-plans`, apply this repository's execution rules over the generic skill template:
+使用 `superpowers:writing-plans` 时，在通用技能模板之上应用本仓库执行规则：
 
-- Save plans to `docs/plans/implementation/<task-id>-<task-name>.md`, not `docs/superpowers/plans/`.
-- The plan header must name `superpowers:executing-plans` as the execution skill. Do not recommend `superpowers:subagent-driven-development`.
-- Do not offer the generic execution choice between subagent-driven and inline execution; this repository uses main-agent inline execution with `superpowers:executing-plans`.
-- Do not include commit steps, commit commands, Git worktree setup, branch finishing, PR creation, merge, tag, or branch cleanup steps.
-- Replace any generic "frequent commits" instruction with verified checkpoints and commit approval requests.
-- If the implementation plan needs a final Git step, write it as "prepare a commit approval request with `git-delivery-workflow` after fresh verification"; do not write `git add` or `git commit` commands.
-- Keep the writing-plans requirement for concrete file paths, concrete test code, concrete implementation code, exact commands, expected failure output, expected passing output, and self-review.
+- 将计划保存到 `docs/plans/implementation/<task-id>-<task-name>.md`，不要保存到 `docs/superpowers/plans/`。
+- 计划头部必须把 `superpowers:executing-plans` 标为执行 skill。不要推荐 `superpowers:subagent-driven-development`。
+- 不要提供通用的“子代理驱动或内联执行”执行选择；本仓库使用主 agent 内联执行，并配合 `superpowers:executing-plans`。
+- 不要包含 commit 步骤、commit 命令、Git worktree 设置、分支收尾、PR 创建、merge、tag 或分支清理步骤。
+- 将任何通用的“频繁 commit”指令替换为已验证检查点和 commit 批准请求。
+- 如果 implementation plan 需要最终 Git 步骤，写成“在最新验证后，使用 `git-delivery-workflow` 准备 commit 批准请求”；不要写 `git add` 或 `git commit` 命令。
+- 保留 writing-plans 对精确文件路径、具体测试代码、具体实现代码、精确命令、预期失败输出、预期通过输出和自评审的要求。
 
-## Implementation Plan Checklist
+## Implementation Plan 清单
 
-Each implementation plan must include:
+每个 implementation plan 必须包含：
 
-- File list with exact create, modify, and test paths.
-- TDD red-green steps.
-- Concrete failing test code.
-- Concrete implementation code.
-- Exact run commands.
-- Expected failure output and expected passing output.
-- Completion verification checklist.
+- 文件列表，列出精确的创建、修改和测试路径。
+- TDD red-green 步骤。
+- 具体失败测试代码。
+- 具体实现代码。
+- 精确运行命令。
+- 预期失败输出和预期通过输出。
+- 完成验证清单。
 
-## API And OpenAPI Checks
+## API 和 OpenAPI 检查
 
-For `backend/app/api/routes/*` changes, the implementation plan must include local API tests and `/api/openapi.json` assertions for:
+对于 `backend/app/api/routes/*` 变更，implementation plan 必须包含本地 API 测试和 `/api/openapi.json` 断言，覆盖：
 
-- Path.
-- Method.
-- Request schema.
-- Response schema.
-- Major error responses.
+- Path。
+- Method。
+- Request schema。
+- Response schema。
+- 主要错误响应。
 
 ## Log & Audit Integration
 
-For user command interfaces, run lifecycle changes, runtime nodes, model calls, tool calls, workspace writes, `bash`, Git delivery, remote delivery, configuration changes, or security-sensitive failures, the implementation plan must include `Log & Audit Integration`:
+对于用户命令接口、run 生命周期变更、runtime 节点、模型调用、工具调用、workspace 写入、`bash`、Git 交付、远程交付、配置变更，或安全敏感失败，implementation plan 必须包含 `Log & Audit Integration`：
 
-- Runtime log category, audit action, associated objects, and failure result.
-- `request_id`, `trace_id`, `correlation_id`, `span_id`, and `parent_span_id` generation or inheritance.
-- Sensitive field redaction, blocking, summarization, and payload size limits.
-- Behavior when log write, audit write, or `log.db` indexing fails.
-- Tests proving logs do not replace domain objects, domain events, Narrative Feed, Inspector, or product state truth.
+- Runtime log category、audit action、关联对象和失败结果。
+- `request_id`、`trace_id`、`correlation_id`、`span_id` 和 `parent_span_id` 的生成或继承。
+- 敏感字段脱敏、阻断、摘要和载荷大小限制。
+- 日志写入、审计写入或 `log.db` 索引失败时的行为。
+- 测试证明日志不会替代领域对象、领域事件、Narrative Feed、Inspector 或产品状态事实。
 
 ## Frontend Design Gate
 
-Use `impeccable` for these frontend quality-gate slices:
+以下前端质量门切片使用 `impeccable`：
 
 - `F2.3-F2.6`
 - `F3.3-F3.7`
@@ -76,17 +76,17 @@ Use `impeccable` for these frontend quality-gate slices:
 - `F0.1`
 - `V6.2`, `V6.3`, `V6.6`, `V6.7`, `V6.8`
 
-Use it for pure API client, mock fixture, or state merge slices only when visible UI is introduced.
+纯 API 客户端、mock fixture 或状态合并切片，只有在引入可见 UI 时才使用 `impeccable` skill。
 
-The implementation plan for applicable frontend display slices must include `Frontend Design Gate`:
+适用前端展示切片的 implementation plan 必须包含 `Frontend Design Gate`：
 
-- Tone source and inherited project tone.
-- Default tone when no reference exists: quiet, professional, high-information-density workspace UI.
-- Reference boundary: what is adopted and what is not copied.
-- Reconfirmation conditions.
-- Pre-implementation information hierarchy, layout, state, interaction path, and responsive strategy.
-- Post-implementation accessibility, responsive, overflow, contrast, focus, and visual anti-pattern review.
-- Pre-delivery hardening for empty, loading, error, disabled, long text, history, and edge states.
-- Reported findings, handled items, remaining risks, and verification evidence.
+- 基调来源和继承的项目基调。
+- 没有参考时的默认基调：安静、专业、高信息密度的 workspace UI。
+- 参考边界：采用什么、不复制什么。
+- 需要重新确认的条件。
+- 实现前的信息层级、布局、状态、交互路径和响应式策略。
+- 实现后的可访问性、响应式、溢出、对比度、焦点和视觉反模式评审。
+- 交付前对空态、加载态、错误态、禁用态、长文本、历史记录和边界状态的加固。
+- 已报告发现、已处理项、剩余风险和验证证据。
 
-The main agent must establish or inherit the project tone before `F0.1` or the first visible frontend slice. If the user provided no reference, record the default workspace tone and continue; do not block implementation for missing style input.
+主 agent 必须在 `F0.1` 或第一个可见前端切片前建立或继承项目基调。如果用户没有提供参考，记录默认 workspace 基调并继续；不要因为缺少样式输入阻塞实现。
