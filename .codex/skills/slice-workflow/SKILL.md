@@ -96,8 +96,10 @@ description: Use when asked to execute, continue, plan, or choose one task from 
 - 不要选择该 batch 行的 `覆盖任务` 之外的任何任务。
 - 按行中出现顺序展开 `覆盖任务` 的任务范围，然后从该有序列表中选择第一个符合条件且未完成的任务。
 - 如果用户指定了任务 id，仍必须验证该任务 id 属于当前 batch；如果不属于，停止。
+- 如果 batch `Status` 是 `planned`，停止并报告该分支尚未由主会话认领。
 - 如果 batch `Status` 是 `merged` 或 `ready_for_review`，停止并报告该分支没有可执行切片。
 - 如果 batch `Status` 是 `blocked`，停止并报告 batch 行和相关 split-plan 细则中的阻塞项。
+- 如果 batch `Status` 不是 `claimed`、`planned`、`ready_for_review`、`merged` 或 `blocked`，停止并报告未知状态。
 - 验证 `前置门槛` 中列出的每个 batch 都已记录为 `merged`，`无` 除外。如果任何前置 batch 不是 `merged`，停止并列出缺失的前置 batch id。
 - 继续应用普通任务资格、split-plan 状态、来源追溯和依赖检查。Batch membership 只缩小候选集合，不覆盖任务依赖。
 
@@ -261,7 +263,7 @@ implementation plan 不得放宽任务边界、重写已批准语义、遗漏必
 - 当验证失败、跳过，或只覆盖部分验收标准时，不要标记完成。
 - split-plan 追踪说明必须包含 implementation-plan 链接、验证命令、关键结果，以及任何阻塞项或剩余范围。
 - 对已注册的当前分支 batch，按以下方式设置或保持 batch `Status`：
-  - `in_progress`：至少一个覆盖任务已完成或进行中，且其它覆盖任务仍未完成。
+  - 保持 `claimed`：覆盖任务仍未全部完成，且没有阻塞项。
   - `ready_for_review`：仅当 batch 的 `覆盖任务` 在 platform plan 和 split plans 中全部为 `[x]`，分支范围所需全部验证已通过，且评审发现已解决。
   - `blocked`：仅当执行因依赖、来源追溯、写入范围或验证阻塞项停止，且该阻塞项阻止分支继续推进。
   - 执行切片期间绝不要设置 `merged`。`merged` 只用于已经集成到 `main` 的工作。

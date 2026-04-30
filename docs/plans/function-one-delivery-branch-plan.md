@@ -11,11 +11,12 @@
 
 调度状态固定为：
 - `planned`：已规划但未认领。
-- `claimed`：已有工作区认领，但尚未开始实现。
-- `in_progress`：分支正在执行一个或多个 slice。
+- `claimed`：已由主会话认领；worktree 可创建或正在实施。
 - `ready_for_review`：分支验证完成，等待 PR/MR review 或合入。
 - `merged`：分支已合入 `main`，进度追踪表状态成为主线事实。
 - `blocked`：依赖、写集、验证或语义冲突阻塞执行。
+
+分会话未完成覆盖任务且没有阻塞项时保持 `claimed`，不得新增或使用 `in_progress` 类状态。
 
 开工前必须执行 Parallel Safety Gate：
 - 前置分支已合入 `main`，或本分支仅使用已合入契约的 mock 数据且不得调用未合入真实实现。
@@ -31,7 +32,7 @@
 
 | Batch | 交付分支 | 覆盖任务 | 前置门槛 | 并行等级 | Status | 主要共享入口 / 冲突点 | Review boundary |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| DB00 | `docs/project-structure-boundary` | B0.0 | 无 | S | ready_for_review | `README.md`, `docs/plans/*` | 项目目录骨架、路径职责和实施计划落点 |
+| DB00 | `docs/project-structure-boundary` | B0.0 | 无 | S | merged | `README.md`, `docs/plans/*` | 项目目录骨架、路径职责和实施计划落点 |
 | DB01 | `chore/engineering-baseline` | B0.1 | DB00 | S | planned | 根目录脚本、后端/前端工程入口 | 前后端依赖、测试命令和开发脚本基线 |
 | DB02 | `feat/backend-runtime-bootstrap` | B0.2, B0.3, L0.1 | DB01 | S | planned | `backend/app/api/*`, `error_codes.py`, settings、日志目录预检 | FastAPI、统一错误响应、启动配置和运行数据目录 |
 | DB03 | `feat/frontend-spa-baseline` | F0.1 | DB01 | G | planned | `frontend/`, 前端测试入口 | 前端 SPA、测试基线和首个设计质量门 |
