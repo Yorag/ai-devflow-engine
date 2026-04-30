@@ -1,0 +1,4 @@
+interface:
+  display_name: "Slice Workflow"
+  short_description: "Run one planned implementation slice"
+  default_prompt: "Use $slice-workflow to execute the next eligible implementation slice from the platform plan."
