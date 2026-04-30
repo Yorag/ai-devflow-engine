@@ -35,7 +35,7 @@
 - Walking skeleton 先行：先打通默认 Project、draft Session、首条需求创建正式 `PipelineRun`、模板快照、Provider 与模型绑定快照、运行上限快照、`GraphDefinition`、首条消息事件、初始 `StageRun`、workspace projection、前端读取与 SSE 增量，再逐步接入完整 runtime。
 - Runtime boundary 先行：人工介入命令必须先依赖统一 runtime orchestration boundary，不允许先用 run 状态字段临时模拟中断、恢复或终止。
 - 工具确认独立于人工审批：高风险工具确认是运行时权限控制点，不属于两个正式人工审批检查点；`tool_confirmation` 是独立顶层 Narrative Feed 条目，`ApprovalRequest` 和 `ApprovalDecision` 不承载工具确认语义。
-- 配置边界先行：`EnvironmentSettings`、`PlatformRuntimeSettings`、业务配置对象、系统内置提示词资产与运行快照必须在控制面、Run 启动和 runtime 消费前先固定；环境变量不承载 Provider、DeliveryChannel、模板运行配置、Agent 运行上限、日志策略、系统内置提示词正文或提示词资产版本切换。
+- 配置边界先行：`EnvironmentSettings`、正式配置存储、`PlatformRuntimeSettings`、`ConfigurationPackage`、业务配置对象、系统内置提示词资产与运行快照必须在控制面、Run 启动和 runtime 消费前先固定；环境变量只服务启动路径、前后端连接、工作区与日志落点、凭据引用解析，不承载 Provider、DeliveryChannel、模板运行配置、Agent 运行上限、Provider 模型能力、上下文压缩阈值、日志策略、系统内置提示词正文或提示词资产版本切换。
 - ToolProtocol 与风险门禁先行：正式 runtime、Provider adapter、Workspace tools 与 Delivery tools 只能消费抽象 `ToolProtocol`、`ToolRegistry` 和统一风险分级门禁，不允许先接入临时工具函数或尚未实现的具体 delivery tool 实例；Workspace tools 参考 Claude Code 的工具工作方式，正式契约名固定为 `bash`、`read_file`、`edit_file`、`write_file`、`glob`、`grep`。
 - Provider 失败策略先行：Provider 请求超时、网络错误和限流必须按本次 run 固化策略执行指数退避重试，连续失败熔断必须进入过程记录和前端可见投影，不得通过运行外 Provider 变更改变已启动 run。
 - `deterministic test runtime` 先行：`deterministic test runtime` 先完成六阶段、澄清、审批、失败和终止，并通过正式 `demo_delivery` 形成 DeliveryRecord；再接入 LangGraph runtime 与 `git_auto_delivery`。
@@ -231,7 +231,7 @@ Superpowers 模板中出现的 `using-git-worktrees`、`commit`、`finishing-a-d
 | --- | --- | --- |
 | [00 项目骨架与执行规则](function-one-platform/00-project-skeleton-and-execution.md) | 目标目录骨架与 B0.0 子任务细则 | B0.0 |
 | [01 工程基线与契约层](function-one-platform/01-foundation-and-contracts.md) | 工程基线、Schema 契约、数据库职责拆分、Project/Session 历史可见性、EnvironmentSettings、PlatformRuntimeSettings、Provider 调用策略快照、PromptAsset Schema、ToolConfirmation Schema、工具风险枚举、运行数据目录、log.db、TraceContext | B0.1-B0.3, F0.1, C1.1-C1.10, C1.10a, L0.1, L1.1-L1.2 |
-| [02 控制面与工作台外壳](function-one-platform/02-control-plane-and-workspace-shell.md) | Project、Session、历史管理、Template、Provider、DeliveryChannel、PlatformRuntimeSettings 管理服务、控制面日志审计、Shell、设置、模板空态 | C2.1-C2.8, C2.9a-C2.9b, L2.1-L2.4, F2.1-F2.6 |
+| [02 控制面与工作台外壳](function-one-platform/02-control-plane-and-workspace-shell.md) | Project、Session、历史管理、Template、Provider、DeliveryChannel、ConfigurationPackage、PlatformRuntimeSettings 管理服务、控制面日志审计、Shell、设置、模板空态 | C2.1-C2.8, C2.7a, C2.9a-C2.9b, L2.1-L2.4, F2.1-F2.6 |
 | [03 Run 主链、投影与叙事流](function-one-platform/03-run-projection-and-feed.md) | PipelineRun、模板快照、Provider/模型绑定快照、运行上限快照、GraphDefinition、StageArtifact、Workspace Projection、ToolConfirmationInspectorProjection、SSE、Run/Stage 日志轻查询、Feed、Provider 调用状态、Inspector | R3.1-R3.4, R3.4a-R3.4b, R3.5-R3.7, Q3.1-Q3.4a, E3.1-E3.2, L3.1, F3.1-F3.7 |
 | [04 人工介入、工具确认与运行控制](function-one-platform/04-human-loop-and-runtime.md) | Runtime orchestration boundary、澄清、审批、工具确认、暂停恢复终止、交付快照、命令审计失败语义、审计查询、Composer、Approval Block、Tool Confirmation Block、重新尝试 UI | A4.0, L4.1-L4.2, H4.1-H4.7, H4.4a, D4.0, F4.1-F4.4, F4.3a |
 | [05 deterministic runtime 与 demo_delivery](function-one-platform/05-deterministic-runtime-and-demo-delivery.md) | RuntimeEngine、`deterministic test runtime`、六阶段确定性推进、demo_delivery、DeliveryRecord、DeliveryResultDetailProjection | A4.1-A4.4, D4.1-D4.3 |
@@ -276,9 +276,10 @@ Superpowers 模板中出现的 `using-git-worktrees`、`commit`、`finishing-a-d
 | C2.2 | 系统模板与内置 Provider seed | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c22) |
 | C2.3 | draft Session、重命名与模板选择更新 | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c23) |
 | C2.4 | 用户模板保存、覆盖与删除 | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c24) |
-| C2.5 | custom Provider 管理 | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c25) |
+| C2.5 | Provider 管理 | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c25) |
 | C2.6 | DeliveryChannel 查询与保存 | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c26) |
 | C2.7 | DeliveryChannel readiness 校验 | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c27) |
+| C2.7a | 项目作用域配置包导入导出 | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c27a) |
 | C2.8 | PlatformRuntimeSettings 管理服务 | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c28) |
 | F2.1 | API Client 路径与类型入口 | Week 2-3 | [ ] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f21) |
 | F2.2 | Mock Fixtures 与 Query Hooks | Week 2-3 | [ ] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f22) |
@@ -398,7 +399,7 @@ Superpowers 模板中出现的 `using-git-worktrees`、`commit`、`finishing-a-d
 - 核心枚举、Schema、数据库边界定稿。
 - Pydantic Schema、投影契约、配置契约、运行快照契约与事件载荷可作为前端 mock 输入。
 - Project 与 Session Schema 明确历史可见性、Session 展示名、重命名、删除和项目移除边界。
-- `PlatformRuntimeSettings`、`RuntimeLimitSnapshot`、Provider/模型绑定快照 Schema 定稿，且与 C1.10a 对齐明确 `compression_prompt` 是系统内置提示词资产，不是配置项。
+- `PlatformRuntimeSettings`、`RuntimeLimitSnapshot`、Provider/模型绑定快照 Schema 定稿，明确 `context_window_tokens`、`max_output_tokens`、`supports_tool_calling`、`supports_structured_output`、`supports_native_reasoning` 是 Provider 模型能力，`compression_threshold_ratio` 是上下文限制策略，且与 C1.10a 对齐明确 `compression_prompt` 是系统内置提示词资产，不是配置项。
 - `ToolConfirmationRequest`、`ToolRiskLevel`、`ToolRiskCategory`、`waiting_tool_confirmation`、`tool_confirmation` 顶层条目和 `ProviderCallPolicySnapshot` Schema 定稿。
 - `PromptAsset` Schema、提示词资产版本引用、权威级别和缓存属性定稿，且明确系统内置提示词资产不属于环境变量、平台运行设置或前端可写配置。
 - 日志审计 Schema、TraceContext、`log.db` 模型边界和迁移测试通过。
@@ -407,14 +408,14 @@ Superpowers 模板中出现的 `using-git-worktrees`、`commit`、`finishing-a-d
 
 ### Week 3
 
-- Project、Session、Template、Provider、DeliveryChannel 控制面 API 可用，Session 重命名只改变展示名。
+- Project、Session、Template、Provider、DeliveryChannel 与项目作用域配置包导入导出控制面 API 可用，Session 重命名只改变展示名。
 - 系统模板初始化从 `agent_role_seed` 提示词资产写入默认 `AgentRole.system_prompt`，写入后运行时真源是模板槽位快照，不回读最新提示词资产。
-- `PlatformRuntimeSettings` 管理服务可校验运行上限、Provider 调用策略、上下文裁剪限制、日志策略和诊断查询分页上限，但不进入普通前端设置弹窗。
+- `PlatformRuntimeSettings` 管理服务可校验运行上限、Provider 调用策略、上下文裁剪限制、上下文压缩阈值比例、日志策略和诊断查询分页上限，但不进入普通前端设置弹窗。
 - 控制面 API 切片已在各自 API 测试中断言本地 OpenAPI path、method、Schema 和主要错误响应。
 - API request/correlation context、基础 RedactionPolicy、JSONL writer、log index 与 AuditService 可用。
 - 控制面写操作继承关联上下文，先裁剪载荷，再写入运行日志和审计记录；成功、失败和被拒绝结果具备审计记录，且审计记录不替代控制面领域对象。
 - 前端 Shell、设置弹窗、模板空态基于 mock 可操作；左栏支持已加载项目和历史会话展示、Session 重命名入口、Session 删除入口和 Project 移除入口的基础状态。
-- 设置弹窗只展示 DeliveryChannel 与 Provider 业务配置；不展示环境变量、SQLite 路径、平台运行上限、日志策略、系统内置提示词资产、提示词版本切换或 `deterministic test runtime`。
+- 设置弹窗展示 DeliveryChannel、Provider 与项目作用域配置导入导出；Provider 页面允许编辑 custom Provider，并允许编辑内置 Provider 的连接字段、默认模型、模型列表、凭据引用和折叠 `高级设置` 中的 Provider 模型能力字段；设置弹窗不展示环境变量、SQLite 路径、平台运行上限、日志策略、`compression_threshold_ratio`、系统内置提示词资产、提示词版本切换或 `deterministic test runtime`。
 - Workspace Shell、设置弹窗与模板空态完成设计质量门检查，项目级主基调已记录并被对应实施计划继承。
 
 ### Week 4
@@ -509,7 +510,7 @@ Superpowers 模板中出现的 `using-git-worktrees`、`commit`、`finishing-a-d
 
 - OpenAPI 与实现一致。
 - OpenAPI 覆盖运行日志轻查询与审计日志查询接口。
-- 配置边界与运行快照回归覆盖 EnvironmentSettings、PlatformRuntimeSettings、RuntimeLimitSnapshot、Provider/模型绑定快照、系统内置提示词资产和前端设置边界。
+- 配置边界与运行快照回归覆盖 EnvironmentSettings、PlatformRuntimeSettings、RuntimeLimitSnapshot、Provider 模型能力、Provider/模型绑定快照、系统内置提示词资产和前端设置边界。
 - 错误码回归覆盖配置、Provider、PromptValidation、Context overflow、AgentDecision、ToolRegistry、workspace、bash allowlist、delivery、日志审计和运行数据目录错误；错误响应不得泄露堆栈、凭据、授权头、Cookie、API Key 或私钥。
 - fixture 回归覆盖 settings override 不污染正式配置 API、前端设置、环境变量语义或已启动 run 快照，fake Provider / fake tool 只能消费正式抽象。
 - 项目与会话历史管理回归覆盖重启后可见性、Session 重命名、Session 删除、Project 移除、活动 run 阻塞和审计事实保留。
@@ -531,11 +532,12 @@ Superpowers 模板中出现的 `using-git-worktrees`、`commit`、`finishing-a-d
 | 审计失败被降级处理导致高影响动作不可追责 | L4.1 固定审计台账失败时拒绝或回滚高影响动作，普通运行日志失败不得破坏已提交领域状态 |
 | `.runtime/logs` 污染工作区、diff 或真实 Git 交付 | L0.1 标记平台运行数据目录，W5.1-W5.5 与 D5.2-D5.4 默认排除 `.runtime/logs` 和平台运行数据目录 |
 | 日志载荷泄露凭据或本机敏感信息 | L1.1-L1.2 固定裁剪状态和载荷摘要，L2.2 建立统一裁剪与摘要策略，L2.3-L2.4 只能写入裁剪后载荷且不得接收 raw payload，L6.2 做敏感字段阻断、长度限制和脱敏回归 |
-| 环境变量膨胀为业务配置中心 | B0.3 固定 `EnvironmentSettings` 只服务启动、路径、前后端连接和凭据引用解析；C1.10/C2.8 把运行设置放入 `PlatformRuntimeSettings`，C1.10a 把系统内置提示词资产固定为版本化后端资产，Provider、DeliveryChannel 和模板运行配置仍走业务 API 或模板编辑 |
+| 环境变量膨胀为业务配置中心 | B0.3 固定 `EnvironmentSettings` 只服务启动、路径、前后端连接和凭据引用解析；C1.10/C2.8 把平台隐性运行设置放入 `PlatformRuntimeSettings`，C1.10a 把系统内置提示词资产固定为版本化后端资产，Provider、DeliveryChannel 和模板运行配置仍走业务 API、模板编辑或配置包导入 |
+| 配置包被实现为 runtime 真源 | C1.2 固定 `ConfigurationPackage` Schema，C2.7a 只把导入包通过正式配置服务写入 Provider、DeliveryChannel 或模板配置，R3.4a/R3.4b 固化快照，A4.8-A4.9b 不直接读取配置包 |
 | 热重载设置改变已启动 run 语义 | R3.4a/R3.4b 在 run 启动时固化 Provider/模型绑定快照与 `RuntimeLimitSnapshot`，A4.1-A4.11 只消费本次 run 快照，V6.8 做回归 |
 | `compression_prompt` 被实现为用户配置或热重载配置 | C1.10a 固定其为系统内置提示词资产类型，A4.8c/A4.8d 负责加载和渲染，A4.9b 只记录系统内置提示词资产版本引用，V6.8 检查其不进入环境变量、设置弹窗、模板编辑或配置 API |
 | 系统内置提示词资产散落或版本漂移 | C1.10a 固定 PromptAsset Schema，C2.2 只把 `agent_role_seed` 写入模板默认槽位，A4.8c 统一加载资产，A4.8d 统一渲染消息序列，A4.9a/A4.9b 只消费渲染结果并记录版本、hash 与来源 |
-| 前端设置弹窗暴露平台内部配置 | F2.4 只展示 DeliveryChannel 与 Provider，F2.6 只展示模板允许字段，V6.8 回归环境变量、SQLite 路径、运行上限、日志策略、系统内置提示词资产、提示词版本切换和 `deterministic test runtime` 不进入普通设置 |
+| 前端设置弹窗暴露平台内部配置 | F2.4 只展示 DeliveryChannel、Provider 和项目作用域配置导入导出；Provider 页面只编辑 Provider 自身字段，并把 Provider 模型能力放入折叠 `高级设置`，导入导出只处理用户可见配置包；F2.6 只展示模板允许字段，V6.8 回归环境变量、SQLite 路径、运行上限、日志策略、`compression_threshold_ratio`、系统内置提示词资产、提示词版本切换和 `deterministic test runtime` 不进入普通设置 |
 | 会话删除或项目移除被误实现为运行控制或物理删除 | C2.9a/C2.9b 固定其只改变产品历史可见性和常规查询入口；活动 run 阻塞删除/移除，默认 Project 不可移除，V6.8 回归不删除运行记录、产物、交付记录或审计事实 |
 | 审计服务分叉导致命令审计语义漂移 | L2.4 是控制面和后续命令审计的唯一基础服务入口；L4.1 只补强审计失败时的拒绝或回滚语义，不创建第二套审计服务、审计表或临时记录 |
 | Human-in-the-loop 先于 runtime 语义落地导致后补 | A4.0 在 H4 命令前固定 Runtime orchestration boundary，澄清、审批、暂停、恢复和终止不得绕过该边界；重新尝试只验证旧 GraphThread 终态并创建新 run |
@@ -550,7 +552,7 @@ Superpowers 模板中出现的 `using-git-worktrees`、`commit`、`finishing-a-d
 | Provider 失败被静默重试或自动切换配置 | C1.10 固定 Provider 调用策略快照，A4.9e 固定指数退避、熔断与过程记录，Q3.3/F3.4/F3.7 固定前端可见投影；已启动 run 不读取最新 Provider 配置改变执行语义 |
 | 错误码散落导致前后端和工具错误不可回归 | B0.2 建立基础错误契约，W5.0a 扩展统一错误码字典，C2.8、R3.4a/R3.4b、A4.8a-A4.9e、W5.0b-W5.4、D5.1-D5.4 和 L6.2/V6.6 只能引用该字典，不得在路由、工具或 runtime 中散落自由文本错误码 |
 | 用户 prompt 覆盖平台边界 | A4.8a 在模板保存和 run 启动前执行 PromptValidation；A4.8c 不接受用户 prompt 作为系统资产；A4.9a 只把通过校验且已固化的 `system_prompt` 作为低权威 `agent_role_prompt` 放入 ContextEnvelope |
-| 上下文组装绕过可信边界或丢失可追溯性 | A4.8b 固定 ContextEnvelope / ContextManifest Schema，A4.8c/A4.8d 固定系统提示词资产加载与渲染来源，A4.9a/A4.9b 负责构建、尺寸守卫、压缩和 `StageArtifact.process` 记录，Inspector 只能读取 StageArtifact 或稳定引用 |
+| 上下文组装绕过可信边界或丢失可追溯性 | A4.8b 固定 ContextEnvelope / ContextManifest Schema，A4.8c/A4.8d 固定系统提示词资产加载与渲染来源，A4.9a/A4.9b 负责构建、尺寸守卫、按 `context_window_tokens * compression_threshold_ratio` 触发压缩并写入 `StageArtifact.process` 记录，Inspector 只能读取 StageArtifact 或稳定引用 |
 | 模型自由文本推进状态或执行工具 | A4.9c 固定 AgentDecision 结构化协议，A4.9d Stage Agent Runtime 只按 AgentDecision、stage_contract、ToolRegistry execution gate 和 StageArtifact 契约推进阶段 |
 | 历史会话被实现为隐式长期记忆 | 产品总规约固定 V1 无跨会话长期记忆，A4.9a 只把当前 Session 需求链路中显式引用的历史 run 纳入上下文，V6.8 回归新 Session 不自动读取其他会话的历史 run、产物、审批、工具确认或工具过程 |
 | 测试 fixture 形成第二套运行语义 | W5.0c 固定 fake Provider、fake tool、settings override、fixture 仓库和 mock remote 只能消费正式 Schema、ProviderSnapshot、ModelBindingSnapshot、ToolProtocol、ToolRegistry execution gate 与交付快照契约 |

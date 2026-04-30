@@ -103,10 +103,11 @@
 
 **验收标准**：
 - `EnvironmentSettings` 由 `pydantic-settings` 加载。
-- 至少覆盖 `platform_runtime_root`、`default_project_root`、`workspace_root`、`backend_cors_origins`、`frontend_api_base_url`、`credential_env_prefixes`。
+- 至少覆盖 `platform_runtime_root`、`default_project_root`、`workspace_root`、`backend_cors_origins`、`frontend_api_base_url` 和 `credential_env_prefixes`。
 - `workspace_root` 未配置时默认派生为 `{platform_runtime_root}/workspaces`。
 - 多 SQLite 职责库路径不逐个暴露为环境变量或用户配置；后续 C1.5 只能从 `platform_runtime_root` 派生默认路径。
-- 不包含 Provider 的 `base_url`、`model_id`、能力声明、模板角色绑定、`system_prompt`、交付仓库、目标分支、代码评审请求类型、交付模式、Agent 循环上限、日志保留策略或 `compression_prompt`。
+- 不包含 Provider 的 `base_url`、`model_id`、能力声明、模板角色绑定、`system_prompt`、交付仓库、目标分支、代码评审请求类型、交付模式、Agent 循环上限、日志保留策略、上下文压缩阈值比例或 `compression_prompt`。
+- 环境变量不得逐项展开 Provider 模型能力字段、`compression_threshold_ratio` 或其他业务配置。
 - 不包含系统内置提示词正文、提示词资产版本切换、`prompt_id` 或 `prompt_version` 覆盖项。
 - `credential_ref = env:<NAME>` 与 `api_key_ref = env:<NAME>` 只能解析受 `credential_env_prefixes` 允许的环境变量名。
 - `override_environment_settings(**values)` 只能在测试中构造隔离 settings，不作为正式产品 API、环境变量矩阵或前端配置入口。
@@ -273,6 +274,7 @@
 - Create: `backend/app/schemas/template.py`
 - Create: `backend/app/schemas/provider.py`
 - Create: `backend/app/schemas/delivery_channel.py`
+- Create: `backend/app/schemas/configuration_package.py`
 - Create: `backend/tests/schemas/test_control_plane_schemas.py`
 
 **实现类/函数**：
@@ -284,7 +286,11 @@
 - `PipelineTemplateRead`
 - `AgentRoleConfig`
 - `ProviderRead`
+- `ModelRuntimeCapabilities`
 - `ProjectDeliveryChannelDetailProjection`
+- `ConfigurationPackageRead`
+- `ConfigurationPackageImportRequest`
+- `ConfigurationPackageExport`
 
 **验收标准**：
 - `Project` 包含默认交付通道引用、默认项目标识和左栏展示名称；普通项目列表响应不得返回已移除 Project。
@@ -294,7 +300,13 @@
 - `PipelineTemplate` 区分 `system_template` 与 `user_template`，并包含固定阶段骨架、阶段槽位到 AgentRole 的绑定、槽位内最终生效的 `role_id` / `system_prompt` / `provider_id` 和自动回归配置。
 - `AgentRoleConfig` 返回 `role_name` 作为展示标签；V1 不提供 `role_name` 修改字段。
 - `Provider` 区分内置 Provider 与 custom Provider，且不暴露真实密钥。
+- `Provider` Schema 必须能按模型表达 `ModelRuntimeCapabilities`，至少包含 `context_window_tokens`、`max_output_tokens`、`supports_tool_calling`、`supports_structured_output`、`supports_native_reasoning`。
+- `context_window_tokens` 必须为正整数，未提供时默认 `128000`；该字段用于 Context Size Guard 判断压缩阈值，不属于 `EnvironmentSettings`。
+- `max_output_tokens` 必须为正整数，未提供时由 Provider adapter 默认能力或内置 Provider 种子补齐；`supports_tool_calling`、`supports_structured_output`、`supports_native_reasoning` 必须为布尔值，未提供且无法从 Provider adapter 或内置种子解析时默认为 `false`。
 - `DeliveryChannel` 包含 `credential_ref`、`credential_status`、`readiness_status`、`readiness_message` 和 `last_validated_at`。
+- `ConfigurationPackage` Schema 必须包含 `package_schema_version` 与 `scope` 元数据，并能表达用户可见 Provider、DeliveryChannel 与 PipelineTemplate 槽位运行配置；Provider 模型能力允许按模型表达 `context_window_tokens`、`max_output_tokens`、`supports_tool_calling`、`supports_structured_output`、`supports_native_reasoning`。
+- `ConfigurationPackage` Schema 不得表达独立 `AgentRole` 定义、`role_name` 修改、阶段骨架修改、阶段契约修改、工具权限修改或审批检查点修改。
+- `ConfigurationPackage` 不得包含真实密钥明文、`PlatformRuntimeSettings`、`compression_threshold_ratio`、系统内置提示词正文、运行快照、历史 run、日志、审计正文或平台内部数据库路径。
 
 **测试方法**：
 - `pytest backend/tests/schemas/test_control_plane_schemas.py -v`
@@ -441,6 +453,7 @@
 - `control.db` 承载 Project、Session、PipelineTemplate、Provider、DeliveryChannel 与项目级配置。
 - `control.db` 承载 `PlatformRuntimeSettingsModel`，用于保存当前平台运行设置、配置版本、schema 版本、平台硬上限版本、创建时间、更新时间和审计关联字段。
 - `PlatformRuntimeSettingsModel` 只保存 C1.10 定义的运行设置分组和版本元数据，不保存真实凭据、不保存 `compression_prompt`，也不保存逐库 SQLite 文件路径。
+- `ProviderModel` 必须能按模型保存 `context_window_tokens`、`max_output_tokens`、`supports_tool_calling`、`supports_structured_output`、`supports_native_reasoning` 等运行时能力声明；缺省能力值在写入控制面模型前完成默认填充，不得在 run 启动或模型调用时临时推导。
 - `Session` 规范实体只存在于 control 模型。
 - control 模型必须能表达已加载 Project 的产品可见性、默认 Project 不可移除边界、Session 展示名和 Session 产品可见性。
 - 会话删除和项目移除只能改变普通项目/会话历史、回看入口和产品查询投影的可见性；control 模型不得要求删除本地项目文件夹、目标仓库、远端仓库、远端分支、提交、代码评审请求或日志审计记录。
@@ -495,9 +508,9 @@
 - `DeliveryRecord` 是正式领域对象，不由临时交付详情投影替代。
 - `PipelineRunModel` 必须包含 `runtime_limit_snapshot_ref`。
 - runtime 模型必须能持久化 `RuntimeLimitSnapshotModel`、`ProviderCallPolicySnapshotModel`、`ProviderSnapshotModel` 与 `ModelBindingSnapshotModel` 结构化快照；`PipelineRunModel` 持久化指向这些结构化快照的外键引用。
-- `RuntimeLimitSnapshotModel` 必须保存实际生效值、来源配置版本、平台硬上限版本、schema 版本和固化时间，不读取或引用最新 `PlatformRuntimeSettingsModel` 来解释历史 run。
+- `RuntimeLimitSnapshotModel` 必须保存实际生效值、来源配置版本、平台硬上限版本、schema 版本和固化时间，包括 `context_limits.compression_threshold_ratio`；不读取或引用最新 `PlatformRuntimeSettingsModel` 来解释历史 run。
 - `ProviderCallPolicySnapshotModel` 必须保存请求超时、网络错误重试次数、限流重试次数、指数退避基准、指数退避上限、连续失败熔断阈值、熔断恢复条件、来源配置版本和 schema 版本。
-- `ProviderSnapshotModel` 与 `ModelBindingSnapshotModel` 只保存凭据引用和能力声明快照，不保存真实密钥。
+- `ProviderSnapshotModel` 与 `ModelBindingSnapshotModel` 只保存凭据引用和能力声明快照，不保存真实密钥；能力声明快照必须包含实际模型的 `context_window_tokens`、`max_output_tokens`、`supports_tool_calling`、`supports_structured_output`、`supports_native_reasoning`。
 
 **测试方法**：
 - `pytest backend/tests/db/test_runtime_model_boundary.py -v`
@@ -598,14 +611,15 @@
 - `PlatformRuntimeSettingsRead` 至少包含 `agent_limits`、`provider_call_policy`、`context_limits`、`log_policy` 四个分组。
 - `agent_limits` 至少包含 `max_react_iterations_per_stage`、`max_tool_calls_per_stage`、`max_file_edit_count`、`max_patch_attempts_per_file`、`max_structured_output_repair_attempts`、`max_auto_regression_retries`、`max_clarification_rounds`、`max_no_progress_iterations`。
 - `provider_call_policy` 覆盖 Provider 请求超时、网络错误重试次数、限流重试次数、指数退避基准、指数退避上限、连续失败熔断阈值和熔断恢复条件。
-- `context_limits` 覆盖工具输出、`bash` stdout / stderr、`grep` 返回、文件读取、模型输出进入日志或过程记录的裁剪限制。
+- `context_limits` 覆盖工具输出、`bash` stdout / stderr、`grep` 返回、文件读取、模型输出进入日志或过程记录的裁剪限制，以及 `compression_threshold_ratio`。
+- `compression_threshold_ratio` 默认值为 `0.8`，必须大于 `0` 且小于 `1`，用于与模型能力快照中的 `context_window_tokens` 共同计算上下文压缩触发阈值。
 - `log_policy` 覆盖普通运行日志保留周期、审计日志保留周期、日志轮转大小、日志查询默认 `limit` 与最大 `limit`。
 - 所有可写运行上限 Schema 均表达平台硬上限校验所需字段，超过硬上限时由 C2.8 拒绝保存。
 - `PlatformRuntimeSettingsRead` 必须包含当前配置版本、schema 版本、平台硬上限版本、更新时间和只读硬上限摘要；`PlatformRuntimeSettingsUpdate` 必须支持携带期望配置版本用于并发冲突检测。
 - `RuntimeSettingsErrorCode` 必须复用 B0.2 的错误码体系，并固定 `config_invalid_value`、`config_hard_limit_exceeded`、`config_version_conflict`、`config_storage_unavailable`、`config_snapshot_unavailable`。
-- `RuntimeLimitSnapshotRead` 记录实际生效值、来源配置版本和平台硬上限版本。
+- `RuntimeLimitSnapshotRead` 记录实际生效值、来源配置版本和平台硬上限版本，并包含固化后的 `compression_threshold_ratio`。
 - `ProviderCallPolicySnapshotRead` 记录本次 run 固化的请求超时、重试次数、指数退避参数、熔断阈值、熔断恢复条件、来源配置版本和 schema 版本。
-- `ProviderSnapshotRead` 与 `ModelBindingSnapshotRead` 能表达 run 启动时实际使用的 Provider、模型、凭据引用、能力声明和 schema 版本。
+- `ProviderSnapshotRead` 与 `ModelBindingSnapshotRead` 能表达 run 启动时实际使用的 Provider、模型、凭据引用、能力声明和 schema 版本；能力声明必须包含 `context_window_tokens`、`max_output_tokens`、`supports_tool_calling`、`supports_structured_output`、`supports_native_reasoning`。
 - `compression_prompt` 不出现在 `EnvironmentSettings`、`PlatformRuntimeSettingsRead`、`PlatformRuntimeSettingsUpdate` 或前端可写配置 Schema 中；若压缩过程需要记录提示词，只能记录系统内置提示词资产版本引用。
 
 **测试方法**：

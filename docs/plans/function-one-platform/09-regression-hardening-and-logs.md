@@ -215,14 +215,16 @@
 - `assertSettingsOverrideFixtureBoundary()`
 
 **验收标准**：
-- 环境变量只覆盖启动路径、前后端连接、工作区根目录、日志落点和凭据引用解析；不得承载 Provider、DeliveryChannel、模板运行配置、Agent 运行上限、日志策略、系统内置提示词正文、提示词资产版本切换、`prompt_id`、`prompt_version` 或 `compression_prompt`。
+- 环境变量只覆盖启动路径、前后端连接、工作区根目录、日志落点和凭据引用解析；不得承载 Provider、Provider 模型能力字段、DeliveryChannel、模板运行配置、Agent 运行上限、日志策略、`compression_threshold_ratio`、系统内置提示词正文、提示词资产版本切换、`prompt_id`、`prompt_version` 或 `compression_prompt`。
+- 配置包只允许作为项目作用域用户可见配置的备份、迁移和环境复制入口；Agent Runtime、Context Management、Provider adapter 和历史回放不得直接读取配置包。
 - 五类 SQLite 文件路径从平台运行数据根目录默认派生；普通前端设置和用户配置不得逐个配置数据库路径。
-- 更新 `PlatformRuntimeSettings` 后，新 run 使用新版本，已启动 run 继续使用自身 `RuntimeLimitSnapshot`。
-- 更新 Provider 配置、凭据引用或能力声明后，新 run 使用新 Provider/模型绑定快照，已启动 run 不改变 ProviderSnapshot 或 ModelBindingSnapshot。
+- 更新 `PlatformRuntimeSettings` 后，新 run 使用新版本，已启动 run 继续使用自身 `RuntimeLimitSnapshot`；配置包不得写入 `compression_threshold_ratio`。
+- 更新 Provider 配置、凭据引用、`context_window_tokens`、`max_output_tokens`、`supports_tool_calling`、`supports_structured_output`、`supports_native_reasoning` 或其他能力声明后，新 run 使用新 Provider/模型绑定快照，已启动 run 不改变 ProviderSnapshot 或 ModelBindingSnapshot。
 - DeliveryChannel 更新只影响后续新启动 run；对尚未固化交付通道快照的当前活动 run，只能用于后续交付就绪校验和交付快照固化。
-- 前端设置弹窗不展示环境变量、平台运行数据目录、SQLite 路径、平台运行上限、日志策略、系统内置提示词资产、提示词版本切换、`runtime_instructions`、结构化输出修复提示词、`compression_prompt` 或 `deterministic test runtime`。
+- 前端设置弹窗不展示环境变量、平台运行数据目录、SQLite 路径、平台运行上限、日志策略、系统内置提示词资产、提示词版本切换、`runtime_instructions`、结构化输出修复提示词、`compression_prompt` 或 `deterministic test runtime`；Provider 模型能力只在折叠 `高级设置` 中展示，配置包导出不得包含真实密钥、平台隐性运行设置、系统内置提示词正文、运行快照、历史 run、日志或审计正文。
 - 模板编辑器不展示系统内置提示词资产、提示词版本切换、`runtime_instructions`、结构化输出修复提示词或 `compression_prompt`；用户编辑的 `system_prompt` 只作为模板槽位运行配置保存。
 - `compression_prompt` 只作为系统内置提示词资产的 `prompt_id`、`prompt_version` 和渲染 hash 出现在压缩过程记录中，不进入环境变量、配置 API、前端设置或模板编辑字段。
+- Context Size Guard 回归必须验证默认 `context_window_tokens = 128000` 与 `compression_threshold_ratio = 0.8` 计算出 `102400` token 基础压缩触发阈值，验证 `max_output_tokens` 只能收紧输出预算或预留输出 token，验证 `supports_tool_calling`、`supports_structured_output`、`supports_native_reasoning` 分别影响工具绑定、结构化输出路径和原生推理记录边界，并验证已启动 run 不受后续 Provider 能力或阈值配置变更影响。
 - 已启动 run 的 `ContextManifest`、压缩过程记录和模型调用过程必须能通过提示词版本引用、`content_hash` 与 `render_hash` 解释；最新提示词资产版本不得改变既有 run 的模板快照、ContextManifest 或压缩记录语义。
 - `PromptRegistry` 不接受环境变量、平台运行设置、前端设置、模板编辑字段或用户消息作为系统内置提示词资产来源。
 - W5.0c `settings_override_fixture()` 只能影响测试创建的新 app/session/run 依赖图；不得改变正式配置 API、前端设置字段、环境变量语义或已启动 run 的快照。

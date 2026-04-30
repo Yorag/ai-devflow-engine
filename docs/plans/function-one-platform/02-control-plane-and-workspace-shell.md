@@ -193,6 +193,7 @@
 - `TemplateService.list_templates()`
 - `TemplateService.get_default_template()`
 - `ProviderService.seed_builtin_providers()`
+- `ProviderService.apply_model_capability_defaults()`
 - `ProviderService.list_providers()`
 
 **验收标准**：
@@ -204,6 +205,8 @@
 - `agent_role_seed` 提示词资产必须具有稳定 `prompt_id`、`prompt_version` 和 `content_hash`，并通过 C1.10a Schema 校验。
 - `agent_role_seed` 文件名不承载版本号；`prompt_version` 只从 Markdown front matter 读取，写入模板槽位时只写入剥离元数据后的提示词正文。
 - Provider 默认包含 `火山引擎`、`DeepSeek`。
+- 内置 Provider 初始化必须通过初始化种子或数据库迁移写入正式 `ProviderModel` 记录；记录必须包含连接字段、默认模型、模型列表、凭据引用和按模型粒度声明的 `context_window_tokens`、`max_output_tokens`、`supports_tool_calling`、`supports_structured_output`、`supports_native_reasoning`。
+- 内置 Provider 缺省 `context_window_tokens` 为 `128000`；`max_output_tokens` 与三个 `supports_*` 能力由 Provider adapter 默认能力或内置种子补齐，仍不可解析时三个 `supports_*` 默认为 `false`。默认填充必须在写入 `ProviderModel` 前完成，不得在 run 启动或模型调用时临时推导。
 - `OpenAI Completions compatible` 只作为 custom Provider 接入协议，不作为内置 Provider 名称。
 - API 测试必须断言 `GET /api/pipeline-templates`、`GET /api/pipeline-templates/{templateId}`、`GET /api/providers` 及其响应 Schema 和主要错误响应已进入 `/api/openapi.json`。
 
@@ -289,35 +292,39 @@
 
 <a id="c25"></a>
 
-## C2.5 custom Provider 管理
+## C2.5 Provider 管理
 
 **计划周期**：Week 3
 **状态**：`[ ]`
-**目标**：实现 custom Provider 新增和编辑，使模板运行配置可以绑定用户自定义 Provider。
-**实施计划**：`docs/plans/implementation/c2.5-custom-provider-management.md`
+**目标**：实现 Provider 新增和编辑，使模板运行配置可以绑定内置 Provider 与用户自定义 Provider，并使内置 Provider 的连接字段和模型能力进入正式配置存储。
+**实施计划**：`docs/plans/implementation/c2.5-provider-management.md`
 
 **修改文件列表**：
 - Modify: `backend/app/services/providers.py`
 - Modify: `backend/app/api/routes/providers.py`
-- Create: `backend/tests/services/test_custom_provider_service.py`
+- Create: `backend/tests/services/test_provider_service.py`
 - Create: `backend/tests/api/test_provider_api.py`
 
 **实现类/函数**：
 - `ProviderService.create_custom_provider()`
 - `ProviderService.patch_custom_provider()`
+- `ProviderService.patch_builtin_provider_runtime_config()`
 - `ProviderService.get_provider()`
 
 **验收标准**：
-- 内置 Provider 只读，不允许修改供应商类型。
+- 内置 Provider 的 `provider_id`、`provider_source` 和协议归属只读，不允许修改供应商类型。
+- 内置 Provider 允许通过 Provider API 更新连接字段、默认模型、模型列表、凭据引用和按模型粒度声明的 `context_window_tokens`、`max_output_tokens`、`supports_tool_calling`、`supports_structured_output`、`supports_native_reasoning`。
 - custom Provider 使用用户自定义展示名。
 - custom Provider 接入协议为 `OpenAI Completions compatible`。
+- Provider 创建或修改时必须允许用户提交按模型设置的 `context_window_tokens`、`max_output_tokens`、`supports_tool_calling`、`supports_structured_output`、`supports_native_reasoning`；未提交时使用后端默认值。
+- Provider 的 `context_window_tokens` 与 `max_output_tokens` 必须为正整数，三个 `supports_*` 字段必须为布尔值；保存前必须校验、默认填充并写入正式 Provider 配置，不得在 run 启动或模型调用时从配置包、环境变量或默认常量临时推导。
 - API 返回 Provider 状态，不返回真实密钥内容。
-- custom Provider 创建、修改、内置 Provider 修改被拒绝和凭据引用变更必须继承 L2.1 上下文，使用 L2.2 裁剪载荷，并通过 L2.4 写入审计记录；审计摘要不得包含真实密钥。
+- custom Provider 创建、修改、内置 Provider 可写字段修改、内置 Provider 身份字段修改被拒绝和凭据引用变更必须继承 L2.1 上下文，使用 L2.2 裁剪载荷，并通过 L2.4 写入审计记录；审计摘要不得包含真实密钥。
 - API 测试必须断言 `POST /api/providers`、`PATCH /api/providers/{providerId}`、`GET /api/providers/{providerId}` 及其请求/响应 Schema 和主要错误响应已进入 `/api/openapi.json`。
 - Provider 保存结果只影响后续新建 Session、后续新启动 run 或尚未启动 run 的模板选择；不得回写已启动 run 的 ProviderSnapshot 或 ModelBindingSnapshot。
 
 **测试方法**：
-- `pytest backend/tests/services/test_custom_provider_service.py -v`
+- `pytest backend/tests/services/test_provider_service.py -v`
 - `pytest backend/tests/api/test_provider_api.py -v`
 
 <a id="c26"></a>
@@ -388,13 +395,49 @@
 - `pytest backend/tests/services/test_delivery_channel_readiness.py -v`
 - `pytest backend/tests/api/test_delivery_channel_validate_api.py -v`
 
+<a id="c27a"></a>
+
+## C2.7a 项目作用域配置包导入导出
+
+**计划周期**：Week 3
+**状态**：`[ ]`
+**目标**：实现当前 Project 作用域下用户可见配置包导出和导入，使配置备份、迁移和环境复制通过正式配置服务完成。
+**实施计划**：`docs/plans/implementation/c2.7a-configuration-package-import-export.md`
+
+**修改文件列表**：
+- Create: `backend/app/services/configuration_packages.py`
+- Modify: `backend/app/api/routes/projects.py`
+- Create: `backend/tests/services/test_configuration_package_service.py`
+- Create: `backend/tests/api/test_configuration_package_api.py`
+
+**实现类/函数**：
+- `ConfigurationPackageService.export_project_package(project_id)`
+- `ConfigurationPackageService.import_project_package(project_id, package)`
+- `ConfigurationPackageService.validate_package_scope(project_id, package)`
+
+**验收标准**：
+- `GET /api/projects/{projectId}/configuration-package/export` 返回当前项目作用域下用户可见配置包，包含 Provider、项目级 DeliveryChannel 与 PipelineTemplate 槽位运行配置。
+- `POST /api/projects/{projectId}/configuration-package/import` 复用 Provider、DeliveryChannel 与 PipelineTemplate 的正式保存校验；导入成功后返回变更摘要、受影响对象标识和配置版本信息。
+- 配置包必须校验 `package_schema_version`、`scope` 和目标 Project 作用域；版本不兼容或作用域非法时返回稳定字段级错误。
+- 导出包不得包含真实密钥、平台隐性运行设置、`compression_threshold_ratio`、系统内置提示词正文、运行快照、历史 run、日志、审计正文或平台内部数据库路径。
+- 导入包不得写入 `PlatformRuntimeSettings`，不得覆盖已启动 run 或历史 run 的快照。
+- 导入包不得写入独立 `AgentRole` 定义，不得修改 `role_name`、阶段骨架、阶段契约、工具权限或审批检查点。
+- 导入或导出 Provider 能力声明时允许包含 `context_window_tokens`、`max_output_tokens`、`supports_tool_calling`、`supports_structured_output`、`supports_native_reasoning`，并必须按模型粒度校验；缺省字段由后端默认值补齐。
+- 导入内置 Provider 时不得改变 `provider_id`、`provider_source` 或协议归属；允许更新连接字段、默认模型、模型列表、凭据引用和 Provider 模型能力字段。
+- 配置包导入导出必须继承 L2.1 上下文，使用 L2.2 裁剪载荷，经由 L2.3 写入运行日志，并通过 L2.4 写入审计记录；审计摘要不得包含真实密钥。
+- API 测试必须断言配置包导入导出路径、请求 Schema、响应 Schema、字段级错误和主要错误响应已进入 `/api/openapi.json`。
+
+**测试方法**：
+- `pytest backend/tests/services/test_configuration_package_service.py -v`
+- `pytest backend/tests/api/test_configuration_package_api.py -v`
+
 <a id="c28"></a>
 
 ## C2.8 PlatformRuntimeSettings 管理服务
 
 **计划周期**：Week 3
 **状态**：`[ ]`
-**目标**：实现后端统一平台运行设置管理服务，校验运行上限、Provider 调用策略、上下文裁剪限制、日志策略和诊断查询分页上限，并为后续 run 启动快照提供稳定配置版本。
+**目标**：实现后端统一平台运行设置管理服务，校验运行上限、Provider 调用策略、上下文裁剪限制、上下文压缩阈值比例、日志策略和诊断查询分页上限，并为后续 run 启动快照提供稳定配置版本。
 **实施计划**：`docs/plans/implementation/c2.8-platform-runtime-settings-service.md`
 
 **修改文件列表**：
@@ -407,6 +450,7 @@
 **实现类/函数**：
 - `PlatformRuntimeSettingsRepository.get_current()`
 - `PlatformRuntimeSettingsRepository.save_new_version()`
+- `PlatformRuntimeSettingsService.ensure_initialized()`
 - `PlatformRuntimeSettingsService.get_current_settings()`
 - `PlatformRuntimeSettingsService.update_settings()`
 - `PlatformRuntimeSettingsService.validate_against_hard_limits()`
@@ -417,11 +461,13 @@
 - 服务通过 `PlatformRuntimeSettingsRepository` 读取和保存 C1.6 的 `PlatformRuntimeSettingsModel`，并维护单调递增配置版本。
 - 首次读取时若 control.db 中不存在记录，服务以 C1.10 默认值和当前平台硬上限版本初始化一条设置记录；初始化结果必须持久化，不能每次请求临时拼装。
 - `PlatformRuntimeSettingsModel` 保存 C1.10 定义的 `agent_limits`、`provider_call_policy`、`context_limits`、`log_policy`、schema 版本、配置版本、平台硬上限版本和更新时间。
-- 运行上限、Provider 调用策略、上下文裁剪限制、日志策略和诊断查询分页上限保存前必须校验。
+- 运行上限、Provider 调用策略、上下文裁剪限制、上下文压缩阈值比例、日志策略和诊断查询分页上限保存前必须校验。
+- `context_limits.compression_threshold_ratio` 默认 `0.8`，必须大于 `0` 且小于 `1`；后端管理能力、初始化迁移或测试 settings override 更新走同一校验路径。
 - 超过平台硬上限时拒绝保存，并返回 `config_hard_limit_exceeded`。
 - 非法字段值、版本冲突和配置存储不可用分别返回 `config_invalid_value`、`config_version_conflict`、`config_storage_unavailable`。
 - 更新接口必须要求或支持 `expected_version`；当客户端基于旧版本提交时不得覆盖最新配置。
-- 配置设置允许热重载，但服务层不得尝试修改已启动 run 的模板快照、Provider 与模型绑定快照、运行上限快照或交付通道快照。
+- 平台隐性运行设置允许热重载，但服务层不得尝试修改已启动 run 的模板快照、Provider 与模型绑定快照、运行上限快照或交付通道快照。
+- `PlatformRuntimeSettings` 不属于普通前端设置或配置包导入导出范围；任何用户可见配置包不得写入 `compression_threshold_ratio`。
 - 配置设置变更必须继承 L2.1 上下文，使用 L2.2 裁剪载荷，经由 L2.3 写入运行日志，并通过 L2.4 写入审计记录；审计摘要记录变更字段、旧值摘要、新值摘要、生效范围和 `correlation_id`。
 - 本切片实现后端管理服务和内部管理 API 边界；内部管理 API 必须进入 OpenAPI 并复用统一错误响应，但不得被 F2.4 普通前端设置弹窗调用或展示为用户可编辑表单。
 - API 测试必须断言运行设置读取、更新、硬上限拒绝、版本冲突、非法字段和主要错误响应已进入 `/api/openapi.json`。
@@ -515,6 +561,7 @@
 - Create: `frontend/src/api/templates.ts`
 - Create: `frontend/src/api/providers.ts`
 - Create: `frontend/src/api/delivery-channels.ts`
+- Create: `frontend/src/api/configuration-package.ts`
 - Create: `frontend/src/api/runs.ts`
 - Create: `frontend/src/api/approvals.ts`
 - Create: `frontend/src/api/query.ts`
@@ -534,6 +581,8 @@
 - `getProjectDeliveryChannel()`
 - `updateProjectDeliveryChannel()`
 - `validateProjectDeliveryChannel()`
+- `exportProjectConfigurationPackage()`
+- `importProjectConfigurationPackage()`
 - `saveAsPipelineTemplate()`
 - `patchPipelineTemplate()`
 - `deletePipelineTemplate()`
@@ -549,8 +598,9 @@
 - `createSessionEventSource()`
 
 **验收标准**：
-- 前端 API client 覆盖 `projects`、`sessions`、`templates`、`providers`、`deliveryChannels`、`runs`、`approvals`、`query` 与 `events` 的资源边界。
+- 前端 API client 覆盖 `projects`、`sessions`、`templates`、`providers`、`deliveryChannels`、`configurationPackage`、`runs`、`approvals`、`query` 与 `events` 的资源边界。
 - Project client 覆盖列表、加载和移除路径；Session client 覆盖创建、重命名、删除、模板更新和详情读取路径。
+- ConfigurationPackage client 覆盖项目作用域导出与导入路径，导入结果必须保留后端返回的变更摘要和字段级错误详情。
 - 错误响应进入统一错误处理，并保留后端返回的稳定 `code`、`message`、`request_id` 与可选字段错误详情。
 - 前端 API client 必须能识别并透传 `config_invalid_value`、`config_hard_limit_exceeded`、`config_version_conflict`、`config_storage_unavailable`、`config_snapshot_unavailable`，但本切片不新增普通用户可编辑的平台运行设置 client。
 - UI 组件不得直接手写核心 API 路径；后续展示切片只能通过本切片建立的 client 模块补充类型和 hook。
@@ -588,6 +638,7 @@
 - mock fixtures 覆盖已加载项目、被移除项目不可见、历史 Session、重命名后的 Session 展示名，以及删除后不在常规列表出现的 Session。
 - mock feed 条目类型与 C1.3 契约一致。
 - mock error fixtures 必须覆盖后端配置校验和平台硬上限错误，用于模板编辑、DeliveryChannel 和 Provider 表单展示错误；mock fixtures 不得定义临时配置字段、临时状态或前端专用投影。
+- mock fixtures 必须覆盖配置包导出成功、导入成功摘要和导入字段级校验错误，且不得包含真实密钥、平台隐性运行设置或运行快照字段。
 - TanStack Query hooks 可以在无后端时支撑页面开发。
 
 **测试方法**：
@@ -641,37 +692,45 @@
 
 **计划周期**：Week 3
 **状态**：`[ ]`
-**目标**：实现统一设置入口、通用配置页和模型提供商页，使项目级 DeliveryChannel 与 Provider 配置不进入模板编辑区。
+**目标**：实现统一设置入口、通用配置页、模型提供商页和导入导出页，使项目级 DeliveryChannel、Provider 配置与项目作用域配置包能力不进入模板编辑区。
 **实施计划**：`docs/plans/implementation/f2.4-settings-modal.md`
 
 **修改文件列表**：
 - Create: `frontend/src/features/settings/SettingsModal.tsx`
 - Create: `frontend/src/features/settings/DeliveryChannelSettings.tsx`
 - Create: `frontend/src/features/settings/ProviderSettings.tsx`
+- Create: `frontend/src/features/settings/ConfigurationPackageSettings.tsx`
 - Create: `frontend/src/features/settings/__tests__/SettingsModal.test.tsx`
 
 **实现类/函数**：
 - `SettingsModal`
 - `DeliveryChannelSettings`
 - `ProviderSettings`
+- `ConfigurationPackageSettings`
 
 **验收标准**：
 - 设置入口位于全局工具区。
-- 设置弹窗包含 `通用配置` 与 `模型提供商`。
+- 设置弹窗包含 `通用配置`、`模型提供商` 与 `导入导出`。
 - `通用配置` 页面显示当前 Project，并编辑项目级 DeliveryChannel。
 - `模型提供商` 页面展示内置 Provider 和 custom Provider。
+- `模型提供商` 页面允许新增或编辑 custom Provider，并允许编辑内置 Provider 的连接字段、默认模型、模型列表、凭据引用和折叠 `高级设置` 中的 Provider 模型能力字段；内置 Provider 的 `provider_id`、`provider_source` 和协议归属不可编辑。
+- `模型提供商` 页面必须把 `context_window_tokens`、`max_output_tokens`、`supports_tool_calling`、`supports_structured_output`、`supports_native_reasoning` 放入折叠的 `高级设置`；这些字段属于 Provider 模型能力，不属于 C2.8 平台运行设置，且都有后端默认值。
+- `模型提供商` 页面不得把 `高级设置` 中的 Provider 模型能力字段呈现为新增或编辑 Provider 的首屏必填项。
+- `导入导出` 页面调用 F2.1 配置包 client，支持当前项目作用域下用户可见配置包的导出和导入。
+- `导入导出` 页面必须展示导入后的变更摘要、受影响对象和字段级校验错误；导入成功后刷新 DeliveryChannel、Provider 和模板数据。
+- 导出包不得包含真实密钥、平台隐性运行设置、`compression_threshold_ratio`、系统内置提示词正文、运行快照、历史 run、日志或审计正文；Provider 模型能力只导出 V1 设置页已开放且后端正式消费的字段。
 - DeliveryChannel 配置不出现在模板编辑区。
-- 设置弹窗不展示或编辑环境变量、平台运行数据目录、SQLite 文件路径、CORS、日志文件路径、后端平台硬上限、全局 ReAct 循环上限、日志保留策略、日志裁剪策略、诊断查询分页上限或 `deterministic test runtime`。
+- 设置弹窗不展示或编辑环境变量、平台运行数据目录、SQLite 文件路径、CORS、日志文件路径、后端平台硬上限、全局 ReAct 循环上限、日志保留策略、日志裁剪策略、诊断查询分页上限、`compression_threshold_ratio` 或 `deterministic test runtime`。
 - 设置弹窗不展示或编辑后端系统内置提示词资产、`prompt_id`、`prompt_version`、`runtime_instructions`、结构化输出修复提示词或 `compression_prompt`。
 - 设置弹窗不得调用 C2.8 的内部运行设置管理 API；若 DeliveryChannel 或 Provider 保存返回配置类错误，只展示后端错误原因，不把平台运行设置补成可编辑入口。
 - Provider 密钥只以 `api_key_ref` 或等价引用形式展示和提交，不展示真实密钥内容。
-- Provider 配置变更的 UI 文案不得暗示会修改已经启动 run 的 Provider 与模型绑定快照。
+- Provider 配置变更和配置包导入的 UI 文案不得暗示会修改已经启动 run 的 Provider 与模型绑定快照。
 - DeliveryChannel 在交付快照固化前可用于当前活动 run 后续交付就绪校验；已固化快照的 run 必须按只读状态展示。
 
 **前端设计质量门**：
 - 继承项目级前端主基调，不单独询问新的设置页风格。
 - 实现后必须检查表单错误、禁用态、加载态、长 Provider 名称、凭据状态说明、键盘焦点和窄屏布局。
-- 设置弹窗用于配置，不承担模板编辑或交付结果展示；视觉层级必须让 DeliveryChannel 与 Provider 的职责边界可扫描。
+- 设置弹窗用于配置，不承担模板编辑或交付结果展示；视觉层级必须让 DeliveryChannel、Provider 与配置导入导出的职责边界可扫描。
 
 **测试方法**：
 - `npm --prefix frontend run test -- SettingsModal`
