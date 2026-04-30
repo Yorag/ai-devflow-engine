@@ -10,13 +10,13 @@
 - `G` 绿色并行：前置已合入且写入范围不重叠时，允许与其它绿色分支并行开发和独立 review。
 
 调度状态固定为：
-- `planned`：已规划但未认领。
-- `claimed`：已由主会话认领；worktree 可创建或正在实施。
+- `planned`：已规划且未进入实施追踪；当当前 Git 分支与本表 `交付分支` 精确匹配、前置门槛满足且任务属于 `覆盖任务` 时，`planned` 不阻塞分支内执行。
+- `claimed`：已由主会话预标，或已由分支内首次状态更新收敛为实施中；worktree 可创建或正在实施。
 - `ready_for_review`：分支验证完成，等待 PR/MR review 或合入。
 - `merged`：分支已合入 `main`，进度追踪表状态成为主线事实。
 - `blocked`：依赖、写集、验证或语义冲突阻塞执行。
 
-分会话未完成覆盖任务且没有阻塞项时保持 `claimed`，不得新增或使用 `in_progress` 类状态。
+分会话未完成覆盖任务且没有阻塞项时，将 `planned` 收敛为 `claimed` 或保持 `claimed`，不得新增或使用 `in_progress` 类状态。
 
 开工前必须执行 Parallel Safety Gate：
 - 前置分支已合入 `main`，或本分支仅使用已合入契约的 mock 数据且不得调用未合入真实实现。
