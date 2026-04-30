@@ -133,6 +133,11 @@ Use `references/commit-message-template.txt` as the agent reference template.
 
 Treat PR readiness as a review boundary even if no remote PR is created yet.
 
+Use `PR/MR` as the platform review boundary term:
+- On GitHub, this is a Pull Request and can be operated through the web UI or `gh` CLI.
+- On GitLab and similar platforms, this is a Merge Request and must follow the equivalent platform flow.
+- Prefer platform PR/MR merge over local `git merge` followed by `git push origin main` whenever a PR/MR exists or is expected.
+
 Recommend a PR when all of these are true:
 - The branch has one review purpose.
 - Fresh verification passed for the branch state.
@@ -159,9 +164,20 @@ When proposing a PR, include:
 
 If no PR tool is available, surface the branch as `PR-ready` and provide the prepared title/body using `references/approval-request-templates.md`.
 
+For GitHub repositories with `gh` available:
+- Check authentication with `gh auth status` before proposing GitHub CLI actions.
+- Use `gh pr status` or `gh pr view <PR-number>` to inspect existing PR state.
+- Use `gh pr create` only after explicit user approval if a PR does not already exist.
+- Before PR/MR creation, verify `git log --oneline origin/main..<branch>` contains only the intended review commits. If it includes unrelated local `main` commits, sync those commits to `origin/main` first or rebase/split the branch before opening the PR/MR.
+
 ## Merge Gate
 
 Merge into `main` only after the branch is approved for integration and verification is fresh.
+
+Default merge path:
+- If a PR/MR exists, merge through the hosting platform. For GitHub, prefer the web merge button or `gh pr merge <PR-number> --squash --delete-branch` after explicit user approval.
+- Do not replace an open PR/MR merge with local `git merge` plus `git push origin main` unless the user explicitly approves bypassing the platform merge path.
+- If the PR/MR has already been merged on the platform, do not merge locally. Switch to `main`, run `git pull --ff-only origin main`, and verify the expected commit is present.
 
 Default merge strategy:
 - Use `git merge --squash <branch>` for `feat/`, `fix/`, `refactor/`, `docs/`, and `chore/` branches.
@@ -172,11 +188,14 @@ Pre-merge checklist:
 - The branch is current relative to `main`.
 - Verification has been rerun on the final merge candidate.
 - The merge will not pull in unrelated WIP.
+- For platform PR/MR merge, the PR/MR contains only the intended review commits relative to the current target branch.
+- For `gh pr merge`, `gh auth status` confirms an authenticated account with permission to merge the target repository.
 
 Do not merge when:
 - The branch still contains mixed-purpose changes.
 - Verification only covered an earlier commit.
 - The merge depends on unresolved manual follow-up.
+- The PR/MR is open but review, required checks, or branch protection still block platform merge.
 
 After merge approval, optionally propose local branch deletion only if:
 - The branch is fully integrated.
