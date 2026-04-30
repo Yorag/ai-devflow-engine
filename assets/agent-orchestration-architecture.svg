@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">Agent-driven Delivery Architecture</title>
+  <desc id="desc">A README-friendly architecture diagram centered on the Agent Orchestration Engine. It shows the operator console, domain API and projections, the six delivery stages, and the supporting human-in-the-loop, runtime tool, and state/event capabilities.</desc>
+
+  <defs>
+    <filter id="shadow" x="-8%" y="-8%" width="116%" height="130%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.09"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8.5" refY="5" orient="auto">
+      <path d="M 0 0 L 9 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 34px "Segoe UI", Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 15px "Segoe UI", Arial, sans-serif; fill: #64748b; }
+      .top-title { font: 700 22px "Segoe UI", Arial, sans-serif; fill: #0f172a; }
+      .top-copy { font: 400 15px "Segoe UI", Arial, sans-serif; fill: #64748b; }
+      .engine-title { font: 800 28px "Segoe UI", Arial, sans-serif; fill: #14532d; }
+      .engine-copy { font: 400 16px "Segoe UI", Arial, sans-serif; fill: #475569; }
+      .stage-title { font: 700 18px "Segoe UI", Arial, sans-serif; fill: #0f172a; }
+      .stage-copy { font: 400 14px "Segoe UI", Arial, sans-serif; fill: #64748b; }
+      .support-title { font: 700 19px "Segoe UI", Arial, sans-serif; fill: #0f172a; }
+      .support-copy { font: 400 14px "Segoe UI", Arial, sans-serif; fill: #64748b; }
+      .label { font: 700 13px "Segoe UI", Arial, sans-serif; fill: #64748b; }
+      .arrow-line { stroke: #64748b; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .chevron { font: 700 25px "Segoe UI", Arial, sans-serif; fill: #94a3b8; }
+      .note { font: 400 13px "Segoe UI", Arial, sans-serif; fill: #64748b; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1280" height="720"/>
+
+  <text class="title" x="640" y="52" text-anchor="middle">Agent-driven Delivery Architecture</text>
+  <text class="subtitle" x="640" y="80" text-anchor="middle">A staged Agent workflow turns requirements into reviewable, recoverable delivery records.</text>
+
+  <rect x="92" y="122" width="420" height="112" rx="18" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.4" filter="url(#shadow)"/>
+  <text class="top-title" x="124" y="162">Operator Console</text>
+  <text class="top-copy" x="124" y="191">input · clarify · approve · control · review</text>
+  <text class="top-copy" x="124" y="214">one workspace for the active delivery run</text>
+
+  <rect x="768" y="122" width="420" height="112" rx="18" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1.4" filter="url(#shadow)"/>
+  <text class="top-title" x="800" y="162">Domain API &amp; Projections</text>
+  <text class="top-copy" x="800" y="191">REST commands · SSE domain events</text>
+  <text class="top-copy" x="800" y="214">workspace view · feed · inspector · timeline</text>
+
+  <path class="arrow-line" d="M 528 178 L 750 178"/>
+  <rect x="592" y="157" width="96" height="29" rx="14.5" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text class="label" x="640" y="176" text-anchor="middle">REST + SSE</text>
+
+  <path class="arrow-line" d="M 978 242 L 978 278"/>
+
+  <rect x="92" y="282" width="1096" height="250" rx="28" fill="#f0fdf4" stroke="#22c55e" stroke-width="2.5" filter="url(#shadow)"/>
+  <text class="engine-title" x="640" y="330" text-anchor="middle">Agent Orchestration Engine</text>
+  <text class="engine-copy" x="640" y="358" text-anchor="middle">LangGraph-driven execution graph · stage handoff artifacts · checkpoint resume</text>
+
+  <g transform="translate(126 400)">
+    <rect width="142" height="82" rx="15" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.5"/>
+    <text class="stage-title" x="71" y="34" text-anchor="middle">Requirement</text>
+    <text class="stage-copy" x="71" y="59" text-anchor="middle">analysis</text>
+  </g>
+  <text class="chevron" x="286" y="450" text-anchor="middle">›</text>
+
+  <g transform="translate(304 400)">
+    <rect width="142" height="82" rx="15" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.5"/>
+    <text class="stage-title" x="71" y="34" text-anchor="middle">Solution</text>
+    <text class="stage-copy" x="71" y="59" text-anchor="middle">design</text>
+  </g>
+  <text class="chevron" x="464" y="450" text-anchor="middle">›</text>
+
+  <g transform="translate(482 400)">
+    <rect width="142" height="82" rx="15" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.5"/>
+    <text class="stage-title" x="71" y="34" text-anchor="middle">Code</text>
+    <text class="stage-copy" x="71" y="59" text-anchor="middle">generation</text>
+  </g>
+  <text class="chevron" x="642" y="450" text-anchor="middle">›</text>
+
+  <g transform="translate(660 400)">
+    <rect width="142" height="82" rx="15" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.5"/>
+    <text class="stage-title" x="71" y="34" text-anchor="middle">Tests</text>
+    <text class="stage-copy" x="71" y="59" text-anchor="middle">generate &amp; run</text>
+  </g>
+  <text class="chevron" x="820" y="450" text-anchor="middle">›</text>
+
+  <g transform="translate(838 400)">
+    <rect width="142" height="82" rx="15" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.5"/>
+    <text class="stage-title" x="71" y="34" text-anchor="middle">Review</text>
+    <text class="stage-copy" x="71" y="59" text-anchor="middle">approve</text>
+  </g>
+  <text class="chevron" x="998" y="450" text-anchor="middle">›</text>
+
+  <g transform="translate(1016 400)">
+    <rect width="142" height="82" rx="15" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.5"/>
+    <text class="stage-title" x="71" y="34" text-anchor="middle">Delivery</text>
+    <text class="stage-copy" x="71" y="59" text-anchor="middle">record</text>
+  </g>
+
+  <text class="label" x="640" y="582" text-anchor="middle">Supporting capabilities</text>
+
+  <g transform="translate(92 604)">
+    <rect width="344" height="76" rx="18" fill="#f5f3ff" stroke="#ddd6fe" stroke-width="1.4" filter="url(#shadow)"/>
+    <text class="support-title" x="172" y="31" text-anchor="middle">Human in the loop</text>
+    <text class="support-copy" x="172" y="55" text-anchor="middle">clarify · approve · reject · rollback</text>
+  </g>
+
+  <g transform="translate(468 604)">
+    <rect width="344" height="76" rx="18" fill="#fff7ed" stroke="#fed7aa" stroke-width="1.4" filter="url(#shadow)"/>
+    <text class="support-title" x="172" y="31" text-anchor="middle">Runtime Tools</text>
+    <text class="support-copy" x="172" y="55" text-anchor="middle">LLM · files · shell · tests · git</text>
+  </g>
+
+  <g transform="translate(844 604)">
+    <rect width="344" height="76" rx="18" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.4" filter="url(#shadow)"/>
+    <text class="support-title" x="172" y="31" text-anchor="middle">State &amp; Events</text>
+    <text class="support-copy" x="172" y="55" text-anchor="middle">domain records · checkpoints · projections</text>
+  </g>
+
+  <text class="note" x="640" y="708" text-anchor="middle">Raw LangGraph state stays internal; the frontend receives domain projections and domain events.</text>
+</svg>
