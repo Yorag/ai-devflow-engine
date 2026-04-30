@@ -1,0 +1,4 @@
+interface:
+  display_name: "Delivery Branch Coordinator"
+  short_description: "Coordinate branch batches and worktrees"
+  default_prompt: "Use $delivery-branch-coordinator to choose claimable delivery batches and prepare worktree launch prompts."
