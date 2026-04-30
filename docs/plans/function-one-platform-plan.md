@@ -53,37 +53,34 @@
 每个非文档实现切片按以下流程执行：
 
 1. 使用 `git-delivery-workflow` 做分支门禁判断。该步骤只做只读检查，任何 Git 写动作必须等待用户批准。
-2. 使用 `superpowers:writing-plans` 为单个切片写实施计划。计划存放在 `docs/plans/implementation/`，文件名采用 `<task-id>-<task-name>.md`；该文件是执行期下钻计划，不要求在总计划评审时预先存在。
-3. 单个实施计划必须包含 TDD 红绿步骤、具体测试代码、具体实现代码、运行命令和预期输出。
-4. 执行时优先使用 `superpowers:subagent-driven-development`。若当前环境或用户选择不使用子代理，则使用 `superpowers:executing-plans`。
-5. 每个子任务完成后使用 `superpowers:verification-before-completion` 做完成前验证。
-6. 若需要提交，只能提出提交申请，不能主动执行提交。
+2. 若切片边界、实施细则、产品边界、阶段语义、API / 投影 / 事件契约或前端交互语义不清，必须先回到三份当前规格文档溯源：`docs/specs/function-one-product-overview-v1.md`、`docs/specs/frontend-workspace-global-design-v1.md`、`docs/specs/function-one-backend-engine-design-v1.md`。若三份规格仍不能解决该问题，必须上报并询问用户，不得在实现中自行决定语义。
+3. 使用 `superpowers:writing-plans` 为单个切片写实施计划。计划存放在 `docs/plans/implementation/`，文件名采用 `<task-id>-<task-name>.md`；该文件是执行期下钻计划，不要求在总计划评审时预先存在。
+4. 单个实施计划必须包含 TDD 红绿步骤、具体测试代码、具体实现代码、运行命令和预期输出。
+5. 使用 `superpowers:executing-plans` 作为实施计划的外层执行流程；对其中每个会改变生产代码、行为、测试目标或重构结构的子任务，必须按 `superpowers:test-driven-development` 完成红绿循环：先写单个失败测试，确认失败原因符合预期，再写最小实现，通过后再重构。不得用补测试替代 TDD。
+6. 子任务或批次完成后使用 `superpowers:requesting-code-review` 执行代码审查检查点，先核对规格符合性，再核对代码质量、测试充分性和回归风险。
+7. 使用 `superpowers:verification-before-completion` 做完成声明前验证；必须基于 fresh verification 命令、退出码和输出结果汇总证据。
+8. 若需要提交，只能提出提交申请，不能主动执行提交。
 
 ### 4.2 与本仓库 Git 规则的关系
 
-Superpowers 模板中出现的 `commit` 步骤，在本仓库中统一替换为：
+Superpowers 模板中出现的 `using-git-worktrees`、`commit`、`finishing-a-development-branch`、`merge`、`PR` 或分支清理步骤，在本仓库中统一替换为：
 - 生成已验证 checkpoint。
 - 汇报变更文件、验证命令与结果。
 - 按 `git-delivery-workflow` 准备提交申请。
-- 等待用户明确批准后再执行 Git 写动作。
+- 等待用户明确批准后再执行任何 Git 写动作。
 
-任何 agent 或 subagent 都必须遵守：
+任何 agent 都必须遵守：
 - 不主动创建分支。
 - 不主动提交。
 - 不主动合并。
 - 不主动打 tag。
 - 不回滚用户已有改动。
 
-### 4.3 子代理使用边界
+### 4.3 执行边界
 
-适合使用 `superpowers:subagent-driven-development` 的任务：
-- 单个后端服务或单个 API 资源实现。
-- 单个前端组件群实现。
-- 单个投影或事件处理链路。
-- 单个测试层补齐。
-- 单个适配器实现。
+本计划不使用 `superpowers:subagent-driven-development` 作为实施方式。所有实现切片统一由主 agent 使用 `superpowers:executing-plans` 执行，并按实施计划、TDD 红绿循环、`superpowers:requesting-code-review` 代码审查检查点和完成前验证推进。
 
-必须串行执行的任务：
+以下任务必须作为独立实施计划或独立批次执行，不得和其他实现切片混在同一执行批次中：
 - 数据模型与枚举首次定稿。
 - OpenAPI 与前端客户端生成策略定稿。
 - Run 生命周期状态机首次定稿。
