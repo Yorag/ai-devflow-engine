@@ -2,7 +2,7 @@
 
 ## 1. 目标目录骨架
 
-功能一平台级 V1 采用单仓库内前后端并行结构。空目录不单独作为 Git 产物提交，目录会随各任务的实际文件落地。
+功能一平台级 V1 采用单仓库内前后端并行结构。B0.0 用 `.gitkeep` 在叶子目录创建可被 Git 追踪的初始骨架；后续切片在目录内落地真实源文件、测试、资产或文档时移除对应占位文件。
 
 ```text
 backend/
@@ -155,26 +155,36 @@ README.md
 
 **计划周期**：Week 1
 **并行性**：串行起点
-**状态**：`[ ]`
+**状态**：`[x]`
+**实施计划**：`docs/plans/implementation/b0.0-project-structure-boundary.md`
+**验证摘要**：`Test-Path backend/app/context/.gitkeep, frontend/src/app/.gitkeep, e2e/tests/.gitkeep, docs/api/.gitkeep` 通过；`rg -n "backend/|frontend/|docs/plans/implementation|\\.gitkeep" docs/architecture/project-structure.md README.md` 通过；人工核对 B0.1、B0.2、F0.1、C1.10a、A4.8b-A4.8d 与 A4.9a-A4.9b 的文件落点与骨架一致。
 **目标**：在实施前固定仓库目录骨架、文件责任边界和后续实施计划落点。
 
 **修改文件列表**：
+- Create: `backend/**/.gitkeep`
+- Create: `frontend/src/**/.gitkeep`
+- Create: `e2e/tests/.gitkeep`
+- Create: `docs/api/.gitkeep`
 - Create: `docs/architecture/project-structure.md`
 - Modify: `README.md`
 - Modify: `docs/plans/function-one-platform-plan.md`
+- Modify: `docs/plans/function-one-delivery-branch-plan.md`
 
 **实现类/函数**：
 - 无生产代码。
+- `.gitkeep` 只作为目录骨架占位，不定义运行行为、Python package、前端 module、API 契约或测试目标。
 - 文档需定义 `backend/`、`frontend/`、`e2e/`、`docs/api/`、`docs/plans/implementation/` 的职责，并覆盖 `backend/app/context/`、`backend/app/prompts/`、`backend/tests/context/` 与 `backend/tests/prompts/` 的落点边界。
 
 **验收标准**：
-- 项目骨架在文档中可追踪。
+- 项目骨架在工作区中可见，并通过 `.gitkeep` 作为 Git 可追踪产物。
+- 项目骨架在文档中可追踪，且文档说明 `.gitkeep` 的占位边界。
 - B0.1、B0.2、F0.1 的文件落点与骨架一致。
 - C1.10a、A4.8b-A4.8d 与 A4.9a-A4.9b 的 context/prompts 文件落点与骨架一致。
-- 空目录不作为单独交付物，实际目录随首个源文件或测试文件创建。
+- B0.0 不创建 `pyproject.toml`、`frontend/package.json`、`frontend/tsconfig.json`、`frontend/vite.config.ts`、`e2e/package.json` 或 `e2e/playwright.config.ts`；这些工程入口仍由 B0.1 或后续切片负责。
 
 **测试方法**：
-- `rg -n "backend/|frontend/|docs/plans/implementation" docs/architecture/project-structure.md README.md`
+- `Test-Path backend/app/context/.gitkeep, frontend/src/app/.gitkeep, e2e/tests/.gitkeep, docs/api/.gitkeep`
+- `rg -n "backend/|frontend/|docs/plans/implementation|\\.gitkeep" docs/architecture/project-structure.md README.md`
 - 人工核对 B0.1、B0.2、F0.1、C1.10a、A4.8b-A4.8d 与 A4.9a-A4.9b 的文件列表与骨架一致。
 
 ## 4. Superpowers 执行规则

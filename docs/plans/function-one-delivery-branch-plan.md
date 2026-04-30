@@ -31,7 +31,7 @@
 
 | Batch | 交付分支 | 覆盖任务 | 前置门槛 | 并行等级 | Status | 主要共享入口 / 冲突点 | Review boundary |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| DB00 | `docs/project-structure-boundary` | B0.0 | 无 | S | merged | `README.md`, `docs/plans/*` | 项目目录骨架、路径职责和实施计划落点 |
+| DB00 | `docs/project-structure-boundary` | B0.0 | 无 | S | ready_for_review | `README.md`, `docs/plans/*` | 项目目录骨架、路径职责和实施计划落点 |
 | DB01 | `chore/engineering-baseline` | B0.1 | DB00 | S | planned | 根目录脚本、后端/前端工程入口 | 前后端依赖、测试命令和开发脚本基线 |
 | DB02 | `feat/backend-runtime-bootstrap` | B0.2, B0.3, L0.1 | DB01 | S | planned | `backend/app/api/*`, `error_codes.py`, settings、日志目录预检 | FastAPI、统一错误响应、启动配置和运行数据目录 |
 | DB03 | `feat/frontend-spa-baseline` | F0.1 | DB01 | G | planned | `frontend/`, 前端测试入口 | 前端 SPA、测试基线和首个设计质量门 |

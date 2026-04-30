@@ -89,7 +89,7 @@ Raw runtime state stays internal. The frontend consumes domain objects, query pr
 
 ## Development Status
 
-This repository is currently in the V1 platform buildout. The authoritative product and implementation boundaries are the split specifications and platform plans under `docs/`. Source directories become concrete only when a slice creates real source files, tests, assets, or documentation inside them.
+This repository is currently in the V1 platform buildout. The authoritative product and implementation boundaries are the split specifications and platform plans under `docs/`. B0.0 creates the tracked directory skeleton with `.gitkeep` placeholders; later slices replace those placeholders with real source files, tests, assets, or documentation.
 
 | Area | Status |
 | --- | --- |
@@ -108,6 +108,10 @@ This repository is currently in the V1 platform buildout. The authoritative prod
 | `docs/plans/function-one-platform/` | Split plan volumes for implementation slices. |
 | `docs/plans/implementation/` | Execution-time implementation plans for individual slices. |
 | `docs/architecture/` | Durable architecture notes and ownership boundaries. |
+| `backend/` | Tracked backend skeleton for FastAPI, domain, persistence, runtime, observability, tools, workspace, delivery, and tests. |
+| `frontend/` | Tracked frontend skeleton for the Vite React SPA source tree. |
+| `e2e/` | Tracked Playwright end-to-end test skeleton. |
+| `docs/api/` | Tracked API and OpenAPI companion documentation skeleton. |
 | `assets/` | README and documentation visuals. |
 | `refs/` | Project working references and development logs. |
 
