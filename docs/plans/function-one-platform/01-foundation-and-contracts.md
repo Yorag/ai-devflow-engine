@@ -87,9 +87,10 @@
 ## B0.3 EnvironmentSettings 启动配置边界
 
 **计划周期**：Week 1
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立服务启动前配置加载边界，使环境变量只服务启动、路径落点、前后端连接和凭据引用解析，不承载业务配置或运行上限。
 **实施计划**：`docs/plans/implementation/b0.3-environment-settings.md`
+**验证摘要**：`uv run --no-sync python -m pytest backend/tests/core/test_environment_settings.py -q` 通过；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py -q` 通过；`uv run --no-sync python -m pytest --collect-only` 收集 17 个 backend tests。测试覆盖 `pydantic-settings` 环境加载、默认工作区路径派生、默认运行数据根目录按 settings 构造时当前工作目录派生、显式工作区路径、凭据环境变量名前缀限制、默认凭据前缀不允许普通启动环境变量名、业务 / runtime / prompt / SQLite 逐库字段排除，以及测试专用 settings override 构造。
 
 **修改文件列表**：
 - Modify: `backend/app/core/config.py`
