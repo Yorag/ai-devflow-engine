@@ -31,6 +31,35 @@ Do not use competition-facing phrasing such as "for judges", "for contest demo",
 5. Prefer correction over patching before implementation.
 When a project area or feature has not been formally implemented, revise planning and specification documents directly for coherent structure, wording, and semantics instead of layering patch-style notes, provided the revision does not change approved functional intent.
 
+## Local Environment And Verification
+
+1. Backend Python commands must prefer the repository-local uv environment.
+Use `uv run <command>` by default. The repo-local virtual environment interpreter such as `.\.venv\Scripts\python` is an acceptable fallback when `uv run` is not suitable. Do not run backend verification through a global Python interpreter.
+
+2. Do not install Python packages globally.
+Backend dependencies must be declared in `pyproject.toml` and installed into the repo-local environment through `uv sync` by default, or an equivalent local virtual environment command when uv is not suitable.
+
+3. Frontend dependencies are isolated under `frontend/`.
+Use `npm --prefix frontend ...` for install, dev, build, and test commands.
+
+4. E2E dependencies are isolated under `e2e/`.
+Use `npm --prefix e2e ...` for Playwright commands once `e2e/package.json` exists.
+
+5. Agents may run existing test, lint, build, collect-only, and read-only verification commands when needed.
+Installing or upgrading dependencies, modifying lock files, running migrations, changing environment files, deleting or moving files, or executing unknown commands requires explicit user approval.
+
+6. Do not rely on undeclared local packages or manually installed tools as project truth.
+If a command requires a dependency, the dependency must be declared in the appropriate project manifest before that command becomes part of the normal verification path.
+
+## Library Documentation Usage
+
+1. Treat Context7 MCP as the preferred usage manual for library APIs when current local knowledge may be stale.
+
+2. LangChain and LangGraph require current documentation checks when implementation, debugging, or review depends on API details.
+Existing AI knowledge may reflect LangChain/LangGraph `0.3.x` conventions, while LangChain `1.0+` reorganized major APIs and prior import paths, constructors, and helper functions may no longer apply.
+
+3. When LangChain or LangGraph code reports an API error, import error, type mismatch, missing function, or unclear usage pattern, query Context7 MCP before relying on memory or applying compatibility patches.
+
 ## Frontend Skill Usage
 
 1. For frontend UI/UX design, implementation, review, polish, or hardening work, Codex agents may use the global `impeccable` skill as an auxiliary design quality tool.
