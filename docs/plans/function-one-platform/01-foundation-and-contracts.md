@@ -365,9 +365,10 @@
 ## C1.4 Inspector 与 Metrics Schema 契约
 
 **计划周期**：Week 2
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：定义 Stage、ControlItem、DeliveryResult 的 Inspector 投影与量化指标 Schema，保证右栏深看信息以结构化原始记录为准。
 **实施计划**：`docs/plans/implementation/c1.4-inspector-metrics-schemas.md`
+**验证摘要**：`uv run --no-sync python -m pytest backend/tests/schemas/test_inspector_metrics_schemas.py -v` 通过 4 个 C1.4 Inspector / Metrics schema contract tests；`uv run --no-sync python -m pytest backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py -q` 通过 21 个 C1.1-C1.4 schema contract tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py -q` 通过 49 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 49 个 backend tests 且无收集错误。TDD RED 先观察到缺少 `backend.app.schemas.inspector`，新增 `MetricSet` 后仍保持缺少 Inspector 的预期 RED，再新增 Inspector schemas 后 focused tests 转绿。内联评审未发现 Critical 或 Important 问题。
 
 **修改文件列表**：
 - Create: `backend/app/schemas/inspector.py`
