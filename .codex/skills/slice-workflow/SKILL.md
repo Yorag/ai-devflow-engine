@@ -18,7 +18,7 @@ description: Use when asked to execute, continue, plan, or choose one task from 
 - 不要用于 `docs/plans/function-one-platform-plan.md` 之外的普通临时功能、缺陷修复或评审。
 - 不要在一次调用中执行多个切片。
 - 不要因为用户指定了任务 id 就绕过依赖、状态、分支或来源追溯 gate。
-- 不要为本计划使用通用 Superpowers 默认流程中会创建 worktree、commit、PR、merge、tag、分支清理或子代理交接的步骤。
+- 不要接受通用 Superpowers 默认流程中会创建 worktree、commit、PR、merge、tag 或分支清理的步骤；子代理执行仅限本技能定义的 implementer / reviewer 工作流。
 - 不要用 `impeccable` 改变产品语义、阶段语义、后端 API、投影字段、事件载荷或测试要求。
 
 ## 必读来源
@@ -48,8 +48,9 @@ description: Use when asked to execute, continue, plan, or choose one task from 
 
 - **REQUIRED SUB-SKILL:** 使用 `git-delivery-workflow` 处理分支和 commit gate。
 - **REQUIRED SUB-SKILL:** 在触碰实现代码前使用 `superpowers:writing-plans`。
-- **REQUIRED SUB-SKILL:** 使用 `superpowers:executing-plans` 执行已写好的 implementation plan。
-- **REQUIRED SUB-SKILL:** 对每个生产代码、行为、测试目标或重构变更使用 `superpowers:test-driven-development`。
+- **REQUIRED SUB-SKILL:** 优先使用 `superpowers:subagent-driven-development` 执行已写好的 implementation plan。
+- **CONDITIONAL FALLBACK SUB-SKILL:** 当环境无法调度子代理、任务无法安全拆分、或子代理上下文无法被精确限定时，使用 `superpowers:executing-plans`。
+- **REQUIRED SUB-SKILL:** 无论由主 agent 还是 implementer subagent 执行，对每个生产代码、行为、测试目标或重构变更使用 `superpowers:test-driven-development`。
 - **REQUIRED SUB-SKILL:** 在切片或实施 batch 后使用 `superpowers:requesting-code-review`。
 - **REQUIRED SUB-SKILL:** 在任何完成、已修复、通过、commit-ready 或 PR-ready 声明前使用 `superpowers:verification-before-completion`。
 - **CONDITIONAL SUB-SKILL:** 对 platform plan 中列出的前端质量门切片使用 `impeccable`。
@@ -62,12 +63,14 @@ description: Use when asked to execute, continue, plan, or choose one task from 
 4. 根据 platform plan 和 split-plan 任务细则解析范围，然后运行预计划 Source Trace Conflict Gate。
 5. 使用 `superpowers:writing-plans`，在 `docs/plans/implementation/` 下创建或更新一个 implementation plan。
 6. 执行前评审 implementation plan。
-7. 在主 agent 会话中使用 `superpowers:executing-plans` 作为外层执行流程。
-8. 在该执行流程内，对每个改变生产代码、行为、测试目标或重构结构的子任务使用 `superpowers:test-driven-development`。
-9. 使用 `superpowers:requesting-code-review` 运行代码评审检查点。
-10. 使用 `superpowers:verification-before-completion` 运行最新验证。
-11. 更新 platform plan 和 split plan 中的任务追踪。
-12. 如果适合 commit，只准备 commit 批准请求。
+7. 判断 implementation plan 是否能拆成边界清晰、上下文可精确限定的实现子任务。
+8. 默认使用 `superpowers:subagent-driven-development`：主 agent 负责调度、上下文裁剪、review 循环和 gate，implementer subagent 负责限定范围内的 TDD 实现。
+9. 只有当子代理不可用、任务无法安全拆分，或上下文不能精确限定时，fallback 到 `superpowers:executing-plans`，并在最终报告中说明原因。
+10. 无论使用哪种执行路径，对每个改变生产代码、行为、测试目标或重构结构的子任务使用 `superpowers:test-driven-development`。
+11. 使用 `superpowers:requesting-code-review` 运行代码评审检查点。
+12. 使用 `superpowers:verification-before-completion` 运行最新验证。
+13. 更新 platform plan 和 split plan 中的任务追踪。
+14. 如果适合 commit，只准备 commit 批准请求。
 
 ## Git Gate（Git 门禁）
 
@@ -203,7 +206,23 @@ implementation plan 不得放宽任务边界、重写已批准语义、遗漏必
 
 ## 执行规则
 
-使用 `superpowers:executing-plans` 作为外层执行流程。在主 agent 会话中执行；不要将 `superpowers:subagent-driven-development` 作为本仓库计划的实现方法。
+默认使用 `superpowers:subagent-driven-development` 作为外层执行流程。主 agent 不把自己的完整会话历史交给子代理；必须为每个 implementer / reviewer subagent 构造精确任务上下文，包含已选切片、implementation plan 中对应任务、允许文件、相关 split-plan 细则、必要 spec 追溯、测试命令和禁止事项。
+
+主 agent 保留以下控制权，不委托给子代理：
+
+- 切片选择、依赖检查、Current-Branch Batch Gate 和 Source Trace Conflict Gate。
+- Git gate、commit 批准请求、PR-ready / merge-ready 判断和所有 Git 写操作决策。
+- platform plan、delivery branch plan、split plan 和 implementation plan 的最终追踪更新。
+- 最新验证结论、完成声明和用户汇报。
+
+子代理执行必须遵守以下边界：
+
+- implementer subagent 只修改分派任务明确允许的文件和测试，不扩大切片范围。
+- implementer subagent 必须使用 `superpowers:test-driven-development`，并回报 red/green 命令、退出码和关键输出。
+- reviewer subagent 只评审，不承担实现；先进行 spec / plan 合规评审，再进行代码质量、测试充分性和回归风险评审。
+- 子代理不得运行 Git write 操作，不得更新任务状态，不得提交、创建 PR、merge、tag、rebase、push 或清理分支。
+
+仅当当前环境无法调度子代理、任务无法安全拆分，或子代理上下文无法被精确限定时，使用 `superpowers:executing-plans` fallback。在 fallback 中，主 agent 仍必须执行同等 TDD 步骤、两阶段内联评审和最终验证，并在完成报告中说明 fallback 原因。
 
 对于每个改变生产代码、行为、测试目标或重构结构的步骤：
 
@@ -217,7 +236,7 @@ implementation plan 不得放宽任务边界、重写已批准语义、遗漏必
 
 ## 代码评审检查点
 
-切片或执行 batch 完成后，使用 `superpowers:requesting-code-review`。
+切片或执行 batch 完成后，使用 `superpowers:requesting-code-review`。当使用 `superpowers:subagent-driven-development` 时，遵循其两阶段 review 顺序：先 spec compliance reviewer，再 code quality reviewer；任一 reviewer 发现问题时，必须修复并 re-review 后才能继续。
 
 按以下顺序评审：
 
@@ -226,7 +245,7 @@ implementation plan 不得放宽任务边界、重写已批准语义、遗漏必
 3. 测试充分性。
 4. 回归风险。
 
-在声明完成前修复 Critical 和 Important 发现。如果当前环境无法调度 reviewer，执行同等的两阶段内联评审，并在最终报告中说明该限制。
+在声明完成前修复 Critical 和 Important 发现。如果当前环境无法调度 reviewer，执行同等的两阶段内联评审，并在最终报告中说明该限制和 fallback 原因。
 
 ## Frontend Design Gate（前端设计 gate）
 
@@ -284,6 +303,8 @@ implementation plan 不得放宽任务边界、重写已批准语义、遗漏必
 - 来源追溯找不到管辖 spec 小节，或发现 specs / plan / 任务语义冲突。
 - 前端质量建议会改变产品语义或 API / 事件契约。
 - 通用 Superpowers 流程要求 Git 写操作或分支收尾动作。
+- 子代理需要的任务边界、允许文件、上下文或禁止事项无法被精确限定，且 fallback 也无法安全执行。
+- 子代理执行或评审试图扩大切片范围、更新追踪状态或运行 Git 写操作。
 - implementation plan 缺少具体 TDD 步骤、代码、命令或预期输出。
 - 验证在聚焦调试后仍反复失败。
 
@@ -294,6 +315,7 @@ implementation plan 不得放宽任务边界、重写已批准语义、遗漏必
 报告：
 
 - 已选切片 id 和 implementation plan 路径。
+- 使用的执行路径：`subagent-driven-development` 或 fallback 到 `executing-plans` 的原因。
 - 变更文件。
 - TDD red/green 证据，或纯文档切片的 N/A 原因。
 - 代码评审结果和修复。
@@ -307,8 +329,10 @@ implementation plan 不得放宽任务边界、重写已批准语义、遗漏必
 ## 常见错误
 
 - 选择任务时没有同时检查 platform-plan 和 split-plan 状态。
-- 把 `superpowers:executing-plans` 当作 `superpowers:test-driven-development` 的替代品。
-- 接受通用 `superpowers:writing-plans` 中的 commit、worktree、PR 或子代理步骤。
+- 在可安全拆分且可调度子代理时跳过 `superpowers:subagent-driven-development`。
+- 把 `superpowers:subagent-driven-development` 或 `superpowers:executing-plans` 当作 `superpowers:test-driven-development` 的替代品。
+- 接受通用 `superpowers:writing-plans` 中的 commit、worktree、PR、merge、tag 或分支清理步骤。
+- 让子代理更新 platform plan、split plan、delivery branch plan 或执行 Git 写操作。
 - 用 specs 覆盖已评审任务细则，而不是在冲突时停止。
 - 来源追溯发现缺失、含糊或冲突的管辖追溯来源后仍继续。
 - 验证后更新无关任务状态。

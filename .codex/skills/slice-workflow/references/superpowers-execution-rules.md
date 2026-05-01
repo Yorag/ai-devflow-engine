@@ -24,12 +24,16 @@
 使用 `superpowers:writing-plans` 时，在通用技能模板之上应用本仓库执行规则：
 
 - 将计划保存到 `docs/plans/implementation/<task-id>-<task-name>.md`，不要保存到 `docs/superpowers/plans/`。
-- 计划头部必须把 `superpowers:executing-plans` 标为执行 skill。不要推荐 `superpowers:subagent-driven-development`。
-- 不要提供通用的“子代理驱动或内联执行”执行选择；本仓库使用主 agent 内联执行，并配合 `superpowers:executing-plans`。
+- 计划头部必须默认把 `superpowers:subagent-driven-development` 标为执行 skill。
+- 只有当环境无法调度子代理、任务无法安全拆分，或子代理上下文无法被精确限定时，才把 `superpowers:executing-plans` 标为 fallback 执行 skill，并写明 fallback 条件。
+- 不要提供开放式的“子代理驱动或内联执行”执行选择；本仓库优先使用子代理实现和两阶段评审，主 agent 保留切片选择、gate、Git 决策、最终验证和追踪更新。
 - 不要包含 commit 步骤、commit 命令、Git worktree 设置、分支收尾、PR 创建、merge、tag 或分支清理步骤。
 - 将任何通用的“频繁 commit”指令替换为已验证检查点和 commit 批准请求。
 - 如果 implementation plan 需要最终 Git 步骤，写成“在最新验证后，使用 `git-delivery-workflow` 准备 commit 批准请求”；不要写 `git add` 或 `git commit` 命令。
 - 保留 writing-plans 对精确文件路径、具体测试代码、具体实现代码、精确命令、预期失败输出、预期通过输出和自评审的要求。
+- 计划必须写出 implementer subagent 的任务边界、允许文件、必要上下文、禁止事项、TDD red/green 命令和回报要求。
+- 计划必须写出 review 顺序：先 spec / plan compliance reviewer，再 code quality / testing / regression reviewer；review 发现必须修复并 re-review。
+- 计划必须说明子代理不得运行 Git write 操作、不得更新 platform / split / delivery branch 追踪状态、不得扩大切片范围。
 
 ## Implementation Plan 清单
 
@@ -42,6 +46,7 @@
 - 精确运行命令。
 - 预期失败输出和预期通过输出。
 - 完成验证清单。
+- 子代理执行清单：implementer 输入、允许文件、禁止事项、TDD 证据、reviewer 输入和 fallback 条件。
 
 ## API 和 OpenAPI 检查
 
