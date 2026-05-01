@@ -127,7 +127,7 @@
 **状态**：`[x]`
 **目标**：基于 B0.3 的 `EnvironmentSettings` 建立平台运行数据根目录和 `.runtime/logs` 启动预检，使后端在接受用户命令前确认日志目录存在且可写。
 **实施计划**：`docs/plans/implementation/l0.1-runtime-data-log-preflight.md`
-**验证摘要**：`uv run --no-sync python -m pytest backend/tests/observability/test_runtime_data_preflight.py -q` 通过；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py -q` 通过；`uv run --no-sync python -m pytest --collect-only` 收集 27 个 backend tests；`uv run --no-sync python -m uvicorn backend.app.main:app --help` 退出码 0。测试覆盖运行数据根目录派生、`logs` 与 `logs/runs` 目录创建、`resolve_logs_dir()`、可写性探测、写入探测失败、不可用路径启动失败、`.runtime/logs` 平台私有标记、FastAPI lifespan 启动门禁，以及未向 `EnvironmentSettings` 添加日志路径或逐库数据库路径字段。
+**验证摘要**：`uv run --no-sync python -m pytest backend/tests/observability/test_runtime_data_preflight.py -q` 通过；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py -q` 通过；`uv run --no-sync python -m pytest --collect-only` 收集 28 个 backend tests；`uv run --no-sync python -m uvicorn backend.app.main:app --help` 退出码 0。测试覆盖运行数据根目录派生、`logs` 与 `logs/runs` 目录创建、`resolve_logs_dir()`、可写性探测、写入探测失败、不可用路径启动失败、`.runtime/logs` 平台私有标记、FastAPI lifespan 启动门禁、允许的本地前端来源 CORS preflight 与 GET 响应，以及未向 `EnvironmentSettings` 添加日志路径或逐库数据库路径字段。
 
 **修改文件列表**：
 - Modify: `backend/app/core/config.py`

@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app import __version__
 from backend.app.api.errors import register_error_handlers
@@ -28,6 +29,12 @@ def create_app(settings: EnvironmentSettings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.environment_settings = environment_settings
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(environment_settings.backend_cors_origins),
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     register_error_handlers(app)
     app.include_router(build_api_router())
     return app

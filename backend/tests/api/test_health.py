@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from backend.app.core.config import EnvironmentSettings
 from backend.app.main import create_app
 
 
@@ -25,6 +26,31 @@ def test_api_docs_and_openapi_are_served_under_api_prefix() -> None:
 
     assert openapi_response.status_code == 200
     assert docs_response.status_code == 200
+
+
+def test_allowed_frontend_origin_can_access_api_with_cors_headers(tmp_path) -> None:
+    app = create_app(
+        settings=EnvironmentSettings(
+            platform_runtime_root=tmp_path / "runtime",
+            backend_cors_origins=("http://localhost:5173",),
+        )
+    )
+    client = TestClient(app)
+
+    preflight_response = client.options(
+        "/api/health",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "X-Request-ID",
+        },
+    )
+    get_response = client.get("/api/health", headers={"Origin": "http://localhost:5173"})
+
+    assert preflight_response.status_code == 200
+    assert preflight_response.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert get_response.status_code == 200
+    assert get_response.headers["access-control-allow-origin"] == "http://localhost:5173"
 
 
 def test_openapi_documents_health_route_and_error_response() -> None:
