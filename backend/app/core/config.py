@@ -1,0 +1,5 @@
+APP_TITLE = "AI DevFlow Engine API"
+API_PREFIX = "/api"
+OPENAPI_URL = f"{API_PREFIX}/openapi.json"
+DOCS_URL = f"{API_PREFIX}/docs"
+SERVICE_NAME = "ai-devflow-engine"

@@ -47,9 +47,10 @@
 ## B0.2 后端 FastAPI 应用与错误契约
 
 **计划周期**：Week 1
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立 FastAPI 应用入口、路由聚合、健康检查和统一错误响应契约，使后续 API 可以在一致服务骨架上扩展。
 **实施计划**：`docs/plans/implementation/b0.2-fastapi-error-contract.md`
+**验证摘要**：`uv run --no-sync python -m pytest backend/tests/api/test_health.py backend/tests/api/test_error_contract.py -q` 通过；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py -q` 通过；`uv run --no-sync python -m pytest --collect-only` 收集 9 个 backend tests；`uv run --no-sync python -m uvicorn backend.app.main:app --help` 退出码 0。OpenAPI 断言覆盖 `/api/health`、`HealthResponse` 与 `ErrorResponse`；错误契约断言覆盖 `ApiError`、404、请求校验、未处理异常、`X-Request-ID` 传播和配置错误码预留。
 
 **修改文件列表**：
 - Create: `backend/app/main.py`
