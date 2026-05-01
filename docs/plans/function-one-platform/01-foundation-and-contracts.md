@@ -270,9 +270,10 @@
 ## C1.2 控制面 Schema 契约
 
 **计划周期**：Week 2
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：定义 Project、Session、PipelineTemplate、AgentRole、Provider 和 DeliveryChannel 的请求响应 Schema，使控制面 API 有稳定字段边界。
 **实施计划**：`docs/plans/implementation/c1.2-control-plane-schemas.md`
+**验证摘要**：`uv run --no-sync python -m pytest backend/tests/schemas/test_control_plane_schemas.py -v` 通过 4 个控制面 Schema 契约测试；`uv run --no-sync python -m pytest backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py -q` 通过 12 个 Schema contract tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py -q` 通过 40 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 40 个 backend tests 且无收集错误。TDD RED 依次观察到缺少 `project`、`template`、`delivery_channel`、`configuration_package` schema 模块；评审修复中新增 RED 覆盖 `ProjectRead.name`、删除 / 移除结果不得声明物理删除，以及配置包 Provider 能力可省略待后端默认补齐的字段。
 
 **修改文件列表**：
 - Create: `backend/app/schemas/project.py`
