@@ -118,6 +118,8 @@ pytest --collect-only
 
 前端命令：
 
+前端命令要求 Node.js `^20.19.0` 或 `>=22.12.0`。
+
 ```powershell
 npm --prefix frontend install
 npm --prefix frontend run dev

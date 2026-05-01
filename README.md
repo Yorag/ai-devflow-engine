@@ -114,6 +114,8 @@ The Python interpreter used to create `.venv` must be Python 3.11 or newer.
 
 Frontend commands:
 
+Frontend commands require Node.js `^20.19.0` or `>=22.12.0`.
+
 ```powershell
 npm --prefix frontend install
 npm --prefix frontend run dev
