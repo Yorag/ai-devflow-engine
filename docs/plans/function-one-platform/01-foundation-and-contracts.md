@@ -153,9 +153,10 @@
 ## F0.1 前端 SPA 骨架与测试基线
 
 **计划周期**：Week 1
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立 React SPA、路由、QueryClient 和测试工具基线，使控制台页面可以独立于后端实现并行推进。
 **实施计划**：`docs/plans/implementation/f0.1-frontend-spa-baseline.md`
+**验证摘要**：`npm --prefix frontend run test -- --run src/pages/__tests__/ConsolePage.test.tsx` 通过并覆盖控制台路由、路由导航、QueryClient Provider 和 shell landmarks；`npm --prefix frontend run test -- --run src/main.test.ts` 通过并保留 B0.1 bootstrap regression；`npm --prefix frontend run test -- --run` 通过；`npm --prefix frontend run build` 通过。前端设计质量门已记录默认产品型工作台基调；本切片未实现工作台三栏、业务组件、API client、SSE 或 Zustand 状态。
 
 **修改文件列表**：
 - Create: `frontend/src/App.tsx`
