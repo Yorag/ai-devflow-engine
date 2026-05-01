@@ -6,6 +6,7 @@ from sqlalchemy import engine_from_config, pool
 from sqlalchemy.engine import make_url
 
 from backend.app.db.base import ROLE_METADATA, DatabaseRole
+import backend.app.db.models.control  # noqa: F401
 
 
 config = context.config

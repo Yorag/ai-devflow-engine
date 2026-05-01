@@ -191,7 +191,7 @@
 | C1.3 | Run、Feed 与事件 Schema 契约 | Week 2 | [x] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c13) |
 | C1.4 | Inspector 与 Metrics Schema 契约 | Week 2 | [x] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c14) |
 | C1.5 | 多 SQLite 连接与 session 管理 | Week 2 | [x] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c15) |
-| C1.6 | control 模型与迁移边界 | Week 2 | [ ] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c16) |
+| C1.6 | control 模型与迁移边界 | Week 2 | [x] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c16) |
 | C1.7 | runtime 模型与迁移边界 | Week 2 | [ ] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c17) |
 | C1.8 | graph 模型与迁移边界 | Week 2 | [ ] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c18) |
 | C1.9 | event 模型边界 | Week 2 | [ ] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c19) |

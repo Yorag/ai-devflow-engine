@@ -444,8 +444,9 @@
 ## C1.6 control 模型与迁移边界
 
 **计划周期**：Week 2
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立 `control.db` 的首批规范模型和迁移边界，确保项目、会话、模板、Provider 与项目级交付配置只在控制面持久化。
+**验证摘要**：实施计划 `docs/plans/implementation/c1.6-control-model-boundary.md` 已完成。TDD RED 先观察到 `ModuleNotFoundError: No module named 'backend.app.db.models.control'`；实现 `backend/app/db/models/control.py` 并接入 Alembic metadata 后，`uv run --no-sync python -m pytest backend/tests/db/test_control_model_boundary.py -q` 通过 5 个 C1.6 tests；`uv run --no-sync alembic -c backend/alembic.ini current` 退出码 0，并对五个 SQLite role 打印 `SQLiteImpl` 上下文；经用户批准后，`uv run --no-sync alembic -c backend/alembic.ini upgrade head` 退出码 0，并对五个 SQLite role 打印 `SQLiteImpl` 上下文；`uv run --no-sync python -m pytest backend/tests/db/test_control_model_boundary.py -v` 通过 5 个 focused tests；`uv run --no-sync python -m pytest backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py -q` 通过 28 个 persistence regression tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_prompt_asset_schemas.py backend/tests/schemas/test_observability_schemas.py backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py -q` 通过 76 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 76 个 backend tests。
 **实施计划**：`docs/plans/implementation/c1.6-control-model-boundary.md`
 
 **修改文件列表**：
