@@ -47,9 +47,10 @@
 ## B0.2 后端 FastAPI 应用与错误契约
 
 **计划周期**：Week 1
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立 FastAPI 应用入口、路由聚合、健康检查和统一错误响应契约，使后续 API 可以在一致服务骨架上扩展。
 **实施计划**：`docs/plans/implementation/b0.2-fastapi-error-contract.md`
+**验证摘要**：`uv run --no-sync python -m pytest backend/tests/api/test_health.py backend/tests/api/test_error_contract.py -q` 通过；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py -q` 通过；`uv run --no-sync python -m pytest --collect-only` 收集 9 个 backend tests；`uv run --no-sync python -m uvicorn backend.app.main:app --help` 退出码 0。OpenAPI 断言覆盖 `/api/health`、`HealthResponse` 与 `ErrorResponse`；错误契约断言覆盖 `ApiError`、404、请求校验、未处理异常、`X-Request-ID` 传播和配置错误码预留。
 
 **修改文件列表**：
 - Create: `backend/app/main.py`
@@ -86,9 +87,10 @@
 ## B0.3 EnvironmentSettings 启动配置边界
 
 **计划周期**：Week 1
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立服务启动前配置加载边界，使环境变量只服务启动、路径落点、前后端连接和凭据引用解析，不承载业务配置或运行上限。
 **实施计划**：`docs/plans/implementation/b0.3-environment-settings.md`
+**验证摘要**：`uv run --no-sync python -m pytest backend/tests/core/test_environment_settings.py -q` 通过；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py -q` 通过；`uv run --no-sync python -m pytest --collect-only` 收集 17 个 backend tests。测试覆盖 `pydantic-settings` 环境加载、默认工作区路径派生、默认运行数据根目录按 settings 构造时当前工作目录派生、显式工作区路径、凭据环境变量名前缀限制、默认凭据前缀不允许普通启动环境变量名、业务 / runtime / prompt / SQLite 逐库字段排除，以及测试专用 settings override 构造。
 
 **修改文件列表**：
 - Modify: `backend/app/core/config.py`
@@ -122,9 +124,10 @@
 ## L0.1 运行数据目录与日志启动预检
 
 **计划周期**：Week 1
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：基于 B0.3 的 `EnvironmentSettings` 建立平台运行数据根目录和 `.runtime/logs` 启动预检，使后端在接受用户命令前确认日志目录存在且可写。
 **实施计划**：`docs/plans/implementation/l0.1-runtime-data-log-preflight.md`
+**验证摘要**：`uv run --no-sync python -m pytest backend/tests/observability/test_runtime_data_preflight.py -q` 通过；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py -q` 通过；`uv run --no-sync python -m pytest --collect-only` 收集 28 个 backend tests；`uv run --no-sync python -m uvicorn backend.app.main:app --help` 退出码 0。测试覆盖运行数据根目录派生、`logs` 与 `logs/runs` 目录创建、`resolve_logs_dir()`、可写性探测、写入探测失败、不可用路径启动失败、`.runtime/logs` 平台私有标记、FastAPI lifespan 启动门禁、允许的本地前端来源 CORS preflight 与 GET 响应，以及未向 `EnvironmentSettings` 添加日志路径或逐库数据库路径字段。
 
 **修改文件列表**：
 - Modify: `backend/app/core/config.py`
