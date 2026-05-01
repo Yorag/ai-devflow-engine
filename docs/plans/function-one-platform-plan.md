@@ -198,7 +198,7 @@
 | C1.10 | PlatformRuntimeSettings 与运行快照 Schema 契约 | Week 2 | [x] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c110) |
 | C1.10a | PromptAsset Schema 契约 | Week 2 | [x] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c110a) |
 | L1.1 | 日志审计 Schema 与 TraceContext 契约 | Week 2 | [x] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#l11) |
-| L1.2 | log 模型与迁移边界 | Week 2 | [ ] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#l12) |
+| L1.2 | log 模型与迁移边界 | Week 2 | [x] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#l12) |
 | L2.1 | API 请求与关联上下文 | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#l21) |
 | L2.2 | 基础 RedactionPolicy 与 payload summarizer | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#l22) |
 | L2.3 | JSONL writer 与 log index | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#l23) |

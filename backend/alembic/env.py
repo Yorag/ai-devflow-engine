@@ -9,6 +9,7 @@ from backend.app.db.base import ROLE_METADATA, DatabaseRole
 import backend.app.db.models.control  # noqa: F401
 import backend.app.db.models.event  # noqa: F401
 import backend.app.db.models.graph  # noqa: F401
+import backend.app.db.models.log  # noqa: F401
 import backend.app.db.models.runtime  # noqa: F401
 
 
