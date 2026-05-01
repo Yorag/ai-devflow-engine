@@ -208,6 +208,10 @@ implementation plan 不得放宽任务边界、重写已批准语义、遗漏必
 
 默认使用 `superpowers:subagent-driven-development` 作为外层执行流程。主 agent 不把自己的完整会话历史交给子代理；必须为每个 implementer / reviewer subagent 构造精确任务上下文，包含已选切片、implementation plan 中对应任务、允许文件、相关 split-plan 细则、必要 spec 追溯、测试命令和禁止事项。
 
+### 子代理命令权限
+
+子代理任务上下文必须列出允许命令。子代理可运行 implementation plan 中声明的只读检查和现有验证命令，例如 `uv run pytest ...`、`uv run ruff check ...`、`npm --prefix frontend test|lint|build ...`。涉及依赖安装或同步、lock / manifest 变更、数据库迁移、配置或环境文件变更、删除 / 移动文件、外部服务写入、Git 写操作，子代理必须停止并回报 `APPROVAL_REQUIRED`，由主 agent 向用户请求批准。
+
 主 agent 保留以下控制权，不委托给子代理：
 
 - 切片选择、依赖检查、Current-Branch Batch Gate 和 Source Trace Conflict Gate。
