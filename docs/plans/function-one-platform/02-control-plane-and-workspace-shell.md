@@ -15,15 +15,18 @@
 ## L2.1 API 请求与关联上下文
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立 API request/correlation 上下文，使统一错误响应、控制面命令和后续日志审计入口能够共享 `request_id`、`trace_id`、`correlation_id` 与 `span_id`。
 **实施计划**：`docs/plans/implementation/l2.1-api-correlation-context.md`
+**验证摘要**：`uv run --no-sync python -m pytest backend/tests/api/test_request_correlation_context.py -v` 通过 3 个 L2.1 request correlation middleware tests；`uv run --no-sync python -m pytest backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/api/test_request_correlation_context.py -q` 通过 API regression；`uv run --no-sync python -m pytest backend/tests/schemas/test_observability_schemas.py backend/tests/db/test_log_model_boundary.py backend/tests/api/test_request_correlation_context.py -q` 通过 observability/schema regression；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/api/test_request_correlation_context.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_prompt_asset_schemas.py backend/tests/schemas/test_observability_schemas.py backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py backend/tests/db/test_runtime_model_boundary.py backend/tests/db/test_graph_model_boundary.py backend/tests/db/test_event_model_boundary.py backend/tests/db/test_log_model_boundary.py -q` 通过 103 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 103 个 backend tests 且无收集错误。TDD RED 先观察到缺少 `backend.app.observability.context`、响应头缺少 `X-Correlation-ID`、错误响应和 OpenAPI 缺少 `correlation_id`，再按请求上下文传播、错误响应关联字段和 OpenAPI 契约转绿。内联评审未发现 Critical 或 Important 问题。
 
 **修改文件列表**：
 - Create: `backend/app/observability/context.py`
 - Modify: `backend/app/main.py`
 - Modify: `backend/app/api/errors.py`
 - Create: `backend/tests/api/test_request_correlation_context.py`
+- Modify: `backend/tests/api/test_error_contract.py`
+- Modify: `backend/tests/api/test_health.py`
 
 **实现类/函数**：
 - `RequestCorrelationMiddleware`

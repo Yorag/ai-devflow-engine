@@ -8,6 +8,7 @@ from backend.app import __version__
 from backend.app.api.errors import register_error_handlers
 from backend.app.api.router import build_api_router
 from backend.app.core.config import APP_TITLE, DOCS_URL, OPENAPI_URL, EnvironmentSettings
+from backend.app.observability.context import RequestCorrelationMiddleware
 from backend.app.observability.runtime_data import RuntimeDataPreflight
 
 
@@ -35,6 +36,7 @@ def create_app(settings: EnvironmentSettings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(RequestCorrelationMiddleware)
     register_error_handlers(app)
     app.include_router(build_api_router())
     return app

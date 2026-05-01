@@ -1,4 +1,3 @@
-from collections.abc import Awaitable, Callable
 from http import HTTPStatus
 from uuid import uuid4
 
@@ -7,18 +6,20 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.responses import Response
 
 from backend.app.api.error_codes import ErrorCode
-
-
-REQUEST_ID_HEADER = "X-Request-ID"
+from backend.app.observability.context import (
+    CORRELATION_ID_HEADER,
+    REQUEST_ID_HEADER,
+    TRACE_ID_HEADER,
+)
 
 
 class ErrorResponse(BaseModel):
     error_code: ErrorCode = Field(..., description="Stable machine-readable error code.")
     message: str = Field(..., description="Human-readable error summary.")
     request_id: str = Field(..., description="Request correlation identifier.")
+    correlation_id: str = Field(..., description="User action or command correlation identifier.")
 
 
 class ApiError(Exception):
@@ -33,7 +34,22 @@ def get_request_id(request: Request) -> str:
     request_id = getattr(request.state, "request_id", None)
     if isinstance(request_id, str) and request_id:
         return request_id
-    return str(uuid4())
+    return request.headers.get(REQUEST_ID_HEADER) or str(uuid4())
+
+
+def get_correlation_id(request: Request) -> str:
+    correlation_id = getattr(request.state, "correlation_id", None)
+    if isinstance(correlation_id, str) and correlation_id:
+        return correlation_id
+    return request.headers.get(CORRELATION_ID_HEADER) or get_request_id(request)
+
+
+def get_trace_id(request: Request) -> str | None:
+    trace_context = getattr(request.state, "trace_context", None)
+    trace_id = getattr(trace_context, "trace_id", None)
+    if isinstance(trace_id, str) and trace_id:
+        return trace_id
+    return request.headers.get(TRACE_ID_HEADER)
 
 
 def build_error_response(
@@ -43,11 +59,23 @@ def build_error_response(
     request: Request,
 ) -> JSONResponse:
     request_id = get_request_id(request)
-    payload = ErrorResponse(error_code=error_code, message=message, request_id=request_id)
+    correlation_id = get_correlation_id(request)
+    payload = ErrorResponse(
+        error_code=error_code,
+        message=message,
+        request_id=request_id,
+        correlation_id=correlation_id,
+    )
+    headers = {
+        REQUEST_ID_HEADER: request_id,
+        CORRELATION_ID_HEADER: correlation_id,
+    }
+    if trace_id := get_trace_id(request):
+        headers[TRACE_ID_HEADER] = trace_id
     return JSONResponse(
         status_code=status_code,
         content=payload.model_dump(mode="json"),
-        headers={REQUEST_ID_HEADER: request_id},
+        headers=headers,
     )
 
 
@@ -67,17 +95,6 @@ def _http_error_message(status_code: int, detail: object) -> str:
 
 
 def register_error_handlers(app: FastAPI) -> None:
-    @app.middleware("http")
-    async def add_request_id(
-        request: Request,
-        call_next: Callable[[Request], Awaitable[Response]],
-    ) -> Response:
-        request_id = request.headers.get(REQUEST_ID_HEADER) or str(uuid4())
-        request.state.request_id = request_id
-        response = await call_next(request)
-        response.headers[REQUEST_ID_HEADER] = request_id
-        return response
-
     @app.exception_handler(ApiError)
     async def handle_api_error(request: Request, exc: ApiError) -> JSONResponse:
         return build_error_response(exc.status_code, exc.error_code, exc.message, request)
