@@ -400,15 +400,18 @@
 ## C1.5 多 SQLite 连接与 session 管理
 
 **计划周期**：Week 2
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立 control、runtime、graph、event、log 多 SQLite 连接管理和 SQLAlchemy session 边界，不创建完整业务模型。
 **实施计划**：`docs/plans/implementation/c1.5-multi-sqlite-session-management.md`
+**验证摘要**：TDD RED 先观察到 `ModuleNotFoundError: No module named 'backend.app.db.base'`；实现数据库 role、session helper 与 Alembic 多库环境后，`uv run --no-sync python -m pytest backend/tests/db/test_database_sessions.py -q` 通过 5 个 C1.5 tests；`uv run --no-sync alembic -c backend/alembic.ini current` 退出码 0，并对五个 SQLite role 打印 `SQLiteImpl` 上下文；`uv run --no-sync python -m pytest backend/tests/db/test_database_sessions.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py -q` 通过 23 个 focused regression tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_prompt_asset_schemas.py backend/tests/schemas/test_observability_schemas.py backend/tests/db/test_database_sessions.py -q` 通过 71 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 71 个 tests。内联评审发现并修正默认 `.runtime/` 运行数据未被 Git 忽略的问题，未发现未解决 Critical 或 Important 问题。
 
 **修改文件列表**：
+- Modify: `.gitignore`
 - Create: `backend/app/db/base.py`
 - Create: `backend/app/db/session.py`
 - Create: `backend/alembic.ini`
 - Create: `backend/alembic/env.py`
+- Create: `backend/alembic/versions/.gitkeep`
 - Modify: `backend/tests/support/settings.py`
 - Create: `backend/tests/db/test_database_sessions.py`
 
