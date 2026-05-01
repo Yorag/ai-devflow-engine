@@ -201,9 +201,10 @@
 ## C1.1 全局枚举与状态契约
 
 **计划周期**：Week 2
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：固化功能一 V1 的状态、阶段、模板、Provider、交付、工具确认、工具风险、事件和运行触发枚举，为后续 Schema、投影、事件矩阵和前端状态提供单一 machine value 来源。
 **实施计划**：`docs/plans/implementation/c1.1-enum-contracts.md`
+**验证摘要**：`uv run --no-sync python -m pytest backend/tests/schemas/test_enum_contracts.py -v` 通过 8 个枚举契约测试；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py -q` 通过 36 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 36 个 backend tests 且无收集错误。TDD RED 先观察到缺少 `backend.app.domain.enums`，再观察到缺少 `backend.app.schemas.common`，随后 focused tests 转绿。
 
 **修改文件列表**：
 - Create: `backend/app/domain/enums.py`
@@ -269,9 +270,10 @@
 ## C1.2 控制面 Schema 契约
 
 **计划周期**：Week 2
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：定义 Project、Session、PipelineTemplate、AgentRole、Provider 和 DeliveryChannel 的请求响应 Schema，使控制面 API 有稳定字段边界。
 **实施计划**：`docs/plans/implementation/c1.2-control-plane-schemas.md`
+**验证摘要**：`uv run --no-sync python -m pytest backend/tests/schemas/test_control_plane_schemas.py -v` 通过 4 个控制面 Schema 契约测试；`uv run --no-sync python -m pytest backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py -q` 通过 12 个 Schema contract tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py -q` 通过 40 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 40 个 backend tests 且无收集错误。TDD RED 依次观察到缺少 `project`、`template`、`delivery_channel`、`configuration_package` schema 模块；评审修复中新增 RED 覆盖 `ProjectRead.name`、删除 / 移除结果不得声明物理删除，以及配置包 Provider 能力可省略待后端默认补齐的字段。
 
 **修改文件列表**：
 - Create: `backend/app/schemas/project.py`
@@ -321,9 +323,10 @@
 ## C1.3 Run、Feed 与事件 Schema 契约
 
 **计划周期**：Week 2
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：定义 Run、Narrative Feed、Workspace Projection、Timeline Projection 与 SSE 事件载荷 Schema，使前端 mock 和增量合并基于同一契约。
 **实施计划**：`docs/plans/implementation/c1.3-run-feed-event-schemas.md`
+**验证摘要**：`uv run --no-sync python -m pytest backend/tests/schemas/test_run_feed_event_schemas.py -v` 通过 5 个 C1.3 schema contract tests；`uv run --no-sync python -m pytest backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py -q` 通过 17 个 C1.1-C1.3 schema contract tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py -q` 通过 45 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 45 个 backend tests 且无收集错误。TDD RED 依次观察到缺少 `backend.app.schemas.feed`、`backend.app.schemas.run`、`backend.app.schemas.workspace`、`backend.app.schemas.events`，并在内联评审中补充混合 SSE payload 与 delivery failure 边界红绿测试。
 
 **修改文件列表**：
 - Create: `backend/app/schemas/run.py`
@@ -362,9 +365,10 @@
 ## C1.4 Inspector 与 Metrics Schema 契约
 
 **计划周期**：Week 2
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：定义 Stage、ControlItem、DeliveryResult 的 Inspector 投影与量化指标 Schema，保证右栏深看信息以结构化原始记录为准。
 **实施计划**：`docs/plans/implementation/c1.4-inspector-metrics-schemas.md`
+**验证摘要**：`uv run --no-sync python -m pytest backend/tests/schemas/test_inspector_metrics_schemas.py -v` 通过 4 个 C1.4 Inspector / Metrics schema contract tests；`uv run --no-sync python -m pytest backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py -q` 通过 21 个 C1.1-C1.4 schema contract tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py -q` 通过 49 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 49 个 backend tests 且无收集错误。TDD RED 先观察到缺少 `backend.app.schemas.inspector`，新增 `MetricSet` 后仍保持缺少 Inspector 的预期 RED，再新增 Inspector schemas 后 focused tests 转绿。内联评审未发现 Critical 或 Important 问题。
 
 **修改文件列表**：
 - Create: `backend/app/schemas/inspector.py`
