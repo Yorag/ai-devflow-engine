@@ -400,15 +400,18 @@
 ## C1.5 多 SQLite 连接与 session 管理
 
 **计划周期**：Week 2
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立 control、runtime、graph、event、log 多 SQLite 连接管理和 SQLAlchemy session 边界，不创建完整业务模型。
 **实施计划**：`docs/plans/implementation/c1.5-multi-sqlite-session-management.md`
+**验证摘要**：TDD RED 先观察到 `ModuleNotFoundError: No module named 'backend.app.db.base'`；实现数据库 role、session helper 与 Alembic 多库环境后，`uv run --no-sync python -m pytest backend/tests/db/test_database_sessions.py -q` 通过 5 个 C1.5 tests；`uv run --no-sync alembic -c backend/alembic.ini current` 退出码 0，并对五个 SQLite role 打印 `SQLiteImpl` 上下文；`uv run --no-sync python -m pytest backend/tests/db/test_database_sessions.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py -q` 通过 23 个 focused regression tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_prompt_asset_schemas.py backend/tests/schemas/test_observability_schemas.py backend/tests/db/test_database_sessions.py -q` 通过 71 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 71 个 tests。内联评审发现并修正默认 `.runtime/` 运行数据未被 Git 忽略的问题，未发现未解决 Critical 或 Important 问题。
 
 **修改文件列表**：
+- Modify: `.gitignore`
 - Create: `backend/app/db/base.py`
 - Create: `backend/app/db/session.py`
 - Create: `backend/alembic.ini`
 - Create: `backend/alembic/env.py`
+- Create: `backend/alembic/versions/.gitkeep`
 - Modify: `backend/tests/support/settings.py`
 - Create: `backend/tests/db/test_database_sessions.py`
 
@@ -441,8 +444,9 @@
 ## C1.6 control 模型与迁移边界
 
 **计划周期**：Week 2
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立 `control.db` 的首批规范模型和迁移边界，确保项目、会话、模板、Provider 与项目级交付配置只在控制面持久化。
+**验证摘要**：实施计划 `docs/plans/implementation/c1.6-control-model-boundary.md` 已完成。TDD RED 先观察到 `ModuleNotFoundError: No module named 'backend.app.db.models.control'`；实现 `backend/app/db/models/control.py` 并接入 Alembic metadata 后，`uv run --no-sync python -m pytest backend/tests/db/test_control_model_boundary.py -q` 通过 5 个 C1.6 tests；`uv run --no-sync alembic -c backend/alembic.ini current` 退出码 0，并对五个 SQLite role 打印 `SQLiteImpl` 上下文；经用户批准后，`uv run --no-sync alembic -c backend/alembic.ini upgrade head` 退出码 0，并对五个 SQLite role 打印 `SQLiteImpl` 上下文；`uv run --no-sync python -m pytest backend/tests/db/test_control_model_boundary.py -v` 通过 5 个 focused tests；`uv run --no-sync python -m pytest backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py -q` 通过 28 个 persistence regression tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_prompt_asset_schemas.py backend/tests/schemas/test_observability_schemas.py backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py -q` 通过 76 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 76 个 backend tests。
 **实施计划**：`docs/plans/implementation/c1.6-control-model-boundary.md`
 
 **修改文件列表**：
@@ -478,9 +482,10 @@
 ## C1.7 runtime 模型与迁移边界
 
 **计划周期**：Week 2
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立 `runtime.db` 的运行领域模型和迁移边界，确保 run、阶段、产物、审批、控制记录和交付记录作为产品级领域真源存在。
 **实施计划**：`docs/plans/implementation/c1.7-runtime-model-boundary.md`
+**验证摘要**：实施计划 `docs/plans/implementation/c1.7-runtime-model-boundary.md` 已完成。TDD RED 先观察到 `ModuleNotFoundError: No module named 'backend.app.db.models.runtime'`；实现 `backend/app/db/models/runtime.py` 并接入 Alembic metadata 后，`uv run --no-sync python -m pytest backend/tests/db/test_runtime_model_boundary.py -q` 通过 5 个 C1.7 tests。初次 GREEN 暴露 `PipelineRunModel` 与快照表之间的 SQLAlchemy sorted table 循环 warning，随后修正为 `PipelineRunModel` 持有结构化快照 FK、快照 `run_id` 保持非 FK 关联字段，focused tests 复跑无 warning。`uv run --no-sync alembic -c backend/alembic.ini current` 退出码 0，并对五个 SQLite role 打印 `SQLiteImpl` 上下文；经用户批准后，`uv run --no-sync alembic -c backend/alembic.ini upgrade head` 退出码 0，并对五个 SQLite role 打印 `SQLiteImpl` 上下文；`uv run --no-sync python -m pytest backend/tests/db/test_runtime_model_boundary.py -v` 通过 5 个 focused tests；`uv run --no-sync python -m pytest backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py backend/tests/db/test_runtime_model_boundary.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py -q` 通过 33 个 persistence regression tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_prompt_asset_schemas.py backend/tests/schemas/test_observability_schemas.py backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py backend/tests/db/test_runtime_model_boundary.py -q` 通过 81 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 81 个 backend tests。内联评审修正测试数据未创建对应 StageRun 的关系覆盖缺口，未发现未解决 Critical 或 Important 问题。
 
 **修改文件列表**：
 - Create: `backend/app/db/models/runtime.py`
@@ -530,9 +535,10 @@
 ## C1.8 graph 模型与迁移边界
 
 **计划周期**：Week 2
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立 `graph.db` 的执行图状态模型和迁移边界，确保 GraphDefinition、GraphThread、GraphCheckpoint 与 GraphInterrupt 独立于产品领域模型存在。
 **实施计划**：`docs/plans/implementation/c1.8-graph-model-boundary.md`
+**验证摘要**：实施计划 `docs/plans/implementation/c1.8-graph-model-boundary.md` 已完成。TDD RED 先观察到 `ModuleNotFoundError: No module named 'backend.app.db.models.graph'`；实现 `backend/app/db/models/graph.py` 后，`uv run --no-sync python -m pytest backend/tests/db/test_graph_model_boundary.py -q` 通过 4 个初始 C1.8 tests。随后新增 Alembic metadata 导入测试，先观察到 `backend/alembic/env.py` 缺少 `backend.app.db.models.graph` 导入，再接入导入后 focused tests 通过 5 个 C1.8 tests。`uv run --no-sync alembic -c backend/alembic.ini current` 退出码 0，并对五个 SQLite role 打印 `SQLiteImpl` 上下文；经用户批准后，`uv run --no-sync alembic -c backend/alembic.ini upgrade head` 退出码 0，并对五个 SQLite role 打印 `SQLiteImpl` 上下文；`uv run --no-sync python -m pytest backend/tests/db/test_graph_model_boundary.py -v` 通过 5 个 focused tests；`uv run --no-sync python -m pytest backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py backend/tests/db/test_runtime_model_boundary.py backend/tests/db/test_graph_model_boundary.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py -q` 通过 38 个 persistence regression tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_prompt_asset_schemas.py backend/tests/schemas/test_observability_schemas.py backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py backend/tests/db/test_runtime_model_boundary.py backend/tests/db/test_graph_model_boundary.py -q` 通过 86 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 86 个 backend tests。内联评审未发现未解决 Critical 或 Important 问题。
 
 **修改文件列表**：
 - Create: `backend/app/db/models/graph.py`
@@ -562,9 +568,10 @@
 ## C1.9 event 模型边界
 
 **计划周期**：Week 2
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立 `event.db` 的领域事件和 Narrative Feed 投影来源数据边界，使查询投影与 SSE 增量共享同一事件来源，并明确审计记录不属于 `event.db`。
 **实施计划**：`docs/plans/implementation/c1.9-event-model-boundary.md`
+**验证摘要**：实施计划 `docs/plans/implementation/c1.9-event-model-boundary.md` 已完成。TDD RED 先观察到缺少 `backend.app.db.models.event`，以及 Alembic env 缺少 event 模型导入；实现 `backend/app/db/models/event.py` 后，focused tests 剩余 Alembic 导入断言失败；接入 `backend/alembic/env.py` 导入后，`uv run --no-sync python -m pytest backend/tests/db/test_event_model_boundary.py -q` 通过 5 个 C1.9 tests。`uv run --no-sync alembic -c backend/alembic.ini current` 退出码 0；经用户批准后，`uv run --no-sync alembic -c backend/alembic.ini upgrade head` 退出码 0；`uv run --no-sync python -m pytest backend/tests/db/test_event_model_boundary.py -v` 通过 5 个 focused tests；`uv run --no-sync python -m pytest backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py backend/tests/db/test_runtime_model_boundary.py backend/tests/db/test_graph_model_boundary.py backend/tests/db/test_event_model_boundary.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py -q` 通过 43 个 persistence regression tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_prompt_asset_schemas.py backend/tests/schemas/test_observability_schemas.py backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py backend/tests/db/test_runtime_model_boundary.py backend/tests/db/test_graph_model_boundary.py backend/tests/db/test_event_model_boundary.py -q` 通过 91 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 91 个 backend tests。内联评审未发现未解决 Critical 或 Important 问题。
 
 **修改文件列表**：
 - Create: `backend/app/db/models/event.py`
@@ -721,11 +728,13 @@
 ## L1.2 log 模型与迁移边界
 
 **计划周期**：Week 2
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立 `log.db` 的运行日志轻量索引、审计台账、载荷摘要和关联标识模型边界，使日志审计独立于领域事件与产品状态真源。
 **实施计划**：`docs/plans/implementation/l1.2-log-model-boundary.md`
+**验证摘要**：实施计划 `docs/plans/implementation/l1.2-log-model-boundary.md` 已完成。TDD RED 先观察到缺少 `backend.app.db.models.log`，以及 Alembic env 缺少 log 模型导入；实现 `backend/app/db/models/log.py` 后，focused tests 剩余 Alembic 导入断言失败；接入 `backend/alembic/env.py` 导入后，`uv run --no-sync python -m pytest backend/tests/db/test_log_model_boundary.py -q` 通过 7 个 L1.2 tests。`uv run --no-sync alembic -c backend/alembic.ini current` 退出码 0；经用户批准后，`uv run --no-sync alembic -c backend/alembic.ini upgrade head` 退出码 0；`uv run --no-sync python -m pytest backend/tests/db/test_log_model_boundary.py -v` 通过 7 个 focused tests；`uv run --no-sync python -m pytest backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py backend/tests/db/test_runtime_model_boundary.py backend/tests/db/test_graph_model_boundary.py backend/tests/db/test_event_model_boundary.py backend/tests/db/test_log_model_boundary.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py -q` 通过 50 个 persistence regression tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_prompt_asset_schemas.py backend/tests/schemas/test_observability_schemas.py backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py backend/tests/db/test_runtime_model_boundary.py backend/tests/db/test_graph_model_boundary.py backend/tests/db/test_event_model_boundary.py backend/tests/db/test_log_model_boundary.py -q` 通过 98 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 98 个 backend tests。内联评审未发现未解决 Critical 或 Important 问题。
 
 **修改文件列表**：
+- Modify: `backend/alembic/env.py`
 - Create: `backend/app/db/models/log.py`
 - Create: `backend/tests/db/test_log_model_boundary.py`
 
