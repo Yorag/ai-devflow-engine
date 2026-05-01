@@ -614,9 +614,10 @@
 ## F2.2 Mock Fixtures 与 Query Hooks
 
 **计划周期**：Week 2-3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立由后端 Schema 派生的 mock fixtures 和 TanStack Query hooks，使前端可在无后端时推进控制台流程。
 **实施计划**：`docs/plans/implementation/f2.2-mock-fixtures-query-hooks.md`
+**验证摘要**：`npm --prefix frontend run test -- --run src/api/__tests__/hooks.test.ts` 通过并覆盖 mock session 状态、top-level feed entry 契约、项目/会话可见性、配置错误 fixtures、配置包导入导出 fixtures、mock API handlers 与 TanStack Query hooks；`npm --prefix frontend run test -- --run` 通过；`npm --prefix frontend run build` 通过。本切片只建立 F2.2 mock fixtures、fetch-compatible mock handlers 和 Query hooks，未实现可见 UI、Zustand store、SSE reducer、后端路由、OpenAPI 生成或普通用户可编辑的平台运行设置 client。
 
 **修改文件列表**：
 - Create: `frontend/src/api/hooks.ts`
