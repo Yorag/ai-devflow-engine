@@ -37,7 +37,7 @@
 | DB02 | `feat/backend-runtime-bootstrap` | B0.2, B0.3, L0.1 | DB01 | S | merged | `backend/app/api/*`, `error_codes.py`, settings、日志目录预检 | FastAPI、统一错误响应、启动配置和运行数据目录 |
 | DB03 | `feat/frontend-spa-baseline` | F0.1 | DB01 | G | merged | `frontend/`, 前端测试入口 | 前端 SPA、测试基线和首个设计质量门 |
 | DB04 | `feat/core-schema-contracts` | C1.1-C1.4 | DB02 | S | merged | 全局枚举、核心 Schema、事件 payload、Projection Schema | 全局枚举、控制面、Run/Feed/Event 和 Inspector 契约 |
-| DB05 | `feat/runtime-prompt-log-contracts` | C1.10, C1.10a, L1.1 | DB04 | Y | ready_for_review | 运行设置 Schema、PromptAsset Schema、TraceContext | 运行设置、提示词资产和日志审计契约 |
+| DB05 | `feat/runtime-prompt-log-contracts` | C1.10, C1.10a, L1.1 | DB04 | Y | merged | 运行设置 Schema、PromptAsset Schema、TraceContext | 运行设置、提示词资产和日志审计契约 |
 | DB06 | `feat/persistence-boundaries` | C1.5-C1.9, L1.2 | DB04, DB05 | S | planned | 数据库 session、control/runtime/graph/event/log models、Alembic migration 链 | 多 SQLite 职责库、模型和迁移边界 |
 | DB07 | `feat/observability-control-audit` | L2.1-L2.4 | DB05, DB06 | S | planned | request context、redaction、JSONL writer、AuditService | API 关联上下文、payload 裁剪、日志写入和控制面审计 |
 | DB08 | `feat/control-plane-core` | C2.1-C2.4 | DB05, DB06, DB07 | S | planned | control routes、Project/Session/Template service、audit hooks | Project、Session、系统模板和用户模板核心控制面 |
