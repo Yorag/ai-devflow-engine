@@ -568,9 +568,10 @@
 ## C1.9 event 模型边界
 
 **计划周期**：Week 2
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立 `event.db` 的领域事件和 Narrative Feed 投影来源数据边界，使查询投影与 SSE 增量共享同一事件来源，并明确审计记录不属于 `event.db`。
 **实施计划**：`docs/plans/implementation/c1.9-event-model-boundary.md`
+**验证摘要**：实施计划 `docs/plans/implementation/c1.9-event-model-boundary.md` 已完成。TDD RED 先观察到缺少 `backend.app.db.models.event`，以及 Alembic env 缺少 event 模型导入；实现 `backend/app/db/models/event.py` 后，focused tests 剩余 Alembic 导入断言失败；接入 `backend/alembic/env.py` 导入后，`uv run --no-sync python -m pytest backend/tests/db/test_event_model_boundary.py -q` 通过 5 个 C1.9 tests。`uv run --no-sync alembic -c backend/alembic.ini current` 退出码 0；经用户批准后，`uv run --no-sync alembic -c backend/alembic.ini upgrade head` 退出码 0；`uv run --no-sync python -m pytest backend/tests/db/test_event_model_boundary.py -v` 通过 5 个 focused tests；`uv run --no-sync python -m pytest backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py backend/tests/db/test_runtime_model_boundary.py backend/tests/db/test_graph_model_boundary.py backend/tests/db/test_event_model_boundary.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py -q` 通过 43 个 persistence regression tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_prompt_asset_schemas.py backend/tests/schemas/test_observability_schemas.py backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py backend/tests/db/test_runtime_model_boundary.py backend/tests/db/test_graph_model_boundary.py backend/tests/db/test_event_model_boundary.py -q` 通过 91 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 91 个 backend tests。内联评审未发现未解决 Critical 或 Important 问题。
 
 **修改文件列表**：
 - Create: `backend/app/db/models/event.py`
