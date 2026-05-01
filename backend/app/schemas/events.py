@@ -51,15 +51,48 @@ class SessionEvent(_StrictBaseModel):
             )
 
         payload_model = _EVENT_PAYLOAD_MODELS.get(self.event_type)
+        parsed_payload: BaseModel | None = None
         if payload_model is not None:
-            payload_model.model_validate(self.payload[required_key])
+            parsed_payload = payload_model.model_validate(self.payload[required_key])
+            payload_run_id = getattr(parsed_payload, "run_id", None)
+            if payload_run_id is not None:
+                _require_matching_run_id(
+                    event_run_id=self.run_id,
+                    payload_run_id=payload_run_id,
+                    field_name=f"{required_key}.run_id",
+                )
+            payload_session_id = getattr(parsed_payload, "session_id", None)
+            if payload_session_id is not None and payload_session_id != self.session_id:
+                raise ValueError(f"{required_key}.session_id must match session_id")
 
         if self.event_type is common.SseEventType.CLARIFICATION_REQUESTED:
             _require_keys(self.payload, "run_id", "stage_run_id", "control_item")
-            ControlItemFeedEntry.model_validate(self.payload["control_item"])
+            _require_matching_run_id(
+                event_run_id=self.run_id,
+                payload_run_id=self.payload["run_id"],
+                field_name="payload.run_id",
+            )
+            control_item = ControlItemFeedEntry.model_validate(
+                self.payload["control_item"]
+            )
+            _require_matching_run_id(
+                event_run_id=self.run_id,
+                payload_run_id=control_item.run_id,
+                field_name="control_item.run_id",
+            )
         elif self.event_type is common.SseEventType.CLARIFICATION_ANSWERED:
             _require_keys(self.payload, "run_id", "stage_run_id", "message_item")
-            MessageFeedEntry.model_validate(self.payload["message_item"])
+            _require_matching_run_id(
+                event_run_id=self.run_id,
+                payload_run_id=self.payload["run_id"],
+                field_name="payload.run_id",
+            )
+            message_item = MessageFeedEntry.model_validate(self.payload["message_item"])
+            _require_matching_run_id(
+                event_run_id=self.run_id,
+                payload_run_id=message_item.run_id,
+                field_name="message_item.run_id",
+            )
         elif self.event_type is common.SseEventType.SESSION_STATUS_CHANGED:
             _require_keys(
                 self.payload,
@@ -68,6 +101,8 @@ class SessionEvent(_StrictBaseModel):
                 "current_run_id",
                 "current_stage_type",
             )
+            if self.payload["session_id"] != self.session_id:
+                raise ValueError("payload.session_id must match session_id")
             common.SessionStatus(self.payload["status"])
             if self.payload["current_stage_type"] is not None:
                 common.StageType(self.payload["current_stage_type"])
@@ -79,6 +114,16 @@ def _require_keys(payload: dict[str, Any], *keys: str) -> None:
     missing_keys = [key for key in keys if key not in payload]
     if missing_keys:
         raise ValueError(f"payload missing required keys: {', '.join(missing_keys)}")
+
+
+def _require_matching_run_id(
+    *,
+    event_run_id: str | None,
+    payload_run_id: str,
+    field_name: str,
+) -> None:
+    if event_run_id != payload_run_id:
+        raise ValueError(f"{field_name} must match run_id")
 
 
 _EVENT_REQUIRED_KEYS: dict[common.SseEventType, str] = {

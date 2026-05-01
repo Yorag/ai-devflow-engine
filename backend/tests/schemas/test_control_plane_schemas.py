@@ -281,7 +281,14 @@ def test_provider_and_delivery_channel_schemas_expose_refs_without_secret_values
         api_key_ref="env:DEEPSEEK_API_KEY",
         default_model_id="deepseek-chat",
         supported_model_ids=["deepseek-chat", "deepseek-reasoner"],
-        runtime_capabilities=[default_capabilities],
+        runtime_capabilities=[
+            default_capabilities,
+            ModelRuntimeCapabilities(
+                model_id="deepseek-reasoner",
+                max_output_tokens=8192,
+                supports_native_reasoning=True,
+            ),
+        ],
         created_at=NOW,
         updated_at=NOW,
     )
@@ -311,6 +318,56 @@ def test_provider_and_delivery_channel_schemas_expose_refs_without_secret_values
             created_at=NOW,
             updated_at=NOW,
         )
+
+    for invalid_provider_fields in (
+        {
+            "supported_model_ids": ["custom-model", ""],
+            "runtime_capabilities": [
+                ModelRuntimeCapabilities(
+                    model_id="custom-model",
+                    max_output_tokens=4096,
+                )
+            ],
+        },
+        {
+            "default_model_id": "custom-reasoner",
+            "supported_model_ids": ["custom-model"],
+            "runtime_capabilities": [
+                ModelRuntimeCapabilities(
+                    model_id="custom-model",
+                    max_output_tokens=4096,
+                ),
+                ModelRuntimeCapabilities(
+                    model_id="custom-reasoner",
+                    max_output_tokens=4096,
+                ),
+            ],
+        },
+        {
+            "supported_model_ids": ["custom-model", "custom-reasoner"],
+            "runtime_capabilities": [
+                ModelRuntimeCapabilities(
+                    model_id="custom-model",
+                    max_output_tokens=4096,
+                )
+            ],
+        },
+    ):
+        with pytest.raises(ValidationError):
+            ProviderRead(
+                **{
+                    "provider_id": "provider-custom",
+                    "display_name": "Custom",
+                    "provider_source": common.ProviderSource.CUSTOM,
+                    "protocol_type": common.ProviderProtocolType.OPENAI_COMPLETIONS_COMPATIBLE,
+                    "base_url": "https://models.example.test",
+                    "api_key_ref": "env:CUSTOM_API_KEY",
+                    "default_model_id": "custom-model",
+                    "created_at": NOW,
+                    "updated_at": NOW,
+                    **invalid_provider_fields,
+                }
+            )
 
     delivery = ProjectDeliveryChannelDetailProjection(
         project_id="project-default",
@@ -466,6 +523,43 @@ def test_configuration_package_schemas_allow_user_visible_config_only() -> None:
     ]
     with pytest.raises(ValidationError):
         ConfigurationPackageImportRequest(**package_with_invalid_capabilities)
+
+    package_with_empty_supported_model = deepcopy(package_payload)
+    package_with_empty_supported_model["providers"][0]["supported_model_ids"] = [
+        "deepseek-chat",
+        "",
+    ]
+    with pytest.raises(ValidationError):
+        ConfigurationPackageImportRequest(**package_with_empty_supported_model)
+
+    package_with_default_model_outside_supported = deepcopy(package_payload)
+    package_with_default_model_outside_supported["providers"][0][
+        "default_model_id"
+    ] = "deepseek-reasoner"
+    package_with_default_model_outside_supported["providers"][0][
+        "runtime_capabilities"
+    ].append(
+        {
+            "model_id": "deepseek-reasoner",
+            "context_window_tokens": 128000,
+            "max_output_tokens": 8192,
+            "supports_tool_calling": False,
+            "supports_structured_output": False,
+            "supports_native_reasoning": True,
+        }
+    )
+    with pytest.raises(ValidationError):
+        ConfigurationPackageImportRequest(
+            **package_with_default_model_outside_supported
+        )
+
+    package_with_uncovered_supported_model = deepcopy(package_payload)
+    package_with_uncovered_supported_model["providers"][0]["supported_model_ids"] = [
+        "deepseek-chat",
+        "deepseek-reasoner",
+    ]
+    with pytest.raises(ValidationError):
+        ConfigurationPackageImportRequest(**package_with_uncovered_supported_model)
 
     package_with_invalid_git_delivery = deepcopy(package_payload)
     package_with_invalid_git_delivery["delivery_channels"] = [

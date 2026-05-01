@@ -159,6 +159,64 @@ def test_session_workspace_projection_groups_runs_feed_and_composer() -> None:
             ),
         )
 
+    with pytest.raises(ValidationError):
+        SessionWorkspaceProjection(
+            session=build_session().model_copy(update={"project_id": "project-other"}),
+            project=build_project(),
+            delivery_channel=build_delivery_channel(),
+            runs=[run],
+            narrative_feed=[],
+            current_run_id="run-1",
+            current_stage_type=common.StageType.REQUIREMENT_ANALYSIS,
+            composer_state=ComposerStateProjection(
+                mode="running",
+                is_input_enabled=False,
+                primary_action="pause",
+                secondary_actions=["terminate"],
+                bound_run_id="run-1",
+            ),
+        )
+
+    with pytest.raises(ValidationError):
+        SessionWorkspaceProjection(
+            session=build_session().model_copy(update={"current_run_id": "run-2"}),
+            project=build_project(),
+            delivery_channel=build_delivery_channel(),
+            runs=[run],
+            narrative_feed=[],
+            current_run_id="run-1",
+            current_stage_type=common.StageType.REQUIREMENT_ANALYSIS,
+            composer_state=ComposerStateProjection(
+                mode="running",
+                is_input_enabled=False,
+                primary_action="pause",
+                secondary_actions=["terminate"],
+                bound_run_id="run-1",
+            ),
+        )
+
+    with pytest.raises(ValidationError):
+        SessionWorkspaceProjection(
+            session=build_session(),
+            project=build_project(),
+            delivery_channel=build_delivery_channel(),
+            runs=[
+                run.model_copy(
+                    update={"current_stage_type": common.StageType.SOLUTION_DESIGN}
+                )
+            ],
+            narrative_feed=[],
+            current_run_id="run-1",
+            current_stage_type=common.StageType.REQUIREMENT_ANALYSIS,
+            composer_state=ComposerStateProjection(
+                mode="running",
+                is_input_enabled=False,
+                primary_action="pause",
+                secondary_actions=["terminate"],
+                bound_run_id="run-1",
+            ),
+        )
+
 
 def test_run_timeline_and_solution_artifact_lock_feed_and_downstream_refs() -> None:
     from backend.app.schemas.feed import ExecutionNodeProjection
@@ -460,6 +518,169 @@ def test_provider_call_stage_item_and_sse_stage_payload_share_projection_semanti
         ProviderCallStageItem(
             **provider_item.model_dump(mode="json"),
             approval_type="solution_design_approval",
+        )
+
+
+def test_session_events_reject_envelope_payload_identity_mismatches() -> None:
+    from backend.app.schemas.events import SessionEvent
+    from backend.app.schemas.feed import (
+        ControlItemFeedEntry,
+        ExecutionNodeProjection,
+        MessageFeedEntry,
+        StageItemProjection,
+    )
+    from backend.app.schemas.run import RunSummaryProjection
+
+    with pytest.raises(ValidationError):
+        SessionEvent(
+            event_id="event-session-created-mismatch",
+            session_id="session-2",
+            run_id=None,
+            event_type=common.SseEventType.SESSION_CREATED,
+            occurred_at=NOW,
+            payload={"session": build_session().model_dump(mode="json")},
+        )
+
+    message_item = MessageFeedEntry(
+        entry_id="entry-message-1",
+        run_id="run-1",
+        occurred_at=NOW,
+        message_id="message-1",
+        author="user",
+        content="Add stable schema contracts.",
+    )
+    with pytest.raises(ValidationError):
+        SessionEvent(
+            event_id="event-message-mismatch",
+            session_id="session-1",
+            run_id="run-2",
+            event_type=common.SseEventType.SESSION_MESSAGE_APPENDED,
+            occurred_at=NOW,
+            payload={"message_item": message_item.model_dump(mode="json")},
+        )
+
+    run_projection = RunSummaryProjection(
+        run_id="run-1",
+        attempt_index=1,
+        status=common.RunStatus.RUNNING,
+        trigger_source=common.RunTriggerSource.INITIAL_REQUIREMENT,
+        started_at=NOW,
+        ended_at=None,
+        current_stage_type=common.StageType.REQUIREMENT_ANALYSIS,
+        is_active=True,
+    )
+    with pytest.raises(ValidationError):
+        SessionEvent(
+            event_id="event-run-mismatch",
+            session_id="session-1",
+            run_id="run-2",
+            event_type=common.SseEventType.PIPELINE_RUN_CREATED,
+            occurred_at=NOW,
+            payload={"run": run_projection.model_dump(mode="json")},
+        )
+
+    stage_node = ExecutionNodeProjection(
+        entry_id="entry-stage-1",
+        run_id="run-1",
+        occurred_at=NOW,
+        stage_run_id="stage-1",
+        stage_type=common.StageType.REQUIREMENT_ANALYSIS,
+        status=common.StageStatus.RUNNING,
+        attempt_index=1,
+        started_at=NOW,
+        ended_at=None,
+        summary="Requirement Analysis is running.",
+        items=[
+            StageItemProjection(
+                item_id="item-context-1",
+                type=common.StageItemType.CONTEXT,
+                occurred_at=NOW,
+                title="Context loaded",
+                summary="Project context loaded.",
+                content=None,
+                artifact_refs=[],
+                metrics={},
+            )
+        ],
+        metrics={},
+    )
+    with pytest.raises(ValidationError):
+        SessionEvent(
+            event_id="event-stage-mismatch",
+            session_id="session-1",
+            run_id="run-2",
+            event_type=common.SseEventType.STAGE_UPDATED,
+            occurred_at=NOW,
+            payload={"stage_node": stage_node.model_dump(mode="json")},
+        )
+
+    with pytest.raises(ValidationError):
+        SessionEvent(
+            event_id="event-session-status-mismatch",
+            session_id="session-1",
+            run_id="run-1",
+            event_type=common.SseEventType.SESSION_STATUS_CHANGED,
+            occurred_at=NOW,
+            payload={
+                "session_id": "session-2",
+                "status": "running",
+                "current_run_id": "run-1",
+                "current_stage_type": "requirement_analysis",
+            },
+        )
+
+    clarification_item = ControlItemFeedEntry(
+        entry_id="entry-clarification-1",
+        run_id="run-1",
+        occurred_at=NOW,
+        control_record_id="control-clarification-1",
+        control_type=common.ControlItemType.CLARIFICATION_WAIT,
+        source_stage_type=common.StageType.REQUIREMENT_ANALYSIS,
+        target_stage_type=common.StageType.REQUIREMENT_ANALYSIS,
+        title="Clarification needed",
+        summary="Requirement Analysis is waiting for user input.",
+        payload_ref="clarification-record-1",
+    )
+    with pytest.raises(ValidationError):
+        SessionEvent(
+            event_id="event-clarification-run-mismatch",
+            session_id="session-1",
+            run_id="run-1",
+            event_type=common.SseEventType.CLARIFICATION_REQUESTED,
+            occurred_at=NOW,
+            payload={
+                "run_id": "run-2",
+                "stage_run_id": "stage-requirement-1",
+                "control_item": clarification_item.model_dump(mode="json"),
+            },
+        )
+
+    with pytest.raises(ValidationError):
+        SessionEvent(
+            event_id="event-clarification-item-mismatch",
+            session_id="session-1",
+            run_id="run-2",
+            event_type=common.SseEventType.CLARIFICATION_REQUESTED,
+            occurred_at=NOW,
+            payload={
+                "run_id": "run-2",
+                "stage_run_id": "stage-requirement-1",
+                "control_item": clarification_item.model_dump(mode="json"),
+            },
+        )
+
+    with pytest.raises(ValidationError):
+        SessionEvent(
+            event_id="event-clarification-answer-mismatch",
+            session_id="session-1",
+            run_id="run-2",
+            event_type=common.SseEventType.CLARIFICATION_ANSWERED,
+            occurred_at=NOW,
+            payload={
+                "run_id": "run-2",
+                "stage_run_id": "stage-requirement-1",
+                "message_item": message_item.model_dump(mode="json"),
+            },
         )
 
 

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt, model_validator
 
@@ -8,6 +8,9 @@ from backend.app.schemas import common
 
 class _StrictBaseModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+NonEmptyString = Annotated[str, Field(min_length=1)]
 
 
 class ConfigurationPackageScope(_StrictBaseModel):
@@ -32,10 +35,26 @@ class ConfigurationPackageProvider(_StrictBaseModel):
     base_url: str = Field(min_length=1)
     api_key_ref: str | None = None
     default_model_id: str = Field(min_length=1)
-    supported_model_ids: list[str] = Field(min_length=1)
+    supported_model_ids: list[NonEmptyString] = Field(min_length=1)
     runtime_capabilities: list[ConfigurationPackageModelRuntimeCapabilities] = Field(
         min_length=1
     )
+
+    @model_validator(mode="after")
+    def validate_model_contract(self) -> "ConfigurationPackageProvider":
+        if self.default_model_id not in self.supported_model_ids:
+            raise ValueError("default_model_id must be in supported_model_ids")
+
+        capability_model_ids = {
+            capability.model_id for capability in self.runtime_capabilities
+        }
+        missing_model_ids = set(self.supported_model_ids) - capability_model_ids
+        if missing_model_ids:
+            raise ValueError(
+                "runtime_capabilities must cover supported_model_ids: "
+                f"{', '.join(sorted(missing_model_ids))}"
+            )
+        return self
 
 
 class ConfigurationPackageDeliveryChannel(_StrictBaseModel):
