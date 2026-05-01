@@ -201,9 +201,10 @@
 ## C1.1 全局枚举与状态契约
 
 **计划周期**：Week 2
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：固化功能一 V1 的状态、阶段、模板、Provider、交付、工具确认、工具风险、事件和运行触发枚举，为后续 Schema、投影、事件矩阵和前端状态提供单一 machine value 来源。
 **实施计划**：`docs/plans/implementation/c1.1-enum-contracts.md`
+**验证摘要**：`uv run --no-sync python -m pytest backend/tests/schemas/test_enum_contracts.py -v` 通过 8 个枚举契约测试；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py -q` 通过 36 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 36 个 backend tests 且无收集错误。TDD RED 先观察到缺少 `backend.app.domain.enums`，再观察到缺少 `backend.app.schemas.common`，随后 focused tests 转绿。
 
 **修改文件列表**：
 - Create: `backend/app/domain/enums.py`
