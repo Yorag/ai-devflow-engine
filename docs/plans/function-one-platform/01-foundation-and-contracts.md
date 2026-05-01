@@ -323,9 +323,10 @@
 ## C1.3 Run、Feed 与事件 Schema 契约
 
 **计划周期**：Week 2
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：定义 Run、Narrative Feed、Workspace Projection、Timeline Projection 与 SSE 事件载荷 Schema，使前端 mock 和增量合并基于同一契约。
 **实施计划**：`docs/plans/implementation/c1.3-run-feed-event-schemas.md`
+**验证摘要**：`uv run --no-sync python -m pytest backend/tests/schemas/test_run_feed_event_schemas.py -v` 通过 5 个 C1.3 schema contract tests；`uv run --no-sync python -m pytest backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py -q` 通过 17 个 C1.1-C1.3 schema contract tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py -q` 通过 45 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 45 个 backend tests 且无收集错误。TDD RED 依次观察到缺少 `backend.app.schemas.feed`、`backend.app.schemas.run`、`backend.app.schemas.workspace`、`backend.app.schemas.events`，并在内联评审中补充混合 SSE payload 与 delivery failure 边界红绿测试。
 
 **修改文件列表**：
 - Create: `backend/app/schemas/run.py`

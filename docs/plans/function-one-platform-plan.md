@@ -188,7 +188,7 @@
 | F0.1 | 前端 SPA 骨架与测试基线 | Week 1 | [x] | 前端 | [01](function-one-platform/01-foundation-and-contracts.md#f01) |
 | C1.1 | 全局枚举与状态契约 | Week 2 | [x] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c11) |
 | C1.2 | 控制面 Schema 契约 | Week 2 | [x] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c12) |
-| C1.3 | Run、Feed 与事件 Schema 契约 | Week 2 | [ ] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c13) |
+| C1.3 | Run、Feed 与事件 Schema 契约 | Week 2 | [x] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c13) |
 | C1.4 | Inspector 与 Metrics Schema 契约 | Week 2 | [ ] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c14) |
 | C1.5 | 多 SQLite 连接与 session 管理 | Week 2 | [ ] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c15) |
 | C1.6 | control 模型与迁移边界 | Week 2 | [ ] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c16) |
