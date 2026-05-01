@@ -99,6 +99,30 @@ This repository is currently in the V1 platform buildout. The authoritative prod
 | Production backend/frontend code | Planned slice by slice; not treated as complete by this README. |
 | Existing archived designs | Kept only as historical references under `docs/archive/`. |
 
+## Development Commands
+
+Backend commands:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+pytest --collect-only
+```
+
+The Python interpreter used to create `.venv` must be Python 3.11 or newer.
+
+Frontend commands:
+
+```powershell
+npm --prefix frontend install
+npm --prefix frontend run dev
+npm --prefix frontend run build
+npm --prefix frontend run test -- --run
+```
+
+The B0.1 backend baseline does not create a FastAPI app entry. `backend/app/main.py` and API health checks are owned by B0.2. The B0.1 frontend baseline only creates the Vite/Vitest engineering entry; React routes, QueryClient setup, pages, and visible console UI are owned by F0.1.
+
 ## Repository Map
 
 | Path | Purpose |

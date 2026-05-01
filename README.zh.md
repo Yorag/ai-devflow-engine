@@ -103,6 +103,30 @@ AI DevFlow Engine 规划为一个本地优先的研发工作台：
 | 生产后端/前端代码 | 按切片规划推进；本 README 不把它描述为已完成能力。 |
 | 历史设计文档 | 仅作为历史参考保留在 `docs/archive/`。 |
 
+## 开发命令
+
+后端命令：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+pytest --collect-only
+```
+
+创建 `.venv` 的 Python 解释器必须是 Python 3.11 或更新版本。
+
+前端命令：
+
+```powershell
+npm --prefix frontend install
+npm --prefix frontend run dev
+npm --prefix frontend run build
+npm --prefix frontend run test -- --run
+```
+
+B0.1 后端基线不创建 FastAPI 应用入口。`backend/app/main.py` 和 API health check 由 B0.2 负责。B0.1 前端基线只创建 Vite/Vitest 工程入口；React 路由、QueryClient、页面和可见控制台 UI 由 F0.1 负责。
+
 ## 仓库地图
 
 | 路径 | 用途 |

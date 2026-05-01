@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-devflow-engine"
+version = "0.1.0"
+description = "Local-first AI engineering workflow engine for requirement-to-delivery pipelines."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+  "alembic>=1.18,<2",
+  "fastapi>=0.136,<1",
+  "httpx>=0.28,<1",
+  "langchain>=1.2.17,<2",
+  "langchain-openai>=1.2.1,<2",
+  "langgraph>=1.1.10,<2",
+  "pydantic>=2.13,<3",
+  "pydantic-settings>=2.14,<3",
+  "sqlalchemy>=2.0.49,<3",
+  "uvicorn[standard]>=0.46,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4,<9",
+  "pytest-asyncio>=0.26,<1",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["backend.app*"]
+namespaces = true
+
+[tool.pytest.ini_options]
+minversion = "8.2"
+testpaths = ["backend/tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+addopts = [
+  "--strict-config",
+  "--strict-markers",
+]
