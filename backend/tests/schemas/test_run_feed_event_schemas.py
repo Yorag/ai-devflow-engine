@@ -326,6 +326,14 @@ def test_tool_confirmation_feed_and_events_are_separate_from_approval() -> None:
         )
 
     with pytest.raises(ValidationError):
+        ToolConfirmationFeedEntry(
+            **{
+                **tool_confirmation.model_dump(mode="json"),
+                "risk_level": "blocked",
+            }
+        )
+
+    with pytest.raises(ValidationError):
         SessionEvent(
             event_id="event-invalid-tool-confirmation",
             session_id="session-1",
@@ -453,6 +461,37 @@ def test_provider_call_stage_item_and_sse_stage_payload_share_projection_semanti
             **provider_item.model_dump(mode="json"),
             approval_type="solution_design_approval",
         )
+
+
+def test_approval_result_reject_requires_reason() -> None:
+    from backend.app.schemas.feed import ApprovalResultFeedEntry
+
+    with pytest.raises(ValidationError):
+        ApprovalResultFeedEntry(
+            entry_id="entry-approval-result",
+            run_id="run-1",
+            occurred_at=NOW,
+            approval_id="approval-1",
+            approval_type=common.ApprovalType.CODE_REVIEW_APPROVAL,
+            decision=common.ApprovalStatus.REJECTED,
+            reason=None,
+            created_at=NOW,
+            next_stage_type=common.StageType.CODE_GENERATION,
+        )
+
+    result = ApprovalResultFeedEntry(
+        entry_id="entry-approval-result",
+        run_id="run-1",
+        occurred_at=NOW,
+        approval_id="approval-1",
+        approval_type=common.ApprovalType.CODE_REVIEW_APPROVAL,
+        decision=common.ApprovalStatus.REJECTED,
+        reason="Tests need broader coverage.",
+        created_at=NOW,
+        next_stage_type=common.StageType.CODE_GENERATION,
+    )
+
+    assert result.reason == "Tests need broader coverage."
 
 
 def test_delivery_result_is_success_only_and_failures_use_system_status() -> None:

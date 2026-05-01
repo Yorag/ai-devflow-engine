@@ -333,6 +333,31 @@ def test_provider_and_delivery_channel_schemas_expose_refs_without_secret_values
     assert delivery_dump["readiness_status"] == "ready"
     assert "credential_value" not in delivery_dump
 
+    with pytest.raises(ValidationError):
+        ProjectDeliveryChannelDetailProjection(
+            project_id="project-default",
+            delivery_channel_id="delivery-invalid",
+            delivery_mode=common.DeliveryMode.GIT_AUTO_DELIVERY,
+            scm_provider_type=None,
+            repository_identifier=None,
+            default_branch=None,
+            code_review_request_type=None,
+            credential_ref=None,
+            credential_status=common.CredentialStatus.UNBOUND,
+            readiness_status=common.DeliveryReadinessStatus.READY,
+            readiness_message="Invalid ready git_auto_delivery config.",
+            last_validated_at=NOW,
+            updated_at=NOW,
+        )
+
+    with pytest.raises(ValidationError):
+        ProjectDeliveryChannelDetailProjection(
+            **{
+                **delivery.model_dump(mode="python"),
+                "credential_status": common.CredentialStatus.INVALID,
+            }
+        )
+
 
 def test_configuration_package_schemas_allow_user_visible_config_only() -> None:
     from backend.app.schemas.configuration_package import (
@@ -441,6 +466,20 @@ def test_configuration_package_schemas_allow_user_visible_config_only() -> None:
     ]
     with pytest.raises(ValidationError):
         ConfigurationPackageImportRequest(**package_with_invalid_capabilities)
+
+    package_with_invalid_git_delivery = deepcopy(package_payload)
+    package_with_invalid_git_delivery["delivery_channels"] = [
+        {
+            "delivery_mode": "git_auto_delivery",
+            "scm_provider_type": "github",
+            "repository_identifier": "owner/repo",
+            "default_branch": "main",
+            "code_review_request_type": "pull_request",
+            "credential_ref": None,
+        }
+    ]
+    with pytest.raises(ValidationError):
+        ConfigurationPackageImportRequest(**package_with_invalid_git_delivery)
 
     for schema_type in (
         ConfigurationPackageRead,

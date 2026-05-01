@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend.app.schemas import common
 
@@ -149,6 +149,12 @@ class ToolConfirmationFeedEntry(FeedEntry):
     ) = None
     disabled_reason: str | None = None
 
+    @model_validator(mode="after")
+    def require_high_risk_tool_confirmation(self) -> "ToolConfirmationFeedEntry":
+        if self.risk_level is not common.ToolRiskLevel.HIGH_RISK:
+            raise ValueError("tool_confirmation risk_level must be high_risk")
+        return self
+
 
 class ControlItemFeedEntry(FeedEntry):
     type: Literal[common.FeedEntryType.CONTROL_ITEM] = common.FeedEntryType.CONTROL_ITEM
@@ -174,6 +180,12 @@ class ApprovalResultFeedEntry(FeedEntry):
     reason: str | None = None
     created_at: datetime
     next_stage_type: common.StageType
+
+    @model_validator(mode="after")
+    def require_reject_reason(self) -> "ApprovalResultFeedEntry":
+        if self.decision is common.ApprovalStatus.REJECTED and not self.reason:
+            raise ValueError("approval_result rejected decision requires reason")
+        return self
 
 
 class DeliveryResultFeedEntry(FeedEntry):

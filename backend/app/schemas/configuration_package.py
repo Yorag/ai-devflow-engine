@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PositiveInt
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt, model_validator
 
 from backend.app.schemas import common
 
@@ -45,6 +45,28 @@ class ConfigurationPackageDeliveryChannel(_StrictBaseModel):
     default_branch: str | None = None
     code_review_request_type: common.CodeReviewRequestType | None = None
     credential_ref: str | None = None
+
+    @model_validator(mode="after")
+    def validate_delivery_mode_contract(
+        self,
+    ) -> "ConfigurationPackageDeliveryChannel":
+        if self.delivery_mode is not common.DeliveryMode.GIT_AUTO_DELIVERY:
+            return self
+
+        git_fields = {
+            "scm_provider_type": self.scm_provider_type,
+            "repository_identifier": self.repository_identifier,
+            "default_branch": self.default_branch,
+            "code_review_request_type": self.code_review_request_type,
+            "credential_ref": self.credential_ref,
+        }
+        missing_fields = [field for field, value in git_fields.items() if not value]
+        if missing_fields:
+            raise ValueError(
+                "git_auto_delivery requires "
+                f"{', '.join(sorted(missing_fields))}"
+            )
+        return self
 
 
 class ConfigurationPackageTemplateSlotConfig(_StrictBaseModel):
