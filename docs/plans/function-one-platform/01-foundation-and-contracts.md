@@ -482,9 +482,10 @@
 ## C1.7 runtime 模型与迁移边界
 
 **计划周期**：Week 2
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立 `runtime.db` 的运行领域模型和迁移边界，确保 run、阶段、产物、审批、控制记录和交付记录作为产品级领域真源存在。
 **实施计划**：`docs/plans/implementation/c1.7-runtime-model-boundary.md`
+**验证摘要**：实施计划 `docs/plans/implementation/c1.7-runtime-model-boundary.md` 已完成。TDD RED 先观察到 `ModuleNotFoundError: No module named 'backend.app.db.models.runtime'`；实现 `backend/app/db/models/runtime.py` 并接入 Alembic metadata 后，`uv run --no-sync python -m pytest backend/tests/db/test_runtime_model_boundary.py -q` 通过 5 个 C1.7 tests。初次 GREEN 暴露 `PipelineRunModel` 与快照表之间的 SQLAlchemy sorted table 循环 warning，随后修正为 `PipelineRunModel` 持有结构化快照 FK、快照 `run_id` 保持非 FK 关联字段，focused tests 复跑无 warning。`uv run --no-sync alembic -c backend/alembic.ini current` 退出码 0，并对五个 SQLite role 打印 `SQLiteImpl` 上下文；经用户批准后，`uv run --no-sync alembic -c backend/alembic.ini upgrade head` 退出码 0，并对五个 SQLite role 打印 `SQLiteImpl` 上下文；`uv run --no-sync python -m pytest backend/tests/db/test_runtime_model_boundary.py -v` 通过 5 个 focused tests；`uv run --no-sync python -m pytest backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py backend/tests/db/test_runtime_model_boundary.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py -q` 通过 33 个 persistence regression tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_prompt_asset_schemas.py backend/tests/schemas/test_observability_schemas.py backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py backend/tests/db/test_runtime_model_boundary.py -q` 通过 81 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 81 个 backend tests。内联评审修正测试数据未创建对应 StageRun 的关系覆盖缺口，未发现未解决 Critical 或 Important 问题。
 
 **修改文件列表**：
 - Create: `backend/app/db/models/runtime.py`

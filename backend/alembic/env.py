@@ -7,6 +7,7 @@ from sqlalchemy.engine import make_url
 
 from backend.app.db.base import ROLE_METADATA, DatabaseRole
 import backend.app.db.models.control  # noqa: F401
+import backend.app.db.models.runtime  # noqa: F401
 
 
 config = context.config
