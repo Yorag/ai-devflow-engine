@@ -682,9 +682,10 @@
 ## L1.1 日志审计 Schema 与 TraceContext 契约
 
 **计划周期**：Week 2
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：定义日志审计查询投影、日志审计枚举、查询参数和跨层 TraceContext，使后续 API、runtime、工具和交付切片共享同一关联语义。
 **实施计划**：`docs/plans/implementation/l1.1-log-audit-schema-trace-context.md`
+**验证摘要**：`uv run --no-sync python -m pytest backend/tests/schemas/test_observability_schemas.py -v` 通过 5 个 L1.1 observability schema contract tests；`uv run --no-sync python -m pytest backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_prompt_asset_schemas.py backend/tests/schemas/test_observability_schemas.py -q` 通过 38 个 schema contract regression tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_prompt_asset_schemas.py backend/tests/schemas/test_observability_schemas.py -q` 通过 66 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 66 个 backend tests 且无收集错误。TDD RED 先观察到缺少 `backend.app.schemas.observability` / `backend.app.domain.trace_context`，再按日志审计投影、查询参数和 TraceContext 继承契约转绿；内联评审修正 `RedactionStatus` 枚举口径、`log_file_ref` 路径边界和子 span 继承保护后未发现未解决 Critical 或 Important 问题。
 
 **修改文件列表**：
 - Create: `backend/app/schemas/observability.py`
