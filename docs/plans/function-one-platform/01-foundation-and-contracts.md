@@ -591,9 +591,10 @@
 ## C1.10 PlatformRuntimeSettings 与运行快照 Schema 契约
 
 **计划周期**：Week 2
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：定义可热重载平台运行设置、运行上限快照、Provider 快照与模型绑定快照 Schema，使后续控制面、Run 启动和 runtime 消费共享同一配置边界。
 **实施计划**：`docs/plans/implementation/c1.10-platform-runtime-settings-snapshots.md`
+**验证摘要**：`uv run --no-sync python -m pytest backend/tests/schemas/test_runtime_settings_schemas.py -v` 通过 5 个 C1.10 runtime settings schema contract tests；`uv run --no-sync python -m pytest backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py -q` 通过 28 个 C1.1-C1.4 + C1.10 schema contract tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py -q` 通过 56 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 56 个 backend tests 且无收集错误。TDD RED 先观察到缺少 `backend.app.schemas.runtime_settings`、`RuntimeSettingsErrorCode` 和 `RunConfigurationSnapshotRead`，再按错误码适配、runtime settings schema、run configuration snapshot 聚合 schema 顺序转绿。内联评审未发现 Critical 或 Important 问题。
 
 **修改文件列表**：
 - Modify: `backend/app/api/error_codes.py`

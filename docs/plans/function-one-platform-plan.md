@@ -195,7 +195,7 @@
 | C1.7 | runtime 模型与迁移边界 | Week 2 | [ ] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c17) |
 | C1.8 | graph 模型与迁移边界 | Week 2 | [ ] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c18) |
 | C1.9 | event 模型边界 | Week 2 | [ ] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c19) |
-| C1.10 | PlatformRuntimeSettings 与运行快照 Schema 契约 | Week 2 | [ ] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c110) |
+| C1.10 | PlatformRuntimeSettings 与运行快照 Schema 契约 | Week 2 | [x] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c110) |
 | C1.10a | PromptAsset Schema 契约 | Week 2 | [ ] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c110a) |
 | L1.1 | 日志审计 Schema 与 TraceContext 契约 | Week 2 | [ ] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#l11) |
 | L1.2 | log 模型与迁移边界 | Week 2 | [ ] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#l12) |
