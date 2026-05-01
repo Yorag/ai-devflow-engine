@@ -640,9 +640,10 @@
 ## C1.10a PromptAsset Schema 契约
 
 **计划周期**：Week 2
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：固定系统内置提示词资产的结构化 Schema、版本字段、权威级别和缓存属性，使后续 PromptRegistry、模板种子、ContextManifest 和压缩过程引用同一契约。
 **实施计划**：`docs/plans/implementation/c1.10a-prompt-asset-schemas.md`
+**验证摘要**：`uv run --no-sync python -m pytest backend/tests/schemas/test_prompt_asset_schemas.py -v` 通过 5 个 C1.10a PromptAsset schema contract tests；`uv run --no-sync python -m pytest backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_prompt_asset_schemas.py -q` 通过 33 个 schema contract tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_prompt_asset_schemas.py -q` 通过 61 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 61 个 backend tests 且无收集错误。TDD RED 先观察到缺少 `backend.app.schemas.prompts`，再按 PromptAsset 枚举、引用、正文 hash 和系统资产边界转绿。内联评审未发现 Critical 或 Important 问题。
 
 **修改文件列表**：
 - Create: `backend/app/schemas/prompts.py`
