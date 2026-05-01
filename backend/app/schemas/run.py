@@ -7,6 +7,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.app.schemas import common
 from backend.app.schemas.feed import TopLevelFeedEntry
+from backend.app.schemas.runtime_settings import (
+    ModelBindingSnapshotRead,
+    ProviderCallPolicySnapshotRead,
+    ProviderSnapshotRead,
+    RuntimeLimitSnapshotRead,
+)
 
 
 class _StrictBaseModel(BaseModel):
@@ -22,6 +28,17 @@ class RunSummaryProjection(_StrictBaseModel):
     ended_at: datetime | None = None
     current_stage_type: common.StageType | None = None
     is_active: bool
+
+
+class RunConfigurationSnapshotRead(_StrictBaseModel):
+    run_id: str = Field(min_length=1)
+    template_snapshot_ref: str = Field(min_length=1)
+    graph_definition_ref: str = Field(min_length=1)
+    runtime_limit_snapshot: RuntimeLimitSnapshotRead
+    provider_call_policy_snapshot: ProviderCallPolicySnapshotRead
+    provider_snapshots: list[ProviderSnapshotRead] = Field(min_length=1)
+    model_binding_snapshots: list[ModelBindingSnapshotRead] = Field(min_length=1)
+    created_at: datetime
 
 
 class ComposerStateProjection(_StrictBaseModel):
@@ -108,6 +125,7 @@ __all__ = [
     "ComposerStateProjection",
     "ImplementationPlanReference",
     "ImplementationPlanTaskRead",
+    "RunConfigurationSnapshotRead",
     "RunSummaryProjection",
     "RunTimelineProjection",
     "SolutionDesignArtifactRead",
