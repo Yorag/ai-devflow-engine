@@ -11,9 +11,10 @@
 ## B0.1 工程与开发命令基线
 
 **计划周期**：Week 1
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立前后端最小工程依赖、测试命令和开发脚本入口，不实现具体 API 与页面业务。
 **实施计划**：`docs/plans/implementation/b0.1-engineering-command-baseline.md`
+**验证摘要**：激活 `.venv` 后，`python -m pip show langchain langgraph langchain-openai` 显示 `langchain==1.2.17`、`langgraph==1.1.10`、`langchain-openai==1.2.1`，且 PyPI index 显示三者均为 latest；`python -m pip install -e ".[dev]"` 通过；`pytest backend/tests/test_engineering_baseline.py -q` 通过；`pytest --collect-only` 收集 1 个 B0.1 backend baseline test；`npm --prefix frontend install` 通过并生成 lockfile；`npm --prefix frontend run test -- --run` 通过；`npm --prefix frontend run build` 通过；`npm --prefix frontend audit --audit-level=moderate` 返回 0 vulnerabilities；`rg -n "Activate.ps1|pytest|npm --prefix frontend|Python 3\.11|开发命令" README.md README.zh.md` 通过。
 
 **修改文件列表**：
 - Create: `pyproject.toml`

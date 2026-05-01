@@ -181,7 +181,7 @@
 | ID | 子任务 | 周期 | 状态 | 负责人模型 | 细则 |
 | --- | --- | --- | --- | --- | --- |
 | B0.0 | 项目目录骨架与边界声明 | Week 1 | [x] | 串行 | [00](function-one-platform/00-project-skeleton-and-execution.md#b00) |
-| B0.1 | 工程与开发命令基线 | Week 1 | [ ] | 串行 | [01](function-one-platform/01-foundation-and-contracts.md#b01) |
+| B0.1 | 工程与开发命令基线 | Week 1 | [x] | 串行 | [01](function-one-platform/01-foundation-and-contracts.md#b01) |
 | B0.2 | 后端 FastAPI 应用与错误契约 | Week 1 | [ ] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#b02) |
 | B0.3 | EnvironmentSettings 启动配置边界 | Week 1 | [ ] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#b03) |
 | L0.1 | 运行数据目录与日志启动预检 | Week 1 | [ ] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#l01) |
