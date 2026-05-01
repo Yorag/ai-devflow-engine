@@ -15,7 +15,7 @@ function AppShell(): JSX.Element {
       <header className="app-header">
         <div className="brand-block">
           <p className="brand-title">AI DevFlow Engine</p>
-          <p className="brand-subtitle">Local workflow console baseline</p>
+          <p className="brand-subtitle">Local workflow console</p>
         </div>
         <nav className="app-nav" aria-label="Primary routes">
           <NavLink className="nav-link" to="/" aria-label="Home" end>

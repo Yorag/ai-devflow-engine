@@ -1,7 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { render, type RenderResult } from "@testing-library/react";
 import type { ReactElement } from "react";
-import { RouterProvider } from "react-router-dom";
+import { RouterProvider, createMemoryRouter } from "react-router-dom";
 
 import { createQueryClient } from "./query-client";
 import { createTestRouter } from "./router";
@@ -15,14 +15,10 @@ export function renderWithAppProviders(
   options: RenderWithAppProvidersOptions = {},
 ): RenderResult {
   const queryClient = createQueryClient();
-
-  if (ui) {
-    return render(
-      <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>,
-    );
-  }
-
-  const router = createTestRouter([options.route ?? "/"]);
+  const initialEntries = [options.route ?? "/"];
+  const router = ui
+    ? createMemoryRouter([{ path: "*", element: ui }], { initialEntries })
+    : createTestRouter(initialEntries);
 
   return render(
     <QueryClientProvider client={queryClient}>

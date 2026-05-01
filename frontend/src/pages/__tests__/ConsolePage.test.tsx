@@ -1,6 +1,7 @@
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { Link, useLocation } from "react-router-dom";
 
 import { renderWithAppProviders } from "../../app/test-utils";
 import { ConsolePage } from "../ConsolePage";
@@ -16,6 +17,17 @@ function QueryClientProbe(): JSX.Element {
     <output aria-label="query client ready">
       {queryClient instanceof QueryClient ? "ready" : "missing"}
     </output>
+  );
+}
+
+function RouterProbe(): JSX.Element {
+  const location = useLocation();
+
+  return (
+    <>
+      <output aria-label="current path">{location.pathname}</output>
+      <Link to="/console">Console link</Link>
+    </>
   );
 }
 
@@ -35,7 +47,9 @@ describe("ConsolePage route baseline", () => {
       }),
     ).toBeTruthy();
     expect(
-      screen.getByText("React SPA baseline is ready for feature slices."),
+      screen.getByText(
+        "Project, session, run, and delivery views will appear here as the workflow surface comes online.",
+      ),
     ).toBeTruthy();
     expect(screen.getByLabelText("query client ready").textContent).toBe(
       "ready",
@@ -76,5 +90,26 @@ describe("ConsolePage route baseline", () => {
     expect(screen.getByRole("main")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Home" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Console" })).toBeTruthy();
+  });
+
+  it("wraps custom UI in router context for focused component tests", () => {
+    renderWithAppProviders(<RouterProbe />, { route: "/custom" });
+
+    expect(screen.getByLabelText("current path").textContent).toBe("/custom");
+    expect(screen.getByRole("link", { name: "Console link" })).toBeTruthy();
+  });
+
+  it("uses product empty-state copy instead of implementation notes", () => {
+    renderWithAppProviders(null, { route: "/console" });
+
+    expect(screen.getByText("Workspace")).toBeTruthy();
+    expect(screen.getByText("Projects")).toBeTruthy();
+    expect(screen.getByText("Runs")).toBeTruthy();
+    expect(screen.getByText("Delivery")).toBeTruthy();
+    expect(screen.queryByText(/baseline/i)).toBeNull();
+    expect(screen.queryByText(/feature slices/i)).toBeNull();
+    expect(screen.queryByText("Routing")).toBeNull();
+    expect(screen.queryByText("Data layer")).toBeNull();
+    expect(screen.queryByText("Design tone")).toBeNull();
   });
 });
