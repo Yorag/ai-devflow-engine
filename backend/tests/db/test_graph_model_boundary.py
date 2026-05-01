@@ -195,7 +195,11 @@ def test_graph_definition_thread_and_checkpoint_models_keep_execution_state_boun
             sequence_index=1,
             created_at=NOW,
         )
-        session.add_all([definition, thread, checkpoint])
+        session.add(definition)
+        session.flush()
+        session.add(thread)
+        session.flush()
+        session.add(checkpoint)
         session.commit()
 
         saved_definition = session.get(GraphDefinitionModel, "graph-definition-1")
@@ -356,15 +360,11 @@ def test_graph_interrupts_model_runtime_wait_points_without_approval_decisions(
             created_at=NOW,
             updated_at=NOW,
         )
-        session.add_all(
-            [
-                definition,
-                thread,
-                clarification_interrupt,
-                approval_interrupt,
-                tool_interrupt,
-            ]
-        )
+        session.add(definition)
+        session.flush()
+        session.add(thread)
+        session.flush()
+        session.add_all([clarification_interrupt, approval_interrupt, tool_interrupt])
         session.commit()
 
         saved_tool_interrupt = session.get(GraphInterruptModel, "interrupt-tool-1")

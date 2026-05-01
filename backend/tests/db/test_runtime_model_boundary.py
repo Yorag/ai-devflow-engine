@@ -268,17 +268,13 @@ def test_pipeline_run_stage_and_snapshot_models_express_runtime_truth(tmp_path) 
             metrics={"token_count": 12},
             created_at=NOW,
         )
-        session.add_all(
-            [
-                run,
-                runtime_limit_snapshot,
-                provider_call_policy_snapshot,
-                provider_snapshot,
-                model_binding_snapshot,
-                stage_run,
-                artifact,
-            ]
-        )
+        session.add_all([runtime_limit_snapshot, provider_call_policy_snapshot])
+        session.flush()
+        session.add(run)
+        session.flush()
+        session.add_all([provider_snapshot, stage_run])
+        session.flush()
+        session.add_all([model_binding_snapshot, artifact])
         session.commit()
 
         saved_run = session.get(PipelineRunModel, "run-1")
@@ -547,21 +543,16 @@ def test_approval_tool_confirmation_and_delivery_boundaries_are_separate(tmp_pat
             completed_at=NOW,
         )
         session.add_all(
-            [
-                run,
-                runtime_limit_snapshot,
-                provider_call_policy_snapshot,
-                solution_stage,
-                tool_stage,
-                delivery_stage,
-                approval_request,
-                approval_decision,
-                tool_confirmation,
-                control_record,
-                delivery_snapshot,
-                delivery_record,
-            ]
+            [runtime_limit_snapshot, provider_call_policy_snapshot, delivery_snapshot]
         )
+        session.flush()
+        session.add(run)
+        session.flush()
+        session.add_all([solution_stage, tool_stage, delivery_stage])
+        session.flush()
+        session.add_all([approval_request, tool_confirmation])
+        session.flush()
+        session.add_all([approval_decision, control_record, delivery_record])
         session.commit()
 
         saved_tool_confirmation = session.get(

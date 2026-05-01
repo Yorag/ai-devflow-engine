@@ -277,7 +277,9 @@ def test_audit_log_model_records_actor_target_result_and_failure_policy(tmp_path
             audit_file_write_failed=False,
             created_at=NOW,
         )
-        session.add_all([metadata, audit])
+        session.add(metadata)
+        session.flush()
+        session.add(audit)
         session.commit()
 
         saved_audit = session.get(AuditLogEntryModel, "audit-1")

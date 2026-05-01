@@ -255,7 +255,9 @@ def test_provider_and_delivery_channel_models_keep_control_configuration_boundar
             created_at=NOW,
             updated_at=NOW,
         )
-        session.add_all([project, provider, delivery])
+        session.add_all([project, provider])
+        session.flush()
+        session.add(delivery)
         session.commit()
 
         saved_provider = session.get(ProviderModel, "provider-deepseek")

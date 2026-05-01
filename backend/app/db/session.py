@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -12,6 +13,28 @@ from backend.app.db.base import DATABASE_FILE_NAMES, DatabaseRole
 def _sqlite_url_for_path(path: Path) -> str:
     resolved = path.expanduser().resolve(strict=False)
     return f"sqlite:///{resolved.as_posix()}"
+
+
+def _enable_sqlite_foreign_keys(
+    dbapi_connection: Any,
+    _connection_record: Any,
+) -> None:
+    original_autocommit = getattr(dbapi_connection, "autocommit", None)
+    if original_autocommit is not None:
+        dbapi_connection.autocommit = True
+
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA foreign_keys=ON")
+    finally:
+        cursor.close()
+        if original_autocommit is not None:
+            dbapi_connection.autocommit = original_autocommit
+
+
+def enable_sqlite_foreign_key_enforcement(engine: Engine) -> None:
+    if engine.url.get_backend_name() == "sqlite":
+        event.listen(engine, "connect", _enable_sqlite_foreign_keys)
 
 
 @dataclass
@@ -48,10 +71,12 @@ class DatabaseManager:
             url = self._database_urls[role]
             database_path = Path(make_url(url).database or "")
             database_path.parent.mkdir(parents=True, exist_ok=True)
-            self._engines[role] = create_engine(
+            engine = create_engine(
                 url,
                 connect_args={"check_same_thread": False},
             )
+            enable_sqlite_foreign_key_enforcement(engine)
+            self._engines[role] = engine
         return self._engines[role]
 
     def session_factory(self, role: DatabaseRole) -> sessionmaker[Session]:

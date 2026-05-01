@@ -6,6 +6,7 @@ from sqlalchemy import engine_from_config, pool
 from sqlalchemy.engine import make_url
 
 from backend.app.db.base import ROLE_METADATA, DatabaseRole
+from backend.app.db.session import enable_sqlite_foreign_key_enforcement
 import backend.app.db.models.control  # noqa: F401
 import backend.app.db.models.event  # noqa: F401
 import backend.app.db.models.graph  # noqa: F401
@@ -55,6 +56,7 @@ def run_migrations_online() -> None:
     for role, section in _role_sections():
         _ensure_sqlite_parent_exists(section["sqlalchemy.url"])
         connectable = engine_from_config(section, prefix="sqlalchemy.", poolclass=pool.NullPool)
+        enable_sqlite_foreign_key_enforcement(connectable)
         with connectable.connect() as connection:
             context.configure(
                 connection=connection,
