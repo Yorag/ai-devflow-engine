@@ -108,13 +108,12 @@ AI DevFlow Engine 规划为一个本地优先的研发工作台：
 后端命令：
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
-pytest --collect-only
+uv sync --extra dev
+uv run pytest --collect-only
+uv run pytest
 ```
 
-创建 `.venv` 的 Python 解释器必须是 Python 3.11 或更新版本。
+后端依赖通过已提交的 `uv.lock` 复现；每次修改 `pyproject.toml` 时必须运行 `uv lock` 更新锁文件。uv 使用的 Python 解释器必须是 Python 3.11 或更新版本。
 
 前端命令：
 

@@ -104,13 +104,12 @@ This repository is currently in the V1 platform buildout. The authoritative prod
 Backend commands:
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
-pytest --collect-only
+uv sync --extra dev
+uv run pytest --collect-only
+uv run pytest
 ```
 
-The Python interpreter used to create `.venv` must be Python 3.11 or newer.
+Backend dependencies are resolved through the committed `uv.lock`; update it with `uv lock` whenever `pyproject.toml` changes. The Python interpreter managed by uv must be Python 3.11 or newer.
 
 Frontend commands:
 
