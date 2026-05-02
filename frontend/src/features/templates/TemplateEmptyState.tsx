@@ -56,7 +56,10 @@ export function TemplateEmptyState({
     localTemplates[0] ??
     null;
   const isDraft = session.status === "draft";
-  const { draft, setDraft, resetDraft } = useTemplateDraftState(selectedTemplate);
+  const { draft, setDraft, resetDraft } = useTemplateDraftState(
+    selectedTemplate,
+    session.session_id,
+  );
 
   useEffect(() => {
     setLocalTemplates((current) =>

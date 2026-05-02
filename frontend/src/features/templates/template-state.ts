@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useLayoutEffect, useState } from "react";
 
 import type {
   PipelineTemplateRead,
@@ -20,6 +20,13 @@ export type TemplateStartGuard = {
   actions: TemplateGuardAction[];
 };
 
+type TemplateDraftRecord = {
+  draft: TemplateDraftState | null;
+  baselineDraft: TemplateDraftState | null;
+  templateId: string | null;
+  scopeId: string;
+};
+
 export function createTemplateDraft(
   template: PipelineTemplateRead,
 ): TemplateDraftState {
@@ -30,25 +37,59 @@ export function createTemplateDraft(
   };
 }
 
-export function useTemplateDraftState(template: PipelineTemplateRead | null): {
+export function useTemplateDraftState(
+  template: PipelineTemplateRead | null,
+  scopeId = "",
+): {
   draft: TemplateDraftState | null;
   setDraft: (draft: TemplateDraftState) => void;
   resetDraft: () => void;
   dirty: boolean;
 } {
-  const [draft, setDraft] = useState<TemplateDraftState | null>(
-    template ? createTemplateDraft(template) : null,
+  const templateId = template?.template_id ?? null;
+  const templateDraftSignature = template
+    ? serializeDraft(createTemplateDraft(template))
+    : null;
+  const [state, setState] = useState<TemplateDraftRecord>(() =>
+    createDraftRecord(template, scopeId),
   );
 
-  useEffect(() => {
-    setDraft(template ? createTemplateDraft(template) : null);
-  }, [template?.template_id]);
+  useLayoutEffect(() => {
+    setState((current) => {
+      const nextRecord = createDraftRecord(template, scopeId);
+      const identityChanged =
+        current.scopeId !== scopeId || current.templateId !== templateId;
+
+      if (identityChanged || !current.draft || !current.baselineDraft) {
+        return nextRecord;
+      }
+
+      if (serializeDraft(current.draft) === serializeDraft(current.baselineDraft)) {
+        return nextRecord;
+      }
+
+      return {
+        ...current,
+        baselineDraft: nextRecord.baselineDraft,
+        templateId,
+        scopeId,
+      };
+    });
+  }, [scopeId, template, templateDraftSignature, templateId]);
+
+  function setDraft(draft: TemplateDraftState) {
+    setState((current) => ({ ...current, draft }));
+  }
+
+  function resetDraft() {
+    setState(createDraftRecord(template, scopeId));
+  }
 
   return {
-    draft,
+    draft: state.draft,
     setDraft,
-    resetDraft: () => setDraft(template ? createTemplateDraft(template) : null),
-    dirty: Boolean(template && draft && isTemplateDirty(template, draft)),
+    resetDraft,
+    dirty: Boolean(template && state.draft && isTemplateDirty(template, state.draft)),
   };
 }
 
@@ -88,6 +129,20 @@ export function cloneStageRoleBindings(
   bindings: StageRoleBinding[],
 ): StageRoleBinding[] {
   return bindings.map((binding) => ({ ...binding }));
+}
+
+function createDraftRecord(
+  template: PipelineTemplateRead | null,
+  scopeId: string,
+): TemplateDraftRecord {
+  const draft = template ? createTemplateDraft(template) : null;
+
+  return {
+    draft,
+    baselineDraft: draft,
+    templateId: template?.template_id ?? null,
+    scopeId,
+  };
 }
 
 function serializeDraft(draft: TemplateDraftState): string {

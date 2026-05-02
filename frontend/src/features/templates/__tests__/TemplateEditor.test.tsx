@@ -400,7 +400,19 @@ describe("TemplateEditor", () => {
               setTemplates(
                 templates.map((template) =>
                   template.template_id === "template-feature"
-                    ? { ...template }
+                    ? {
+                        ...template,
+                        stage_role_bindings: template.stage_role_bindings.map(
+                          (binding, index) =>
+                            index === 0
+                              ? {
+                                  ...binding,
+                                  system_prompt:
+                                    "Server refresh should not replace dirty drafts.",
+                                }
+                              : binding,
+                        ),
+                      }
                     : template,
                 ),
               )
@@ -432,6 +444,120 @@ describe("TemplateEditor", () => {
       "value",
       "Keep this unsaved local prompt.",
     );
+  });
+
+  it("accepts refreshed selected template data when the current draft is clean", async () => {
+    const workspace = mockSessionWorkspaces["session-draft"];
+
+    function RefreshHarness(): JSX.Element {
+      const [templates, setTemplates] = useState(mockPipelineTemplates);
+
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() =>
+              setTemplates(
+                templates.map((template) =>
+                  template.template_id === "template-feature"
+                    ? {
+                        ...template,
+                        name: "Imported feature flow",
+                        max_auto_regression_retries: 2,
+                        stage_role_bindings: template.stage_role_bindings.map(
+                          (binding, index) =>
+                            index === 0
+                              ? {
+                                  ...binding,
+                                  system_prompt:
+                                    "Use imported configuration prompt.",
+                                }
+                              : binding,
+                        ),
+                      }
+                    : template,
+                ),
+              )
+            }
+          >
+            Import selected template update
+          </button>
+          <TemplateEmptyState
+            session={workspace.session}
+            templates={templates}
+            providers={mockProviderList}
+            selectedTemplateId="template-feature"
+            onTemplateChange={() => undefined}
+          />
+        </>
+      );
+    }
+
+    renderWithAppProviders(<RefreshHarness />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Import selected template update" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Imported feature flow" }),
+    ).toBeTruthy();
+    expect(
+      await screen.findByDisplayValue("Use imported configuration prompt."),
+    ).toBeTruthy();
+    expect(screen.getByLabelText("Maximum auto regression retries")).toHaveProperty(
+      "value",
+      "2",
+    );
+    expect(screen.getByText("Saved")).toBeTruthy();
+    expect(screen.queryByText(/Save this edited system template/u)).toBeNull();
+  });
+
+  it("resets draft edits when switching draft sessions with the same template", () => {
+    const workspace = mockSessionWorkspaces["session-draft"];
+    const secondDraftSession = {
+      ...workspace.session,
+      session_id: "session-second-draft",
+      display_name: "Second blank requirement",
+    };
+
+    function SessionHarness(): JSX.Element {
+      const [session, setSession] = useState(workspace.session);
+
+      return (
+        <>
+          <button type="button" onClick={() => setSession(secondDraftSession)}>
+            Open second draft session
+          </button>
+          <TemplateEmptyState
+            session={session}
+            templates={mockPipelineTemplates}
+            providers={mockProviderList}
+            selectedTemplateId="template-feature"
+            onTemplateChange={() => undefined}
+          />
+        </>
+      );
+    }
+
+    renderWithAppProviders(<SessionHarness />);
+
+    fireEvent.change(screen.getByLabelText("requirement_analysis system prompt"), {
+      target: { value: "Session one unsaved prompt." },
+    });
+    expect(screen.getByLabelText("requirement_analysis system prompt")).toHaveProperty(
+      "value",
+      "Session one unsaved prompt.",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open second draft session" }));
+
+    expect(screen.getByLabelText("requirement_analysis system prompt")).toHaveProperty(
+      "value",
+      "Analyze the requirement and ask clarifying questions when needed.",
+    );
+    expect(screen.getByText("Saved")).toBeTruthy();
+    expect(screen.queryByText(/Save this edited system template/u)).toBeNull();
   });
 
   it("keeps forbidden template and platform fields out of the editor", () => {
