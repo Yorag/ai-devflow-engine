@@ -107,9 +107,11 @@
 ## L2.4 AuditService 与控制面命令审计
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立控制面命令可复用的 AuditService 入口，使 Project、Session、Template、Provider 和 DeliveryChannel 后续切片能够按统一结构记录成功、失败和被拒绝结果。
 **实施计划**：`docs/plans/implementation/l2.4-audit-service-control-plane.md`
+
+**验证摘要**：实施计划 `docs/plans/implementation/l2.4-audit-service-control-plane.md` 已完成。TDD RED 先观察到缺少 `backend.app.observability.audit`；代码评审修复阶段新增单次审计台账提交测试，并先观察到 `session.commit_count` 为 2 后修复为单次提交。`uv run --no-sync python -m pytest backend/tests/observability/test_audit_service.py -v` 通过 6 个 L2.4 tests；`uv run --no-sync python -m pytest backend/tests/observability/test_redaction_policy.py backend/tests/db/test_log_model_boundary.py backend/tests/observability/test_jsonl_log_writer.py backend/tests/observability/test_audit_service.py -q` 通过 31 个 observability regression tests。Spec compliance reviewer 未发现问题；code quality reviewer 初审提出的二次提交台账更新 Important 发现和 `metadata_excerpt` 诊断信息 Minor 发现已修复并通过 re-review。
 
 **修改文件列表**：
 - Create: `backend/app/observability/audit.py`

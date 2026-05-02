@@ -202,7 +202,7 @@
 | L2.1 | API 请求与关联上下文 | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#l21) |
 | L2.2 | 基础 RedactionPolicy 与 payload summarizer | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#l22) |
 | L2.3 | JSONL writer 与 log index | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#l23) |
-| L2.4 | AuditService 与控制面命令审计 | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#l24) |
+| L2.4 | AuditService 与控制面命令审计 | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#l24) |
 | C2.1 | 默认 Project、项目加载与项目列表 | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c21) |
 | C2.2 | 系统模板与内置 Provider seed | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c22) |
 | C2.3 | draft Session、重命名与模板选择更新 | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c23) |
