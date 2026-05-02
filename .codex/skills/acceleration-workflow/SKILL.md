@@ -39,6 +39,13 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py list --json
 uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py show --claim <claim-id> --json
 uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py current-worker --json
+uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py scan-worker-commits --json
+uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py ingest-worker-commits
+uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py sync-idle-branches
+uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py auto-advance-claims
+uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py status-summary
+uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py worker-start
+uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py post-checkpoint
 uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py claim --claim <claim-id> --lane <lane-id> --task <task-id> --branch <branch-name> --base <coordination-base> --evidence docs/plans/acceleration/reports/<claim-id>.md
 uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py ingest --claim <claim-id> --status implemented --worker-head <head>
 ```
@@ -77,6 +84,10 @@ git check-ignore -q .worktrees
 - **Worker Launch**：为已 claim 的 slice 输出 worktree 命令和 worker prompt。
 - **Progress Ingest**：读取 worker evidence report。Local ingest 最多在共享 coordination store 中把 claim 收敛为 `reported` 或 `blocked`；Committed ingest 才能把 claim 收敛为 `implemented` 或 `mock_ready`。
 - **Integration Checkpoint**：协调 AL 分支进入 `integration/function-one-acceleration`，跑验证并更新最终状态。
+- **Sync Idle Branches**：integration checkpoint push 后，同步没有 active / blocked claim 的空闲 lane branch 到最新 integration base。
+- **Auto Advance**：integration checkpoint 完成后，为已同步到最新 integration base 且没有 active claim 的 lane 自动 claim 下一条 queue task。
+- **Status Summary**：输出 AL01-AL06 lane、branch delta、dirty、latest claim 和下一动作。
+- **Post Checkpoint**：在 integration checkpoint 后串联 scan/ingest、空闲同步和自动解封；默认 dry-run，`--apply` 才写 store 或执行 ff-only sync。
 - **Main Promotion**：integration checkpoint 通过后，按 `git-delivery-workflow` 准备进入 `main` 的 PR/MR-ready 或 merge-ready 报告。
 
 ## Candidate Selection
@@ -139,6 +150,17 @@ Worker prompt 必须包含：
 
 ## Progress Ingest
 
+主协调会话默认使用自动扫描交接，不要求用户手工复制 worker checkpoint report。worker 分支完成并获得用户批准提交后，主协调会话或 integration 会话运行：
+
+```powershell
+uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py scan-worker-commits
+uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py ingest-worker-commits
+```
+
+`scan-worker-commits` 只读检查当前 shared store 中 `claimed` / `reported` claim 的分支 HEAD、对应 worktree dirty 状态、evidence report 是否已提交、evidence metadata 是否匹配 claim/lane/task/base、implementation plan 是否在分支 diff 中，以及 evidence report 是否声明 expected ingest result。`ingest-worker-commits` 只在扫描结果 ready 时把对应 claim 更新为 `implemented` 或 `mock_ready` 并写入 Worker HEAD。
+
+worker 提交后的人工回复只作为可读摘要，不是协调必要输入。不要要求用户把 worktree、branch、changed files 或验证命令逐项复制给主会话；这些信息应优先从 Git branch、evidence report 和 coordination store 自动读取。
+
 读取 worker evidence report 后：
 
 - `reported`：本地 worktree 中已有 evidence report、implementation plan、代码 / 测试 diff 和验证记录；只能用于本地协调，不得进入 integration。
@@ -147,6 +169,56 @@ Worker prompt 必须包含：
 - `blocked`：记录 blocker，并把共享 coordination store 中的对应 claim 设为 `blocked`。
 
 只有主协调会话可以把 claim 推进到 `integrated` 或 `done`。
+
+## Sync Idle Branches And Auto Advance
+
+主协调会话在 integration checkpoint 完成、claim 已收敛为 `done`、integration 分支已 push 后，默认先检查空闲分支同步，再运行自动解封：
+
+```powershell
+uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py status-summary
+uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py post-checkpoint
+uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py post-checkpoint --apply
+uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py sync-idle-branches
+uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py sync-idle-branches --apply
+uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py auto-advance-claims
+uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py auto-advance-claims --apply
+```
+
+`status-summary` 输出六路协调状态。主协调会话每次汇报都应包含该六路摘要，避免只讨论当前 lane。
+
+`post-checkpoint` 是常用入口：默认 dry-run，串联 worker commit scan、可 ingest 判断、空闲 branch 同步候选和 auto-advance 候选。`post-checkpoint --apply` 才执行 committed ingest、`sync-idle-branches --apply` 和 `auto-advance-claims --apply`。它不执行 lane merge、verification、checkpoint commit 或 push；这些仍由 integration checkpoint 明确控制。
+
+`sync-idle-branches` 默认 dry-run，只报告哪些 lane branch 可 ff-only 同步；`--apply` 才执行 Git `merge --ff-only`。因为它会移动 branch HEAD，必须遵守 `git-delivery-workflow` 的批准规则。
+
+空闲分支同步只允许处理同时满足以下条件的 lane：
+
+- lane 没有 `claimed`、`reported`、`implemented`、`mock_ready`、`integrating` 或 `blocked` claim。
+- worker branch 存在且有 worktree。
+- worktree clean。
+- branch 相对 integration target 没有独有未集成 commit。
+- branch 落后 integration target，且可 `merge --ff-only`。
+
+`auto-advance-claims` 默认 dry-run，只报告每条 lane 会 claim 哪个下一任务或为什么跳过；`--apply` 才写入共享 coordination store。
+
+自动解封只允许 claim 同 lane 的下一条 queue task，并且必须满足：
+
+- lane 没有 `claimed`、`reported`、`implemented`、`mock_ready` 或 `integrating` claim。
+- worker branch 存在、worktree clean，且 branch HEAD 等于当前 integration coordination base。
+- 下一任务在 platform plan 和 split plan 中均不是 `[x]`。
+- 下一任务没有 active claim，且不是 `blocked`。
+- 任务位于 Lane Registry 和 Lane Queue 中。
+
+如果 lane branch 落后 integration，自动解封必须跳过该 lane；先由用户批准运行 `sync-idle-branches --apply` 或手动同步该 worker branch 到 integration checkpoint，再运行 auto-advance。自动解封不得创建分支、worktree、commit、merge 或 push。
+
+因此完整节奏是：worker checkpoint commit -> scan / ingest -> integration merge / verify / mark done / push -> `sync-idle-branches --apply` 同步空闲 worker branch -> `auto-advance-claims --apply` 解封下一条 claim。
+
+Worker 会话启动时可用以下命令代替手工读 claim 字段：
+
+```powershell
+uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py worker-start --json
+```
+
+`worker-start` 只读检查当前 branch 的唯一 `claimed` / `reported` claim、branch HEAD、dirty 状态和 integration delta。返回 `startable: true` 时，worker 可继续执行 `$slice-workflow`；返回 no active claim 时，worker 停止并让主协调会话运行 `post-checkpoint --apply` 或 `auto-advance-claims --apply`。
 
 Evidence 读取规则：
 
@@ -174,7 +246,7 @@ checkpoint 后必须：
 - 将通过的 claim 在共享 coordination store 中更新为 `integrated` 或 `done`。
 - 只对通过 merge gate 的 task 更新 platform plan 和 split plan 为 `[x]`。
 - 对 mock-first 或部分完成的 task 使用或保持 `[/]`。
-- 记录下一批 ready claim。
+- 运行 `post-checkpoint` dry-run；获得用户批准后运行 `post-checkpoint --apply`，让后续 worker 会话可直接用 `worker-start --json` 或 `current-worker --json` 发现下一条 claim。
 
 ## Output Formats
 
@@ -212,7 +284,7 @@ Evidence report: docs/plans/acceleration/reports/<claim-id>.md 或 current-worke
 
 必须写或更新 implementation plan，按 TDD 执行，运行 claim 范围验证，并在 evidence report 中记录 red/green、验证命令、关键输出、mock-first 状态、commit readiness 和阻塞项。
 
-完成后停止并报告 worktree path、branch、dirty status、diff stat、evidence report path、验证结果和本地结果 `reported` 或 `blocked`。如果验证通过且适合提交，准备 commit 批准请求，并说明提交后预期由主协调会话 ingest 为 `implemented` 或 `mock_ready`。获得明确批准后才能提交该 lane 分支。不要自行 claim 下一个任务，不要合并 integration，不要直接向 main 提交。
+完成后停止并报告简短 checkpoint 摘要和本地结果 `reported` 或 `blocked`。如果验证通过且适合提交，准备 commit 批准请求，并说明提交后主协调会话会通过 `scan-worker-commits` / `ingest-worker-commits` 自动读取 branch HEAD、evidence report 和 expected ingest result。获得明确批准后才能提交该 lane 分支。不要自行 claim 下一个任务，不要合并 integration，不要直接向 main 提交。
 ```
 
 ## Stop Conditions
@@ -234,6 +306,8 @@ Evidence report: docs/plans/acceleration/reports/<claim-id>.md 或 current-worke
 ## Common Mistakes
 
 - 让 worker 自己从 queue 抢任务。
+- 忘记同步空闲 lane branch 就运行 auto-advance，导致自动解封被 branch head guard 跳过。
+- integration checkpoint 后忘记运行 auto-advance，导致 worker 会话反复回主协调申请下一条 claim。
 - 让多个 worker 同时更新共享 coordination store 或中央 checkpoint snapshot。
 - 把本地 `reported` evidence 当作可 merge 的 integration 输入。
 - 把 mock-first 的 `mock_ready` 当作完成。
