@@ -591,6 +591,184 @@ a {
   overflow-wrap: anywhere;
 }
 
+.template-editor {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 14px;
+}
+
+.template-editor__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.template-editor__heading h2 {
+  margin: 4px 0 0;
+  font-size: 1rem;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.template-editor__heading span {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: oklch(98.4% 0.005 248);
+  color: var(--text-muted);
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.template-editor__guard {
+  margin: 0;
+  border: 1px solid oklch(84% 0.035 82);
+  border-radius: 8px;
+  background: oklch(97% 0.02 82);
+  color: oklch(38% 0.08 82);
+  padding: 9px 10px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.template-editor__field-error {
+  margin: 0;
+  border: 1px solid oklch(84% 0.035 26);
+  border-radius: 8px;
+  background: oklch(97.5% 0.015 26);
+  color: oklch(40% 0.08 26);
+  padding: 9px 10px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.template-editor__global,
+.template-editor-stage__fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.template-editor label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: oklch(33% 0.02 248);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.template-editor input,
+.template-editor select,
+.template-editor textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: oklch(27% 0.022 248);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 0.84rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.template-editor textarea {
+  resize: vertical;
+}
+
+.template-editor__checkbox {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  align-content: center;
+}
+
+.template-editor__checkbox input {
+  width: 18px;
+  min-height: 18px;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.template-editor__stages {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.template-editor-stage {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: oklch(98.4% 0.005 248);
+  padding: 10px;
+}
+
+.template-editor-stage__title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.template-editor-stage__title strong,
+.template-editor-stage__title span {
+  overflow-wrap: anywhere;
+}
+
+.template-editor-stage__title strong {
+  color: oklch(28% 0.025 248);
+  font-size: 0.86rem;
+}
+
+.template-editor-stage__title span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.template-editor-stage__prompt {
+  grid-column: 1 / -1;
+}
+
+.template-editor__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.template-editor__action-note {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.template-editor__actions .workspace-button {
+  width: auto;
+  min-width: 0;
+}
+
 .workspace-inspector {
   border-left: 1px solid var(--border);
   background: var(--surface);
@@ -1101,6 +1279,30 @@ a {
 
   .template-summary__header strong {
     text-align: left;
+  }
+
+  .template-editor__global,
+  .template-editor-stage__fields {
+    grid-template-columns: 1fr;
+  }
+
+  .template-editor__heading,
+  .template-editor-stage__title {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .template-editor__actions {
+    justify-content: stretch;
+  }
+
+  .template-editor__action-note {
+    text-align: left;
+  }
+
+  .template-editor__actions .workspace-button {
+    width: 100%;
   }
 }
 

@@ -780,14 +780,19 @@
 ## F2.6 模板编辑与脏状态守卫
 
 **计划周期**：Week 3-4
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现模板允许字段编辑、另存/覆盖/删除和脏状态拦截，使首条需求启动前的运行配置可控。
 **实施计划**：`docs/plans/implementation/f2.6-template-editor-dirty-guard.md`
+**验证摘要**：`npm --prefix frontend run test -- --run src/features/templates/__tests__/TemplateEditor.test.tsx` 通过，覆盖允许字段编辑、系统模板另存、用户模板覆盖/另存/删除、脏状态启动守卫、最大自动回归重试次数错误、配置边界字段不暴露和本地另存模板保留；`npm --prefix frontend run test -- --run src/features/templates/__tests__/TemplateSelector.test.tsx` 通过；`npm --prefix frontend run test -- --run src/features/workspace/__tests__/WorkspaceShell.test.tsx` 通过，覆盖 Narrative Workspace 中模板编辑集成和脏状态启动拦截；`npm --prefix frontend run test -- --run` 通过，8 个测试文件 / 54 个测试；`npm --prefix frontend run build` 通过。本切片只实现 draft 会话中模板运行前配置编辑、保存动作模拟和前端脏状态守卫，不实现后端模板持久化、Composer、真实 run 启动或平台硬上限编辑入口。
 
 **修改文件列表**：
 - Create: `frontend/src/features/templates/TemplateEditor.tsx`
 - Create: `frontend/src/features/templates/template-state.ts`
 - Create: `frontend/src/features/templates/__tests__/TemplateEditor.test.tsx`
+- Modify: `frontend/src/features/templates/TemplateEmptyState.tsx`
+- Modify: `frontend/src/features/workspace/WorkspaceShell.tsx`
+- Modify: `frontend/src/features/workspace/__tests__/WorkspaceShell.test.tsx`
+- Modify: `frontend/src/styles/global.css`
 
 **实现类/函数**：
 - `TemplateEditor`

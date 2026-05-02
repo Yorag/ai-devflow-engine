@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   usePipelineTemplatesQuery,
   useProjectSessionsQuery,
+  useProvidersQuery,
   useSessionWorkspaceQuery,
 } from "../../api/hooks";
 import type { ProjectRead } from "../../api/types";
@@ -24,6 +25,7 @@ export function WorkspaceShell(): JSX.Element {
     request: mockApiRequestOptions,
   });
   const templatesQuery = usePipelineTemplatesQuery({ request: mockApiRequestOptions });
+  const providersQuery = useProvidersQuery({ request: mockApiRequestOptions });
   const sessions = useMemo(() => sessionsQuery.data ?? [], [sessionsQuery.data]);
   const selectedSession =
     sessions.find((session) => session.session_id === currentSessionId) ??
@@ -90,6 +92,7 @@ export function WorkspaceShell(): JSX.Element {
             <TemplateEmptyState
               session={workspace.session}
               templates={templatesQuery.data ?? []}
+              providers={providersQuery.data ?? []}
               selectedTemplateId={selectedTemplateId}
               onTemplateChange={handleTemplateChange}
             />

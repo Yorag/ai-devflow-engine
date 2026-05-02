@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { renderWithAppProviders } from "../../../app/test-utils";
@@ -115,5 +115,27 @@ describe("WorkspaceShell", () => {
         "Select a session to review its run history and execution feed.",
       ),
     ).toBeNull();
+  });
+
+  it("renders template editing inside the draft narrative empty state", async () => {
+    renderWithAppProviders(<ConsolePage />);
+
+    const editor = await screen.findByRole("region", { name: "Template editor" });
+    expect(within(editor).getByText("Run configuration")).toBeTruthy();
+    expect(
+      within(editor).getByLabelText("requirement_analysis system prompt"),
+    ).toBeTruthy();
+    expect(within(editor).getByLabelText("requirement_analysis provider")).toBeTruthy();
+
+    fireEvent.change(within(editor).getByLabelText("requirement_analysis system prompt"), {
+      target: { value: "Clarify only when missing facts block implementation." },
+    });
+
+    expect(within(editor).getByText(/Save this edited system template/u)).toBeTruthy();
+    expect(
+      within(editor).getByRole("button", { name: "Save as user template" }),
+    ).toBeTruthy();
+    expect(document.body.textContent ?? "").not.toContain("DeliveryChannel");
+    expect(document.body.textContent ?? "").not.toContain("deterministic test runtime");
   });
 });
