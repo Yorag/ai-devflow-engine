@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -69,6 +70,45 @@ class AuditService:
         self._session = session
         self._audit_writer = audit_writer
         self._redaction_policy = redaction_policy or RedactionPolicy()
+
+    def require_audit_record(
+        self,
+        *,
+        actor_type: AuditActorType,
+        actor_id: str,
+        action: str,
+        target_type: str,
+        target_id: str,
+        result: AuditResult,
+        reason: str | None,
+        metadata: dict[str, Any] | None,
+        trace_context: TraceContext,
+        rollback: Callable[[], None] | None = None,
+        created_at: datetime | None = None,
+    ) -> AuditRecordResult:
+        try:
+            return self.record_command_result(
+                actor_type=actor_type,
+                actor_id=actor_id,
+                action=action,
+                target_type=target_type,
+                target_id=target_id,
+                result=result,
+                reason=reason,
+                metadata=metadata,
+                trace_context=trace_context,
+                created_at=created_at,
+            )
+        except AuditWriteError as exc:
+            if rollback is not None:
+                try:
+                    rollback()
+                except Exception:
+                    pass
+            raise AuditWriteError(
+                f"Required audit record for action {action!r} could not be "
+                "written; reject or roll back high-impact action."
+            ) from exc
 
     def record_command_result(
         self,
@@ -154,13 +194,39 @@ class AuditService:
         trace_context: TraceContext,
         created_at: datetime | None = None,
     ) -> AuditRecordResult:
-        return self.record_command_result(
+        return self.require_audit_record(
             actor_type=actor_type,
             actor_id=actor_id,
             action=action,
             target_type=target_type,
             target_id=target_id,
             result=AuditResult.REJECTED,
+            reason=reason,
+            metadata=metadata,
+            trace_context=trace_context,
+            created_at=created_at,
+        )
+
+    def record_blocked_action(
+        self,
+        *,
+        actor_type: AuditActorType,
+        actor_id: str,
+        action: str,
+        target_type: str,
+        target_id: str,
+        reason: str,
+        metadata: dict[str, Any] | None,
+        trace_context: TraceContext,
+        created_at: datetime | None = None,
+    ) -> AuditRecordResult:
+        return self.require_audit_record(
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            result=AuditResult.BLOCKED,
             reason=reason,
             metadata=metadata,
             trace_context=trace_context,
