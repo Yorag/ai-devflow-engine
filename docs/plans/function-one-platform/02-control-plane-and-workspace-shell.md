@@ -361,11 +361,12 @@
 ## C2.6 DeliveryChannel 查询与保存
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现项目级默认 DeliveryChannel 的查询和保存，使交付配置独立于 Session 与模板，并复用 C2.1 已创建的默认通道。
 **实施计划**：`docs/plans/implementation/c2.6-delivery-channel-crud.md`
 
 **修改文件列表**：
+- Modify: `backend/app/schemas/delivery_channel.py`
 - Modify: `backend/app/services/delivery_channels.py`
 - Modify: `backend/app/api/routes/projects.py`
 - Create: `backend/tests/services/test_delivery_channel_service.py`
@@ -390,6 +391,8 @@
 **测试方法**：
 - `pytest backend/tests/services/test_delivery_channel_service.py -v`
 - `pytest backend/tests/api/test_delivery_channel_api.py -v`
+
+**验证摘要**：实施计划 `docs/plans/implementation/c2.6-delivery-channel-crud.md` 已完成。TDD RED 先观察到缺少 `ProjectDeliveryChannelUpdateRequest`、DeliveryChannel query/save service、project delivery-channel routes、OpenAPI route/schema 暴露，以及非 ASCII credential env 名称被误接受；GREEN 后实现项目级默认 DeliveryChannel GET/PUT、严格更新请求、git/demo 模式保存、服务层 mode-dependent 校验、统一错误映射、成功与拒绝审计、成功审计失败 rollback、unsafe legacy credential ref 的审计和 API 投影阻断。Spec compliance reviewer 和 code quality reviewer 复审均未留下 Critical 或 Important 发现。`uv run --no-sync python -m pytest backend/tests/services/test_delivery_channel_service.py backend/tests/api/test_delivery_channel_api.py -q` 通过 21 个 C2.6 focused tests；`uv run --no-sync python -m pytest backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py -q` 通过 11 个 schema regression tests；`uv run --no-sync python -m pytest backend/tests/services/test_project_service.py backend/tests/api/test_project_api.py backend/tests/services/test_provider_service.py backend/tests/api/test_provider_api.py backend/tests/services/test_provider_seed.py backend/tests/api/test_template_provider_seed_api.py backend/tests/services/test_user_template_service.py backend/tests/api/test_template_api.py -q` 通过 64 个 DB09 control-plane regression tests；`uv run --no-sync python -m pytest --collect-only -q` 收集 238 个 backend tests 且无收集错误；`uv run --no-sync python -m pytest -q` 通过 238 个 backend tests。
 
 <a id="c27"></a>
 
