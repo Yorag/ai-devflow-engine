@@ -221,7 +221,7 @@
 | R3.1 | Run 状态机纯领域规则 | Week 4 | [x] | 后端核心 | [03](function-one-platform/03-run-projection-and-feed.md#r31) |
 | C2.9a | Session 删除命令与历史可见性 | Week 4 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c29a) |
 | C2.9b | Project 移除命令与级联历史可见性 | Week 4 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c29b) |
-| E3.1 | 领域事件 Schema 与 EventStore | Week 4 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#e31) |
+| E3.1 | 领域事件 Schema 与 EventStore | Week 4 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#e31) |
 | R3.2 | 首条需求启动首个 run | Week 4 | [ ] | 后端核心 | [03](function-one-platform/03-run-projection-and-feed.md#r32) |
 | R3.3 | 重新尝试领域规则与内部创建基础 | Week 4 | [ ] | 后端核心 | [03](function-one-platform/03-run-projection-and-feed.md#r33) |
 | R3.4 | 模板快照固化 | Week 4 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#r34) |
@@ -239,7 +239,7 @@
 | L3.1 | Run 与 Stage 日志轻查询 API | Week 5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#l31) |
 | F3.1 | Workspace Store 快照初始化 | Week 5 | [x] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f31) |
 | F3.2 | SSE Client 与 Event Reducer | Week 5 | [x] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f32) |
-| F3.3 | Feed Entry Renderer | Week 5-6 | [ ] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f33) |
+| F3.3 | Feed Entry Renderer | Week 5-6 | [x] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f33) |
 | F3.4 | StageNode 与阶段内部条目 | Week 5-6 | [ ] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f34) |
 | F3.5 | Run Boundary 与 Run Switcher | Week 5-6 | [ ] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f35) |
 | F3.6 | Inspector Shell 与打开状态 | Week 5-6 | [ ] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f36) |
@@ -261,7 +261,7 @@
 | F4.3 | Approval Block 与 Reject 输入 | Week 6 | [ ] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f43) |
 | F4.3a | Tool Confirmation Block 与确认交互 | Week 6-7 | [ ] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f43a) |
 | F4.4 | 重新尝试 UI 与历史审批禁用态 | Week 6 | [ ] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f44) |
-| A4.1 | RuntimeEngine 接口 | Week 7 | [ ] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#a41) |
+| A4.1 | RuntimeEngine 接口 | Week 7 | [x] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#a41) |
 | W5.0 | ToolProtocol 与工具注册表 | Week 7 | [ ] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w50) |
 | W5.0a | 统一错误码字典与错误响应契约 | Week 7 | [ ] | 后端契约 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w50a) |
 | W5.1 | WorkspaceManager 隔离工作区 | Week 7 | [ ] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w51) |

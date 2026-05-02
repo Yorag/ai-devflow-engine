@@ -14,9 +14,10 @@
 ## A4.1 RuntimeEngine 接口
 
 **计划周期**：Week 7
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：定义 `deterministic test runtime` 与 LangGraph runtime 的共同接口，使运行生命周期服务不依赖具体执行内核，并保证两条执行路径只消费 run 已固化的运行快照。
 **实施计划**：`docs/plans/implementation/a4.1-runtime-engine-interface.md`
+**验证摘要**：实施计划 `docs/plans/implementation/a4.1-runtime-engine-interface.md` 已完成并在 integration checkpoint 合入 `3cba4f8`。`uv run python -m pytest backend/tests/events/test_event_store.py backend/tests/runtime/test_runtime_engine_contract.py -v` 通过 26 个 E3.1 / A4.1 focused tests；`uv run python -m pytest -q` 通过 356 个 backend tests。
 
 **修改文件列表**：
 - Create: `backend/app/runtime/base.py`
