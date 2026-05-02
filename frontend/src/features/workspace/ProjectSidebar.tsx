@@ -12,14 +12,18 @@ import { SessionList } from "./SessionList";
 type ProjectSidebarProps = {
   request: ApiRequestOptions;
   currentProjectId: string;
+  currentSessionId: string;
   onProjectChange: (projectId: string) => void;
+  onSessionChange: (sessionId: string) => void;
   onCurrentProjectChange: (project: ProjectRead | null) => void;
 };
 
 export function ProjectSidebar({
   request,
   currentProjectId,
+  currentSessionId,
   onProjectChange,
+  onSessionChange,
   onCurrentProjectChange,
 }: ProjectSidebarProps): JSX.Element {
   const projectsQuery = useProjectsQuery({ request });
@@ -31,8 +35,14 @@ export function ProjectSidebar({
   const projectId = currentProject?.project_id ?? "";
   const sessionsQuery = useProjectSessionsQuery(projectId, { request });
   const deliveryQuery = useProjectDeliveryChannelQuery(projectId, { request });
-  const sessionCount = sessionsQuery.data?.length ?? 0;
+  const sessions = sessionsQuery.data ?? [];
+  const sessionCount = sessions.length;
   const deliveryMode = deliveryQuery.data?.delivery_mode ?? "unknown";
+  const latestSession = sessions.reduce<ProjectSidebarLatestSession | null>(
+    (latest, session) =>
+      latest && latest.updated_at >= session.updated_at ? latest : session,
+    null,
+  );
 
   useEffect(() => {
     onCurrentProjectChange(currentProject);
@@ -72,6 +82,12 @@ export function ProjectSidebar({
             <span>Default delivery</span>
             <strong>{deliveryMode}</strong>
           </div>
+          <div>
+            <span>Latest activity</span>
+            <strong>
+              {latestSession ? formatTimestamp(latestSession.updated_at) : "None"}
+            </strong>
+          </div>
         </section>
       ) : null}
 
@@ -88,10 +104,18 @@ export function ProjectSidebar({
         Remove project
       </button>
 
-      <SessionList sessions={sessionsQuery.data ?? []} />
+      <SessionList
+        sessions={sessions}
+        currentSessionId={currentSessionId}
+        onSessionChange={onSessionChange}
+      />
     </aside>
   );
 }
+
+type ProjectSidebarLatestSession = {
+  updated_at: string;
+};
 
 function ProjectSwitcher({
   projects,
@@ -124,4 +148,19 @@ function ProjectSwitcher({
       ) : null}
     </section>
   );
+}
+
+function formatTimestamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(
+    date.getUTCDate(),
+  )} ${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}`;
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
 }

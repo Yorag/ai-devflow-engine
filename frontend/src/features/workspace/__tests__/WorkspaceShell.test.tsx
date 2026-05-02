@@ -86,6 +86,45 @@ describe("WorkspaceShell", () => {
     ).toHaveProperty("disabled", true);
   });
 
+  it("opens a selected session from the sidebar and shows session metadata", async () => {
+    renderWithAppProviders(<ConsolePage />);
+
+    expect(
+      await screen.findByRole("region", { name: "Template empty state" }),
+    ).toBeTruthy();
+    const runningSessionItem = screen
+      .getByRole("button", { name: "Open Add workspace shell" })
+      .closest("article");
+    expect(runningSessionItem).toBeTruthy();
+    expect(
+      within(runningSessionItem as HTMLElement).getByText("Updated 2026-05-01 09:25"),
+    ).toBeTruthy();
+    expect(
+      within(runningSessionItem as HTMLElement).getByText(
+        "Current stage Solution Design",
+      ),
+    ).toBeTruthy();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open Add workspace shell" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", {
+        level: 1,
+        name: "Add workspace shell",
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("region", { name: "Template empty state" }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", {
+        name: "Open Add workspace shell",
+      }),
+    ).toHaveProperty("ariaCurrent", "page");
+  });
+
   it("uses product workspace copy and avoids implementation placeholder text", async () => {
     renderWithAppProviders(<ConsolePage />);
 

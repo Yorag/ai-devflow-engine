@@ -73,7 +73,9 @@ export function WorkspaceShell(): JSX.Element {
       <ProjectSidebar
         request={mockApiRequestOptions}
         currentProjectId={currentProjectId}
+        currentSessionId={selectedSession?.session_id ?? ""}
         onProjectChange={handleProjectChange}
+        onSessionChange={setCurrentSessionId}
         onCurrentProjectChange={setCurrentProject}
       />
       <section className="workspace-main" aria-label="Narrative workspace">
