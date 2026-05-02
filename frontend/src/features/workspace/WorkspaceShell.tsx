@@ -8,6 +8,7 @@ import {
 } from "../../api/hooks";
 import type { ProjectRead } from "../../api/types";
 import { mockApiRequestOptions } from "../../mocks/handlers";
+import { NarrativeFeed } from "../feed/NarrativeFeed";
 import { SettingsModal } from "../settings/SettingsModal";
 import { TemplateEmptyState } from "../templates/TemplateEmptyState";
 import { ProjectSidebar } from "./ProjectSidebar";
@@ -98,6 +99,8 @@ export function WorkspaceShell(): JSX.Element {
               selectedTemplateId={selectedTemplateId}
               onTemplateChange={handleTemplateChange}
             />
+          ) : workspace ? (
+            <NarrativeFeed entries={workspace.narrative_feed} />
           ) : (
             <div className="workspace-main__empty">
               <p className="workspace-eyebrow">Narrative Workspace</p>
