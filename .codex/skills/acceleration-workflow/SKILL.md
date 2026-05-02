@@ -52,7 +52,7 @@ git check-ignore -q .worktrees
 - **Queue Discovery**：从 lane queue 中找出 ready claim 候选，说明依赖、owner 和风险。
 - **Claim Slice**：主协调会话把一个 ready task 写入 Claim Ledger，状态为 `claimed`。
 - **Worker Launch**：为已 claim 的 slice 输出 worktree 命令和 worker prompt。
-- **Progress Ingest**：读取 worker evidence report，把 `implemented`、`mock_ready` 或 `blocked` 收敛到 Claim Ledger。
+- **Progress Ingest**：读取 worker evidence report。Local ingest 最多把 claim 收敛为 `reported` 或 `blocked`；Committed ingest 才能把 claim 收敛为 `implemented` 或 `mock_ready`。
 - **Integration Checkpoint**：协调 AL 分支进入 `integration/function-one-acceleration`，跑验证并更新最终状态。
 - **Main Promotion**：integration checkpoint 通过后，按 `git-delivery-workflow` 准备进入 `main` 的 PR/MR-ready 或 merge-ready 报告。
 
@@ -64,7 +64,7 @@ git check-ignore -q .worktrees
 - platform plan 与 split plan 状态不是 `[x]`。
 - task 在 acceleration execution plan 的 Lane Registry 和 Lane Queue 中有且只有一个归属 lane。
 - lane status 是 `planned` 或 `claimed`。
-- Claim Ledger 中没有同一 task 的 active claim：`claimed`、`implemented`、`mock_ready` 或 `integrating`。
+- Claim Ledger 中没有同一 task 的 active claim：`claimed`、`reported`、`implemented`、`mock_ready` 或 `integrating`。
 - 任务依赖满足，或 Start Gate 明确允许 mock-first。
 - 当前 active claims 不会与候选 task 共享同一个非 owner 写入口。
 - 候选 task 不要求 worker 修改其它 lane owner 的共享入口。
@@ -101,7 +101,7 @@ cd ".worktrees\<safe-branch-name>"
 
 如果 branch 或 worktree 已存在，不要创建重复工作区；报告现有位置，并让用户决定进入现有 worktree、为已有 branch 创建明确的新 worktree，还是清理旧工作区。
 
-已有 lane worktree 的继续提示必须先报告当前 Worker HEAD 和目标 Coordination Base；如果二者落后 integration checkpoint，停止并准备同步请求。
+已有 lane worktree 的继续提示必须先报告当前分支 HEAD、dirty status 和目标 Coordination Base；如果当前分支 HEAD 落后 integration checkpoint，停止并准备同步请求。
 
 Worker prompt 必须包含：
 
@@ -111,24 +111,26 @@ Worker prompt 必须包含：
 - lane owner scope。
 - forbidden shared entries。
 - 允许命令和验证命令。
-- 禁止更新最终进度表、禁止自行 claim 下一个任务、禁止未经用户批准的 Git 写操作。claim commit 必须走 `git-delivery-workflow` commit gate。
+- 禁止更新最终进度表、禁止自行 claim 下一个任务、禁止未经用户批准的 Git 写操作。未提交 evidence 只能报告 `reported`；claim commit 必须走 `git-delivery-workflow` commit gate。
 
 ## Progress Ingest
 
 读取 worker evidence report 后：
 
-- `implemented`：代码和 focused tests 已完成，等待 integration。
-- `mock_ready`：只完成 mock-first 或 fixture-based 部分，不得标 `[x]`。
+- `reported`：本地 worktree 中已有 evidence report、implementation plan、代码 / 测试 diff 和验证记录；只能用于本地协调，不得进入 integration。
+- `implemented`：worker 分支已有用户批准的 checkpoint commit，包含代码、测试、implementation plan 和 evidence report，等待 integration。
+- `mock_ready`：worker 分支已有用户批准的 checkpoint commit，只完成 mock-first 或 fixture-based 部分，不得标 `[x]`。
 - `blocked`：记录 blocker，并把对应 Claim Ledger 行设为 `blocked`。
 
 只有主协调会话可以把 claim 推进到 `integrated` 或 `done`。
 
 Evidence 读取规则：
 
-- 首选从本地 worker worktree 读取 `docs/plans/acceleration/reports/<claim-id>.md`，并记录 `git -C <worktree> rev-parse --short HEAD` 为 Worker HEAD。
-- 如果没有本地 worktree，使用 `git show <branch>:docs/plans/acceleration/reports/<claim-id>.md` 读取报告，并用 `git rev-parse --short <branch>` 记录 Worker HEAD。
+- Local Progress Ingest：从本地 worker worktree 读取 `docs/plans/acceleration/reports/<claim-id>.md`，并读取 `git -C <worktree> status --short`、`git -C <worktree> diff --stat` 和 `git -C <worktree> rev-parse --short HEAD`。如果 report 与 Claim Ledger 一致，Claim Ledger 最多更新为 `reported` 或 `blocked`；dirty worktree 不得更新为 `implemented` 或 `mock_ready`。
+- Committed Progress Ingest：使用 `git show <branch>:docs/plans/acceleration/reports/<claim-id>.md` 读取报告，并用 `git rev-parse --short <branch>` 记录 Worker HEAD。只有确认 evidence report、implementation plan、代码和测试包含在该 branch commit 中，Claim Ledger 才能更新为 `implemented` 或 `mock_ready`。
+- Worker 不在 evidence report 中声明权威 Worker HEAD；Worker HEAD 由主协调会话在 ingest 时写入 Claim Ledger。
 - 如果 evidence report 不存在、分支不可读，或报告中的 claim/lane/task/Coordination Base 与 Claim Ledger 不一致，停止 ingest。
-- Progress Ingest 只更新 Claim Ledger 和 blocker 信息；不要合并代码，不要更新 platform plan 或 split plan。
+- Progress Ingest 只更新 Claim Ledger、Worker HEAD 和 blocker 信息；不要合并代码，不要更新 platform plan 或 split plan。
 
 ## Integration Checkpoint
 
@@ -138,6 +140,7 @@ checkpoint 前必须确认：
 
 - integration branch 当前。
 - 待集成 lane 的 Coordination Base、Worker HEAD、diff 和 evidence report 一致。
+- 待集成 claim 是已提交的 `implemented` 或 `mock_ready`，不是 `reported`，且不是本地 dirty worktree。
 - 没有跨 lane owner 未解决冲突。
 - focused verification 已在 lane 分支通过。
 
@@ -176,14 +179,14 @@ Claim: <claim-id>
 Lane: <lane-id>
 Task: <task-id>
 Coordination Base: <current-baseline-commit>
-Worker HEAD: <filled by worker when reporting>
+Worker HEAD: <由主协调会话在 ingest 时填写；worker 不在 evidence report 中声明权威 Worker HEAD>
 Evidence report: docs/plans/acceleration/reports/<claim-id>.md
 
 只在该 lane owner scope 和该 task slice 范围内工作。不要修改其它 lane owner 的共享入口。不要更新 function-one-acceleration-execution-plan.md、function-one-platform-plan.md 或 split plan 的最终完成状态；这些由主协调会话在 integration checkpoint 后统一更新。
 
-必须写或更新 implementation plan，按 TDD 执行，运行 claim 范围验证，并在 evidence report 中记录 red/green、验证命令、关键输出、mock-first 状态和阻塞项。
+必须写或更新 implementation plan，按 TDD 执行，运行 claim 范围验证，并在 evidence report 中记录 red/green、验证命令、关键输出、mock-first 状态、commit readiness 和阻塞项。
 
-完成后停止并报告 implemented、mock_ready 或 blocked。如需提交当前 lane claim，只能在验证后准备 commit 批准请求；获得明确批准后才能提交该 lane 分支。不要自行 claim 下一个任务，不要合并 integration，不要直接向 main 提交。
+完成后停止并报告 worktree path、branch、dirty status、diff stat、evidence report path、验证结果和本地结果 `reported` 或 `blocked`。如果验证通过且适合提交，准备 commit 批准请求，并说明提交后预期由主协调会话 ingest 为 `implemented` 或 `mock_ready`。获得明确批准后才能提交该 lane 分支。不要自行 claim 下一个任务，不要合并 integration，不要直接向 main 提交。
 ```
 
 ## Stop Conditions
@@ -198,6 +201,7 @@ Evidence report: docs/plans/acceleration/reports/<claim-id>.md
 - 候选 task 需要修改其它 lane owner 共享入口。
 - platform plan 与 split plan 状态冲突。
 - 本地已有同名 branch 或 worktree，且用户要求创建重复工作区。
+- 用户要求把 `reported` claim、未提交 worktree diff 或缺少 checkpoint commit 的 worker 成果进入 integration checkpoint。
 - 用户要求 worker 直接更新最终 `[x]` 状态。
 - 用户要求 AL 分支绕过 integration 直接合入 `main`。
 
@@ -205,6 +209,7 @@ Evidence report: docs/plans/acceleration/reports/<claim-id>.md
 
 - 让 worker 自己从 queue 抢任务。
 - 让多个 worker 同时更新中央 Claim Ledger。
+- 把本地 `reported` evidence 当作可 merge 的 integration 输入。
 - 把 mock-first 的 `mock_ready` 当作完成。
 - 让前端 lane 自行发明 projection 或 event payload。
 - 让非 owner lane 修改 schema、router、migration、frontend store 或 event payload。

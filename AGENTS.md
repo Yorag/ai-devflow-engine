@@ -92,4 +92,5 @@ Existing AI knowledge may reflect LangChain/LangGraph `0.3.x` conventions, while
 - Use the repo-local skill `acceleration-workflow` for main-session lane coordination, ready claim discovery, worker launch prompts, progress ingest, and integration checkpoints.
 - Use `slice-workflow` only for an assigned acceleration claim in a lane worker branch.
 - Worker branches must not update the central Claim Ledger, `function-one-platform-plan.md`, or split-plan final task status. Those final status updates happen only in the main coordination session after an integration checkpoint.
+- Uncommitted worker evidence is only local `reported` progress. A claim becomes `implemented` or `mock_ready` only after a user-approved worker checkpoint commit contains the evidence report, implementation plan, code, and tests.
 - Acceleration lane branches merge to `integration/function-one-acceleration` first. Do not merge an acceleration lane directly to `main` unless the user explicitly abandons acceleration mode and approves a different integration strategy.

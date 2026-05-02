@@ -40,8 +40,9 @@
 | `queued` | 子任务在 lane queue 中，但依赖或 start gate 尚未满足。 |
 | `ready` | 子任务依赖满足，可由主协调会话 claim。 |
 | `claimed` | 子任务已分配给一个 lane worker。 |
-| `implemented` | Worker 已完成代码、测试和本地证据，等待 integration ingest。 |
-| `mock_ready` | Worker 基于冻结契约或 mock 完成可验证部分，等待真实 owner 接入。 |
+| `reported` | Worker 本地 worktree 已写入 evidence report、implementation plan、代码或测试变更；主协调会话可读取本地状态，但该 claim 尚无可合入 checkpoint。 |
+| `implemented` | Worker 分支已有用户批准的 checkpoint commit，包含代码、测试、implementation plan 和 evidence report，等待 integration。 |
+| `mock_ready` | Worker 分支已有用户批准的 checkpoint commit，只完成 mock-first 或 fixture-based 可验证部分；不得标 `[x]`。 |
 | `integrated` | 子任务实现已进入 integration 分支并通过对应 checkpoint 验证。 |
 | `done` | 主协调会话已把 platform plan 与 split plan 状态更新为 `[x]`。 |
 | `blocked` | 子任务存在阻塞项，不能继续执行或集成。 |
@@ -51,7 +52,7 @@
 | Field | Meaning |
 | --- | --- |
 | `Coordination Base` | 主协调会话分配 claim 时记录的当前基线提交，用于判断任务资格和 owner 冲突。初始 claim 使用当时的 `main` HEAD；存在 integration checkpoint 后使用最新 integration 基线，除非主协调会话另行记录。 |
-| `Worker HEAD` | Worker 回报 evidence 时的实际分支提交。Progress ingest 和 integration checkpoint 必须用 Worker HEAD 读取 diff 与 evidence。 |
+| `Worker HEAD` | 主协调会话在 ingest 时读取并写入 Claim Ledger 的分支提交。Worker 不在 evidence report 中声明权威 Worker HEAD。`reported` 状态下它只标识当前 worktree 的已提交基线，必须结合 dirty status 和本地 diff 读取；`implemented` 或 `mock_ready` 状态下它必须是包含 evidence report 的 checkpoint commit。 |
 | `Integration Base` | integration checkpoint 使用的目标分支提交，通常是 `integration/function-one-acceleration` 的当前 HEAD。 |
 
 ## 3. Lane Registry
@@ -123,28 +124,29 @@ Lane queue 记录任务归属和 lane 内执行顺序。任务资格仍必须由
 
 ## 8. Worker Evidence
 
-Worker 分支完成 claim 后提交本地证据，不直接更新全局完成状态。
+Worker 分支完成 claim 后写入本地证据，不直接更新全局完成状态。未提交的本地证据只能支持 `reported` 或 `blocked` 的本地进度收敛；它不能作为 integration checkpoint 的合入输入。
 
 每个 claim 必须提供：
 
 - `docs/plans/implementation/<task-id>-<task-name>.md` 中的实施计划、TDD 步骤和验证记录。
 - 代码、测试和必要 fixture。
-- `docs/plans/acceleration/reports/<claim-id>.md`，记录 claim、lane、Coordination Base、Worker HEAD、变更文件、TDD red/green、验证命令、mock-first 状态、owner conflict 和剩余 gate。
+- `docs/plans/acceleration/reports/<claim-id>.md`，记录 claim、lane、task、Coordination Base、变更文件、TDD red/green、验证命令、mock-first 状态、owner conflict、commit readiness 和剩余 gate。
 
-Worker 可以在自己的 evidence report 中写 `implemented`、`mock_ready` 或 `blocked`。`function-one-acceleration-execution-plan.md`、`function-one-platform-plan.md` 和 split plan 的最终状态只由主协调会话在 integration checkpoint 后更新。
+Worker evidence report 只声明本地结果：`reported` 或 `blocked`，并写明提交后预期由主协调会话收敛为 `implemented` 还是 `mock_ready`。`implemented` 和 `mock_ready` 是主协调会话在确认 worker checkpoint commit 后写入 Claim Ledger 的状态。`function-one-acceleration-execution-plan.md`、`function-one-platform-plan.md` 和 split plan 的最终状态只由主协调会话在 integration checkpoint 后更新。
 
 主协调会话通过以下方式读取 worker evidence：
 
-- 首选：从已存在的 worker worktree 读取 `docs/plans/acceleration/reports/<claim-id>.md`，同时记录 `git -C <worktree> rev-parse --short HEAD` 为 Worker HEAD。
-- 如果没有本地 worktree：使用 `git show <branch>:docs/plans/acceleration/reports/<claim-id>.md` 读取报告，并使用 `git rev-parse --short <branch>` 记录 Worker HEAD。
-- 如果报告不存在、分支不可读，或 Worker HEAD 与报告中的 `Coordination Base` / `Claim` 不一致，Progress Ingest 停止。
-- Progress Ingest 只更新 Claim Ledger；不合并代码，不更新 platform plan 或 split plan。
+- Local Progress Ingest：从已存在的 worker worktree 读取 `docs/plans/acceleration/reports/<claim-id>.md`，同时读取 `git -C <worktree> status --short`、`git -C <worktree> diff --stat` 和 `git -C <worktree> rev-parse --short HEAD`。如果报告、claim、lane、task 和 Coordination Base 一致，Claim Ledger 最多更新为 `reported` 或 `blocked`。本地 dirty worktree 不得更新为 `implemented` 或 `mock_ready`。
+- Committed Progress Ingest：使用 `git show <branch>:docs/plans/acceleration/reports/<claim-id>.md` 读取报告，并使用 `git rev-parse --short <branch>` 记录 Worker HEAD。只有当 evidence report、implementation plan、代码和测试都包含在该 branch commit 中，Claim Ledger 才能更新为 `implemented` 或 `mock_ready`。
+- 如果报告不存在、分支不可读，或报告中的 `Claim` / `Lane` / `Task` / `Coordination Base` 与 Claim Ledger 不一致，Progress Ingest 停止。
+- Progress Ingest 只更新 Claim Ledger、Worker HEAD 和 blocker 信息；不合并代码，不更新 platform plan 或 split plan。
 
 ## 9. Integration Checkpoints
 
 integration checkpoint 由主协调会话执行。AL 分支默认合入 `integration/function-one-acceleration`，不得直接进入 `main`。
 
 checkpoint 前必须确认待集成 lane 的 Coordination Base、Worker HEAD、diff 和 evidence report 一致。
+`reported` claim、未提交 worktree diff 或缺少 checkpoint commit 的 worker 成果不得进入 integration checkpoint。
 
 | Checkpoint | Scope | Required Verification |
 | --- | --- | --- |
@@ -165,8 +167,9 @@ checkpoint 前必须确认待集成 lane 的 Coordination Base、Worker HEAD、d
 
 | Completion Type | Gate |
 | --- | --- |
-| `implemented` | Worker evidence 完整，focused tests 通过，未修改其它 lane owner 共享入口。 |
-| `mock_ready` | mock/fixture 来源写明，真实 owner 未完成或未进入 integration，任务不得标 `[x]`。 |
+| `reported` | Worker 本地 worktree 有 evidence report、implementation plan、代码 / 测试 diff 和验证记录；只允许本地进度协调，不允许 integration。 |
+| `implemented` | Worker checkpoint commit 完整包含代码、测试、implementation plan 和 evidence report，focused tests 通过，未修改其它 lane owner 共享入口。 |
+| `mock_ready` | Worker checkpoint commit 完整包含 mock/fixture 来源、验证记录和 evidence report；真实 owner 未完成或未进入 integration，任务不得标 `[x]`。 |
 | `integrated` | Claim 已合入 integration 分支，相关 focused tests 和 impacted tests 通过。 |
 | `done` | integration checkpoint 通过，platform plan、split plan、实现代码、测试和验收标准一致。 |
 | `main-ready` | integration 分支通过本轮主线验证，剩余问题有明确后续 claim，且不会破坏已完成用户流程。 |
@@ -182,6 +185,7 @@ checkpoint 前必须确认待集成 lane 的 Coordination Base、Worker HEAD、d
 - platform plan 与 split plan 状态冲突。
 - implementation plan 放宽或改写已评审任务语义。
 - 当前 specs、split plan 或现有实现之间出现来源追溯冲突。
+- claim 只有本地 `reported` evidence、未提交 diff 或缺少包含 evidence report 的 checkpoint commit，却被要求进入 integration checkpoint。
 - 验证失败且 focused 调试后仍不能收敛。
 - Worker 需要 Git 写操作、依赖安装、lock/manifest 变更、迁移执行或环境文件变更但没有用户批准。
 
@@ -196,12 +200,12 @@ Claim: <claim-id>
 Lane: <lane-id>
 Task: <task-id>
 Coordination Base: <current-baseline-commit>
-Worker HEAD: <filled by worker when reporting>
+Worker HEAD: <由主协调会话在 ingest 时填写；worker 不在 evidence report 中声明权威 Worker HEAD>
 Evidence report: docs/plans/acceleration/reports/<claim-id>.md
 
 只在该 lane owner scope 和该 task slice 范围内工作。不要修改其它 lane owner 的共享入口。不要更新 function-one-acceleration-execution-plan.md、function-one-platform-plan.md 或 split plan 的最终完成状态；这些由主协调会话在 integration checkpoint 后统一更新。
 
-必须写或更新 implementation plan，按 TDD 执行，运行 claim 范围验证，并在 evidence report 中记录 red/green、验证命令、关键输出、mock-first 状态和阻塞项。
+必须写或更新 implementation plan，按 TDD 执行，运行 claim 范围验证，并在 evidence report 中记录 red/green、验证命令、关键输出、mock-first 状态、commit readiness 和阻塞项。
 
-完成后停止并报告 implemented、mock_ready 或 blocked。如需提交当前 lane claim，只能在验证后准备 commit 批准请求；获得明确批准后才能提交该 lane 分支。不要自行 claim 下一个任务，不要合并 integration，不要直接向 main 提交。
+完成后停止并报告 worktree path、branch、dirty status、diff stat、evidence report path、验证结果和本地结果 `reported` 或 `blocked`。如果验证通过且适合提交，准备 commit 批准请求，并说明提交后预期由主协调会话 ingest 为 `implemented` 或 `mock_ready`。获得明确批准后才能提交该 lane 分支。不要自行 claim 下一个任务，不要合并 integration，不要直接向 main 提交。
 ```

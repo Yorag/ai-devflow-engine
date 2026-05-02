@@ -90,7 +90,7 @@ For Function One acceleration mode:
 - Lane branches use the exact branch names in `docs/plans/function-one-acceleration-execution-plan.md`.
 - New lane work starts from `main` only when initially creating the lane branch.
 - After an integration checkpoint exists, new claims should use the latest `integration/function-one-acceleration` state as their coordination base unless the acceleration plan says otherwise.
-- Existing lane worktrees must report their current Worker HEAD before taking a new claim. If the lane is behind the latest integration checkpoint and needs integrated contracts, prepare a sync request before continuing.
+- Existing lane worktrees must report their current branch HEAD and dirty status before taking a new claim. If the lane is behind the latest integration checkpoint and needs integrated contracts, prepare a sync request before continuing.
 - Do not create ad hoc branches for individual task slices inside a lane unless the user explicitly asks for a temporary repair branch.
 
 If the worktree is dirty with unrelated edits, stop and ask the user how to separate the work before creating or switching branches.
@@ -222,7 +222,8 @@ Pre-merge checklist:
 Acceleration lane pre-merge checklist:
 - Target branch is `integration/function-one-acceleration`.
 - Claim ids are present in `docs/plans/function-one-acceleration-execution-plan.md`.
-- Worker evidence reports exist for each claim being integrated.
+- Worker evidence reports exist in the worker branch checkpoint commit for each claim being integrated.
+- Claims are `implemented` or `mock_ready`; `reported` claims, dirty worker worktrees, and uncommitted evidence reports are not mergeable integration inputs.
 - The lane did not modify another lane owner's shared entry, or the owner conflict has been resolved in the integration checkpoint plan.
 - Focused verification evidence is fresh for the lane diff.
 - Claims marked `mock_ready` remain partial and do not update final platform/split plan status.
@@ -239,7 +240,8 @@ Do not merge when:
 - The merge depends on unresolved manual follow-up.
 - The PR/MR is open but review, required checks, or branch protection still block platform merge.
 - An AL lane branch is targeting `main` directly.
-- Worker evidence is missing for included claims.
+- Worker evidence is missing from the checkpoint commit for included claims.
+- Included claims are only `reported`, exist only as local dirty worktree changes, or lack a user-approved checkpoint commit.
 - Central Claim Ledger and platform/split plan status disagree.
 - Integration checkpoint verification is stale or has not run.
 
