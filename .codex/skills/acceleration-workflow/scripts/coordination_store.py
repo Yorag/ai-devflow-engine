@@ -49,6 +49,23 @@ def default_store_path(cwd: Path) -> Path:
     return git_common_dir(cwd) / STORE_RELATIVE_PATH
 
 
+def current_branch(cwd: Path) -> str:
+    result = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=cwd,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        raise SystemExit(f"failed to locate current branch: {result.stderr.strip()}")
+    branch = result.stdout.strip()
+    if not branch:
+        raise SystemExit("failed to locate current branch: detached HEAD")
+    return branch
+
+
 def connect(store_path: Path, *, read_only: bool = False) -> sqlite3.Connection:
     if read_only:
         uri = store_path.resolve().as_uri() + "?mode=ro"
@@ -131,6 +148,26 @@ def fetch_claim(connection: sqlite3.Connection, claim_id: str) -> sqlite3.Row | 
         """,
         (claim_id,),
     ).fetchone()
+
+
+def fetch_claims_for_branch(
+    connection: sqlite3.Connection,
+    *,
+    branch: str,
+    statuses: list[str],
+) -> list[sqlite3.Row]:
+    placeholders = ", ".join("?" for _ in statuses)
+    return connection.execute(
+        f"""
+        SELECT claim_id, task_id, lane_id, branch, status, coordination_base,
+               worker_head, evidence_path, blocker, created_at, updated_at
+        FROM claims
+        WHERE branch = ?
+          AND status IN ({placeholders})
+        ORDER BY claim_id
+        """,
+        (branch, *statuses),
+    ).fetchall()
 
 
 def print_claim(row: sqlite3.Row, *, as_json: bool) -> None:
@@ -287,6 +324,41 @@ def command_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_current_worker(args: argparse.Namespace) -> int:
+    store_path = default_store_path(Path.cwd())
+    branch = args.branch or current_branch(Path.cwd())
+    statuses = args.status
+    try:
+        with connect(store_path, read_only=True) as connection:
+            rows = fetch_claims_for_branch(
+                connection,
+                branch=branch,
+                statuses=statuses,
+            )
+    except sqlite3.OperationalError as exc:
+        print(f"coordination store is not readable: {exc}", file=sys.stderr)
+        return 2
+
+    if len(rows) == 1:
+        print_claim(rows[0], as_json=args.json)
+        return 0
+
+    expected = ", ".join(sorted(statuses))
+    if not rows:
+        print(
+            f"no active claim for branch {branch}; expected one of {expected}",
+            file=sys.stderr,
+        )
+        return 2
+
+    claim_ids = ", ".join(row["claim_id"] for row in rows)
+    print(
+        f"multiple active claims for branch {branch}; expected exactly one, got {claim_ids}",
+        file=sys.stderr,
+    )
+    return 2
+
+
 def command_validate_worker(args: argparse.Namespace) -> int:
     store_path = default_store_path(Path.cwd())
     try:
@@ -354,6 +426,18 @@ def build_parser() -> argparse.ArgumentParser:
     list_claims.add_argument("--json", action="store_true")
     list_claims.set_defaults(func=command_list)
 
+    current_worker = subparsers.add_parser("current-worker")
+    current_worker.add_argument("--branch")
+    current_worker.add_argument(
+        "--status",
+        action="append",
+        default=[],
+        choices=sorted(CLAIM_STATUSES),
+        help="Allowed claim status. Repeat to allow multiple statuses.",
+    )
+    current_worker.add_argument("--json", action="store_true")
+    current_worker.set_defaults(func=command_current_worker)
+
     validate_worker = subparsers.add_parser("validate-worker")
     validate_worker.add_argument("--claim", required=True, dest="claim")
     validate_worker.add_argument("--branch", required=True)
@@ -372,7 +456,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
-    if args.command == "validate-worker" and not args.status:
+    if args.command in {"current-worker", "validate-worker"} and not args.status:
         args.status = ["claimed", "reported"]
     return args.func(args)
 

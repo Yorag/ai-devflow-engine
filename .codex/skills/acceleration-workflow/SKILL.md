@@ -38,6 +38,7 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py init
 uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py list --json
 uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py show --claim <claim-id> --json
+uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py current-worker --json
 uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py claim --claim <claim-id> --lane <lane-id> --task <task-id> --branch <branch-name> --base <coordination-base> --evidence docs/plans/acceleration/reports/<claim-id>.md
 uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py ingest --claim <claim-id> --status implemented --worker-head <head>
 ```
@@ -128,8 +129,8 @@ cd ".worktrees\<safe-branch-name>"
 Worker prompt 必须包含：
 
 - 当前 worktree 和 branch。
-- claim id、lane id、task id、Coordination Base。
-- coordination store 读取方式：`uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py show --claim <claim-id> --json`。
+- claim id、lane id、task id、Coordination Base；如果 worker prompt 未显式列出这些字段，worker 必须用 `current-worker --json` 只读发现当前 branch 的唯一 `claimed` / `reported` claim。
+- coordination store 读取方式：`uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py current-worker --json` 或 `uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py show --claim <claim-id> --json`。
 - evidence report 路径。
 - lane owner scope。
 - forbidden shared entries。
@@ -199,13 +200,13 @@ Worker prompt：
 
 使用 $slice-workflow 执行 acceleration claim：
 
-Claim: <claim-id>
-Lane: <lane-id>
-Task: <task-id>
-Coordination Base: <current-baseline-commit>
+Claim: <claim-id 或运行 current-worker --json 自动发现>
+Lane: <lane-id 或 current-worker 输出>
+Task: <task-id 或 current-worker 输出>
+Coordination Base: <current-baseline-commit 或 current-worker 输出>
 Worker HEAD: <由主协调会话在 ingest 时填写；worker 不在 evidence report 中声明权威 Worker HEAD>
-Coordination store: 使用 `git rev-parse --git-common-dir` 定位 `<git-common-dir>/codex-coordination/function-one.sqlite`，并用 `uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py show --claim <claim-id> --json` 只读校验。
-Evidence report: docs/plans/acceleration/reports/<claim-id>.md
+Coordination store: 使用 `git rev-parse --git-common-dir` 定位 `<git-common-dir>/codex-coordination/function-one.sqlite`，并用 `uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py current-worker --json` 自动发现当前 branch 的唯一 active claim；如果已显式获得 claim id，也可用 `show --claim <claim-id> --json` 复核。
+Evidence report: docs/plans/acceleration/reports/<claim-id>.md 或 current-worker 输出的 evidence_path
 
 只在该 lane owner scope 和该 task slice 范围内工作。不要修改其它 lane owner 的共享入口。不要写入 coordination store。不要更新 function-one-acceleration-execution-plan.md、function-one-platform-plan.md 或 split plan 的最终完成状态；这些由主协调会话在 integration checkpoint 后统一更新。
 
