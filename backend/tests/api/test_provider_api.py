@@ -6,8 +6,9 @@ from fastapi.testclient import TestClient
 
 from backend.app.core.config import EnvironmentSettings
 from backend.app.db.base import DatabaseRole
-from backend.app.db.models.control import ControlBase
+from backend.app.db.models.control import ControlBase, ProviderModel
 from backend.app.db.models.log import AuditLogEntryModel, LogBase
+from backend.app.domain.enums import ProviderProtocolType, ProviderSource
 from backend.app.main import create_app
 from backend.app.schemas.observability import AuditResult
 
@@ -180,6 +181,59 @@ def test_provider_routes_patch_builtin_runtime_config_and_preserve_identity(
     assert "blocked:sensitive_field" not in audit.metadata_excerpt
     assert "https://api.deepseek.example/v1" not in audit.metadata_excerpt
     assert "DeepSeek" not in audit.metadata_excerpt
+
+
+def test_provider_routes_block_legacy_raw_api_key_ref_in_read_projection(
+    tmp_path: Path,
+) -> None:
+    from datetime import UTC, datetime
+
+    app = build_provider_api_app(tmp_path)
+    now = datetime(2026, 5, 2, 13, 0, 0, tzinfo=UTC)
+    with app.state.database_manager.session(DatabaseRole.CONTROL) as session:
+        session.add(
+            ProviderModel(
+                provider_id="provider-custom-legacy",
+                display_name="Legacy custom provider",
+                provider_source=ProviderSource.CUSTOM,
+                protocol_type=ProviderProtocolType.OPENAI_COMPLETIONS_COMPATIBLE,
+                base_url="https://provider.example.test/v1",
+                api_key_ref="raw-legacy-secret",
+                default_model_id="legacy-chat",
+                supported_model_ids=["legacy-chat"],
+                runtime_capabilities=[
+                    {
+                        "model_id": "legacy-chat",
+                        "context_window_tokens": 128000,
+                        "max_output_tokens": 4096,
+                        "supports_tool_calling": False,
+                        "supports_structured_output": False,
+                        "supports_native_reasoning": False,
+                    }
+                ],
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.commit()
+
+    with TestClient(app) as client:
+        detail_response = client.get("/api/providers/provider-custom-legacy")
+        list_response = client.get("/api/providers")
+
+    assert detail_response.status_code == 200
+    detail_body = detail_response.json()
+    assert detail_body["api_key_ref"] == "[blocked:api_key_ref]"
+    assert "raw-legacy-secret" not in str(detail_body)
+
+    assert list_response.status_code == 200
+    legacy_provider = next(
+        item
+        for item in list_response.json()
+        if item["provider_id"] == "provider-custom-legacy"
+    )
+    assert legacy_provider["api_key_ref"] == "[blocked:api_key_ref]"
+    assert "raw-legacy-secret" not in str(list_response.json())
 
 
 def test_provider_routes_return_unified_errors_for_invalid_commands(

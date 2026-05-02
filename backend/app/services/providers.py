@@ -45,6 +45,7 @@ DUPLICATE_MODEL_CAPABILITY_MESSAGE = (
 INVALID_CREDENTIAL_REFERENCE_MESSAGE = (
     "Provider api_key_ref must use an env: credential reference."
 )
+BLOCKED_API_KEY_REF = "[blocked:api_key_ref]"
 
 BUILTIN_PROVIDER_SEEDS: tuple[dict[str, Any], ...] = (
     {
@@ -230,6 +231,9 @@ class ProviderService:
     ) -> ProviderModel | None:
         self.seed_builtin_providers(trace_context=trace_context)
         return self._session.get(ProviderModel, provider_id)
+
+    def api_key_ref_for_projection(self, value: str | None) -> str | None:
+        return self._audit_api_key_ref(value)
 
     def create_custom_provider(
         self,
@@ -667,17 +671,7 @@ class ProviderService:
     ) -> None:
         if value is None:
             return
-        env_name = value.removeprefix("env:")
-        env_name_has_valid_chars = env_name.replace("_", "").isalnum()
-        env_name_has_allowed_prefix = any(
-            env_name.startswith(prefix) for prefix in self._credential_env_prefixes
-        )
-        if (
-            value.startswith("env:")
-            and env_name
-            and env_name_has_valid_chars
-            and env_name_has_allowed_prefix
-        ):
+        if self._is_safe_api_key_ref(value):
             return
         self._raise_rejected_config(
             action=rejected_action,
@@ -794,11 +788,11 @@ class ProviderService:
             "provider_id": provider.provider_id,
             "provider_source": provider.provider_source.value,
             "protocol_type": provider.protocol_type.value,
-            "api_key_ref": provider.api_key_ref,
+            "api_key_ref": self._audit_api_key_ref(provider.api_key_ref),
             "ref_transition": {
                 "changed": old_api_key_ref != provider.api_key_ref,
-                "before_ref": old_api_key_ref,
-                "after_ref": provider.api_key_ref,
+                "before_ref": self._audit_api_key_ref(old_api_key_ref),
+                "after_ref": self._audit_api_key_ref(provider.api_key_ref),
             },
             "default_model_id": provider.default_model_id,
             "supported_model_ids": list(provider.supported_model_ids),
@@ -807,9 +801,32 @@ class ProviderService:
             "runtime_capability_count": len(provider.runtime_capabilities),
         }
 
+    def _is_safe_api_key_ref(self, value: str) -> bool:
+        env_name = value.removeprefix("env:")
+        env_name_has_valid_chars = all(
+            char == "_" or char.isascii() and char.isalnum() for char in env_name
+        )
+        env_name_has_allowed_prefix = any(
+            env_name.startswith(prefix) for prefix in self._credential_env_prefixes
+        )
+        return (
+            value.startswith("env:")
+            and bool(env_name)
+            and env_name_has_valid_chars
+            and env_name_has_allowed_prefix
+        )
+
+    def _audit_api_key_ref(self, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if self._is_safe_api_key_ref(value):
+            return value
+        return BLOCKED_API_KEY_REF
+
 
 __all__ = [
     "API_ACTOR_ID",
+    "BLOCKED_API_KEY_REF",
     "BUILTIN_PROVIDER_IDS",
     "BUILTIN_PROVIDER_SEEDS",
     "DEFAULT_CONTEXT_WINDOW_TOKENS",

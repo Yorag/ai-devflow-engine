@@ -539,3 +539,65 @@ def test_custom_provider_patch_rolls_back_when_success_audit_fails(
     assert after is not None
     assert after.display_name == old_display_name
     assert after.base_url == old_base_url
+
+
+def test_provider_patch_audit_blocks_preexisting_unsafe_api_key_ref(
+    tmp_path: Path,
+) -> None:
+    from backend.app.services.providers import ProviderService
+
+    audit = RecordingAuditService()
+    manager = build_manager(tmp_path)
+
+    with manager.session(DatabaseRole.CONTROL) as session:
+        provider = ProviderModel(
+            provider_id="provider-custom-legacy",
+            display_name="Legacy custom provider",
+            provider_source=ProviderSource.CUSTOM,
+            protocol_type=ProviderProtocolType.OPENAI_COMPLETIONS_COMPATIBLE,
+            base_url="https://provider.example.test/v1",
+            api_key_ref="raw-legacy-secret",
+            default_model_id="legacy-chat",
+            supported_model_ids=["legacy-chat"],
+            runtime_capabilities=[
+                {
+                    "model_id": "legacy-chat",
+                    "context_window_tokens": 128000,
+                    "max_output_tokens": 4096,
+                    "supports_tool_calling": False,
+                    "supports_structured_output": False,
+                    "supports_native_reasoning": False,
+                }
+            ],
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        session.add(provider)
+        session.commit()
+
+        ProviderService(
+            session,
+            audit_service=audit,
+            now=lambda: LATER,
+        ).patch_custom_provider(
+            provider.provider_id,
+            provider_request(
+                display_name="Legacy custom provider",
+                api_key_ref="env:AI_DEVFLOW_CREDENTIAL_REPAIRED_PROVIDER",
+                default_model_id="legacy-chat",
+                supported_model_ids=["legacy-chat"],
+                runtime_capabilities=[{"model_id": "legacy-chat"}],
+            ),
+            trace_context=build_trace(),
+        )
+
+    records = action_records(audit, "provider.patch_custom")
+    assert len(records) == 1
+    metadata = records[0]["metadata"]
+    assert metadata["api_key_ref"] == "env:AI_DEVFLOW_CREDENTIAL_REPAIRED_PROVIDER"
+    assert metadata["ref_transition"] == {
+        "changed": True,
+        "before_ref": "[blocked:api_key_ref]",
+        "after_ref": "env:AI_DEVFLOW_CREDENTIAL_REPAIRED_PROVIDER",
+    }
+    assert "raw-legacy-secret" not in str(metadata)

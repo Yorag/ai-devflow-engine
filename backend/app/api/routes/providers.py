@@ -21,7 +21,7 @@ from backend.app.services.providers import ProviderService, ProviderServiceError
 router = APIRouter(tags=["providers"])
 
 
-def _provider_read(provider: Any) -> ProviderRead:
+def _provider_read(provider: Any, *, service: ProviderService) -> ProviderRead:
     return ProviderRead.model_validate(
         {
             "provider_id": provider.provider_id,
@@ -29,7 +29,7 @@ def _provider_read(provider: Any) -> ProviderRead:
             "provider_source": provider.provider_source,
             "protocol_type": provider.protocol_type,
             "base_url": provider.base_url,
-            "api_key_ref": provider.api_key_ref,
+            "api_key_ref": service.api_key_ref_for_projection(provider.api_key_ref),
             "default_model_id": provider.default_model_id,
             "supported_model_ids": provider.supported_model_ids,
             "runtime_capabilities": provider.runtime_capabilities,
@@ -84,7 +84,7 @@ def list_providers(
     service: ProviderService = Depends(get_provider_service),
 ) -> list[ProviderRead]:
     providers = service.list_providers(trace_context=get_trace_context())
-    return [_provider_read(provider) for provider in providers]
+    return [_provider_read(provider, service=service) for provider in providers]
 
 
 @router.post(
@@ -104,7 +104,7 @@ def create_provider(
         )
     except ProviderServiceError as exc:
         _raise_api_error(exc)
-    return _provider_read(provider)
+    return _provider_read(provider, service=service)
 
 
 @router.get(
@@ -123,7 +123,7 @@ def get_provider(
     provider = service.get_provider(providerId, trace_context=get_trace_context())
     if provider is None:
         raise ApiError(ErrorCode.NOT_FOUND, "Provider was not found.", 404)
-    return _provider_read(provider)
+    return _provider_read(provider, service=service)
 
 
 @router.patch(
@@ -149,4 +149,4 @@ def patch_provider(
         )
     except ProviderServiceError as exc:
         _raise_api_error(exc)
-    return _provider_read(provider)
+    return _provider_read(provider, service=service)
