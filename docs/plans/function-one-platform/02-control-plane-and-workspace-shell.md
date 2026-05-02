@@ -137,11 +137,17 @@
 ## C2.1 默认 Project、项目加载与项目列表
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现默认项目登记、本地项目加载、项目列表查询和最小默认 `demo_delivery` 通道创建，使系统首次启动后具备稳定项目上下文、可切换项目列表与默认交付通道引用。
 **实施计划**：`docs/plans/implementation/c2.1-default-projects.md`
 
+**验证摘要**：实施计划 `docs/plans/implementation/c2.1-default-projects.md` 已完成。TDD RED 先观察到缺少 `backend.app.services.projects`、API app state 缺少 `database_manager`、默认 Project 未在 startup 注册、`ProjectRead` OpenAPI required 字段缺少 `is_default`，以及已有 Project 二次加载成功审计缺失；随后实现 `ProjectService`、`DeliveryChannelService`、`GET /api/projects`、`POST /api/projects`、startup 默认 Project 注册、OpenAPI 契约断言、重启持久化测试和审计失败 rollback 边界。`uv run --no-sync python -m pytest backend/tests/services/test_project_service.py backend/tests/api/test_project_api.py -q` 通过 12 个 C2.1 tests；`uv run --no-sync python -m pytest backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/api/test_request_correlation_context.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/services/test_project_service.py backend/tests/api/test_project_api.py -q` 通过 34 个 API/lifespan regression tests；`uv run --no-sync python -m pytest -q` 通过 141 个 backend tests；`uv run --no-sync python -m pytest --collect-only -q` 收集 141 个 backend tests 且无收集错误。Spec compliance reviewer 与 code quality reviewer 均未发现 Critical、Important 或 Minor 问题。
+
 **修改文件列表**：
+- Modify: `backend/app/main.py`
+- Modify: `backend/app/api/router.py`
+- Modify: `backend/app/schemas/project.py`
+- Modify: `backend/tests/observability/test_runtime_data_preflight.py`
 - Create: `backend/app/services/projects.py`
 - Create: `backend/app/services/delivery_channels.py`
 - Create: `backend/app/api/routes/projects.py`

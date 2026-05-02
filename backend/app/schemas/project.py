@@ -13,9 +13,13 @@ class ProjectRead(_StrictBaseModel):
     name: str = Field(min_length=1)
     root_path: str = Field(min_length=1)
     default_delivery_channel_id: str | None = None
-    is_default: bool = False
+    is_default: bool
     created_at: datetime
     updated_at: datetime
+
+
+class ProjectCreateRequest(_StrictBaseModel):
+    root_path: str = Field(min_length=1)
 
 
 class ProjectRemoveResult(_StrictBaseModel):
@@ -34,6 +38,7 @@ class ProjectRemoveResult(_StrictBaseModel):
 
 
 __all__ = [
+    "ProjectCreateRequest",
     "ProjectRead",
     "ProjectRemoveResult",
 ]

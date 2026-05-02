@@ -3,12 +3,22 @@ from fastapi.testclient import TestClient
 
 from backend.app.api.error_codes import ErrorCode
 from backend.app.core.config import EnvironmentSettings
+from backend.app.db.base import DatabaseRole
+from backend.app.db.models.control import ControlBase
+from backend.app.db.models.log import LogBase
 from backend.app.main import create_app
 from backend.app.observability.runtime_data import (
     RuntimeDataPreflight,
     RuntimeDataPreflightError,
     RuntimeDataSettings,
 )
+
+
+def create_control_and_log_tables(app) -> None:  # noqa: ANN001
+    ControlBase.metadata.create_all(
+        app.state.database_manager.engine(DatabaseRole.CONTROL)
+    )
+    LogBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.LOG))
 
 
 def test_runtime_data_settings_derive_log_paths_from_environment_settings(tmp_path) -> None:
@@ -113,6 +123,7 @@ def test_preflight_fails_when_writability_probe_cannot_write(monkeypatch, tmp_pa
 def test_fastapi_lifespan_runs_preflight_before_serving_requests(tmp_path) -> None:
     runtime_root = tmp_path / "runtime"
     app = create_app(settings=EnvironmentSettings(platform_runtime_root=runtime_root))
+    create_control_and_log_tables(app)
 
     with TestClient(app) as client:
         response = client.get("/api/health")
