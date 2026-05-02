@@ -32,7 +32,7 @@ function RouterProbe(): JSX.Element {
 }
 
 describe("ConsolePage route baseline", () => {
-  it("renders the console placeholder inside the SPA providers", () => {
+  it("renders the workspace shell inside the SPA providers", async () => {
     renderWithAppProviders(
       <>
         <ConsolePage />
@@ -41,16 +41,14 @@ describe("ConsolePage route baseline", () => {
     );
 
     expect(
-      screen.getByRole("heading", {
-        level: 1,
-        name: "AI delivery workspace",
+      await screen.findByRole("complementary", {
+        name: "Project and session sidebar",
       }),
     ).toBeTruthy();
     expect(
-      screen.getByText(
-        "Project, session, run, and delivery views will appear here as the workflow surface comes online.",
-      ),
+      screen.getByRole("region", { name: "Narrative workspace" }),
     ).toBeTruthy();
+    expect(screen.getByText("Inspector closed")).toBeTruthy();
     expect(screen.getByLabelText("query client ready").textContent).toBe(
       "ready",
     );
@@ -75,7 +73,7 @@ describe("ConsolePage route baseline", () => {
     expect(
       await screen.findByRole("heading", {
         level: 1,
-        name: "AI delivery workspace",
+        name: "Workspace",
       }),
     ).toBeTruthy();
   });
@@ -99,13 +97,13 @@ describe("ConsolePage route baseline", () => {
     expect(screen.getByRole("link", { name: "Console link" })).toBeTruthy();
   });
 
-  it("uses product empty-state copy instead of implementation notes", () => {
+  it("uses product workspace copy instead of implementation notes", async () => {
     renderWithAppProviders(null, { route: "/console" });
 
-    expect(screen.getByText("Workspace")).toBeTruthy();
-    expect(screen.getByText("Projects")).toBeTruthy();
-    expect(screen.getByText("Runs")).toBeTruthy();
-    expect(screen.getByText("Delivery")).toBeTruthy();
+    expect(await screen.findByText("Narrative Workspace")).toBeTruthy();
+    expect(await screen.findByText("Default delivery")).toBeTruthy();
+    expect(screen.getByText("Inspector closed")).toBeTruthy();
+    expect(screen.queryByText(/workflow surface comes online/i)).toBeNull();
     expect(screen.queryByText(/baseline/i)).toBeNull();
     expect(screen.queryByText(/feature slices/i)).toBeNull();
     expect(screen.queryByText("Routing")).toBeNull();

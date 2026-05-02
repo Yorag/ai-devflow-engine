@@ -214,7 +214,7 @@
 | C2.8 | PlatformRuntimeSettings 管理服务 | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c28) |
 | F2.1 | API Client 路径与类型入口 | Week 2-3 | [x] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f21) |
 | F2.2 | Mock Fixtures 与 Query Hooks | Week 2-3 | [x] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f22) |
-| F2.3 | Workspace Shell 与 Project Sidebar | Week 3 | [ ] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f23) |
+| F2.3 | Workspace Shell 与 Project Sidebar | Week 3 | [x] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f23) |
 | F2.4 | 统一设置弹窗 | Week 3 | [ ] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f24) |
 | F2.5 | 模板空态与模板选择 | Week 3-4 | [ ] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f25) |
 | F2.6 | 模板编辑与脏状态守卫 | Week 3-4 | [ ] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f26) |

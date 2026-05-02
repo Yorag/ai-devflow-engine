@@ -651,9 +651,10 @@
 ## F2.3 Workspace Shell 与 Project Sidebar
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现控制台三栏外壳和左侧 Project / Session Sidebar，为后续 Narrative Workspace 提供页面骨架。
 **实施计划**：`docs/plans/implementation/f2.3-workspace-shell-sidebar.md`
+**验证摘要**：`npm --prefix frontend run test -- --run src/features/workspace/__tests__/WorkspaceShell.test.tsx` 通过，覆盖三栏 shell、Project Switcher、默认 Project 阻塞态、项目切换、默认交付摘要、Session 状态与 shell-only 删除阻塞态；`npm --prefix frontend run test -- --run src/pages/__tests__/ConsolePage.test.tsx` 通过，覆盖 Console 路由挂载、SPA provider 和 route landmarks；`npm --prefix frontend run test -- --run` 通过，5 个测试文件 / 24 个测试；`npm --prefix frontend run build` 通过。本切片只实现 Workspace shell、Project / Session Sidebar、Narrative Workspace 插槽和默认关闭 Inspector；未实现设置弹窗、模板空态、模板编辑、真实 Project 加载 / 移除、真实 Session 重命名 / 删除、run 控制或 Inspector 详情。
 
 **修改文件列表**：
 - Create: `frontend/src/features/workspace/WorkspaceShell.tsx`
