@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.orm import Session
 
 from backend.app.api.error_codes import ErrorCode
@@ -14,8 +14,8 @@ from backend.app.observability.audit import AuditService
 from backend.app.observability.context import get_trace_context
 from backend.app.observability.log_writer import JsonlLogWriter
 from backend.app.observability.runtime_data import RuntimeDataSettings
-from backend.app.schemas.template import PipelineTemplateRead
-from backend.app.services.templates import TemplateService
+from backend.app.schemas.template import PipelineTemplateRead, PipelineTemplateWriteRequest
+from backend.app.services.templates import TemplateService, TemplateServiceError
 
 
 router = APIRouter(tags=["pipeline-templates"])
@@ -38,6 +38,14 @@ def _pipeline_template_read(template: Any) -> PipelineTemplateRead:
             "updated_at": template.updated_at,
         }
     )
+
+
+def _raise_api_error(exc: TemplateServiceError) -> None:
+    raise ApiError(
+        error_code=exc.error_code,
+        message=exc.message,
+        status_code=exc.status_code,
+    ) from exc
 
 
 def get_control_session(request: Request) -> Iterator[Session]:
@@ -79,6 +87,30 @@ def list_pipeline_templates(
     return [_pipeline_template_read(template) for template in templates]
 
 
+@router.post(
+    "/pipeline-templates",
+    response_model=PipelineTemplateRead,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+def create_pipeline_template(
+    body: PipelineTemplateWriteRequest,
+    service: TemplateService = Depends(get_template_service),
+) -> PipelineTemplateRead:
+    try:
+        template = service.save_as_user_template(
+            source_template_id=None,
+            body=body,
+            trace_context=get_trace_context(),
+        )
+    except TemplateServiceError as exc:
+        _raise_api_error(exc)
+    return _pipeline_template_read(template)
+
+
 @router.get(
     "/pipeline-templates/{templateId}",
     response_model=PipelineTemplateRead,
@@ -102,3 +134,79 @@ def get_pipeline_template(
             404,
         )
     return _pipeline_template_read(template)
+
+
+@router.patch(
+    "/pipeline-templates/{templateId}",
+    response_model=PipelineTemplateRead,
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+def patch_pipeline_template(
+    templateId: str,
+    body: PipelineTemplateWriteRequest,
+    service: TemplateService = Depends(get_template_service),
+) -> PipelineTemplateRead:
+    try:
+        template = service.patch_user_template(
+            template_id=templateId,
+            body=body,
+            trace_context=get_trace_context(),
+        )
+    except TemplateServiceError as exc:
+        _raise_api_error(exc)
+    return _pipeline_template_read(template)
+
+
+@router.post(
+    "/pipeline-templates/{templateId}/save-as",
+    response_model=PipelineTemplateRead,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+def save_as_pipeline_template(
+    templateId: str,
+    body: PipelineTemplateWriteRequest,
+    service: TemplateService = Depends(get_template_service),
+) -> PipelineTemplateRead:
+    try:
+        template = service.save_as_user_template(
+            source_template_id=templateId,
+            body=body,
+            trace_context=get_trace_context(),
+        )
+    except TemplateServiceError as exc:
+        _raise_api_error(exc)
+    return _pipeline_template_read(template)
+
+
+@router.delete(
+    "/pipeline-templates/{templateId}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+def delete_pipeline_template(
+    templateId: str,
+    service: TemplateService = Depends(get_template_service),
+) -> Response:
+    try:
+        service.delete_user_template(
+            template_id=templateId,
+            trace_context=get_trace_context(),
+        )
+    except TemplateServiceError as exc:
+        _raise_api_error(exc)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

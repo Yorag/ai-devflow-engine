@@ -280,11 +280,12 @@
 ## C2.4 用户模板保存、覆盖与删除
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现用户模板的另存、覆盖和删除语义，保证系统模板不可被覆盖或删除。
 **实施计划**：`docs/plans/implementation/c2.4-user-template-crud.md`
 
 **修改文件列表**：
+- Modify: `backend/app/schemas/template.py`
 - Modify: `backend/app/services/templates.py`
 - Modify: `backend/app/api/routes/templates.py`
 - Create: `backend/tests/services/test_user_template_service.py`
@@ -311,6 +312,8 @@
 **测试方法**：
 - `pytest backend/tests/services/test_user_template_service.py -v`
 - `pytest backend/tests/api/test_template_api.py -v`
+
+**验证摘要**：实施计划 `docs/plans/implementation/c2.4-user-template-crud.md` 已完成。TDD RED 先观察到缺少 `PipelineTemplateWriteRequest`、模板命令 API 路由返回 `405/404` 或 OpenAPI 缺少目标 path；代码评审后补充并修复两个重要边界：角色校验使用 `ROLE_STAGE_TYPES` 的阶段适用性而不是固定内置 `STAGE_ROLE_IDS`，删除被其它用户模板作为 `base_template_id` 引用的模板时返回 `validation_error` 409 并写入 `template.delete.rejected`，避免 self-FK 完整性错误和 lineage 丢失。实现新增 `PipelineTemplateWriteRequest`、`TemplateService.save_as_user_template()`、`patch_user_template()`、`delete_user_template()`、模板命令路由和审计元数据裁剪；`name`、`description` 明确作为 `PipelineTemplate` 资源元数据，不进入运行时槽位配置。`uv run --no-sync python -m pytest backend/tests/services/test_user_template_service.py backend/tests/api/test_template_api.py -q` 通过 19 个 C2.4 focused tests；`uv run --no-sync python -m pytest backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/api/test_request_correlation_context.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/services/test_project_service.py backend/tests/api/test_project_api.py backend/tests/prompts/test_agent_role_seed_assets.py backend/tests/services/test_template_seed.py backend/tests/services/test_provider_seed.py backend/tests/api/test_template_provider_seed_api.py backend/tests/services/test_session_service.py backend/tests/api/test_session_api.py backend/tests/services/test_user_template_service.py backend/tests/api/test_template_api.py -q` 通过 89 个 DB08/API regression tests；`uv run --no-sync python -m pytest --collect-only -q` 收集 196 个 backend tests 且无收集错误；`uv run --no-sync python -m pytest -q` 通过 196 个 backend tests。Spec compliance reviewer 和 code quality reviewer 复审均未留下 Critical 或 Important 发现。
 
 <a id="c25"></a>
 

@@ -5,11 +5,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
-from backend.app.db.models.control import PipelineTemplateModel
-from backend.app.domain.enums import StageType, TemplateSource
+from backend.app.api.error_codes import ErrorCode
+from backend.app.db.models.control import PipelineTemplateModel, ProviderModel, SessionModel
+from backend.app.domain.enums import SessionStatus, StageType, TemplateSource
 from backend.app.domain.trace_context import TraceContext
 from backend.app.schemas.observability import AuditActorType, AuditResult
 from backend.app.schemas.prompts import (
@@ -20,13 +22,31 @@ from backend.app.schemas.prompts import (
     PromptSectionRead,
     PromptType,
 )
-from backend.app.schemas.template import FIXED_APPROVAL_CHECKPOINTS, FIXED_STAGE_SEQUENCE
+from backend.app.schemas.template import (
+    FIXED_APPROVAL_CHECKPOINTS,
+    FIXED_STAGE_SEQUENCE,
+    PipelineTemplateWriteRequest,
+)
+from backend.app.services.providers import ProviderService
 
 
 ROLE_ASSET_DIR = Path(__file__).resolve().parents[1] / "prompts" / "assets" / "roles"
 SYSTEM_TEMPLATE_IDS = ("template-bugfix", "template-feature", "template-refactor")
 DEFAULT_TEMPLATE_ID = "template-feature"
 SEED_ACTOR_ID = "control-plane-seed"
+API_ACTOR_ID = "api-user"
+
+TEMPLATE_NOT_FOUND_MESSAGE = "Pipeline template was not found."
+INVALID_TEMPLATE_MESSAGE = "Pipeline template contains invalid editable fields."
+UNKNOWN_PROVIDER_MESSAGE = "Pipeline template references an unknown Provider."
+PATCH_SYSTEM_TEMPLATE_MESSAGE = "System templates cannot be overwritten."
+DELETE_SYSTEM_TEMPLATE_MESSAGE = "System templates cannot be deleted."
+DELETE_STARTED_SESSION_MESSAGE = (
+    "Pipeline template is selected by a Session that has already started."
+)
+DELETE_BASE_TEMPLATE_MESSAGE = (
+    "Pipeline template is used as a base template by another template."
+)
 
 ROLE_ASSET_FILES = {
     "role-requirement-analyst": "requirement_analyst.md",
@@ -110,6 +130,19 @@ class AgentRoleSeed:
     role_id: str
     role_name: str
     asset: PromptAssetRead
+
+
+class TemplateServiceError(RuntimeError):
+    def __init__(
+        self,
+        error_code: ErrorCode,
+        message: str,
+        status_code: int = 422,
+    ) -> None:
+        self.error_code = error_code
+        self.message = message
+        self.status_code = status_code
+        super().__init__(message)
 
 
 def parse_front_matter(markdown: str) -> tuple[dict[str, str], str]:
@@ -265,7 +298,17 @@ class TemplateService:
         *,
         trace_context: TraceContext,
     ) -> list[PipelineTemplateModel]:
-        return self.seed_system_templates(trace_context=trace_context)
+        system_templates = self.seed_system_templates(trace_context=trace_context)
+        user_templates = (
+            self._session.query(PipelineTemplateModel)
+            .filter(PipelineTemplateModel.template_source == TemplateSource.USER_TEMPLATE)
+            .order_by(
+                PipelineTemplateModel.created_at.asc(),
+                PipelineTemplateModel.template_id.asc(),
+            )
+            .all()
+        )
+        return [*system_templates, *user_templates]
 
     def get_default_template(
         self,
@@ -288,6 +331,331 @@ class TemplateService:
     ) -> PipelineTemplateModel | None:
         self.seed_system_templates(trace_context=trace_context)
         return self._session.get(PipelineTemplateModel, template_id)
+
+    def save_as_user_template(
+        self,
+        *,
+        source_template_id: str | None,
+        body: PipelineTemplateWriteRequest,
+        trace_context: TraceContext,
+    ) -> PipelineTemplateModel:
+        source_template = None
+        if source_template_id is not None:
+            source_template = self.get_template(
+                source_template_id,
+                trace_context=trace_context,
+            )
+            if source_template is None:
+                self._record_rejected(
+                    action="template.save_as.rejected",
+                    target_id=source_template_id,
+                    reason=TEMPLATE_NOT_FOUND_MESSAGE,
+                    metadata={
+                        "source_template_id": source_template_id,
+                    },
+                    trace_context=trace_context,
+                )
+                raise TemplateServiceError(
+                    ErrorCode.NOT_FOUND,
+                    TEMPLATE_NOT_FOUND_MESSAGE,
+                    404,
+                )
+        else:
+            self.seed_system_templates(trace_context=trace_context)
+
+        try:
+            bindings = self._validated_bindings(body, trace_context=trace_context)
+        except TemplateServiceError as exc:
+            self._record_rejected(
+                action="template.save_as.rejected",
+                target_id=source_template_id or "new-user-template",
+                reason=exc.message,
+                metadata={
+                    "source_template_id": source_template_id,
+                    "error_code": exc.error_code.value,
+                },
+                trace_context=trace_context,
+            )
+            raise
+
+        timestamp = self._now()
+        template = PipelineTemplateModel(
+            template_id=f"template-user-{uuid4().hex}",
+            name=body.name,
+            description=body.description,
+            template_source=TemplateSource.USER_TEMPLATE,
+            base_template_id=source_template.template_id if source_template else None,
+            fixed_stage_sequence=[stage.value for stage in body.fixed_stage_sequence],
+            stage_role_bindings=bindings,
+            approval_checkpoints=[
+                checkpoint.value for checkpoint in body.approval_checkpoints
+            ],
+            auto_regression_enabled=body.auto_regression_enabled,
+            max_auto_regression_retries=body.max_auto_regression_retries,
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+        self._session.add(template)
+        self._session.flush()
+        try:
+            self._record_success(
+                action="template.save_as",
+                template=template,
+                trace_context=trace_context,
+                metadata=self._template_audit_metadata(
+                    template,
+                    source_template_id=source_template_id,
+                ),
+            )
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
+        return template
+
+    def patch_user_template(
+        self,
+        *,
+        template_id: str,
+        body: PipelineTemplateWriteRequest,
+        trace_context: TraceContext,
+    ) -> PipelineTemplateModel:
+        template = self.get_template(template_id, trace_context=trace_context)
+        if template is None:
+            self._record_rejected(
+                action="template.patch.rejected",
+                target_id=template_id,
+                reason=TEMPLATE_NOT_FOUND_MESSAGE,
+                metadata={
+                    "template_id": template_id,
+                },
+                trace_context=trace_context,
+            )
+            raise TemplateServiceError(ErrorCode.NOT_FOUND, TEMPLATE_NOT_FOUND_MESSAGE, 404)
+        if template.template_source is TemplateSource.SYSTEM_TEMPLATE:
+            self._record_rejected(
+                action="template.patch.rejected",
+                target_id=template_id,
+                reason=PATCH_SYSTEM_TEMPLATE_MESSAGE,
+                metadata={
+                    "template_id": template_id,
+                    "template_source": template.template_source.value,
+                },
+                trace_context=trace_context,
+            )
+            raise TemplateServiceError(
+                ErrorCode.VALIDATION_ERROR,
+                PATCH_SYSTEM_TEMPLATE_MESSAGE,
+                409,
+            )
+
+        try:
+            bindings = self._validated_bindings(body, trace_context=trace_context)
+        except TemplateServiceError as exc:
+            self._record_rejected(
+                action="template.patch.rejected",
+                target_id=template_id,
+                reason=exc.message,
+                metadata={
+                    "template_id": template_id,
+                    "error_code": exc.error_code.value,
+                },
+                trace_context=trace_context,
+            )
+            raise
+
+        template.name = body.name
+        template.description = body.description
+        template.fixed_stage_sequence = [stage.value for stage in body.fixed_stage_sequence]
+        template.stage_role_bindings = bindings
+        template.approval_checkpoints = [
+            checkpoint.value for checkpoint in body.approval_checkpoints
+        ]
+        template.auto_regression_enabled = body.auto_regression_enabled
+        template.max_auto_regression_retries = body.max_auto_regression_retries
+        template.updated_at = self._now()
+        self._session.add(template)
+        self._session.flush()
+        try:
+            self._record_success(
+                action="template.patch",
+                template=template,
+                trace_context=trace_context,
+                metadata=self._template_audit_metadata(
+                    template,
+                    source_template_id=None,
+                ),
+            )
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
+        return template
+
+    def delete_user_template(
+        self,
+        *,
+        template_id: str,
+        trace_context: TraceContext,
+    ) -> None:
+        template = self.get_template(template_id, trace_context=trace_context)
+        if template is None:
+            self._record_rejected(
+                action="template.delete.rejected",
+                target_id=template_id,
+                reason=TEMPLATE_NOT_FOUND_MESSAGE,
+                metadata={
+                    "template_id": template_id,
+                },
+                trace_context=trace_context,
+            )
+            raise TemplateServiceError(ErrorCode.NOT_FOUND, TEMPLATE_NOT_FOUND_MESSAGE, 404)
+        if template.template_source is TemplateSource.SYSTEM_TEMPLATE:
+            self._record_rejected(
+                action="template.delete.rejected",
+                target_id=template_id,
+                reason=DELETE_SYSTEM_TEMPLATE_MESSAGE,
+                metadata={
+                    "template_id": template_id,
+                    "template_source": template.template_source.value,
+                },
+                trace_context=trace_context,
+            )
+            raise TemplateServiceError(
+                ErrorCode.VALIDATION_ERROR,
+                DELETE_SYSTEM_TEMPLATE_MESSAGE,
+                409,
+            )
+
+        child_template_ids = [
+            child_template_id
+            for (child_template_id,) in self._session.query(
+                PipelineTemplateModel.template_id
+            )
+            .filter(PipelineTemplateModel.base_template_id == template_id)
+            .order_by(PipelineTemplateModel.template_id.asc())
+            .all()
+        ]
+        if child_template_ids:
+            self._record_rejected(
+                action="template.delete.rejected",
+                target_id=template_id,
+                reason=DELETE_BASE_TEMPLATE_MESSAGE,
+                metadata={
+                    "template_id": template_id,
+                    "child_template_ids": child_template_ids,
+                },
+                trace_context=trace_context,
+            )
+            raise TemplateServiceError(
+                ErrorCode.VALIDATION_ERROR,
+                DELETE_BASE_TEMPLATE_MESSAGE,
+                409,
+            )
+
+        referencing_sessions = (
+            self._session.query(SessionModel)
+            .filter(SessionModel.selected_template_id == template_id)
+            .order_by(SessionModel.session_id.asc())
+            .all()
+        )
+        blocked_sessions = [
+            session
+            for session in referencing_sessions
+            if session.status is not SessionStatus.DRAFT
+            or session.current_run_id is not None
+        ]
+        if blocked_sessions:
+            self._record_rejected(
+                action="template.delete.rejected",
+                target_id=template_id,
+                reason=DELETE_STARTED_SESSION_MESSAGE,
+                metadata={
+                    "template_id": template_id,
+                    "blocked_session_ids": [
+                        session.session_id for session in blocked_sessions
+                    ],
+                },
+                trace_context=trace_context,
+            )
+            raise TemplateServiceError(
+                ErrorCode.VALIDATION_ERROR,
+                DELETE_STARTED_SESSION_MESSAGE,
+                409,
+            )
+
+        timestamp = self._now()
+        fallback_session_ids: list[str] = []
+        for session in referencing_sessions:
+            session.selected_template_id = DEFAULT_TEMPLATE_ID
+            session.updated_at = timestamp
+            fallback_session_ids.append(session.session_id)
+            self._session.add(session)
+        self._session.delete(template)
+        self._session.flush()
+        try:
+            self._audit_service.record_command_result(
+                actor_type=AuditActorType.USER,
+                actor_id=API_ACTOR_ID,
+                action="template.delete",
+                target_type="pipeline_template",
+                target_id=template_id,
+                result=AuditResult.SUCCEEDED,
+                reason=None,
+                metadata={
+                    "template_id": template_id,
+                    "template_source": TemplateSource.USER_TEMPLATE.value,
+                    "fallback_template_id": DEFAULT_TEMPLATE_ID,
+                    "fallback_session_ids": fallback_session_ids,
+                },
+                trace_context=trace_context,
+            )
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
+
+    def validate_editable_fields(
+        self,
+        body: PipelineTemplateWriteRequest,
+    ) -> list[dict[str, str]]:
+        expected_stages = list(FIXED_STAGE_SEQUENCE)
+        if [binding.stage_type for binding in body.stage_role_bindings] != expected_stages:
+            raise TemplateServiceError(
+                ErrorCode.VALIDATION_ERROR,
+                INVALID_TEMPLATE_MESSAGE,
+            )
+
+        bindings: list[dict[str, str]] = []
+        for binding in body.stage_role_bindings:
+            applicable_stage_types = ROLE_STAGE_TYPES.get(binding.role_id, [])
+            if binding.stage_type not in applicable_stage_types:
+                raise TemplateServiceError(
+                    ErrorCode.VALIDATION_ERROR,
+                    INVALID_TEMPLATE_MESSAGE,
+                )
+            prompt = binding.system_prompt.strip()
+            bindings.append(
+                {
+                    "stage_type": binding.stage_type.value,
+                    "role_id": binding.role_id,
+                    "system_prompt": prompt,
+                    "provider_id": binding.provider_id,
+                }
+            )
+        return bindings
+
+    def validate_template_prompts_before_save(
+        self,
+        bindings: list[dict[str, str]],
+    ) -> list[dict[str, str]]:
+        for binding in bindings:
+            if not binding["system_prompt"].strip():
+                raise TemplateServiceError(
+                    ErrorCode.VALIDATION_ERROR,
+                    INVALID_TEMPLATE_MESSAGE,
+                )
+        return bindings
 
     def _ordered_system_templates(self) -> list[PipelineTemplateModel]:
         templates = (
@@ -340,6 +708,97 @@ class TemplateService:
             trace_context=trace_context,
         )
 
+    def _validated_bindings(
+        self,
+        body: PipelineTemplateWriteRequest,
+        *,
+        trace_context: TraceContext,
+    ) -> list[dict[str, str]]:
+        ProviderService(
+            self._session,
+            audit_service=self._audit_service,
+            now=self._now,
+        ).seed_builtin_providers(trace_context=trace_context)
+        bindings = self.validate_editable_fields(body)
+        bindings = self.validate_template_prompts_before_save(bindings)
+        provider_ids = {binding["provider_id"] for binding in bindings}
+        existing_provider_ids = {
+            provider_id
+            for (provider_id,) in self._session.query(ProviderModel.provider_id)
+            .filter(ProviderModel.provider_id.in_(provider_ids))
+            .all()
+        }
+        if provider_ids - existing_provider_ids:
+            raise TemplateServiceError(
+                ErrorCode.VALIDATION_ERROR,
+                UNKNOWN_PROVIDER_MESSAGE,
+            )
+        return bindings
+
+    def _template_audit_metadata(
+        self,
+        template: PipelineTemplateModel,
+        *,
+        source_template_id: str | None,
+    ) -> dict[str, Any]:
+        role_ids = _unique_ordered(
+            binding["role_id"] for binding in template.stage_role_bindings
+        )
+        provider_ids = _unique_ordered(
+            binding["provider_id"] for binding in template.stage_role_bindings
+        )
+        return {
+            "template_id": template.template_id,
+            "source_template_id": source_template_id,
+            "base_template_id": template.base_template_id,
+            "template_source": template.template_source.value,
+            "stage_types": list(template.fixed_stage_sequence),
+            "role_ids": role_ids,
+            "provider_ids": provider_ids,
+            "auto_regression_enabled": template.auto_regression_enabled,
+            "max_auto_regression_retries": template.max_auto_regression_retries,
+        }
+
+    def _record_success(
+        self,
+        *,
+        action: str,
+        template: PipelineTemplateModel,
+        trace_context: TraceContext,
+        metadata: dict[str, Any],
+    ) -> None:
+        self._audit_service.record_command_result(
+            actor_type=AuditActorType.USER,
+            actor_id=API_ACTOR_ID,
+            action=action,
+            target_type="pipeline_template",
+            target_id=template.template_id,
+            result=AuditResult.SUCCEEDED,
+            reason=None,
+            metadata=metadata,
+            trace_context=trace_context,
+        )
+
+    def _record_rejected(
+        self,
+        *,
+        action: str,
+        target_id: str,
+        reason: str,
+        metadata: dict[str, Any],
+        trace_context: TraceContext,
+    ) -> None:
+        self._audit_service.record_rejected_command(
+            actor_type=AuditActorType.USER,
+            actor_id=API_ACTOR_ID,
+            action=action,
+            target_type="pipeline_template",
+            target_id=target_id,
+            reason=reason,
+            metadata=metadata,
+            trace_context=trace_context,
+        )
+
 
 def _stage_role_bindings(
     *,
@@ -380,6 +839,7 @@ __all__ = [
     "SYSTEM_TEMPLATE_IDS",
     "TEMPLATE_SEEDS",
     "TemplateService",
+    "TemplateServiceError",
     "build_agent_role_seed_asset",
     "load_agent_role_seed_asset",
     "load_default_agent_role_seed_assets",
