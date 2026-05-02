@@ -32,7 +32,8 @@
 - 如果 implementation plan 需要最终 Git 步骤，写成“在最新验证后，使用 `git-delivery-workflow` 准备 commit 批准请求”；不要写 `git add` 或 `git commit` 命令。
 - 保留 writing-plans 对精确文件路径、具体测试代码、具体实现代码、精确命令、预期失败输出、预期通过输出和自评审的要求。
 - 计划必须写出 implementer subagent 的任务边界、允许文件、必要上下文、禁止事项、TDD red/green 命令和回报要求。
-- 计划必须写出 review 顺序：先 spec / plan compliance reviewer，再 code quality / testing / regression reviewer；review 发现必须修复并 re-review。
+- 计划必须写出 review 顺序：先 spec / plan compliance reviewer，再 code quality / testing / regression reviewer；reviewer 默认不重复跑 tests，除非主 agent 明确要求。
+- review 发现 Critical 或 Important 必须修复并 re-review；re-review 覆盖上轮 findings 和相关变更。
 - 计划必须说明子代理不得运行 Git write 操作、不得更新 platform / split / delivery branch 追踪状态、不得扩大切片范围。
 
 ## Implementation Plan 清单
@@ -47,6 +48,16 @@
 - 预期失败输出和预期通过输出。
 - 完成验证清单。
 - 子代理执行清单：implementer 输入、允许文件、禁止事项、TDD 证据、reviewer 输入和 fallback 条件。
+
+## Verification Rhythm
+
+按分级节奏运行验证：
+
+- 实现阶段只跑 focused tests。
+- review 修复后跑 focused tests 和 impacted regressions。
+- 标记任务完成前跑一次切片范围需要的 full backend / frontend suite，或 platform plan 明确要求的完整验证命令。
+- full suite 后如果只修改 tracking docs，不重跑 full suite；检查 `git diff` / `git status` 证明没有代码、测试、配置或 lock / manifest 变化。
+- full suite 后如再改代码、测试、配置、依赖清单或影响运行行为的生成物，重新运行受影响验证。
 
 ## API 和 OpenAPI 检查
 

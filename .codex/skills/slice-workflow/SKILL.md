@@ -23,7 +23,7 @@ description: Use when asked to execute, continue, plan, or choose one task from 
 
 ## 必读来源
 
-读取最小必要集合，但必须把这些文件视为事实来源：
+读取当前 gate 所需的最小必要集合，并把这些文件视为事实来源：
 
 - `AGENTS.md`
 - `docs/plans/function-one-platform-plan.md`
@@ -31,6 +31,8 @@ description: Use when asked to execute, continue, plan, or choose one task from 
 - `docs/specs/function-one-product-overview-v1.md`
 - `docs/specs/frontend-workspace-global-design-v1.md`
 - `docs/specs/function-one-backend-engine-design-v1.md`
+
+切片选择阶段默认只读取 platform plan、相关 split-plan 细则、当前分支名，以及激活 batch gate 时的 delivery branch plan 相关行。三个当前 specs 在语义不清、发现冲突，或已选切片触及对应契约时读取相关章节。
 
 仅在分支感知的切片选择、注册分支校验、当前分支 batch 状态更新，或报告可用 batch 选项时读取 `docs/plans/function-one-delivery-branch-plan.md`。当没有激活 batch gate 时，普通 `main` 分支任务查找不要加载它。
 
@@ -185,7 +187,7 @@ description: Use when asked to execute, continue, plan, or choose one task from 
 docs/plans/implementation/<task-id>-<task-name>.md
 ```
 
-implementation plan 必须包含精确文件路径、TDD red-green 步骤、具体失败测试代码、具体实现代码、精确运行命令、预期失败和通过输出，以及完成验证清单。加载 `references/superpowers-execution-rules.md` 获取完整 implementation-plan checklist。
+implementation plan 遵循 `superpowers:writing-plans` 的任务表结构，并包含精确文件路径、TDD red-green 步骤、具体失败测试代码、具体实现代码、精确运行命令、预期失败和通过输出，以及完成验证清单。加载 `references/superpowers-execution-rules.md` 获取本仓库覆盖规则。
 
 implementation plan 不得放宽任务边界、重写已批准语义、遗漏必需验收标准，或使用 TODO/TBD/fill in later 之类占位符。
 
@@ -223,7 +225,8 @@ implementation plan 不得放宽任务边界、重写已批准语义、遗漏必
 
 - implementer subagent 只修改分派任务明确允许的文件和测试，不扩大切片范围。
 - implementer subagent 必须使用 `superpowers:test-driven-development`，并回报 red/green 命令、退出码和关键输出。
-- reviewer subagent 只评审，不承担实现；先进行 spec / plan 合规评审，再进行代码质量、测试充分性和回归风险评审。
+- reviewer subagent 只评审，不承担实现；默认只做静态 review。除非主 agent 明确要求，reviewer 不重复运行测试。
+- reviewer subagent 先进行 spec / plan 合规评审，再进行代码质量、测试充分性和回归风险评审。
 - 子代理不得运行 Git write 操作，不得更新任务状态，不得提交、创建 PR、merge、tag、rebase、push 或清理分支。
 
 仅当当前环境无法调度子代理、任务无法安全拆分，或子代理上下文无法被精确限定时，使用 `superpowers:executing-plans` fallback。在 fallback 中，主 agent 仍必须执行同等 TDD 步骤、两阶段内联评审和最终验证，并在完成报告中说明 fallback 原因。
@@ -240,7 +243,7 @@ implementation plan 不得放宽任务边界、重写已批准语义、遗漏必
 
 ## 代码评审检查点
 
-切片或执行 batch 完成后，使用 `superpowers:requesting-code-review`。当使用 `superpowers:subagent-driven-development` 时，遵循其两阶段 review 顺序：先 spec compliance reviewer，再 code quality reviewer；任一 reviewer 发现问题时，必须修复并 re-review 后才能继续。
+切片或执行 batch 完成后，使用 `superpowers:requesting-code-review`。当使用 `superpowers:subagent-driven-development` 时，遵循其两阶段 review 顺序：先 spec compliance reviewer，再 code quality reviewer；任一 reviewer 发现 Critical 或 Important 问题时，必须修复并 re-review 后才能继续。
 
 按以下顺序评审：
 
@@ -250,6 +253,8 @@ implementation plan 不得放宽任务边界、重写已批准语义、遗漏必
 4. 回归风险。
 
 在声明完成前修复 Critical 和 Important 发现。如果当前环境无法调度 reviewer，执行同等的两阶段内联评审，并在最终报告中说明该限制和 fallback 原因。
+
+reviewer 默认不重复运行测试，除非主 agent 明确要求。reviewer 测试结果不能替代主 agent 的最终 fresh verification。re-review 应覆盖上轮 findings 和相关变更。
 
 ## Frontend Design Gate（前端设计 gate）
 
@@ -271,6 +276,14 @@ implementation plan 不得放宽任务边界、重写已批准语义、遗漏必
 - 读取完整输出和退出码。
 - 如实报告失败。
 - 不要从过期或局部结果外推。
+
+### 分级验证节奏
+
+- 实现阶段：只运行 focused tests，证明当前 TDD red-green 循环。
+- review 修复后：运行 focused tests 和 impacted regression 命令。
+- 标记任务完成前：运行一次切片范围需要的 full backend / frontend suite，或 platform plan 明确要求的完整验证命令。
+- full suite 之后如果只修改 platform / split / delivery / implementation tracking docs，不重跑 full suite；改为检查 `git diff` / `git status`，确认 full suite 后没有代码、测试、配置或 lock / manifest 变化，并在完成报告中说明。
+- 如果 full suite 后又修改代码、测试、配置、依赖清单或会影响运行行为的文档生成物，必须重新运行受影响的 focused / impacted / full 命令。
 
 验证后，只更新允许的追踪位置：
 
