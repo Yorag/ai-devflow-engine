@@ -7,10 +7,18 @@ from backend.app.main import create_app
 def test_health_returns_service_status_and_request_id() -> None:
     client = TestClient(create_app())
 
-    response = client.get("/api/health", headers={"X-Request-ID": "req-health-1"})
+    response = client.get(
+        "/api/health",
+        headers={
+            "X-Request-ID": "req-health-1",
+            "X-Correlation-ID": "corr-health-1",
+        },
+    )
 
     assert response.status_code == 200
     assert response.headers["x-request-id"] == "req-health-1"
+    assert response.headers["x-correlation-id"] == "corr-health-1"
+    assert response.headers["x-trace-id"]
     assert response.json() == {
         "status": "ok",
         "service": "ai-devflow-engine",
@@ -79,4 +87,5 @@ def test_openapi_documents_health_route_and_error_response() -> None:
         "error_code",
         "message",
         "request_id",
+        "correlation_id",
     }
