@@ -435,7 +435,7 @@
 ## C2.7a 项目作用域配置包导入导出
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现当前 Project 作用域下用户可见配置包导出和导入，使配置备份、迁移和环境复制通过正式配置服务完成。
 **实施计划**：`docs/plans/implementation/c2.7a-configuration-package-import-export.md`
 
@@ -465,6 +465,8 @@
 **测试方法**：
 - `pytest backend/tests/services/test_configuration_package_service.py -v`
 - `pytest backend/tests/api/test_configuration_package_api.py -v`
+
+**验证摘要**：实施计划 `docs/plans/implementation/c2.7a-configuration-package-import-export.md` 已完成。TDD RED 先观察到缺少 `backend.app.services.configuration_packages`、配置包 API route `404`、OpenAPI 路径缺失，以及 custom Provider 包内引用未正确落库。实现新增 `ConfigurationPackageImportResult`、`ConfigurationPackageChangedObject`、`ConfigurationPackageFieldError`、`ConfigurationPackageService` 和项目级配置包导入导出 API；导出覆盖 Provider、项目默认 DeliveryChannel 和 `user_template` 模板运行配置，阻断不安全 `api_key_ref` / `credential_ref`，排除 `system_template`、平台隐性运行设置、系统提示词资产、运行快照、日志和审计正文；导入采用 validate-then-apply，保留包内 custom Provider / user template 标识，返回 changed object `config_version`，对 parsed-but-invalid 包返回 HTTP 200 字段级错误，并写入裁剪后的运行日志与审计。Spec compliance reviewer 先发现 Provider 密钥导出、Pydantic 预校验、custom id 保留和 rejected import log 缺口；修复后复审无 Critical / Important 发现。Code quality reviewer 复审无 Critical / Important 发现，仅保留 export 首次补种 built-in Provider 会触发内部 commit 的 Minor 风险；该行为与当前计划一致，常规启动路径已补种 Provider。本切片验证：`uv run --no-sync python -m pytest backend/tests/services/test_configuration_package_service.py backend/tests/api/test_configuration_package_api.py backend/tests/schemas/test_control_plane_schemas.py -q` 通过 22 个 focused/schema tests；`uv run --no-sync python -m pytest backend/tests/services/test_configuration_package_service.py backend/tests/api/test_configuration_package_api.py backend/tests/services/test_provider_service.py backend/tests/api/test_provider_api.py backend/tests/services/test_delivery_channel_service.py backend/tests/api/test_delivery_channel_api.py backend/tests/services/test_delivery_channel_readiness.py backend/tests/api/test_delivery_channel_validate_api.py backend/tests/services/test_user_template_service.py backend/tests/api/test_template_api.py -q` 通过 102 个 DB09 regression tests；`uv run --no-sync python -m pytest --collect-only -q` 收集 280 个 backend tests 且无收集错误；`uv run --no-sync python -m pytest -q` 通过 280 个 backend tests。
 
 <a id="c28"></a>
 

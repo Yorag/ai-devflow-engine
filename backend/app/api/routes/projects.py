@@ -13,6 +13,11 @@ from backend.app.observability.audit import AuditService
 from backend.app.observability.context import get_trace_context
 from backend.app.observability.log_writer import JsonlLogWriter
 from backend.app.observability.runtime_data import RuntimeDataSettings
+from backend.app.schemas.configuration_package import (
+    ConfigurationPackageExport,
+    ConfigurationPackageImportRequest,
+    ConfigurationPackageImportResult,
+)
 from backend.app.schemas.delivery_channel import (
     ProjectDeliveryChannelDetailProjection,
     ProjectDeliveryChannelUpdateRequest,
@@ -24,6 +29,10 @@ from backend.app.services.delivery_channels import (
     DeliveryChannelServiceError,
 )
 from backend.app.services.projects import ProjectService, ProjectServiceError
+from backend.app.services.configuration_packages import (
+    ConfigurationPackageService,
+    ConfigurationPackageServiceError,
+)
 
 
 router = APIRouter(tags=["projects"])
@@ -91,6 +100,16 @@ def _raise_delivery_channel_api_error(exc: DeliveryChannelServiceError) -> None:
     ) from exc
 
 
+def _raise_configuration_package_api_error(
+    exc: ConfigurationPackageServiceError,
+) -> None:
+    raise ApiError(
+        error_code=exc.error_code,
+        message=exc.message,
+        status_code=exc.status_code,
+    ) from exc
+
+
 def get_control_session(request: Request) -> Iterator[Session]:
     manager: DatabaseManager = request.app.state.database_manager
     session = manager.session(DatabaseRole.CONTROL)
@@ -130,6 +149,26 @@ def get_delivery_channel_service(
     audit_service = AuditService(log_session, audit_writer=audit_writer)
     try:
         yield DeliveryChannelService(
+            session,
+            audit_service=audit_service,
+            log_writer=audit_writer,
+            credential_env_prefixes=settings.credential_env_prefixes,
+        )
+    finally:
+        log_session.close()
+
+
+def get_configuration_package_service(
+    request: Request,
+    session: Session = Depends(get_control_session),
+) -> Iterator[ConfigurationPackageService]:
+    manager: DatabaseManager = request.app.state.database_manager
+    settings = request.app.state.environment_settings
+    log_session = manager.session(DatabaseRole.LOG)
+    audit_writer = JsonlLogWriter(RuntimeDataSettings.from_environment_settings(settings))
+    audit_service = AuditService(log_session, audit_writer=audit_writer)
+    try:
+        yield ConfigurationPackageService(
             session,
             audit_service=audit_service,
             log_writer=audit_writer,
@@ -245,3 +284,49 @@ def validate_project_delivery_channel(
     except DeliveryChannelServiceError as exc:
         _raise_delivery_channel_api_error(exc)
     return _delivery_channel_validation_read(validation)
+
+
+@router.get(
+    "/projects/{projectId}/configuration-package/export",
+    response_model=ConfigurationPackageExport,
+    responses={
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+def export_project_configuration_package(
+    projectId: str,
+    service: ConfigurationPackageService = Depends(get_configuration_package_service),
+) -> ConfigurationPackageExport:
+    try:
+        return service.export_project_package(
+            projectId,
+            trace_context=get_trace_context(),
+        )
+    except ConfigurationPackageServiceError as exc:
+        _raise_configuration_package_api_error(exc)
+
+
+@router.post(
+    "/projects/{projectId}/configuration-package/import",
+    response_model=ConfigurationPackageImportResult,
+    responses={
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+def import_project_configuration_package(
+    projectId: str,
+    body: ConfigurationPackageImportRequest,
+    service: ConfigurationPackageService = Depends(get_configuration_package_service),
+) -> ConfigurationPackageImportResult:
+    try:
+        return service.import_project_package(
+            projectId,
+            body,
+            trace_context=get_trace_context(),
+        )
+    except ConfigurationPackageServiceError as exc:
+        _raise_configuration_package_api_error(exc)
