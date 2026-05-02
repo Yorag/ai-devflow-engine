@@ -7,7 +7,7 @@ description: Use when starting a non-trivial change, deciding whether to create 
 
 ## Overview
 
-Standardize Git decisions for this repository from the first branch cut to the final release tag. Core principle: one verified delivery slice per branch boundary, one review purpose per PR boundary, and no Git write action without explicit user approval.
+Standardize Git decisions for this repository from the first branch cut to the final release tag. Core principle: one verified delivery slice per branch boundary, one review purpose per PR boundary, integration checkpoints for acceleration lanes, and no Git write action without explicit user approval.
 
 **REQUIRED SUB-SKILL:** Use `superpowers:verification-before-completion` before recommending `commit`, `PR`, `merge`, or `release` actions.
 
@@ -49,6 +49,12 @@ Answer five questions:
 - What fresh verification proves readiness?
 - Is the next Git action `branch`, `commit`, `PR`, `merge`, or `release`?
 
+When the current branch or target branch is listed in `docs/plans/function-one-acceleration-execution-plan.md`, also answer:
+
+- Is this an acceleration lane branch, the integration branch, or `main`?
+- Does the next action target `integration/function-one-acceleration` or `main`?
+- Which claim ids and evidence reports are included?
+
 ## Branch Gate
 
 Create a new branch by default for any new feature, bugfix, refactor, docs batch, or chore that is not the same unmerged delivery slice as the current branch.
@@ -79,6 +85,13 @@ Default branch action:
 - Start from `main` for new slices.
 - If `main` may be stale, sync it first.
 - Create the new branch with `git switch -c <branch-name>`.
+
+For Function One acceleration mode:
+- Lane branches use the exact branch names in `docs/plans/function-one-acceleration-execution-plan.md`.
+- New lane work starts from `main` only when initially creating the lane branch.
+- After an integration checkpoint exists, new claims should use the latest `integration/function-one-acceleration` state as their coordination base unless the acceleration plan says otherwise.
+- Existing lane worktrees must report their current branch HEAD and dirty status before taking a new claim. If the lane is behind the latest integration checkpoint and needs integrated contracts, prepare a sync request before continuing.
+- Do not create ad hoc branches for individual task slices inside a lane unless the user explicitly asks for a temporary repair branch.
 
 If the worktree is dirty with unrelated edits, stop and ask the user how to separate the work before creating or switching branches.
 
@@ -157,6 +170,12 @@ Do not recommend a PR when:
 - Required spec approval is still pending.
 - Verification has not been rerun after syncing with `main`.
 
+Acceleration lane PR readiness:
+- AL lane branches are PR/MR-ready for `integration/function-one-acceleration`, not for `main`.
+- A lane PR/MR must list the claim ids, evidence reports, mock-first status, owner conflicts, and focused verification.
+- `mock_ready` claims can be integrated only as partial progress and must not be represented as final platform task completion.
+- Integration branch PR/MR to `main` is allowed only after the relevant integration checkpoint verification passes and global status updates are coherent.
+
 When proposing a PR, include:
 - PR title
 - Scope summary
@@ -176,6 +195,13 @@ For GitHub repositories with `gh` available:
 
 Merge into `main` only after the branch is approved for integration and verification is fresh.
 
+For acceleration mode, there are two merge targets:
+
+- Lane branch -> `integration/function-one-acceleration`
+- `integration/function-one-acceleration` -> `main`
+
+AL lane branches do not merge directly to `main` unless the user explicitly abandons acceleration mode and approves a different integration strategy.
+
 Default merge path:
 - If a PR/MR exists, merge through the hosting platform. For GitHub, prefer the web merge button or `gh pr merge <PR-number> --squash --delete-branch` after explicit user approval.
 - Do not replace an open PR/MR merge with local `git merge` plus `git push origin main` unless the user explicitly approves bypassing the platform merge path.
@@ -193,11 +219,31 @@ Pre-merge checklist:
 - For platform PR/MR merge, the PR/MR contains only the intended review commits relative to the current target branch.
 - For `gh pr merge`, `gh auth status` confirms an authenticated account with permission to merge the target repository.
 
+Acceleration lane pre-merge checklist:
+- Target branch is `integration/function-one-acceleration`.
+- Claim ids are present in `docs/plans/function-one-acceleration-execution-plan.md`.
+- Worker evidence reports exist in the worker branch checkpoint commit for each claim being integrated.
+- Claims are `implemented` or `mock_ready`; `reported` claims, dirty worker worktrees, and uncommitted evidence reports are not mergeable integration inputs.
+- The lane did not modify another lane owner's shared entry, or the owner conflict has been resolved in the integration checkpoint plan.
+- Focused verification evidence is fresh for the lane diff.
+- Claims marked `mock_ready` remain partial and do not update final platform/split plan status.
+
+Integration branch to `main` pre-merge checklist:
+- The integration checkpoint has run the declared verification commands.
+- `docs/plans/function-one-acceleration-execution-plan.md`, `docs/plans/function-one-platform-plan.md`, and split plan statuses agree.
+- Remaining `mock_ready` or `blocked` claims are documented and do not masquerade as completed tasks.
+- The diff does not include unrelated lane WIP.
+
 Do not merge when:
 - The branch still contains mixed-purpose changes.
 - Verification only covered an earlier commit.
 - The merge depends on unresolved manual follow-up.
 - The PR/MR is open but review, required checks, or branch protection still block platform merge.
+- An AL lane branch is targeting `main` directly.
+- Worker evidence is missing from the checkpoint commit for included claims.
+- Included claims are only `reported`, exist only as local dirty worktree changes, or lack a user-approved checkpoint commit.
+- Central Claim Ledger and platform/split plan status disagree.
+- Integration checkpoint verification is stale or has not run.
 
 After merge approval, optionally propose local branch deletion only if:
 - The branch is fully integrated.

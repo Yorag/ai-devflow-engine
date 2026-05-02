@@ -168,7 +168,7 @@ README.md
 - Create: `docs/architecture/project-structure.md`
 - Modify: `README.md`
 - Modify: `docs/plans/function-one-platform-plan.md`
-- Modify: `docs/plans/function-one-delivery-branch-plan.md`
+- Modify: `docs/archive/function-one-delivery-branch-plan-legacy.md`
 
 **实现类/函数**：
 - 无生产代码。

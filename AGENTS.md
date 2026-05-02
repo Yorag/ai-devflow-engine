@@ -81,3 +81,16 @@ Existing AI knowledge may reflect LangChain/LangGraph `0.3.x` conventions, while
   backend domain model, API contract, projection contract, and event semantics: `docs/specs/function-one-backend-engine-design-v1.md`
 - Do not reintroduce archived feature one semantics. In the current split specs, `Solution Validation` is internal to `Solution Design`, `Rollback / Retry` is a runtime control node, `approval_request` / `approval_result` / `delivery_result` are top-level Narrative Feed entries, and the first `new_requirement` auto-starts a `PipelineRun`.
 - The user must review and approve any spec document in the current feature one split specification set before any commit related to those specs.
+
+## Active Execution Workflow
+
+- The active function one execution coordinator is:
+  `docs/plans/function-one-acceleration-execution-plan.md`
+- The archived delivery branch table is:
+  `docs/archive/function-one-delivery-branch-plan-legacy.md`
+- Do not use the archived Delivery Branch Plan as an active scheduling source.
+- Use the repo-local skill `acceleration-workflow` for main-session lane coordination, ready claim discovery, worker launch prompts, progress ingest, and integration checkpoints.
+- Use `slice-workflow` only for an assigned acceleration claim in a lane worker branch.
+- Worker branches must not update the central Claim Ledger, `function-one-platform-plan.md`, or split-plan final task status. Those final status updates happen only in the main coordination session after an integration checkpoint.
+- Uncommitted worker evidence is only local `reported` progress. A claim becomes `implemented` or `mock_ready` only after a user-approved worker checkpoint commit contains the evidence report, implementation plan, code, and tests.
+- Acceleration lane branches merge to `integration/function-one-acceleration` first. Do not merge an acceleration lane directly to `main` unless the user explicitly abandons acceleration mode and approves a different integration strategy.
