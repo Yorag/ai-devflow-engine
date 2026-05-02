@@ -137,11 +137,17 @@
 ## C2.1 默认 Project、项目加载与项目列表
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现默认项目登记、本地项目加载、项目列表查询和最小默认 `demo_delivery` 通道创建，使系统首次启动后具备稳定项目上下文、可切换项目列表与默认交付通道引用。
 **实施计划**：`docs/plans/implementation/c2.1-default-projects.md`
 
+**验证摘要**：实施计划 `docs/plans/implementation/c2.1-default-projects.md` 已完成。TDD RED 先观察到缺少 `backend.app.services.projects`、API app state 缺少 `database_manager`、默认 Project 未在 startup 注册、`ProjectRead` OpenAPI required 字段缺少 `is_default`，以及已有 Project 二次加载成功审计缺失；随后实现 `ProjectService`、`DeliveryChannelService`、`GET /api/projects`、`POST /api/projects`、startup 默认 Project 注册、OpenAPI 契约断言、重启持久化测试和审计失败 rollback 边界。`uv run --no-sync python -m pytest backend/tests/services/test_project_service.py backend/tests/api/test_project_api.py -q` 通过 12 个 C2.1 tests；`uv run --no-sync python -m pytest backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/api/test_request_correlation_context.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/services/test_project_service.py backend/tests/api/test_project_api.py -q` 通过 34 个 API/lifespan regression tests；`uv run --no-sync python -m pytest -q` 通过 141 个 backend tests；`uv run --no-sync python -m pytest --collect-only -q` 收集 141 个 backend tests 且无收集错误。Spec compliance reviewer 与 code quality reviewer 均未发现 Critical、Important 或 Minor 问题。
+
 **修改文件列表**：
+- Modify: `backend/app/main.py`
+- Modify: `backend/app/api/router.py`
+- Modify: `backend/app/schemas/project.py`
+- Modify: `backend/tests/observability/test_runtime_data_preflight.py`
 - Create: `backend/app/services/projects.py`
 - Create: `backend/app/services/delivery_channels.py`
 - Create: `backend/app/api/routes/projects.py`
@@ -175,11 +181,16 @@
 ## C2.2 系统模板与内置 Provider seed
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现三个系统模板和两个内置 Provider 的初始化，使 draft Session 可以稳定关联默认模板。
 **实施计划**：`docs/plans/implementation/c2.2-system-template-provider-seed.md`
 
+**验证摘要**：实施计划 `docs/plans/implementation/c2.2-system-template-provider-seed.md` 已完成。TDD RED 先观察到缺少 `backend.app.services.templates`、缺少 `backend.app.services.providers`、模板/Provider API 返回 `404`，随后实现五个 `agent_role_seed` 提示词资产、`TemplateService`、`ProviderService`、`GET /api/pipeline-templates`、`GET /api/pipeline-templates/{templateId}`、`GET /api/providers` 和 startup seed。代码评审后修复两个 Important 发现：已存在系统模板时 read path 不再加载本地 prompt asset；系统模板和内置 Provider seed 改为各写一条 batch audit，并在 audit 成功后才提交控制面 seed 行，audit 失败会 rollback 控制行。`uv run --no-sync python -m pytest backend/tests/services/test_template_seed.py -v` 通过 7 个 template seed tests；`uv run --no-sync python -m pytest backend/tests/services/test_provider_seed.py -v` 通过 7 个 provider seed tests；`uv run --no-sync python -m pytest backend/tests/prompts/test_agent_role_seed_assets.py backend/tests/services/test_template_seed.py backend/tests/services/test_provider_seed.py backend/tests/api/test_template_provider_seed_api.py -q` 通过 23 个 C2.2 focused tests；`uv run --no-sync python -m pytest backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/api/test_request_correlation_context.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/services/test_project_service.py backend/tests/api/test_project_api.py backend/tests/prompts/test_agent_role_seed_assets.py backend/tests/services/test_template_seed.py backend/tests/services/test_provider_seed.py backend/tests/api/test_template_provider_seed_api.py -q` 通过 57 个 DB08/API regression tests；`uv run --no-sync python -m pytest --collect-only -q` 收集 164 个 backend tests 且无收集错误；`uv run --no-sync python -m pytest -q` 通过 164 个 backend tests。Spec compliance reviewer 未发现问题；code quality reviewer 初审提出的两个 Important 发现已修复，后续内联复审未发现 Critical 或 Important 问题。
+
 **修改文件列表**：
+- Modify: `backend/app/main.py`
+- Modify: `backend/app/api/router.py`
+- Modify: `backend/tests/api/test_project_api.py`
 - Create: `backend/app/prompts/assets/roles/requirement_analyst.md`
 - Create: `backend/app/prompts/assets/roles/solution_designer.md`
 - Create: `backend/app/prompts/assets/roles/code_generator.md`
@@ -228,11 +239,13 @@
 ## C2.3 draft Session、重命名与模板选择更新
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现项目下 draft Session 创建、左栏展示名重命名和运行前模板选择更新，使首条需求前的会话状态符合规格。
 **实施计划**：`docs/plans/implementation/c2.3-draft-session-template-selection.md`
 
 **修改文件列表**：
+- Modify: `backend/app/schemas/session.py`
+- Modify: `backend/app/api/router.py`
 - Create: `backend/app/services/sessions.py`
 - Create: `backend/app/api/routes/sessions.py`
 - Create: `backend/tests/services/test_session_service.py`
@@ -260,16 +273,19 @@
 - `pytest backend/tests/services/test_session_service.py -v`
 - `pytest backend/tests/api/test_session_api.py -v`
 
+**验证摘要**：实施计划 `docs/plans/implementation/c2.3-draft-session-template-selection.md` 已完成。TDD RED 先观察到缺少 `backend.app.services.sessions`、Session API 路由返回 `404` 和 OpenAPI 缺少目标 path，随后实现 `SessionService`、Session API router、`SessionTemplateUpdateRequest` 和 router 注册。代码评审未发现 Critical 或 Important 问题；评审指出 API 层成功审计持久化覆盖不足后，已补充 API 测试断言创建、重命名和模板更新成功审计记录。`uv run --no-sync python -m pytest backend/tests/services/test_session_service.py backend/tests/api/test_session_api.py -q` 通过 13 个 C2.3 focused tests；`uv run --no-sync python -m pytest backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/api/test_request_correlation_context.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/services/test_project_service.py backend/tests/api/test_project_api.py backend/tests/prompts/test_agent_role_seed_assets.py backend/tests/services/test_template_seed.py backend/tests/services/test_provider_seed.py backend/tests/api/test_template_provider_seed_api.py backend/tests/services/test_session_service.py backend/tests/api/test_session_api.py -q` 通过 70 个 DB08/API regression tests；`uv run --no-sync python -m pytest --collect-only -q` 收集 177 个 backend tests 且无收集错误；`uv run --no-sync python -m pytest -q` 通过 177 个 backend tests。
+
 <a id="c24"></a>
 
 ## C2.4 用户模板保存、覆盖与删除
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现用户模板的另存、覆盖和删除语义，保证系统模板不可被覆盖或删除。
 **实施计划**：`docs/plans/implementation/c2.4-user-template-crud.md`
 
 **修改文件列表**：
+- Modify: `backend/app/schemas/template.py`
 - Modify: `backend/app/services/templates.py`
 - Modify: `backend/app/api/routes/templates.py`
 - Create: `backend/tests/services/test_user_template_service.py`
@@ -296,6 +312,8 @@
 **测试方法**：
 - `pytest backend/tests/services/test_user_template_service.py -v`
 - `pytest backend/tests/api/test_template_api.py -v`
+
+**验证摘要**：实施计划 `docs/plans/implementation/c2.4-user-template-crud.md` 已完成。TDD RED 先观察到缺少 `PipelineTemplateWriteRequest`、模板命令 API 路由返回 `405/404` 或 OpenAPI 缺少目标 path；代码评审后补充并修复两个重要边界：角色校验使用 `ROLE_STAGE_TYPES` 的阶段适用性而不是固定内置 `STAGE_ROLE_IDS`，删除被其它用户模板作为 `base_template_id` 引用的模板时返回 `validation_error` 409 并写入 `template.delete.rejected`，避免 self-FK 完整性错误和 lineage 丢失。实现新增 `PipelineTemplateWriteRequest`、`TemplateService.save_as_user_template()`、`patch_user_template()`、`delete_user_template()`、模板命令路由和审计元数据裁剪；`name`、`description` 明确作为 `PipelineTemplate` 资源元数据，不进入运行时槽位配置。`uv run --no-sync python -m pytest backend/tests/services/test_user_template_service.py backend/tests/api/test_template_api.py -q` 通过 19 个 C2.4 focused tests；`uv run --no-sync python -m pytest backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/api/test_request_correlation_context.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/services/test_project_service.py backend/tests/api/test_project_api.py backend/tests/prompts/test_agent_role_seed_assets.py backend/tests/services/test_template_seed.py backend/tests/services/test_provider_seed.py backend/tests/api/test_template_provider_seed_api.py backend/tests/services/test_session_service.py backend/tests/api/test_session_api.py backend/tests/services/test_user_template_service.py backend/tests/api/test_template_api.py -q` 通过 89 个 DB08/API regression tests；`uv run --no-sync python -m pytest --collect-only -q` 收集 196 个 backend tests 且无收集错误；`uv run --no-sync python -m pytest -q` 通过 196 个 backend tests。Spec compliance reviewer 和 code quality reviewer 复审均未留下 Critical 或 Important 发现。
 
 <a id="c25"></a>
 

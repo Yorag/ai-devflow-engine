@@ -3,12 +3,22 @@ from fastapi.testclient import TestClient
 
 from backend.app.api.error_codes import ErrorCode
 from backend.app.core.config import EnvironmentSettings
+from backend.app.db.base import DatabaseRole
+from backend.app.db.models.control import ControlBase
+from backend.app.db.models.log import LogBase
 from backend.app.main import create_app
 from backend.app.observability.runtime_data import (
     RuntimeDataPreflight,
     RuntimeDataPreflightError,
     RuntimeDataSettings,
 )
+
+
+def create_control_and_log_tables(app) -> None:  # noqa: ANN001
+    ControlBase.metadata.create_all(
+        app.state.database_manager.engine(DatabaseRole.CONTROL)
+    )
+    LogBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.LOG))
 
 
 def test_runtime_data_settings_derive_log_paths_from_environment_settings(tmp_path) -> None:
@@ -113,6 +123,7 @@ def test_preflight_fails_when_writability_probe_cannot_write(monkeypatch, tmp_pa
 def test_fastapi_lifespan_runs_preflight_before_serving_requests(tmp_path) -> None:
     runtime_root = tmp_path / "runtime"
     app = create_app(settings=EnvironmentSettings(platform_runtime_root=runtime_root))
+    create_control_and_log_tables(app)
 
     with TestClient(app) as client:
         response = client.get("/api/health")
@@ -120,6 +131,24 @@ def test_fastapi_lifespan_runs_preflight_before_serving_requests(tmp_path) -> No
     assert response.status_code == 200
     assert (runtime_root / "logs").is_dir()
     assert (runtime_root / "logs" / "runs").is_dir()
+
+
+def test_fastapi_lifespan_initializes_schema_before_startup_seed(tmp_path) -> None:
+    runtime_root = tmp_path / "runtime"
+    default_project_root = tmp_path / "ai-devflow-engine"
+    default_project_root.mkdir()
+    app = create_app(
+        settings=EnvironmentSettings(
+            platform_runtime_root=runtime_root,
+            default_project_root=default_project_root,
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/api/projects")
+
+    assert response.status_code == 200
+    assert response.json()[0]["project_id"] == "project-default"
 
 
 def test_fastapi_lifespan_fails_when_runtime_data_is_unavailable(tmp_path) -> None:

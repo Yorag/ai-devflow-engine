@@ -77,10 +77,49 @@ class PipelineTemplateRead(_StrictBaseModel):
         return value
 
 
+class PipelineTemplateWriteRequest(_StrictBaseModel):
+    name: str = Field(min_length=1)
+    description: str | None = None
+    fixed_stage_sequence: list[common.StageType] = Field(
+        default_factory=lambda: list(FIXED_STAGE_SEQUENCE)
+    )
+    stage_role_bindings: list[StageRoleBinding] = Field(min_length=1)
+    approval_checkpoints: list[common.ApprovalType] = Field(
+        default_factory=lambda: list(FIXED_APPROVAL_CHECKPOINTS)
+    )
+    auto_regression_enabled: bool
+    max_auto_regression_retries: int = Field(ge=0)
+
+    @field_validator("fixed_stage_sequence")
+    @classmethod
+    def require_fixed_stage_sequence(
+        cls,
+        value: list[common.StageType],
+    ) -> list[common.StageType]:
+        if tuple(value) != FIXED_STAGE_SEQUENCE:
+            raise ValueError(
+                "fixed_stage_sequence must match the Function One V1 stage order"
+            )
+        return value
+
+    @field_validator("approval_checkpoints")
+    @classmethod
+    def require_fixed_approval_checkpoints(
+        cls,
+        value: list[common.ApprovalType],
+    ) -> list[common.ApprovalType]:
+        if tuple(value) != FIXED_APPROVAL_CHECKPOINTS:
+            raise ValueError(
+                "approval_checkpoints must contain the two Function One V1 checkpoints"
+            )
+        return value
+
+
 __all__ = [
     "AgentRoleConfig",
     "FIXED_APPROVAL_CHECKPOINTS",
     "FIXED_STAGE_SEQUENCE",
     "PipelineTemplateRead",
+    "PipelineTemplateWriteRequest",
     "StageRoleBinding",
 ]

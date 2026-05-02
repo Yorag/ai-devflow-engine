@@ -26,6 +26,10 @@ class SessionRenameRequest(_StrictBaseModel):
     display_name: str = Field(min_length=1)
 
 
+class SessionTemplateUpdateRequest(_StrictBaseModel):
+    template_id: str = Field(min_length=1)
+
+
 class SessionDeleteResult(_StrictBaseModel):
     session_id: str = Field(min_length=1)
     project_id: str = Field(min_length=1)
@@ -46,4 +50,5 @@ __all__ = [
     "SessionDeleteResult",
     "SessionRead",
     "SessionRenameRequest",
+    "SessionTemplateUpdateRequest",
 ]
