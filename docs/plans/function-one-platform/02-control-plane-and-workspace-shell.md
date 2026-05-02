@@ -694,9 +694,10 @@
 ## F2.4 统一设置弹窗
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现统一设置入口、通用配置页、模型提供商页和导入导出页，使项目级 DeliveryChannel、Provider 配置与项目作用域配置包能力不进入模板编辑区。
 **实施计划**：`docs/plans/implementation/f2.4-settings-modal.md`
+**验证摘要**：`npm --prefix frontend run test -- --run src/features/settings/__tests__/SettingsModal.test.tsx` 通过，覆盖全局设置入口、三页签、DeliveryChannel 编辑表单、Provider 身份只读与连接 / 模型 / 能力字段编辑、配置包导出 / 导入、导入后配置查询刷新、禁止暴露平台运行设置 / 启动环境 / 系统提示词资产字段、弹窗焦点管理和项目切换时的 stale 数据防护；`npm --prefix frontend run test -- --run` 通过，6 个测试文件 / 36 个测试；`npm --prefix frontend run build` 通过。本切片只实现统一设置弹窗与 mock/API client 驱动的前端交互，不实现后端持久化保存、模板空态、模板编辑或 F2.5/F2.6 范围。
 
 **修改文件列表**：
 - Create: `frontend/src/features/settings/SettingsModal.tsx`

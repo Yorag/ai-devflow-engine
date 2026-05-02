@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect } from "react";
 
 import type { ApiRequestOptions } from "../../api/client";
 import {
@@ -11,12 +11,19 @@ import { SessionList } from "./SessionList";
 
 type ProjectSidebarProps = {
   request: ApiRequestOptions;
+  currentProjectId: string;
+  onProjectChange: (projectId: string) => void;
+  onCurrentProjectChange: (project: ProjectRead | null) => void;
 };
 
-export function ProjectSidebar({ request }: ProjectSidebarProps): JSX.Element {
+export function ProjectSidebar({
+  request,
+  currentProjectId,
+  onProjectChange,
+  onCurrentProjectChange,
+}: ProjectSidebarProps): JSX.Element {
   const projectsQuery = useProjectsQuery({ request });
   const projects = projectsQuery.data ?? [];
-  const [currentProjectId, setCurrentProjectId] = useState<string>("");
   const currentProject =
     projects.find((project) => project.project_id === currentProjectId) ??
     projects[0] ??
@@ -27,12 +34,23 @@ export function ProjectSidebar({ request }: ProjectSidebarProps): JSX.Element {
   const sessionCount = sessionsQuery.data?.length ?? 0;
   const deliveryMode = deliveryQuery.data?.delivery_mode ?? "unknown";
 
+  useEffect(() => {
+    onCurrentProjectChange(currentProject);
+  }, [currentProject, onCurrentProjectChange]);
+
+  function handleProjectChange(projectId: string) {
+    onProjectChange(projectId);
+    onCurrentProjectChange(
+      projects.find((project) => project.project_id === projectId) ?? null,
+    );
+  }
+
   return (
     <aside className="workspace-sidebar" aria-label="Project and session sidebar">
       <ProjectSwitcher
         projects={projects}
         currentProject={currentProject}
-        onProjectChange={setCurrentProjectId}
+        onProjectChange={handleProjectChange}
       />
 
       <div className="workspace-sidebar__actions">
@@ -89,19 +107,21 @@ function ProjectSwitcher({
       <p className="workspace-eyebrow">Project</p>
       <h2>{currentProject?.name ?? "No project loaded"}</h2>
       <p>{currentProject?.root_path ?? "Load a local project to begin."}</p>
-      <label>
-        <span>Switch project</span>
-        <select
-          value={currentProject?.project_id ?? ""}
-          onChange={(event) => onProjectChange(event.target.value)}
-        >
-          {projects.map((project) => (
-            <option key={project.project_id} value={project.project_id}>
-              {project.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      {projects.length > 0 ? (
+        <label>
+          <span>Switch project</span>
+          <select
+            value={currentProject?.project_id ?? ""}
+            onChange={(event) => onProjectChange(event.target.value)}
+          >
+            {projects.map((project) => (
+              <option key={project.project_id} value={project.project_id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
     </section>
   );
 }
