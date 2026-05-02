@@ -320,11 +320,12 @@
 ## C2.5 Provider 管理
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现 Provider 新增和编辑，使模板运行配置可以绑定内置 Provider 与用户自定义 Provider，并使内置 Provider 的连接字段和模型能力进入正式配置存储。
 **实施计划**：`docs/plans/implementation/c2.5-provider-management.md`
 
 **修改文件列表**：
+- Modify: `backend/app/schemas/provider.py`
 - Modify: `backend/app/services/providers.py`
 - Modify: `backend/app/api/routes/providers.py`
 - Create: `backend/tests/services/test_provider_service.py`
@@ -334,6 +335,7 @@
 - `ProviderService.create_custom_provider()`
 - `ProviderService.patch_custom_provider()`
 - `ProviderService.patch_builtin_provider_runtime_config()`
+- `ProviderService.patch_provider()`
 - `ProviderService.get_provider()`
 
 **验收标准**：
@@ -351,6 +353,8 @@
 **测试方法**：
 - `pytest backend/tests/services/test_provider_service.py -v`
 - `pytest backend/tests/api/test_provider_api.py -v`
+
+**验证摘要**：实施计划 `docs/plans/implementation/c2.5-provider-management.md` 已完成。TDD RED 先观察到缺少 `ProviderWriteRequest`、Provider command routes 返回 `405/404`、OpenAPI 未暴露 Provider command path；review 后补充并修复一个重要 OpenAPI 边界：`GET /api/providers/{providerId}` 的自动 `422` validation response 必须显式映射为统一 `ErrorResponse`，测试断言 GET/POST/PATCH 的 `422` schema 均为 `ErrorResponse`。实现新增 `ProviderWriteRequest`、严格布尔 Provider capability 写入模型、Provider create/detail/patch API、custom Provider 创建和更新、built-in Provider runtime config 更新、credential env prefix 校验、runtime capability 完整性校验、审计记录和成功审计失败 rollback。Spec compliance reviewer 和 code quality reviewer 复审均未留下 Critical 或 Important 发现。`uv run --no-sync python -m pytest backend/tests/services/test_provider_service.py backend/tests/api/test_provider_api.py -q` 通过 19 个 C2.5 focused tests；`uv run --no-sync python -m pytest backend/tests/services/test_provider_seed.py backend/tests/api/test_template_provider_seed_api.py backend/tests/services/test_user_template_service.py backend/tests/api/test_template_api.py -q` 通过 33 个 DB09 seed/API regression tests；`uv run --no-sync python -m pytest --collect-only -q` 收集 217 个 backend tests 且无收集错误；`uv run --no-sync python -m pytest -q` 通过 217 个 backend tests。
 
 <a id="c26"></a>
 

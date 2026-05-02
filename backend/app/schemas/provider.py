@@ -1,7 +1,14 @@
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, PositiveInt, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PositiveInt,
+    StrictBool,
+    model_validator,
+)
 
 from backend.app.schemas import common
 
@@ -20,6 +27,27 @@ class ModelRuntimeCapabilities(_StrictBaseModel):
     supports_tool_calling: bool = False
     supports_structured_output: bool = False
     supports_native_reasoning: bool = False
+
+
+class ProviderModelRuntimeCapabilitiesWrite(_StrictBaseModel):
+    model_id: str = Field(min_length=1)
+    context_window_tokens: PositiveInt = 128000
+    max_output_tokens: PositiveInt | None = None
+    supports_tool_calling: StrictBool = False
+    supports_structured_output: StrictBool = False
+    supports_native_reasoning: StrictBool = False
+
+
+class ProviderWriteRequest(_StrictBaseModel):
+    display_name: str | None = Field(default=None, min_length=1)
+    protocol_type: common.ProviderProtocolType | None = None
+    base_url: str = Field(min_length=1)
+    api_key_ref: str | None = None
+    default_model_id: str = Field(min_length=1)
+    supported_model_ids: list[NonEmptyString] = Field(min_length=1)
+    runtime_capabilities: list[ProviderModelRuntimeCapabilitiesWrite] = Field(
+        min_length=1
+    )
 
 
 class ProviderRead(_StrictBaseModel):
@@ -54,5 +82,7 @@ class ProviderRead(_StrictBaseModel):
 
 __all__ = [
     "ModelRuntimeCapabilities",
+    "ProviderModelRuntimeCapabilitiesWrite",
     "ProviderRead",
+    "ProviderWriteRequest",
 ]
