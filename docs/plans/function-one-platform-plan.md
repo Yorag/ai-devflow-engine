@@ -245,7 +245,7 @@
 | F3.6 | Inspector Shell 与打开状态 | Week 5-6 | [ ] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f36) |
 | F3.7 | Inspector 分组与 Metrics 展示 | Week 5-6 | [ ] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f37) |
 | A4.0 | Runtime orchestration boundary | Week 6 | [x] | 后端核心 | [04](function-one-platform/04-human-loop-and-runtime.md#a40) |
-| L4.1 | 命令审计失败语义 | Week 6 | [ ] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#l41) |
+| L4.1 | 命令审计失败语义 | Week 6 | [x] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#l41) |
 | L4.2 | 审计日志查询 API | Week 6 | [ ] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#l42) |
 | H4.1 | 澄清记录与后端消息语义 | Week 6 | [ ] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#h41) |
 | H4.2 | Composer 澄清输入语义 | Week 6 | [ ] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#h42) |

@@ -58,9 +58,10 @@
 ## L4.1 命令审计失败语义
 
 **计划周期**：Week 6
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：固定用户命令和高影响动作在审计写入失败时的拒绝或回滚语义，确保后续澄清、审批、暂停、恢复、终止、重新尝试和交付前置动作不会把审计失败降级为普通运行日志失败。
 **实施计划**：`docs/plans/implementation/l4.1-command-audit-failure-semantics.md`
+**验证摘要**：实施计划 `docs/plans/implementation/l4.1-command-audit-failure-semantics.md` 已完成并在 integration checkpoint 合入 `c6290f5`。`uv run python -m pytest backend/tests/observability/test_command_audit_failure_semantics.py -v` 通过 5 个 L4.1 focused tests；`uv run python -m pytest backend/tests/observability/test_audit_service.py backend/tests/observability/test_command_audit_failure_semantics.py -q` 通过 12 个 audit regressions；`uv run python -m pytest -q` 通过 330 个 backend tests。
 
 **修改文件列表**：
 - Modify: `backend/app/observability/audit.py`
