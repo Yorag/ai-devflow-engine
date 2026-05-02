@@ -90,6 +90,7 @@ For Function One acceleration mode:
 - Lane branches use the exact branch names in `docs/plans/function-one-acceleration-execution-plan.md`.
 - New lane work starts from `main` only when initially creating the lane branch.
 - After an integration checkpoint exists, new claims should use the latest `integration/function-one-acceleration` state as their coordination base unless the acceleration plan says otherwise.
+- Existing lane worktrees must report their current Worker HEAD before taking a new claim. If the lane is behind the latest integration checkpoint and needs integrated contracts, prepare a sync request before continuing.
 - Do not create ad hoc branches for individual task slices inside a lane unless the user explicitly asks for a temporary repair branch.
 
 If the worktree is dirty with unrelated edits, stop and ask the user how to separate the work before creating or switching branches.
