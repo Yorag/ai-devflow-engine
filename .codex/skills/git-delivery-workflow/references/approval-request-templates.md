@@ -28,11 +28,11 @@ Verification:
 - <command 2> -> <result>
 
 Proposed commit subject:
-`<type>(<scope>): <summary>`
+`<type>(<scope>): <summary>[ (#<PR-number>)]`
 
 Commit body summary:
 - Changes: <what changed>
-- Refs: <spec/plan/issue if any>
+- Refs: <PR/MR/spec/plan/issue if any>
 - Default commit body: `Changes` + `Refs`
 - Optional Verification in commit body: <only if commit history should retain it>
 

@@ -104,6 +104,7 @@ Keep commits narrow:
 Use the repository commit standard:
 - Subject format: `<type>(<scope>): <summary>`
 - `scope` is required.
+- For known `main` PR/MR review boundaries, append the compact review reference to the subject, e.g. `(#9)`, and keep it in `Refs`.
 - Keep the subject imperative and within 72 characters.
 - Use one of `feat`, `fix`, `refactor`, `docs`, `chore`, `test`, `build`, `ci`.
 - Body is required for every commit and defaults to `Changes` and `Refs`.
@@ -119,6 +120,7 @@ Examples:
 - `refactor(context): extract preview target builder`
 - `docs(spec): refine workflow terminology`
 - `chore(dev): update local development tooling`
+- `feat(persistence): add multi-sqlite boundary models (#9)`
 
 When proposing a commit, include:
 - Branch name
