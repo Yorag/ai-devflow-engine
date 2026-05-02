@@ -80,9 +80,13 @@ class PipelineTemplateRead(_StrictBaseModel):
 class PipelineTemplateWriteRequest(_StrictBaseModel):
     name: str = Field(min_length=1)
     description: str | None = None
-    fixed_stage_sequence: list[common.StageType]
+    fixed_stage_sequence: list[common.StageType] = Field(
+        default_factory=lambda: list(FIXED_STAGE_SEQUENCE)
+    )
     stage_role_bindings: list[StageRoleBinding] = Field(min_length=1)
-    approval_checkpoints: list[common.ApprovalType]
+    approval_checkpoints: list[common.ApprovalType] = Field(
+        default_factory=lambda: list(FIXED_APPROVAL_CHECKPOINTS)
+    )
     auto_regression_enabled: bool
     max_auto_regression_retries: int = Field(ge=0)
 

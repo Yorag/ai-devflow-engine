@@ -56,6 +56,13 @@ def write_payload(name: str = "Custom feature flow") -> dict:
     }
 
 
+def editable_payload(name: str = "Custom feature flow") -> dict:
+    payload = write_payload(name)
+    payload.pop("fixed_stage_sequence")
+    payload.pop("approval_checkpoints")
+    return payload
+
+
 def assert_error(
     response,
     *,
@@ -283,6 +290,43 @@ def test_template_command_routes_validate_payload_without_saving(
     assert user_count == 0
 
 
+def test_template_command_routes_accept_editable_only_payload(
+    tmp_path: Path,
+) -> None:
+    app = build_template_api_app(tmp_path)
+
+    with TestClient(app) as client:
+        save_as_response = client.post(
+            "/api/pipeline-templates/template-feature/save-as",
+            json=editable_payload("Editable-only variant"),
+            headers={
+                "X-Request-ID": "req-template-editable-save-as",
+                "X-Correlation-ID": "corr-template-editable-save-as",
+            },
+        )
+        assert save_as_response.status_code == 201
+        saved_as = save_as_response.json()
+
+        patch_response = client.patch(
+            f"/api/pipeline-templates/{saved_as['template_id']}",
+            json=editable_payload("Editable-only variant updated"),
+            headers={
+                "X-Request-ID": "req-template-editable-patch",
+                "X-Correlation-ID": "corr-template-editable-patch",
+            },
+        )
+
+    assert patch_response.status_code == 200
+    patched = patch_response.json()
+    assert patched["name"] == "Editable-only variant updated"
+    assert patched["fixed_stage_sequence"] == [
+        stage.value for stage in FIXED_STAGE_SEQUENCE
+    ]
+    assert patched["approval_checkpoints"] == [
+        checkpoint.value for checkpoint in FIXED_APPROVAL_CHECKPOINTS
+    ]
+
+
 def test_template_command_routes_reject_delete_of_template_used_as_save_as_source(
     tmp_path: Path,
 ) -> None:
@@ -433,9 +477,7 @@ def test_template_command_routes_are_documented_in_openapi(tmp_path: Path) -> No
 
     assert set(schemas["PipelineTemplateWriteRequest"]["required"]) == {
         "name",
-        "fixed_stage_sequence",
         "stage_role_bindings",
-        "approval_checkpoints",
         "auto_regression_enabled",
         "max_auto_regression_retries",
     }

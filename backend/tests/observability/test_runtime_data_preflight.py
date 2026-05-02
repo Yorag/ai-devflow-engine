@@ -133,6 +133,24 @@ def test_fastapi_lifespan_runs_preflight_before_serving_requests(tmp_path) -> No
     assert (runtime_root / "logs" / "runs").is_dir()
 
 
+def test_fastapi_lifespan_initializes_schema_before_startup_seed(tmp_path) -> None:
+    runtime_root = tmp_path / "runtime"
+    default_project_root = tmp_path / "ai-devflow-engine"
+    default_project_root.mkdir()
+    app = create_app(
+        settings=EnvironmentSettings(
+            platform_runtime_root=runtime_root,
+            default_project_root=default_project_root,
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/api/projects")
+
+    assert response.status_code == 200
+    assert response.json()[0]["project_id"] == "project-default"
+
+
 def test_fastapi_lifespan_fails_when_runtime_data_is_unavailable(tmp_path) -> None:
     runtime_root = tmp_path / "runtime-file"
     runtime_root.write_text("not a directory", encoding="utf-8")

@@ -27,6 +27,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     RuntimeDataPreflight.from_environment_settings(
         app.state.environment_settings
     ).ensure_runtime_data_ready()
+    app.state.database_manager.initialize_schema()
     ensure_startup_default_project(app)
     ensure_startup_control_plane_seed(app)
     yield

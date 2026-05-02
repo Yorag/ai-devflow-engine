@@ -7,7 +7,7 @@ from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.core.config import EnvironmentSettings
-from backend.app.db.base import DATABASE_FILE_NAMES, DatabaseRole
+from backend.app.db.base import DATABASE_FILE_NAMES, ROLE_METADATA, DatabaseRole
 
 
 def _sqlite_url_for_path(path: Path) -> str:
@@ -91,6 +91,11 @@ class DatabaseManager:
     def session(self, role: DatabaseRole) -> Session:
         return self.session_factory(role)()
 
+    def initialize_schema(self) -> None:
+        _load_model_metadata()
+        for role in DatabaseRole:
+            ROLE_METADATA[role].create_all(self.engine(role))
+
 
 _default_database_manager: DatabaseManager | None = None
 
@@ -124,3 +129,11 @@ def get_event_session(manager: DatabaseManager | None = None) -> Session:
 
 def get_log_session(manager: DatabaseManager | None = None) -> Session:
     return _session_for(DatabaseRole.LOG, manager)
+
+
+def _load_model_metadata() -> None:
+    import backend.app.db.models.control  # noqa: F401
+    import backend.app.db.models.event  # noqa: F401
+    import backend.app.db.models.graph  # noqa: F401
+    import backend.app.db.models.log  # noqa: F401
+    import backend.app.db.models.runtime  # noqa: F401
