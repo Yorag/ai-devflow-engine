@@ -239,11 +239,13 @@
 ## C2.3 draft Session、重命名与模板选择更新
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现项目下 draft Session 创建、左栏展示名重命名和运行前模板选择更新，使首条需求前的会话状态符合规格。
 **实施计划**：`docs/plans/implementation/c2.3-draft-session-template-selection.md`
 
 **修改文件列表**：
+- Modify: `backend/app/schemas/session.py`
+- Modify: `backend/app/api/router.py`
 - Create: `backend/app/services/sessions.py`
 - Create: `backend/app/api/routes/sessions.py`
 - Create: `backend/tests/services/test_session_service.py`
@@ -270,6 +272,8 @@
 **测试方法**：
 - `pytest backend/tests/services/test_session_service.py -v`
 - `pytest backend/tests/api/test_session_api.py -v`
+
+**验证摘要**：实施计划 `docs/plans/implementation/c2.3-draft-session-template-selection.md` 已完成。TDD RED 先观察到缺少 `backend.app.services.sessions`、Session API 路由返回 `404` 和 OpenAPI 缺少目标 path，随后实现 `SessionService`、Session API router、`SessionTemplateUpdateRequest` 和 router 注册。代码评审未发现 Critical 或 Important 问题；评审指出 API 层成功审计持久化覆盖不足后，已补充 API 测试断言创建、重命名和模板更新成功审计记录。`uv run --no-sync python -m pytest backend/tests/services/test_session_service.py backend/tests/api/test_session_api.py -q` 通过 13 个 C2.3 focused tests；`uv run --no-sync python -m pytest backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/api/test_request_correlation_context.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/services/test_project_service.py backend/tests/api/test_project_api.py backend/tests/prompts/test_agent_role_seed_assets.py backend/tests/services/test_template_seed.py backend/tests/services/test_provider_seed.py backend/tests/api/test_template_provider_seed_api.py backend/tests/services/test_session_service.py backend/tests/api/test_session_api.py -q` 通过 70 个 DB08/API regression tests；`uv run --no-sync python -m pytest --collect-only -q` 收集 177 个 backend tests 且无收集错误；`uv run --no-sync python -m pytest -q` 通过 177 个 backend tests。
 
 <a id="c24"></a>
 
