@@ -34,7 +34,7 @@
 - 计划必须写出 implementer subagent 的任务边界、允许文件、必要上下文、禁止事项、TDD red/green 命令和回报要求。
 - 计划必须写出 review 顺序：先 spec / plan compliance reviewer，再 code quality / testing / regression reviewer；reviewer 默认不重复跑 tests，除非主 agent 明确要求。
 - review 发现 Critical 或 Important 必须修复并 re-review；re-review 覆盖上轮 findings 和相关变更。
-- 计划必须说明子代理不得运行 Git write 操作、不得更新 platform / split / delivery branch 追踪状态、不得扩大切片范围。
+- 计划必须说明子代理不得运行 Git write 操作、不得更新 acceleration execution plan / platform / split 最终追踪状态、不得扩大切片范围。
 
 ## Implementation Plan 清单
 

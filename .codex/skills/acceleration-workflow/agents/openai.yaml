@@ -1,0 +1,4 @@
+interface:
+  display_name: "Acceleration Workflow"
+  short_description: "Coordinate acceleration lanes and task claims"
+  default_prompt: "Use $acceleration-workflow to find ready task claims, prepare lane worker prompts, or run an integration checkpoint."
