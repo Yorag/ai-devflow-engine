@@ -14,7 +14,7 @@
 ## A4.0 Runtime orchestration boundary
 
 **计划周期**：Week 6
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：在人工介入命令和工具确认命令落地前固定运行编排边界，使澄清、审批、工具确认、暂停、恢复和终止都通过统一 runtime boundary 与领域服务协作；重新尝试只验证旧 GraphThread 已终结并创建新的 PipelineRun，不恢复或复用旧执行图。
 **实施计划**：`docs/plans/implementation/a4.0-runtime-orchestration-boundary.md`
 

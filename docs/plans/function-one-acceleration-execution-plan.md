@@ -117,10 +117,10 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 
 | Claim | Task | Lane | Branch | Status | Coordination Base | Worker HEAD | Evidence | Blocker |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| AL01-R3.1 | R3.1 | AL01 | `feat/al-run-core-events` | claimed | 5d44d4a | - | `docs/plans/acceleration/reports/AL01-R3.1.md` | - |
-| AL03-A4.0 | A4.0 | AL03 | `feat/al-runtime-human-loop` | claimed | 5d44d4a | - | `docs/plans/acceleration/reports/AL03-A4.0.md` | - |
-| AL05-A4.8 | A4.8 | AL05 | `feat/al-provider-langgraph-context` | claimed | 5d44d4a | - | `docs/plans/acceleration/reports/AL05-A4.8.md` | - |
-| AL06-F3.1 | F3.1 | AL06 | `feat/al-frontend-runtime-ui` | claimed | 5d44d4a | - | `docs/plans/acceleration/reports/AL06-F3.1.md` | - |
+| AL01-R3.1 | R3.1 | AL01 | `feat/al-run-core-events` | done | 5d44d4a | 222396d | `docs/plans/acceleration/reports/AL01-R3.1.md` | - |
+| AL03-A4.0 | A4.0 | AL03 | `feat/al-runtime-human-loop` | done | 5d44d4a | ebfcb61 | `docs/plans/acceleration/reports/AL03-A4.0.md` | - |
+| AL05-A4.8 | A4.8 | AL05 | `feat/al-provider-langgraph-context` | done | 5d44d4a | aee52fb | `docs/plans/acceleration/reports/AL05-A4.8.md` | - |
+| AL06-F3.1 | F3.1 | AL06 | `feat/al-frontend-runtime-ui` | done | 5d44d4a | 564624a | `docs/plans/acceleration/reports/AL06-F3.1.md` | - |
 
 当前基线不预置 live claim。主协调会话在认领 ready task 时写入共享 coordination store，并记录当时的 Coordination Base。
 

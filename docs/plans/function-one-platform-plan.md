@@ -218,7 +218,7 @@
 | F2.4 | 统一设置弹窗 | Week 3 | [x] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f24) |
 | F2.5 | 模板空态与模板选择 | Week 3-4 | [x] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f25) |
 | F2.6 | 模板编辑与脏状态守卫 | Week 3-4 | [x] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f26) |
-| R3.1 | Run 状态机纯领域规则 | Week 4 | [ ] | 后端核心 | [03](function-one-platform/03-run-projection-and-feed.md#r31) |
+| R3.1 | Run 状态机纯领域规则 | Week 4 | [x] | 后端核心 | [03](function-one-platform/03-run-projection-and-feed.md#r31) |
 | C2.9a | Session 删除命令与历史可见性 | Week 4 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c29a) |
 | C2.9b | Project 移除命令与级联历史可见性 | Week 4 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c29b) |
 | E3.1 | 领域事件 Schema 与 EventStore | Week 4 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#e31) |
@@ -237,14 +237,14 @@
 | Q3.4a | ToolConfirmationInspectorProjection | Week 5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q34a) |
 | E3.2 | SSE 流端点与断线恢复 | Week 5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#e32) |
 | L3.1 | Run 与 Stage 日志轻查询 API | Week 5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#l31) |
-| F3.1 | Workspace Store 快照初始化 | Week 5 | [ ] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f31) |
+| F3.1 | Workspace Store 快照初始化 | Week 5 | [x] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f31) |
 | F3.2 | SSE Client 与 Event Reducer | Week 5 | [ ] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f32) |
 | F3.3 | Feed Entry Renderer | Week 5-6 | [ ] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f33) |
 | F3.4 | StageNode 与阶段内部条目 | Week 5-6 | [ ] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f34) |
 | F3.5 | Run Boundary 与 Run Switcher | Week 5-6 | [ ] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f35) |
 | F3.6 | Inspector Shell 与打开状态 | Week 5-6 | [ ] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f36) |
 | F3.7 | Inspector 分组与 Metrics 展示 | Week 5-6 | [ ] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f37) |
-| A4.0 | Runtime orchestration boundary | Week 6 | [ ] | 后端核心 | [04](function-one-platform/04-human-loop-and-runtime.md#a40) |
+| A4.0 | Runtime orchestration boundary | Week 6 | [x] | 后端核心 | [04](function-one-platform/04-human-loop-and-runtime.md#a40) |
 | L4.1 | 命令审计失败语义 | Week 6 | [ ] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#l41) |
 | L4.2 | 审计日志查询 API | Week 6 | [ ] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#l42) |
 | H4.1 | 澄清记录与后端消息语义 | Week 6 | [ ] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#h41) |
@@ -280,7 +280,7 @@
 | A4.5 | LangGraph 主链与 checkpoint | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a45) |
 | A4.6 | LangGraph interrupt resume | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a46) |
 | A4.7 | LangGraph 事件到领域产物转换 | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a47) |
-| A4.8 | Provider Registry | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48) |
+| A4.8 | Provider Registry | Week 8 | [x] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48) |
 | A4.8a | PromptValidation 边界校验 | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48a) |
 | A4.8b | ContextEnvelope 与 ContextManifest Schema | Week 8 | [ ] | 后端契约 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48b) |
 | A4.8c | PromptRegistry 与系统提示词资产加载 | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48c) |
