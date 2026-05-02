@@ -61,12 +61,12 @@
 
 | Lane | Branch | Coverage | Status | Owner Scope | Review Boundary |
 | --- | --- | --- | --- | --- | --- |
-| AL01 | `feat/al-run-core-events` | R3.1, E3.1, R3.2, R3.3, R3.4, R3.4a, R3.4b, R3.5, R3.6, R3.7, C2.9a, C2.9b | planned | Run 状态机、PipelineRun、EventStore、snapshot、GraphDefinition、StageRun、StageArtifact、历史可见性命令 | Run 和事件真源 |
+| AL01 | `feat/al-run-core-events` | R3.1, E3.1, R3.2, R3.3, R3.4, R3.4a, R3.4b, R3.5, R3.6, R3.7, C2.9a, C2.9b | claimed | Run 状态机、PipelineRun、EventStore、snapshot、GraphDefinition、StageRun、StageArtifact、历史可见性命令 | Run 和事件真源 |
 | AL02 | `feat/al-projections-streams` | Q3.1, Q3.2, Q3.3, Q3.4, Q3.4a, E3.2, L3.1, L4.2 | planned | Projection services、SSE、run/stage log query、audit query route | 查询投影、实时流和轻查询 API |
-| AL03 | `feat/al-runtime-human-loop` | A4.0, L4.1, H4.1, H4.3, D4.0, H4.4, H4.4a, H4.5, H4.6, H4.7 | planned | RuntimeOrchestrationService、clarification、approval、delivery snapshot gate、runtime control commands | 运行编排和人工介入后端 |
+| AL03 | `feat/al-runtime-human-loop` | A4.0, L4.1, H4.1, H4.3, D4.0, H4.4, H4.4a, H4.5, H4.6, H4.7 | claimed | RuntimeOrchestrationService、clarification、approval、delivery snapshot gate、runtime control commands | 运行编排和人工介入后端 |
 | AL04 | `feat/al-tools-deterministic-delivery` | A4.1, W5.0, W5.0a, W5.0b, W5.0c, W5.0d, W5.1, W5.2, W5.3, W5.4, W5.5, W5.6, A4.2, A4.3, A4.4, D4.1, D4.2, D4.3, D5.1, D5.2, D5.3, D5.4 | planned | RuntimeEngine、ToolProtocol、ToolRegistry、Workspace tools、ChangeSet、PreviewTarget、deterministic runtime、DeliveryRecord、delivery adapters | 工具、deterministic runtime 和交付适配 |
-| AL05 | `feat/al-provider-langgraph-context` | A4.5, A4.6, A4.7, A4.8, A4.8a, A4.8b, A4.8c, A4.8d, A4.9, A4.9a, A4.9e, A4.9b, A4.9c, A4.9d, A4.10, A4.11 | planned | LangGraph runtime、Provider registry、PromptValidation、PromptRegistry、PromptRenderer、ContextEnvelope、Provider adapter、AgentDecision、StageAgentRuntime | Provider、LangGraph、上下文和 Stage Agent |
-| AL06 | `feat/al-frontend-runtime-ui` | F3.1, F3.2, F3.3, F3.4, F3.5, F3.6, F3.7, H4.2, F4.1, F4.2, F4.3, F4.3a, F4.4, F5.1, F5.2a, F5.2b | planned | frontend workspace store、SSE reducer、Feed、StageNode、Inspector、Composer、Approval、Tool Confirmation、Delivery UI | 前端运行工作台和交付展示 |
+| AL05 | `feat/al-provider-langgraph-context` | A4.5, A4.6, A4.7, A4.8, A4.8a, A4.8b, A4.8c, A4.8d, A4.9, A4.9a, A4.9e, A4.9b, A4.9c, A4.9d, A4.10, A4.11 | claimed | LangGraph runtime、Provider registry、PromptValidation、PromptRegistry、PromptRenderer、ContextEnvelope、Provider adapter、AgentDecision、StageAgentRuntime | Provider、LangGraph、上下文和 Stage Agent |
+| AL06 | `feat/al-frontend-runtime-ui` | F3.1, F3.2, F3.3, F3.4, F3.5, F3.6, F3.7, H4.2, F4.1, F4.2, F4.3, F4.3a, F4.4, F5.1, F5.2a, F5.2b | claimed | frontend workspace store、SSE reducer、Feed、StageNode、Inspector、Composer、Approval、Tool Confirmation、Delivery UI | 前端运行工作台和交付展示 |
 | QA | `test/al-regression-hardening` | V6.1, V6.2, V6.3, V6.4, V6.5, V6.6, V6.8, L6.1, L6.2, V6.7 | planned | backend API flow、OpenAPI、Playwright、frontend error states、config regression、log hardening、release checklist | integration 回归和发布候选验证 |
 
 ## 4. Shared Ownership
@@ -105,6 +105,10 @@ Start gate 只允许开始实现或 mock-first；它不等于完成 gate。
 
 | Claim | Task | Lane | Branch | Status | Coordination Base | Worker HEAD | Evidence | Blocker |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| AL01-R3.1 | R3.1 | AL01 | `feat/al-run-core-events` | claimed | 5d44d4a | - | `docs/plans/acceleration/reports/AL01-R3.1.md` | - |
+| AL03-A4.0 | A4.0 | AL03 | `feat/al-runtime-human-loop` | claimed | 5d44d4a | - | `docs/plans/acceleration/reports/AL03-A4.0.md` | - |
+| AL05-A4.8 | A4.8 | AL05 | `feat/al-provider-langgraph-context` | claimed | 5d44d4a | - | `docs/plans/acceleration/reports/AL05-A4.8.md` | - |
+| AL06-F3.1 | F3.1 | AL06 | `feat/al-frontend-runtime-ui` | claimed | 5d44d4a | - | `docs/plans/acceleration/reports/AL06-F3.1.md` | - |
 
 当前基线不预置 claim。主协调会话在认领 ready task 时新增 Claim Ledger 行，并记录当时的 Coordination Base。
 
