@@ -211,7 +211,7 @@
 | C2.6 | DeliveryChannel 查询与保存 | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c26) |
 | C2.7 | DeliveryChannel readiness 校验 | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c27) |
 | C2.7a | 项目作用域配置包导入导出 | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c27a) |
-| C2.8 | PlatformRuntimeSettings 管理服务 | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c28) |
+| C2.8 | PlatformRuntimeSettings 管理服务 | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c28) |
 | F2.1 | API Client 路径与类型入口 | Week 2-3 | [x] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f21) |
 | F2.2 | Mock Fixtures 与 Query Hooks | Week 2-3 | [x] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f22) |
 | F2.3 | Workspace Shell 与 Project Sidebar | Week 3 | [x] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f23) |

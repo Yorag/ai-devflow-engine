@@ -473,14 +473,16 @@
 ## C2.8 PlatformRuntimeSettings 管理服务
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现后端统一平台运行设置管理服务，校验运行上限、Provider 调用策略、上下文裁剪限制、上下文压缩阈值比例、日志策略和诊断查询分页上限，并为后续 run 启动快照提供稳定配置版本。
 **实施计划**：`docs/plans/implementation/c2.8-platform-runtime-settings-service.md`
+**验证摘要**：实施计划 `docs/plans/implementation/c2.8-platform-runtime-settings-service.md` 已完成。TDD RED 先观察到缺少 `backend.app.services.runtime_settings`、缺少 `update_settings()`、`/api/runtime-settings` 未进入 OpenAPI、storage commit failure 未映射为 `config_storage_unavailable`、以及拒绝路径 observability failure 泄漏原始异常；GREEN 后实现 `PlatformRuntimeSettingsRepository`、`PlatformRuntimeSettingsService`、内部 `GET/PUT /api/runtime-settings`、默认持久化初始化、partial update merge、conditional `config_version` 更新、硬上限校验、`config_invalid_value` / `config_hard_limit_exceeded` / `config_version_conflict` / `config_storage_unavailable` 映射、runtime-settings 路由级请求校验映射、JSONL 与审计记录。控制库先提交再写成功观测事实，避免跨 SQLite 资源产生未提交控制写的 false success；post-commit observability failure 返回 `config_storage_unavailable`，已提交控制行仍是配置真源。Spec compliance 与 code quality reviewers 初审发现版本 CAS、事务顺序、API 非法字段映射、拒绝路径 observability failure 和 API 503 覆盖问题；修复后复审无 Critical 或 Important 发现。验证：`uv run --no-sync python -m pytest backend/tests/services/test_runtime_settings_service.py backend/tests/api/test_runtime_settings_admin_api.py -q` 通过 17 个 C2.8 focused tests；`uv run --no-sync python -m pytest backend/tests/services/test_runtime_settings_service.py backend/tests/api/test_runtime_settings_admin_api.py backend/tests/services/test_configuration_package_service.py backend/tests/api/test_configuration_package_api.py backend/tests/services/test_provider_service.py backend/tests/api/test_provider_api.py backend/tests/services/test_delivery_channel_service.py backend/tests/api/test_delivery_channel_api.py backend/tests/services/test_delivery_channel_readiness.py backend/tests/api/test_delivery_channel_validate_api.py backend/tests/services/test_user_template_service.py backend/tests/api/test_template_api.py -q` 通过 119 个 DB09 regression tests；`uv run --no-sync python -m pytest backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_control_plane_schemas.py -q` 通过 9 个 schema regression tests；`uv run --no-sync python -m pytest --collect-only -q` 收集 297 个 backend tests 且无收集错误；`uv run --no-sync python -m pytest -q` 通过 297 个 backend tests。
 
 **修改文件列表**：
 - Create: `backend/app/services/runtime_settings.py`
 - Create: `backend/app/repositories/runtime_settings.py`
 - Create: `backend/app/api/routes/runtime_settings.py`
+- Modify: `backend/app/api/router.py`
 - Create: `backend/tests/services/test_runtime_settings_service.py`
 - Create: `backend/tests/api/test_runtime_settings_admin_api.py`
 
