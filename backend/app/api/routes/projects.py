@@ -16,6 +16,7 @@ from backend.app.observability.runtime_data import RuntimeDataSettings
 from backend.app.schemas.delivery_channel import (
     ProjectDeliveryChannelDetailProjection,
     ProjectDeliveryChannelUpdateRequest,
+    ProjectDeliveryChannelValidationResult,
 )
 from backend.app.schemas.project import ProjectCreateRequest, ProjectRead
 from backend.app.services.delivery_channels import (
@@ -64,6 +65,20 @@ def _delivery_channel_read(
             "readiness_message": channel.readiness_message,
             "last_validated_at": channel.last_validated_at,
             "updated_at": channel.updated_at,
+        }
+    )
+
+
+def _delivery_channel_validation_read(
+    validation: Any,
+) -> ProjectDeliveryChannelValidationResult:
+    return ProjectDeliveryChannelValidationResult.model_validate(
+        {
+            "readiness_status": validation.readiness_status,
+            "readiness_message": validation.readiness_message,
+            "credential_status": validation.credential_status,
+            "validated_fields": list(validation.validated_fields),
+            "validated_at": validation.validated_at,
         }
     )
 
@@ -117,6 +132,7 @@ def get_delivery_channel_service(
         yield DeliveryChannelService(
             session,
             audit_service=audit_service,
+            log_writer=audit_writer,
             credential_env_prefixes=settings.credential_env_prefixes,
         )
     finally:
@@ -206,3 +222,26 @@ def update_project_delivery_channel(
     except DeliveryChannelServiceError as exc:
         _raise_delivery_channel_api_error(exc)
     return _delivery_channel_read(channel, service=service)
+
+
+@router.post(
+    "/projects/{projectId}/delivery-channel/validate",
+    response_model=ProjectDeliveryChannelValidationResult,
+    responses={
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+def validate_project_delivery_channel(
+    projectId: str,
+    service: DeliveryChannelService = Depends(get_delivery_channel_service),
+) -> ProjectDeliveryChannelValidationResult:
+    try:
+        validation = service.validate_project_channel(
+            projectId,
+            trace_context=get_trace_context(),
+        )
+    except DeliveryChannelServiceError as exc:
+        _raise_delivery_channel_api_error(exc)
+    return _delivery_channel_validation_read(validation)

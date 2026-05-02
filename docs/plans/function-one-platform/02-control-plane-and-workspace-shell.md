@@ -399,11 +399,12 @@
 ## C2.7 DeliveryChannel readiness 校验
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现项目级交付配置校验，统一输出 `readiness_status`、`credential_status` 和阻塞原因。
 **实施计划**：`docs/plans/implementation/c2.7-delivery-channel-readiness.md`
 
 **修改文件列表**：
+- Modify: `backend/app/schemas/delivery_channel.py`
 - Modify: `backend/app/services/delivery_channels.py`
 - Modify: `backend/app/api/routes/projects.py`
 - Create: `backend/tests/services/test_delivery_channel_readiness.py`
@@ -426,6 +427,8 @@
 **测试方法**：
 - `pytest backend/tests/services/test_delivery_channel_readiness.py -v`
 - `pytest backend/tests/api/test_delivery_channel_validate_api.py -v`
+
+**验证摘要**：实施计划 `docs/plans/implementation/c2.7-delivery-channel-readiness.md` 已完成。TDD RED 先观察到缺少 `ProjectDeliveryChannelValidationResult`、`DeliveryChannelService.compute_readiness()`、`DeliveryChannelService.resolve_credential_status()`、`DeliveryChannelService.validate_project_channel()`、validate API route 和 OpenAPI 暴露；GREEN 后实现项目级 DeliveryChannel readiness 校验、`demo_delivery` ready、`git_auto_delivery` 字段和凭据可用性校验、`validated_at` 响应、当前配置持久化、运行日志、成功/拒绝/失败审计、失败 rollback、credential value 不外泄，以及历史 runtime delivery snapshot 不变。Spec compliance reviewer 复审未留下 Critical 或 Important 发现，仅记录 API 层未直接重复服务层 empty env value 与 whitespace-wrapped `credential_ref` 用例的 Minor 风险；代码质量 reviewer 未及时返回，主 agent 已执行同等内联评审，未发现 Critical 或 Important 发现。`uv run --no-sync python -m pytest backend/tests/services/test_delivery_channel_readiness.py backend/tests/api/test_delivery_channel_validate_api.py -q` 通过 24 个 C2.7 focused tests；`uv run --no-sync python -m pytest backend/tests/services/test_delivery_channel_service.py backend/tests/api/test_delivery_channel_api.py backend/tests/services/test_delivery_channel_readiness.py backend/tests/api/test_delivery_channel_validate_api.py -q` 通过 45 个 C2.6/C2.7 DeliveryChannel regression tests；`uv run --no-sync python -m pytest backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py -q` 通过 11 个 schema regression tests；`uv run --no-sync python -m pytest backend/tests/services/test_project_service.py backend/tests/api/test_project_api.py backend/tests/services/test_provider_service.py backend/tests/api/test_provider_api.py backend/tests/services/test_provider_seed.py backend/tests/api/test_template_provider_seed_api.py backend/tests/services/test_user_template_service.py backend/tests/api/test_template_api.py -q` 通过 64 个 DB09 control-plane regression tests；`uv run --no-sync python -m pytest --collect-only -q` 收集 262 个 backend tests 且无收集错误；`uv run --no-sync python -m pytest -q` 通过 262 个 backend tests。
 
 <a id="c27a"></a>
 

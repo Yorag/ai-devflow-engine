@@ -62,7 +62,16 @@ class ProjectDeliveryChannelUpdateRequest(_StrictBaseModel):
     credential_ref: str | None = None
 
 
+class ProjectDeliveryChannelValidationResult(_StrictBaseModel):
+    readiness_status: common.DeliveryReadinessStatus
+    readiness_message: str | None = None
+    credential_status: common.CredentialStatus
+    validated_fields: list[str]
+    validated_at: datetime
+
+
 __all__ = [
     "ProjectDeliveryChannelDetailProjection",
     "ProjectDeliveryChannelUpdateRequest",
+    "ProjectDeliveryChannelValidationResult",
 ]

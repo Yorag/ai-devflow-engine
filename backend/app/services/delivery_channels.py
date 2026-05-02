@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -18,8 +20,15 @@ from backend.app.domain.enums import (
     ScmProviderType,
 )
 from backend.app.domain.trace_context import TraceContext
+from backend.app.observability.log_writer import LogPayloadSummary, LogRecordInput
+from backend.app.observability.redaction import RedactionPolicy
 from backend.app.schemas.delivery_channel import ProjectDeliveryChannelUpdateRequest
-from backend.app.schemas.observability import AuditActorType, AuditResult
+from backend.app.schemas.observability import (
+    AuditActorType,
+    AuditResult,
+    LogCategory,
+    LogLevel,
+)
 
 
 DEFAULT_PROJECT_ID = "project-default"
@@ -30,9 +39,27 @@ DELIVERY_CHANNEL_NOT_FOUND_MESSAGE = "DeliveryChannel was not found."
 INVALID_CREDENTIAL_REFERENCE_MESSAGE = (
     "DeliveryChannel credential_ref must use an env: credential reference."
 )
+INVALID_ALLOWED_CREDENTIAL_REFERENCE_MESSAGE = (
+    "DeliveryChannel credential_ref must use an allowed env: credential reference."
+)
+MISSING_ENV_CREDENTIAL_MESSAGE = (
+    "DeliveryChannel credential_ref does not resolve to an available credential."
+)
+EMPTY_ENV_CREDENTIAL_MESSAGE = (
+    "DeliveryChannel credential_ref resolves to an empty credential."
+)
 UNVALIDATED_READINESS_MESSAGE = "DeliveryChannel readiness has not been validated."
+DEMO_READY_MESSAGE = "demo_delivery is ready."
+GIT_READY_MESSAGE = "git_auto_delivery is ready."
 GIT_REQUIRED_MESSAGE_PREFIX = "git_auto_delivery requires "
 BLOCKED_CREDENTIAL_REF = "[blocked:credential_ref]"
+GIT_VALIDATED_FIELDS = (
+    "scm_provider_type",
+    "repository_identifier",
+    "default_branch",
+    "code_review_request_type",
+    "credential_ref",
+)
 
 
 def _default_channel_id(project_id: str) -> str:
@@ -55,18 +82,41 @@ class DeliveryChannelServiceError(RuntimeError):
         super().__init__(message)
 
 
+@dataclass(frozen=True)
+class DeliveryChannelReadinessResult:
+    readiness_status: DeliveryReadinessStatus
+    readiness_message: str | None
+    credential_status: CredentialStatus
+    validated_fields: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class DeliveryChannelValidationResult:
+    readiness_status: DeliveryReadinessStatus
+    readiness_message: str | None
+    credential_status: CredentialStatus
+    validated_fields: tuple[str, ...]
+    validated_at: datetime
+
+
 class DeliveryChannelService:
     def __init__(
         self,
         session: Session,
         *,
         audit_service: Any | None = None,
+        log_writer: Any | None = None,
+        redaction_policy: RedactionPolicy | None = None,
         now: Callable[[], datetime] | None = None,
         credential_env_prefixes: Iterable[str] | None = None,
+        credential_resolver: Callable[[str], str | None] | None = None,
     ) -> None:
         self._session = session
         self._audit_service = audit_service
+        self._log_writer = log_writer
+        self._redaction_policy = redaction_policy or RedactionPolicy()
         self._now = now or (lambda: datetime.now(UTC))
+        self._credential_resolver = credential_resolver or os.environ.get
         self._credential_env_prefixes = tuple(
             credential_env_prefixes
             if credential_env_prefixes is not None
@@ -119,6 +169,86 @@ class DeliveryChannelService:
 
     def credential_ref_for_projection(self, value: str | None) -> str | None:
         return self._audit_credential_ref(value)
+
+    def resolve_credential_status(self, credential_ref: str | None) -> CredentialStatus:
+        if self._is_blank(credential_ref):
+            return CredentialStatus.UNBOUND
+        if not isinstance(credential_ref, str) or not self._is_safe_credential_ref(
+            credential_ref,
+        ):
+            return CredentialStatus.INVALID
+        credential_value = self._credential_resolver(
+            self._credential_env_name(credential_ref),
+        )
+        if credential_value is None:
+            return CredentialStatus.UNBOUND
+        if self._is_blank(credential_value):
+            return CredentialStatus.INVALID
+        return CredentialStatus.READY
+
+    def compute_readiness(
+        self,
+        channel: DeliveryChannelModel,
+    ) -> DeliveryChannelReadinessResult:
+        if channel.delivery_mode is DeliveryMode.DEMO_DELIVERY:
+            return DeliveryChannelReadinessResult(
+                readiness_status=DeliveryReadinessStatus.READY,
+                readiness_message=DEMO_READY_MESSAGE,
+                credential_status=CredentialStatus.READY,
+                validated_fields=("delivery_mode",),
+            )
+
+        missing_git_fields = [
+            field for field in GIT_VALIDATED_FIELDS[:-1] if self._is_blank(getattr(channel, field))
+        ]
+        if missing_git_fields:
+            return DeliveryChannelReadinessResult(
+                readiness_status=DeliveryReadinessStatus.UNCONFIGURED,
+                readiness_message=(
+                    f"{GIT_REQUIRED_MESSAGE_PREFIX}{', '.join(sorted(missing_git_fields))}"
+                ),
+                credential_status=CredentialStatus.UNBOUND,
+                validated_fields=GIT_VALIDATED_FIELDS,
+            )
+
+        if self._is_blank(channel.credential_ref):
+            return DeliveryChannelReadinessResult(
+                readiness_status=DeliveryReadinessStatus.UNCONFIGURED,
+                readiness_message=f"{GIT_REQUIRED_MESSAGE_PREFIX}credential_ref",
+                credential_status=CredentialStatus.UNBOUND,
+                validated_fields=GIT_VALIDATED_FIELDS,
+            )
+
+        credential_ref = channel.credential_ref
+        if not self._is_safe_credential_ref(credential_ref):
+            return DeliveryChannelReadinessResult(
+                readiness_status=DeliveryReadinessStatus.INVALID,
+                readiness_message=INVALID_ALLOWED_CREDENTIAL_REFERENCE_MESSAGE,
+                credential_status=CredentialStatus.INVALID,
+                validated_fields=GIT_VALIDATED_FIELDS,
+            )
+
+        credential_status = self.resolve_credential_status(credential_ref)
+        if credential_status is CredentialStatus.UNBOUND:
+            return DeliveryChannelReadinessResult(
+                readiness_status=DeliveryReadinessStatus.UNCONFIGURED,
+                readiness_message=MISSING_ENV_CREDENTIAL_MESSAGE,
+                credential_status=credential_status,
+                validated_fields=GIT_VALIDATED_FIELDS,
+            )
+        if credential_status is CredentialStatus.INVALID:
+            return DeliveryChannelReadinessResult(
+                readiness_status=DeliveryReadinessStatus.INVALID,
+                readiness_message=EMPTY_ENV_CREDENTIAL_MESSAGE,
+                credential_status=credential_status,
+                validated_fields=GIT_VALIDATED_FIELDS,
+            )
+        return DeliveryChannelReadinessResult(
+            readiness_status=DeliveryReadinessStatus.READY,
+            readiness_message=GIT_READY_MESSAGE,
+            credential_status=credential_status,
+            validated_fields=GIT_VALIDATED_FIELDS,
+        )
 
     def update_project_channel(
         self,
@@ -173,6 +303,93 @@ class DeliveryChannelService:
             raise
         return channel
 
+    def validate_project_channel(
+        self,
+        project_id: str,
+        *,
+        trace_context: TraceContext,
+    ) -> DeliveryChannelValidationResult:
+        self._require_audit_service()
+        self._require_log_writer()
+        channel: DeliveryChannelModel | None = None
+        result: DeliveryChannelValidationResult | None = None
+        should_record_failed = False
+        recording_success_audit = False
+        try:
+            project = self._get_visible_project_for_validation(
+                project_id,
+                trace_context=trace_context,
+            )
+            channel = self._get_default_channel(project)
+            if channel is None:
+                self._record_validation_rejected(
+                    target_id=f"project:{project_id}",
+                    reason=DELIVERY_CHANNEL_NOT_FOUND_MESSAGE,
+                    metadata={
+                        "project_id": project_id,
+                        "delivery_channel_id": project.default_delivery_channel_id,
+                    },
+                    trace_context=trace_context,
+                )
+                raise DeliveryChannelServiceError(
+                    ErrorCode.NOT_FOUND,
+                    DELIVERY_CHANNEL_NOT_FOUND_MESSAGE,
+                    404,
+                )
+
+            should_record_failed = True
+            readiness = self.compute_readiness(channel)
+            validated_at = self._now()
+            channel.credential_status = readiness.credential_status
+            channel.readiness_status = readiness.readiness_status
+            channel.readiness_message = readiness.readiness_message
+            channel.last_validated_at = validated_at
+            channel.updated_at = validated_at
+            self._session.add(channel)
+            self._session.flush()
+
+            result = DeliveryChannelValidationResult(
+                readiness_status=readiness.readiness_status,
+                readiness_message=readiness.readiness_message,
+                credential_status=readiness.credential_status,
+                validated_fields=readiness.validated_fields,
+                validated_at=validated_at,
+            )
+            self._record_validation_log(
+                channel=channel,
+                result=result,
+                trace_context=trace_context,
+            )
+            recording_success_audit = True
+            self._record_validation_success(
+                channel=channel,
+                result=result,
+                trace_context=trace_context,
+            )
+            recording_success_audit = False
+            self._session.commit()
+            should_record_failed = False
+            return result
+        except DeliveryChannelServiceError:
+            self._session.rollback()
+            raise
+        except Exception as exc:
+            failed_audit_error: Exception | None = None
+            if should_record_failed and not recording_success_audit and channel is not None:
+                try:
+                    self._record_validation_failed(
+                        channel=channel,
+                        result=result,
+                        error=exc,
+                        trace_context=trace_context,
+                    )
+                except Exception as audit_exc:
+                    failed_audit_error = audit_exc
+            self._session.rollback()
+            if failed_audit_error is not None:
+                raise failed_audit_error from exc
+            raise
+
     def _get_visible_project(self, project_id: str) -> ProjectModel:
         project = self._session.get(ProjectModel, project_id)
         if project is None or not project.is_visible:
@@ -193,6 +410,23 @@ class DeliveryChannelService:
             return self._get_visible_project(project_id)
         except DeliveryChannelServiceError:
             self._record_rejected(
+                target_id=f"project:{project_id}",
+                reason=PROJECT_NOT_FOUND_MESSAGE,
+                metadata={"project_id": project_id},
+                trace_context=trace_context,
+            )
+            raise
+
+    def _get_visible_project_for_validation(
+        self,
+        project_id: str,
+        *,
+        trace_context: TraceContext,
+    ) -> ProjectModel:
+        try:
+            return self._get_visible_project(project_id)
+        except DeliveryChannelServiceError:
+            self._record_validation_rejected(
                 target_id=f"project:{project_id}",
                 reason=PROJECT_NOT_FOUND_MESSAGE,
                 metadata={"project_id": project_id},
@@ -356,6 +590,98 @@ class DeliveryChannelService:
             trace_context=trace_context,
         )
 
+    def _record_validation_log(
+        self,
+        *,
+        channel: DeliveryChannelModel,
+        result: DeliveryChannelValidationResult,
+        trace_context: TraceContext,
+    ) -> None:
+        self._require_log_writer()
+        redacted = self._redaction_policy.summarize_payload(
+            self._validation_metadata(channel, result=result),
+            payload_type="delivery_channel_validation",
+        )
+        self._log_writer.write(
+            LogRecordInput(
+                source="services.delivery_channels",
+                category=LogCategory.DELIVERY,
+                level=LogLevel.INFO,
+                message="DeliveryChannel readiness validation result computed.",
+                trace_context=trace_context,
+                payload=LogPayloadSummary.from_redacted_payload(
+                    "delivery_channel_validation",
+                    redacted,
+                ),
+                created_at=result.validated_at,
+            )
+        )
+
+    def _record_validation_success(
+        self,
+        *,
+        channel: DeliveryChannelModel,
+        result: DeliveryChannelValidationResult,
+        trace_context: TraceContext,
+    ) -> None:
+        self._require_audit_service()
+        self._audit_service.record_command_result(
+            actor_type=AuditActorType.USER,
+            actor_id=API_ACTOR_ID,
+            action="delivery_channel.validate",
+            target_type="delivery_channel",
+            target_id=channel.delivery_channel_id,
+            result=AuditResult.SUCCEEDED,
+            reason=None,
+            metadata=self._validation_metadata(channel, result=result),
+            trace_context=trace_context,
+        )
+
+    def _record_validation_rejected(
+        self,
+        *,
+        target_id: str,
+        reason: str,
+        metadata: dict[str, Any],
+        trace_context: TraceContext,
+    ) -> None:
+        self._require_audit_service()
+        self._audit_service.record_rejected_command(
+            actor_type=AuditActorType.USER,
+            actor_id=API_ACTOR_ID,
+            action="delivery_channel.validate.rejected",
+            target_type="delivery_channel",
+            target_id=target_id,
+            reason=reason,
+            metadata=metadata,
+            trace_context=trace_context,
+        )
+
+    def _record_validation_failed(
+        self,
+        *,
+        channel: DeliveryChannelModel,
+        result: DeliveryChannelValidationResult | None,
+        error: Exception,
+        trace_context: TraceContext,
+    ) -> None:
+        self._require_audit_service()
+        self._audit_service.record_command_result(
+            actor_type=AuditActorType.USER,
+            actor_id=API_ACTOR_ID,
+            action="delivery_channel.validate.failed",
+            target_type="delivery_channel",
+            target_id=channel.delivery_channel_id,
+            result=AuditResult.FAILED,
+            reason=str(error) or type(error).__name__,
+            metadata=self._validation_failure_metadata(
+                channel,
+                result=result,
+                error=error,
+            ),
+            trace_context=trace_context,
+        )
+
     def _audit_metadata(
         self,
         channel: DeliveryChannelModel,
@@ -381,6 +707,49 @@ class DeliveryChannelService:
                 "after_ref": self._audit_credential_ref(channel.credential_ref),
             },
         }
+
+    def _validation_metadata(
+        self,
+        channel: DeliveryChannelModel,
+        *,
+        result: DeliveryChannelValidationResult,
+    ) -> dict[str, Any]:
+        return {
+            "project_id": channel.project_id,
+            "delivery_channel_id": channel.delivery_channel_id,
+            "delivery_mode": channel.delivery_mode.value,
+            "scm_provider_type": self._enum_value(channel.scm_provider_type),
+            "repository_identifier": channel.repository_identifier,
+            "default_branch": channel.default_branch,
+            "code_review_request_type": self._enum_value(
+                channel.code_review_request_type,
+            ),
+            "credential_ref": self._audit_credential_ref(channel.credential_ref),
+            "credential_status": result.credential_status.value,
+            "readiness_status": result.readiness_status.value,
+            "readiness_message": result.readiness_message,
+            "validated_fields": list(result.validated_fields),
+            "validated_at": result.validated_at.isoformat(),
+        }
+
+    def _validation_failure_metadata(
+        self,
+        channel: DeliveryChannelModel,
+        *,
+        result: DeliveryChannelValidationResult | None,
+        error: Exception,
+    ) -> dict[str, Any]:
+        if result is None:
+            metadata = {
+                "project_id": channel.project_id,
+                "delivery_channel_id": channel.delivery_channel_id,
+                "delivery_mode": channel.delivery_mode.value,
+                "credential_ref": self._audit_credential_ref(channel.credential_ref),
+            }
+        else:
+            metadata = self._validation_metadata(channel, result=result)
+        metadata["error_type"] = type(error).__name__
+        return metadata
 
     @staticmethod
     def _enum_value(
@@ -409,6 +778,10 @@ class DeliveryChannelService:
         if self._audit_service is None:
             raise RuntimeError("audit_service is required for DeliveryChannel writes.")
 
+    def _require_log_writer(self) -> None:
+        if self._log_writer is None:
+            raise RuntimeError("log_writer is required for DeliveryChannel validation.")
+
     @staticmethod
     def _is_blank(value: Any) -> bool:
         if value is None:
@@ -432,6 +805,10 @@ class DeliveryChannelService:
             and env_name_has_allowed_prefix
         )
 
+    @staticmethod
+    def _credential_env_name(value: str) -> str:
+        return value.removeprefix("env:")
+
     def _audit_credential_ref(self, value: str | None) -> str | None:
         if value is None:
             return None
@@ -445,10 +822,18 @@ __all__ = [
     "BLOCKED_CREDENTIAL_REF",
     "DEFAULT_DELIVERY_CHANNEL_ID",
     "DEFAULT_PROJECT_ID",
+    "DEMO_READY_MESSAGE",
+    "DeliveryChannelReadinessResult",
     "DeliveryChannelService",
     "DeliveryChannelServiceError",
+    "DeliveryChannelValidationResult",
+    "EMPTY_ENV_CREDENTIAL_MESSAGE",
+    "GIT_READY_MESSAGE",
     "INVALID_CREDENTIAL_REFERENCE_MESSAGE",
+    "INVALID_ALLOWED_CREDENTIAL_REFERENCE_MESSAGE",
     "GIT_REQUIRED_MESSAGE_PREFIX",
+    "GIT_VALIDATED_FIELDS",
+    "MISSING_ENV_CREDENTIAL_MESSAGE",
     "PROJECT_NOT_FOUND_MESSAGE",
     "DELIVERY_CHANNEL_NOT_FOUND_MESSAGE",
     "UNVALIDATED_READINESS_MESSAGE",
