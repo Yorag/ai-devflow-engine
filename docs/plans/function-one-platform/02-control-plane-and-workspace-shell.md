@@ -744,14 +744,18 @@
 ## F2.5 模板空态与模板选择
 
 **计划周期**：Week 3-4
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现 draft 会话中的模板空态、系统模板列表和模板选择，使空白会话属于 Narrative Feed 空态内容。
 **实施计划**：`docs/plans/implementation/f2.5-template-empty-state-selector.md`
+**验证摘要**：`npm --prefix frontend run test -- --run src/features/templates/__tests__/TemplateSelector.test.tsx` 通过，覆盖 draft 会话模板空态、默认 `新功能开发流程`、模板切换、固定阶段摘要和禁止暴露配置边界字段；`npm --prefix frontend run test -- --run src/features/workspace/__tests__/WorkspaceShell.test.tsx` 通过，覆盖 Narrative Workspace 中的模板空态集成和本地模板选择切换；`npm --prefix frontend run test -- --run` 通过，7 个测试文件 / 41 个测试；`npm --prefix frontend run build` 通过。本切片只实现 F2.5 模板空态、模板选择和 mock/API client 驱动的前端展示，不实现 F2.6 模板编辑、脏状态守卫、保存、覆盖、删除、Composer 或 run 启动。
 
 **修改文件列表**：
 - Create: `frontend/src/features/templates/TemplateEmptyState.tsx`
 - Create: `frontend/src/features/templates/TemplateSelector.tsx`
 - Create: `frontend/src/features/templates/__tests__/TemplateSelector.test.tsx`
+- Modify: `frontend/src/features/workspace/WorkspaceShell.tsx`
+- Modify: `frontend/src/features/workspace/__tests__/WorkspaceShell.test.tsx`
+- Modify: `frontend/src/styles/global.css`
 
 **实现类/函数**：
 - `TemplateEmptyState`

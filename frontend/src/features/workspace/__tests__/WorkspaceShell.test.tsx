@@ -96,4 +96,24 @@ describe("WorkspaceShell", () => {
     expect(screen.queryByText(/data layer/i)).toBeNull();
     expect(screen.queryByText(/workflow surface comes online/i)).toBeNull();
   });
+
+  it("renders the draft session template selector as narrative feed empty content", async () => {
+    renderWithAppProviders(<ConsolePage />);
+
+    expect(
+      await screen.findByRole("region", { name: "Template empty state" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("radio", { name: /新功能开发流程/u }),
+    ).toHaveProperty("checked", true);
+    fireEvent.click(screen.getByRole("radio", { name: /Bug 修复流程/u }));
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Bug 修复流程" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText(
+        "Select a session to review its run history and execution feed.",
+      ),
+    ).toBeNull();
+  });
 });
