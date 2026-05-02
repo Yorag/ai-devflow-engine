@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PositiveInt, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt, StrictBool
 
 from backend.app.schemas import common
 
@@ -22,9 +22,9 @@ class ConfigurationPackageModelRuntimeCapabilities(_StrictBaseModel):
     model_id: str = Field(min_length=1)
     context_window_tokens: PositiveInt = 128000
     max_output_tokens: PositiveInt | None = None
-    supports_tool_calling: bool = False
-    supports_structured_output: bool = False
-    supports_native_reasoning: bool = False
+    supports_tool_calling: StrictBool = False
+    supports_structured_output: StrictBool = False
+    supports_native_reasoning: StrictBool = False
 
 
 class ConfigurationPackageProvider(_StrictBaseModel):
@@ -40,22 +40,6 @@ class ConfigurationPackageProvider(_StrictBaseModel):
         min_length=1
     )
 
-    @model_validator(mode="after")
-    def validate_model_contract(self) -> "ConfigurationPackageProvider":
-        if self.default_model_id not in self.supported_model_ids:
-            raise ValueError("default_model_id must be in supported_model_ids")
-
-        capability_model_ids = {
-            capability.model_id for capability in self.runtime_capabilities
-        }
-        missing_model_ids = set(self.supported_model_ids) - capability_model_ids
-        if missing_model_ids:
-            raise ValueError(
-                "runtime_capabilities must cover supported_model_ids: "
-                f"{', '.join(sorted(missing_model_ids))}"
-            )
-        return self
-
 
 class ConfigurationPackageDeliveryChannel(_StrictBaseModel):
     delivery_mode: common.DeliveryMode
@@ -64,28 +48,6 @@ class ConfigurationPackageDeliveryChannel(_StrictBaseModel):
     default_branch: str | None = None
     code_review_request_type: common.CodeReviewRequestType | None = None
     credential_ref: str | None = None
-
-    @model_validator(mode="after")
-    def validate_delivery_mode_contract(
-        self,
-    ) -> "ConfigurationPackageDeliveryChannel":
-        if self.delivery_mode is not common.DeliveryMode.GIT_AUTO_DELIVERY:
-            return self
-
-        git_fields = {
-            "scm_provider_type": self.scm_provider_type,
-            "repository_identifier": self.repository_identifier,
-            "default_branch": self.default_branch,
-            "code_review_request_type": self.code_review_request_type,
-            "credential_ref": self.credential_ref,
-        }
-        missing_fields = [field for field, value in git_fields.items() if not value]
-        if missing_fields:
-            raise ValueError(
-                "git_auto_delivery requires "
-                f"{', '.join(sorted(missing_fields))}"
-            )
-        return self
 
 
 class ConfigurationPackageTemplateSlotConfig(_StrictBaseModel):
@@ -128,10 +90,33 @@ class ConfigurationPackageExport(ConfigurationPackageImportRequest):
     exported_at: datetime
 
 
+class ConfigurationPackageChangedObject(_StrictBaseModel):
+    object_type: Literal["provider", "delivery_channel", "pipeline_template"]
+    object_id: str = Field(min_length=1)
+    action: Literal["created", "updated", "unchanged"]
+    config_version: str = Field(min_length=1)
+
+
+class ConfigurationPackageFieldError(_StrictBaseModel):
+    field: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+
+
+class ConfigurationPackageImportResult(_StrictBaseModel):
+    package_id: str = Field(min_length=1)
+    package_schema_version: str = Field(min_length=1)
+    summary: str = Field(min_length=1)
+    changed_objects: list[ConfigurationPackageChangedObject] = Field(default_factory=list)
+    field_errors: list[ConfigurationPackageFieldError] = Field(default_factory=list)
+
+
 __all__ = [
+    "ConfigurationPackageChangedObject",
     "ConfigurationPackageDeliveryChannel",
     "ConfigurationPackageExport",
+    "ConfigurationPackageFieldError",
     "ConfigurationPackageImportRequest",
+    "ConfigurationPackageImportResult",
     "ConfigurationPackageModelRuntimeCapabilities",
     "ConfigurationPackageProvider",
     "ConfigurationPackageRead",

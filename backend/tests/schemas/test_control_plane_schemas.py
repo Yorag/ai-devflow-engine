@@ -532,6 +532,13 @@ def test_configuration_package_schemas_allow_user_visible_config_only() -> None:
     with pytest.raises(ValidationError):
         ConfigurationPackageImportRequest(**package_with_empty_supported_model)
 
+    package_with_string_capability_bool = deepcopy(package_payload)
+    package_with_string_capability_bool["providers"][0]["runtime_capabilities"][0][
+        "supports_tool_calling"
+    ] = "yes"
+    with pytest.raises(ValidationError):
+        ConfigurationPackageImportRequest(**package_with_string_capability_bool)
+
     package_with_default_model_outside_supported = deepcopy(package_payload)
     package_with_default_model_outside_supported["providers"][0][
         "default_model_id"
@@ -548,18 +555,25 @@ def test_configuration_package_schemas_allow_user_visible_config_only() -> None:
             "supports_native_reasoning": True,
         }
     )
-    with pytest.raises(ValidationError):
-        ConfigurationPackageImportRequest(
-            **package_with_default_model_outside_supported
-        )
+    semantic_invalid_import = ConfigurationPackageImportRequest(
+        **package_with_default_model_outside_supported
+    )
+    assert semantic_invalid_import.providers[0].default_model_id == (
+        "deepseek-reasoner"
+    )
 
     package_with_uncovered_supported_model = deepcopy(package_payload)
     package_with_uncovered_supported_model["providers"][0]["supported_model_ids"] = [
         "deepseek-chat",
         "deepseek-reasoner",
     ]
-    with pytest.raises(ValidationError):
-        ConfigurationPackageImportRequest(**package_with_uncovered_supported_model)
+    semantic_incomplete_import = ConfigurationPackageImportRequest(
+        **package_with_uncovered_supported_model
+    )
+    assert semantic_incomplete_import.providers[0].supported_model_ids == [
+        "deepseek-chat",
+        "deepseek-reasoner",
+    ]
 
     package_with_invalid_git_delivery = deepcopy(package_payload)
     package_with_invalid_git_delivery["delivery_channels"] = [
@@ -572,8 +586,10 @@ def test_configuration_package_schemas_allow_user_visible_config_only() -> None:
             "credential_ref": None,
         }
     ]
-    with pytest.raises(ValidationError):
-        ConfigurationPackageImportRequest(**package_with_invalid_git_delivery)
+    semantic_invalid_delivery_import = ConfigurationPackageImportRequest(
+        **package_with_invalid_git_delivery
+    )
+    assert semantic_invalid_delivery_import.delivery_channels[0].credential_ref is None
 
     for schema_type in (
         ConfigurationPackageRead,

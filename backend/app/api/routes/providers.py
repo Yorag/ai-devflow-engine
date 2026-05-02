@@ -3,24 +3,25 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.orm import Session
 
-from backend.app.api.errors import ErrorResponse
+from backend.app.api.error_codes import ErrorCode
+from backend.app.api.errors import ApiError, ErrorResponse
 from backend.app.db.base import DatabaseRole
 from backend.app.db.session import DatabaseManager
 from backend.app.observability.audit import AuditService
 from backend.app.observability.context import get_trace_context
 from backend.app.observability.log_writer import JsonlLogWriter
 from backend.app.observability.runtime_data import RuntimeDataSettings
-from backend.app.schemas.provider import ProviderRead
-from backend.app.services.providers import ProviderService
+from backend.app.schemas.provider import ProviderRead, ProviderWriteRequest
+from backend.app.services.providers import ProviderService, ProviderServiceError
 
 
 router = APIRouter(tags=["providers"])
 
 
-def _provider_read(provider: Any) -> ProviderRead:
+def _provider_read(provider: Any, *, service: ProviderService) -> ProviderRead:
     return ProviderRead.model_validate(
         {
             "provider_id": provider.provider_id,
@@ -28,7 +29,7 @@ def _provider_read(provider: Any) -> ProviderRead:
             "provider_source": provider.provider_source,
             "protocol_type": provider.protocol_type,
             "base_url": provider.base_url,
-            "api_key_ref": provider.api_key_ref,
+            "api_key_ref": service.api_key_ref_for_projection(provider.api_key_ref),
             "default_model_id": provider.default_model_id,
             "supported_model_ids": provider.supported_model_ids,
             "runtime_capabilities": provider.runtime_capabilities,
@@ -36,6 +37,14 @@ def _provider_read(provider: Any) -> ProviderRead:
             "updated_at": provider.updated_at,
         }
     )
+
+
+def _raise_api_error(exc: ProviderServiceError) -> None:
+    raise ApiError(
+        error_code=exc.error_code,
+        message=exc.message,
+        status_code=exc.status_code,
+    ) from exc
 
 
 def get_control_session(request: Request) -> Iterator[Session]:
@@ -60,6 +69,7 @@ def get_provider_service(
         yield ProviderService(
             session,
             audit_service=audit_service,
+            credential_env_prefixes=settings.credential_env_prefixes,
         )
     finally:
         log_session.close()
@@ -74,4 +84,69 @@ def list_providers(
     service: ProviderService = Depends(get_provider_service),
 ) -> list[ProviderRead]:
     providers = service.list_providers(trace_context=get_trace_context())
-    return [_provider_read(provider) for provider in providers]
+    return [_provider_read(provider, service=service) for provider in providers]
+
+
+@router.post(
+    "/providers",
+    response_model=ProviderRead,
+    status_code=status.HTTP_201_CREATED,
+    responses={422: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+)
+def create_provider(
+    body: ProviderWriteRequest,
+    service: ProviderService = Depends(get_provider_service),
+) -> ProviderRead:
+    try:
+        provider = service.create_custom_provider(
+            body,
+            trace_context=get_trace_context(),
+        )
+    except ProviderServiceError as exc:
+        _raise_api_error(exc)
+    return _provider_read(provider, service=service)
+
+
+@router.get(
+    "/providers/{providerId}",
+    response_model=ProviderRead,
+    responses={
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+def get_provider(
+    providerId: str,
+    service: ProviderService = Depends(get_provider_service),
+) -> ProviderRead:
+    provider = service.get_provider(providerId, trace_context=get_trace_context())
+    if provider is None:
+        raise ApiError(ErrorCode.NOT_FOUND, "Provider was not found.", 404)
+    return _provider_read(provider, service=service)
+
+
+@router.patch(
+    "/providers/{providerId}",
+    response_model=ProviderRead,
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+def patch_provider(
+    providerId: str,
+    body: ProviderWriteRequest,
+    service: ProviderService = Depends(get_provider_service),
+) -> ProviderRead:
+    try:
+        provider = service.patch_provider(
+            providerId,
+            body,
+            trace_context=get_trace_context(),
+        )
+    except ProviderServiceError as exc:
+        _raise_api_error(exc)
+    return _provider_read(provider, service=service)

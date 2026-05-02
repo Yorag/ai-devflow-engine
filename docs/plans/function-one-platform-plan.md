@@ -207,11 +207,11 @@
 | C2.2 | 系统模板与内置 Provider seed | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c22) |
 | C2.3 | draft Session、重命名与模板选择更新 | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c23) |
 | C2.4 | 用户模板保存、覆盖与删除 | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c24) |
-| C2.5 | Provider 管理 | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c25) |
-| C2.6 | DeliveryChannel 查询与保存 | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c26) |
-| C2.7 | DeliveryChannel readiness 校验 | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c27) |
-| C2.7a | 项目作用域配置包导入导出 | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c27a) |
-| C2.8 | PlatformRuntimeSettings 管理服务 | Week 3 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c28) |
+| C2.5 | Provider 管理 | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c25) |
+| C2.6 | DeliveryChannel 查询与保存 | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c26) |
+| C2.7 | DeliveryChannel readiness 校验 | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c27) |
+| C2.7a | 项目作用域配置包导入导出 | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c27a) |
+| C2.8 | PlatformRuntimeSettings 管理服务 | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c28) |
 | F2.1 | API Client 路径与类型入口 | Week 2-3 | [x] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f21) |
 | F2.2 | Mock Fixtures 与 Query Hooks | Week 2-3 | [x] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f22) |
 | F2.3 | Workspace Shell 与 Project Sidebar | Week 3 | [x] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f23) |

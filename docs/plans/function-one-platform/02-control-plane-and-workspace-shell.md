@@ -320,11 +320,12 @@
 ## C2.5 Provider 管理
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现 Provider 新增和编辑，使模板运行配置可以绑定内置 Provider 与用户自定义 Provider，并使内置 Provider 的连接字段和模型能力进入正式配置存储。
 **实施计划**：`docs/plans/implementation/c2.5-provider-management.md`
 
 **修改文件列表**：
+- Modify: `backend/app/schemas/provider.py`
 - Modify: `backend/app/services/providers.py`
 - Modify: `backend/app/api/routes/providers.py`
 - Create: `backend/tests/services/test_provider_service.py`
@@ -334,6 +335,7 @@
 - `ProviderService.create_custom_provider()`
 - `ProviderService.patch_custom_provider()`
 - `ProviderService.patch_builtin_provider_runtime_config()`
+- `ProviderService.patch_provider()`
 - `ProviderService.get_provider()`
 
 **验收标准**：
@@ -352,16 +354,19 @@
 - `pytest backend/tests/services/test_provider_service.py -v`
 - `pytest backend/tests/api/test_provider_api.py -v`
 
+**验证摘要**：实施计划 `docs/plans/implementation/c2.5-provider-management.md` 已完成。TDD RED 先观察到缺少 `ProviderWriteRequest`、Provider command routes 返回 `405/404`、OpenAPI 未暴露 Provider command path；review 后补充并修复一个重要 OpenAPI 边界：`GET /api/providers/{providerId}` 的自动 `422` validation response 必须显式映射为统一 `ErrorResponse`，测试断言 GET/POST/PATCH 的 `422` schema 均为 `ErrorResponse`。实现新增 `ProviderWriteRequest`、严格布尔 Provider capability 写入模型、Provider create/detail/patch API、custom Provider 创建和更新、built-in Provider runtime config 更新、credential env prefix 校验、runtime capability 完整性校验、审计记录和成功审计失败 rollback。Spec compliance reviewer 和 code quality reviewer 复审均未留下 Critical 或 Important 发现。`uv run --no-sync python -m pytest backend/tests/services/test_provider_service.py backend/tests/api/test_provider_api.py -q` 通过 19 个 C2.5 focused tests；`uv run --no-sync python -m pytest backend/tests/services/test_provider_seed.py backend/tests/api/test_template_provider_seed_api.py backend/tests/services/test_user_template_service.py backend/tests/api/test_template_api.py -q` 通过 33 个 DB09 seed/API regression tests；`uv run --no-sync python -m pytest --collect-only -q` 收集 217 个 backend tests 且无收集错误；`uv run --no-sync python -m pytest -q` 通过 217 个 backend tests。
+
 <a id="c26"></a>
 
 ## C2.6 DeliveryChannel 查询与保存
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现项目级默认 DeliveryChannel 的查询和保存，使交付配置独立于 Session 与模板，并复用 C2.1 已创建的默认通道。
 **实施计划**：`docs/plans/implementation/c2.6-delivery-channel-crud.md`
 
 **修改文件列表**：
+- Modify: `backend/app/schemas/delivery_channel.py`
 - Modify: `backend/app/services/delivery_channels.py`
 - Modify: `backend/app/api/routes/projects.py`
 - Create: `backend/tests/services/test_delivery_channel_service.py`
@@ -387,16 +392,19 @@
 - `pytest backend/tests/services/test_delivery_channel_service.py -v`
 - `pytest backend/tests/api/test_delivery_channel_api.py -v`
 
+**验证摘要**：实施计划 `docs/plans/implementation/c2.6-delivery-channel-crud.md` 已完成。TDD RED 先观察到缺少 `ProjectDeliveryChannelUpdateRequest`、DeliveryChannel query/save service、project delivery-channel routes、OpenAPI route/schema 暴露，以及非 ASCII credential env 名称被误接受；GREEN 后实现项目级默认 DeliveryChannel GET/PUT、严格更新请求、git/demo 模式保存、服务层 mode-dependent 校验、统一错误映射、成功与拒绝审计、成功审计失败 rollback、unsafe legacy credential ref 的审计和 API 投影阻断。Spec compliance reviewer 和 code quality reviewer 复审均未留下 Critical 或 Important 发现。`uv run --no-sync python -m pytest backend/tests/services/test_delivery_channel_service.py backend/tests/api/test_delivery_channel_api.py -q` 通过 21 个 C2.6 focused tests；`uv run --no-sync python -m pytest backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py -q` 通过 11 个 schema regression tests；`uv run --no-sync python -m pytest backend/tests/services/test_project_service.py backend/tests/api/test_project_api.py backend/tests/services/test_provider_service.py backend/tests/api/test_provider_api.py backend/tests/services/test_provider_seed.py backend/tests/api/test_template_provider_seed_api.py backend/tests/services/test_user_template_service.py backend/tests/api/test_template_api.py -q` 通过 64 个 DB09 control-plane regression tests；`uv run --no-sync python -m pytest --collect-only -q` 收集 238 个 backend tests 且无收集错误；`uv run --no-sync python -m pytest -q` 通过 238 个 backend tests。
+
 <a id="c27"></a>
 
 ## C2.7 DeliveryChannel readiness 校验
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现项目级交付配置校验，统一输出 `readiness_status`、`credential_status` 和阻塞原因。
 **实施计划**：`docs/plans/implementation/c2.7-delivery-channel-readiness.md`
 
 **修改文件列表**：
+- Modify: `backend/app/schemas/delivery_channel.py`
 - Modify: `backend/app/services/delivery_channels.py`
 - Modify: `backend/app/api/routes/projects.py`
 - Create: `backend/tests/services/test_delivery_channel_readiness.py`
@@ -420,12 +428,14 @@
 - `pytest backend/tests/services/test_delivery_channel_readiness.py -v`
 - `pytest backend/tests/api/test_delivery_channel_validate_api.py -v`
 
+**验证摘要**：实施计划 `docs/plans/implementation/c2.7-delivery-channel-readiness.md` 已完成。TDD RED 先观察到缺少 `ProjectDeliveryChannelValidationResult`、`DeliveryChannelService.compute_readiness()`、`DeliveryChannelService.resolve_credential_status()`、`DeliveryChannelService.validate_project_channel()`、validate API route 和 OpenAPI 暴露；GREEN 后实现项目级 DeliveryChannel readiness 校验、`demo_delivery` ready、`git_auto_delivery` 字段和凭据可用性校验、`validated_at` 响应、当前配置持久化、运行日志、成功/拒绝/失败审计、失败 rollback、credential value 不外泄，以及历史 runtime delivery snapshot 不变。Spec compliance reviewer 复审未留下 Critical 或 Important 发现，仅记录 API 层未直接重复服务层 empty env value 与 whitespace-wrapped `credential_ref` 用例的 Minor 风险；代码质量 reviewer 未及时返回，主 agent 已执行同等内联评审，未发现 Critical 或 Important 发现。`uv run --no-sync python -m pytest backend/tests/services/test_delivery_channel_readiness.py backend/tests/api/test_delivery_channel_validate_api.py -q` 通过 24 个 C2.7 focused tests；`uv run --no-sync python -m pytest backend/tests/services/test_delivery_channel_service.py backend/tests/api/test_delivery_channel_api.py backend/tests/services/test_delivery_channel_readiness.py backend/tests/api/test_delivery_channel_validate_api.py -q` 通过 45 个 C2.6/C2.7 DeliveryChannel regression tests；`uv run --no-sync python -m pytest backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py -q` 通过 11 个 schema regression tests；`uv run --no-sync python -m pytest backend/tests/services/test_project_service.py backend/tests/api/test_project_api.py backend/tests/services/test_provider_service.py backend/tests/api/test_provider_api.py backend/tests/services/test_provider_seed.py backend/tests/api/test_template_provider_seed_api.py backend/tests/services/test_user_template_service.py backend/tests/api/test_template_api.py -q` 通过 64 个 DB09 control-plane regression tests；`uv run --no-sync python -m pytest --collect-only -q` 收集 262 个 backend tests 且无收集错误；`uv run --no-sync python -m pytest -q` 通过 262 个 backend tests。
+
 <a id="c27a"></a>
 
 ## C2.7a 项目作用域配置包导入导出
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现当前 Project 作用域下用户可见配置包导出和导入，使配置备份、迁移和环境复制通过正式配置服务完成。
 **实施计划**：`docs/plans/implementation/c2.7a-configuration-package-import-export.md`
 
@@ -456,19 +466,23 @@
 - `pytest backend/tests/services/test_configuration_package_service.py -v`
 - `pytest backend/tests/api/test_configuration_package_api.py -v`
 
+**验证摘要**：实施计划 `docs/plans/implementation/c2.7a-configuration-package-import-export.md` 已完成。TDD RED 先观察到缺少 `backend.app.services.configuration_packages`、配置包 API route `404`、OpenAPI 路径缺失，以及 custom Provider 包内引用未正确落库。实现新增 `ConfigurationPackageImportResult`、`ConfigurationPackageChangedObject`、`ConfigurationPackageFieldError`、`ConfigurationPackageService` 和项目级配置包导入导出 API；导出覆盖 Provider、项目默认 DeliveryChannel 和 `user_template` 模板运行配置，阻断不安全 `api_key_ref` / `credential_ref`，排除 `system_template`、平台隐性运行设置、系统提示词资产、运行快照、日志和审计正文；导入采用 validate-then-apply，保留包内 custom Provider / user template 标识，返回 changed object `config_version`，对 parsed-but-invalid 包返回 HTTP 200 字段级错误，并写入裁剪后的运行日志与审计。Spec compliance reviewer 先发现 Provider 密钥导出、Pydantic 预校验、custom id 保留和 rejected import log 缺口；修复后复审无 Critical / Important 发现。Code quality reviewer 复审无 Critical / Important 发现，仅保留 export 首次补种 built-in Provider 会触发内部 commit 的 Minor 风险；该行为与当前计划一致，常规启动路径已补种 Provider。本切片验证：`uv run --no-sync python -m pytest backend/tests/services/test_configuration_package_service.py backend/tests/api/test_configuration_package_api.py backend/tests/schemas/test_control_plane_schemas.py -q` 通过 22 个 focused/schema tests；`uv run --no-sync python -m pytest backend/tests/services/test_configuration_package_service.py backend/tests/api/test_configuration_package_api.py backend/tests/services/test_provider_service.py backend/tests/api/test_provider_api.py backend/tests/services/test_delivery_channel_service.py backend/tests/api/test_delivery_channel_api.py backend/tests/services/test_delivery_channel_readiness.py backend/tests/api/test_delivery_channel_validate_api.py backend/tests/services/test_user_template_service.py backend/tests/api/test_template_api.py -q` 通过 102 个 DB09 regression tests；`uv run --no-sync python -m pytest --collect-only -q` 收集 280 个 backend tests 且无收集错误；`uv run --no-sync python -m pytest -q` 通过 280 个 backend tests。
+
 <a id="c28"></a>
 
 ## C2.8 PlatformRuntimeSettings 管理服务
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现后端统一平台运行设置管理服务，校验运行上限、Provider 调用策略、上下文裁剪限制、上下文压缩阈值比例、日志策略和诊断查询分页上限，并为后续 run 启动快照提供稳定配置版本。
 **实施计划**：`docs/plans/implementation/c2.8-platform-runtime-settings-service.md`
+**验证摘要**：实施计划 `docs/plans/implementation/c2.8-platform-runtime-settings-service.md` 已完成。TDD RED 先观察到缺少 `backend.app.services.runtime_settings`、缺少 `update_settings()`、`/api/runtime-settings` 未进入 OpenAPI、storage commit failure 未映射为 `config_storage_unavailable`、以及拒绝路径 observability failure 泄漏原始异常；GREEN 后实现 `PlatformRuntimeSettingsRepository`、`PlatformRuntimeSettingsService`、内部 `GET/PUT /api/runtime-settings`、默认持久化初始化、partial update merge、conditional `config_version` 更新、硬上限校验、`config_invalid_value` / `config_hard_limit_exceeded` / `config_version_conflict` / `config_storage_unavailable` 映射、runtime-settings 路由级请求校验映射、JSONL 与审计记录。控制库先提交再写成功观测事实，避免跨 SQLite 资源产生未提交控制写的 false success；post-commit observability failure 返回 `config_storage_unavailable`，已提交控制行仍是配置真源。Spec compliance 与 code quality reviewers 初审发现版本 CAS、事务顺序、API 非法字段映射、拒绝路径 observability failure 和 API 503 覆盖问题；修复后复审无 Critical 或 Important 发现。验证：`uv run --no-sync python -m pytest backend/tests/services/test_runtime_settings_service.py backend/tests/api/test_runtime_settings_admin_api.py -q` 通过 17 个 C2.8 focused tests；`uv run --no-sync python -m pytest backend/tests/services/test_runtime_settings_service.py backend/tests/api/test_runtime_settings_admin_api.py backend/tests/services/test_configuration_package_service.py backend/tests/api/test_configuration_package_api.py backend/tests/services/test_provider_service.py backend/tests/api/test_provider_api.py backend/tests/services/test_delivery_channel_service.py backend/tests/api/test_delivery_channel_api.py backend/tests/services/test_delivery_channel_readiness.py backend/tests/api/test_delivery_channel_validate_api.py backend/tests/services/test_user_template_service.py backend/tests/api/test_template_api.py -q` 通过 119 个 DB09 regression tests；`uv run --no-sync python -m pytest backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_control_plane_schemas.py -q` 通过 9 个 schema regression tests；`uv run --no-sync python -m pytest --collect-only -q` 收集 297 个 backend tests 且无收集错误；`uv run --no-sync python -m pytest -q` 通过 297 个 backend tests。
 
 **修改文件列表**：
 - Create: `backend/app/services/runtime_settings.py`
 - Create: `backend/app/repositories/runtime_settings.py`
 - Create: `backend/app/api/routes/runtime_settings.py`
+- Modify: `backend/app/api/router.py`
 - Create: `backend/tests/services/test_runtime_settings_service.py`
 - Create: `backend/tests/api/test_runtime_settings_admin_api.py`
 

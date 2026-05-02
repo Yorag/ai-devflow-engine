@@ -53,6 +53,25 @@ class ProjectDeliveryChannelDetailProjection(_StrictBaseModel):
         return self
 
 
+class ProjectDeliveryChannelUpdateRequest(_StrictBaseModel):
+    delivery_mode: common.DeliveryMode
+    scm_provider_type: common.ScmProviderType | None = None
+    repository_identifier: str | None = None
+    default_branch: str | None = None
+    code_review_request_type: common.CodeReviewRequestType | None = None
+    credential_ref: str | None = None
+
+
+class ProjectDeliveryChannelValidationResult(_StrictBaseModel):
+    readiness_status: common.DeliveryReadinessStatus
+    readiness_message: str | None = None
+    credential_status: common.CredentialStatus
+    validated_fields: list[str]
+    validated_at: datetime
+
+
 __all__ = [
     "ProjectDeliveryChannelDetailProjection",
+    "ProjectDeliveryChannelUpdateRequest",
+    "ProjectDeliveryChannelValidationResult",
 ]
