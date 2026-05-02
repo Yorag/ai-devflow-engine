@@ -1,0 +1,191 @@
+# Function One Acceleration Execution Plan
+
+本文件取代已归档的 `docs/archive/function-one-delivery-branch-plan-legacy.md`，作为功能一剩余实现的唯一主动调度入口。
+
+本计划采用“子任务依赖队列 + lane 冲突域分支 + integration checkpoint”的执行模型：
+
+- `docs/plans/function-one-platform-plan.md` 与对应 split plan 仍是子任务范围、验收标准和最终完成状态的事实来源。
+- 本文件只控制剩余任务如何 claim、分配到 lane、隔离共享写集、收敛到 integration 分支并更新主线事实。
+- Worker 分支不得直接把全局任务状态标记为最终完成；最终 `[x]` 状态只在 integration checkpoint 通过后由主协调会话统一更新。
+- 旧 DB12-DB34 不再作为可启动分支或前置门槛；其覆盖范围已被本文件的 lane queue 接管。
+
+## 1. Mode
+
+| Key | Value |
+| --- | --- |
+| Execution mode | active |
+| Coordination skill | `.codex/skills/acceleration-workflow/SKILL.md` |
+| Slice execution skill | `.codex/skills/slice-workflow/SKILL.md` |
+| Integration branch | `integration/function-one-acceleration` |
+| Stable branch | `main` |
+| Legacy branch plan | `docs/archive/function-one-delivery-branch-plan-legacy.md` |
+
+## 2. Status Model
+
+### 2.1 Lane Status
+
+| Status | Meaning |
+| --- | --- |
+| `planned` | Lane 已规划，尚未创建或认领工作区。 |
+| `claimed` | Lane 已由主协调会话分配，worktree 可创建或正在实施。 |
+| `integrating` | Lane 的一个或多个 claim 正在合入 integration 分支。 |
+| `blocked` | Lane 被依赖、共享写集、验证或来源追溯问题阻塞。 |
+| `complete` | Lane 覆盖的任务均已在 integration checkpoint 后完成。 |
+
+### 2.2 Claim Status
+
+| Status | Meaning |
+| --- | --- |
+| `queued` | 子任务在 lane queue 中，但依赖或 start gate 尚未满足。 |
+| `ready` | 子任务依赖满足，可由主协调会话 claim。 |
+| `claimed` | 子任务已分配给一个 lane worker。 |
+| `implemented` | Worker 已完成代码、测试和本地证据，等待 integration ingest。 |
+| `mock_ready` | Worker 基于冻结契约或 mock 完成可验证部分，等待真实 owner 接入。 |
+| `integrated` | 子任务实现已进入 integration 分支并通过对应 checkpoint 验证。 |
+| `done` | 主协调会话已把 platform plan 与 split plan 状态更新为 `[x]`。 |
+| `blocked` | 子任务存在阻塞项，不能继续执行或集成。 |
+
+## 3. Lane Registry
+
+六条 AL lane 是功能一剩余实现的长期并行分支。`AL00` 是当前 DB09 收尾 gate，不计入六条并行 lane。`QA` 是 integration-owned 验证队列，不作为产品实现 lane。
+
+| Lane | Branch | Coverage | Status | Owner Scope | Review Boundary |
+| --- | --- | --- | --- | --- | --- |
+| AL00 | `feat/provider-delivery-runtime-settings` | C2.5, C2.6, C2.7, C2.7a, C2.8 | claimed | Provider、DeliveryChannel、ConfigurationPackage、PlatformRuntimeSettings | 配置、交付通道和运行设置收尾 gate |
+| AL01 | `feat/al-run-core-events` | R3.1, E3.1, R3.2, R3.3, R3.4, R3.4a, R3.4b, R3.5, R3.6, R3.7, C2.9a, C2.9b | planned | Run 状态机、PipelineRun、EventStore、snapshot、GraphDefinition、StageRun、StageArtifact、历史可见性命令 | Run 和事件真源 |
+| AL02 | `feat/al-projections-streams` | Q3.1, Q3.2, Q3.3, Q3.4, Q3.4a, E3.2, L3.1, L4.2 | planned | Projection services、SSE、run/stage log query、audit query route | 查询投影、实时流和轻查询 API |
+| AL03 | `feat/al-runtime-human-loop` | A4.0, L4.1, H4.1, H4.3, D4.0, H4.4, H4.4a, H4.5, H4.6, H4.7 | planned | RuntimeOrchestrationService、clarification、approval、delivery snapshot gate、runtime control commands | 运行编排和人工介入后端 |
+| AL04 | `feat/al-tools-deterministic-delivery` | A4.1, W5.0, W5.0a, W5.0b, W5.0c, W5.0d, W5.1, W5.2, W5.3, W5.4, W5.5, W5.6, A4.2, A4.3, A4.4, D4.1, D4.2, D4.3, D5.1, D5.2, D5.3, D5.4 | planned | RuntimeEngine、ToolProtocol、ToolRegistry、Workspace tools、ChangeSet、PreviewTarget、deterministic runtime、DeliveryRecord、delivery adapters | 工具、deterministic runtime 和交付适配 |
+| AL05 | `feat/al-provider-langgraph-context` | A4.5, A4.6, A4.7, A4.8, A4.8a, A4.8b, A4.8c, A4.8d, A4.9, A4.9a, A4.9e, A4.9b, A4.9c, A4.9d, A4.10, A4.11 | planned | LangGraph runtime、Provider registry、PromptValidation、PromptRegistry、PromptRenderer、ContextEnvelope、Provider adapter、AgentDecision、StageAgentRuntime | Provider、LangGraph、上下文和 Stage Agent |
+| AL06 | `feat/al-frontend-runtime-ui` | F3.1, F3.2, F3.3, F3.4, F3.5, F3.6, F3.7, H4.2, F4.1, F4.2, F4.3, F4.3a, F4.4, F5.1, F5.2a, F5.2b | planned | frontend workspace store、SSE reducer、Feed、StageNode、Inspector、Composer、Approval、Tool Confirmation、Delivery UI | 前端运行工作台和交付展示 |
+| QA | `test/al-regression-hardening` | V6.1, V6.2, V6.3, V6.4, V6.5, V6.6, V6.8, L6.1, L6.2, V6.7 | planned | backend API flow、OpenAPI、Playwright、frontend error states、config regression、log hardening、release checklist | integration 回归和发布候选验证 |
+
+## 4. Shared Ownership
+
+共享入口只能由 owner lane 修改。其它 lane 需要变更共享入口时，必须停止当前 slice 并向主协调会话报告 owner conflict。
+
+| Shared Entry | Owner | Consumers |
+| --- | --- | --- |
+| Provider、DeliveryChannel、ConfigurationPackage、PlatformRuntimeSettings API 与 service | AL00 | AL01, AL03, AL04, AL05, AL06 |
+| Run 状态枚举转换、PipelineRun、StageRun、StageArtifact、GraphDefinition、EventStore | AL01 | AL02, AL03, AL04, AL05, AL06, QA |
+| Projection payload、SSE payload、run/stage log query route、audit query route | AL02 | AL06, QA |
+| RuntimeOrchestrationService、clarification、approval、tool confirmation、runtime control command semantics | AL03 | AL04, AL05, AL06, QA |
+| ToolProtocol、ToolRegistry、WorkspaceManager、Workspace tools、ChangeSet、PreviewTarget、DeliveryRecord、delivery adapter | AL04 | AL03, AL05, AL06, QA |
+| Prompt、Context、Provider adapter、LangGraph node/checkpoint、AgentDecision、StageAgentRuntime | AL05 | AL01, AL03, AL04, AL06, QA |
+| frontend API client runtime-facing additions、workspace store、Feed/Inspector/Composer/Approval/Delivery components | AL06 | QA |
+| OpenAPI/e2e/regression harness and release checklist | QA | all lanes |
+
+## 5. Dependency And Start Gates
+
+Start gate 只允许开始实现或 mock-first；它不等于完成 gate。
+
+| Gate | Rule |
+| --- | --- |
+| AL00 gate | AL00 必须先完成 C2.7a 和 C2.8，才能让运行快照、交付快照、Provider adapter 和配置回归进入 `done`。其它 lane 可使用已冻结 schema 或 fixture 先行。 |
+| AL01 gate | AL01 可在 AL00 未合入前开始 R3.1、E3.1、R3.5-R3.7 的纯领域和持久化实现；R3.4a、R3.4b 的最终完成必须等待 AL00。 |
+| AL02 gate | AL02 可基于 AL01 提供的事件 fixture 或冻结 projection contract 先行；最终完成必须读取真实 EventStore、StageArtifact 或 runtime model。 |
+| AL03 gate | AL03 可基于 AL01/AL02 的 stub 接口先行 A4.0、L4.1、H4.1、H4.3；审批命令、运行控制和 tool confirmation 的最终完成必须接入真实 run state 和 projection events。 |
+| AL04 gate | AL04 可立即开始 ToolProtocol、错误码、WorkspaceManager、纯工具和 fixture；deterministic runtime 与 delivery adapter 的最终完成必须接入 AL01 run truth、AL03 runtime boundary 和 AL00 delivery settings。 |
+| AL05 gate | AL05 可立即开始 PromptValidation、PromptRegistry、PromptRenderer、Context schema 和 provider registry；LangGraph 与 StageAgentRuntime 的最终完成必须接入 AL01、AL03、AL04。 |
+| AL06 gate | AL06 可基于冻结 projection/event/mock payload 先行所有 runtime UI；最终完成必须切换到真实 API/SSE、真实 error contract 和真实 delivery/result payload。 |
+| QA gate | QA 可提前创建测试骨架、fixture 和 checklist；任何回归任务的 `done` 必须基于 integration 分支的真实实现验证。 |
+
+## 6. Claim Ledger
+
+主协调会话独占更新本表。Worker 只能执行已经被分配的 claim，不得自行从 queue 抢任务。
+
+| Claim | Task | Lane | Branch | Status | Base | Evidence | Blocker |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| AL00-C2.7a-001 | C2.7a | AL00 | `feat/provider-delivery-runtime-settings` | claimed | `2355338` | `docs/plans/implementation/c2.7a-configuration-package-import-export.md` | 无 |
+| AL00-C2.8-001 | C2.8 | AL00 | `feat/provider-delivery-runtime-settings` | queued | `2355338` | 待创建 | 等待 C2.7a |
+
+## 7. Lane Queues
+
+Lane queue 记录任务归属和 lane 内执行顺序。任务资格仍必须由 platform plan、split plan 和 start gate 共同确认。
+
+| Lane | Queue |
+| --- | --- |
+| AL00 | C2.7a -> C2.8 |
+| AL01 | R3.1 -> E3.1 -> R3.4 -> R3.4a -> R3.4b -> R3.5 -> R3.6 -> R3.7 -> R3.2 -> R3.3 -> C2.9a -> C2.9b |
+| AL02 | Q3.1 -> Q3.2 -> Q3.3 -> Q3.4 -> Q3.4a -> E3.2 -> L3.1 -> L4.2 |
+| AL03 | A4.0 -> L4.1 -> H4.1 -> H4.3 -> D4.0 -> H4.4 -> H4.4a -> H4.5 -> H4.6 -> H4.7 |
+| AL04 | A4.1 -> W5.0 -> W5.0a -> W5.0b -> W5.0c -> W5.0d -> W5.1 -> W5.2 -> W5.3 -> W5.4 -> W5.5 -> W5.6 -> A4.2 -> A4.3 -> A4.4 -> D4.1 -> D4.2 -> D4.3 -> D5.1 -> D5.2 -> D5.3 -> D5.4 |
+| AL05 | A4.8 -> A4.8a -> A4.8c -> A4.8d -> A4.8b -> A4.9 -> A4.9a -> A4.9e -> A4.9b -> A4.5 -> A4.6 -> A4.7 -> A4.9c -> A4.9d -> A4.10 -> A4.11 |
+| AL06 | F3.1 -> F3.2 -> F3.3 -> F3.4 -> F3.5 -> F3.6 -> F3.7 -> H4.2 -> F4.1 -> F4.2 -> F4.3 -> F4.3a -> F4.4 -> F5.1 -> F5.2a -> F5.2b |
+| QA | V6.1 -> V6.4 -> V6.5 -> V6.6 -> V6.8 -> L6.1 -> L6.2 -> V6.2 -> V6.3 -> V6.7 |
+
+## 8. Worker Evidence
+
+Worker 分支完成 claim 后提交本地证据，不直接更新全局完成状态。
+
+每个 claim 必须提供：
+
+- `docs/plans/implementation/<task-id>-<task-name>.md` 中的实施计划、TDD 步骤和验证记录。
+- 代码、测试和必要 fixture。
+- `docs/plans/acceleration/reports/<claim-id>.md`，记录 claim、lane、base commit、变更文件、TDD red/green、验证命令、mock-first 状态、owner conflict 和剩余 gate。
+
+Worker 可以在自己的 evidence report 中写 `implemented`、`mock_ready` 或 `blocked`。`function-one-acceleration-execution-plan.md`、`function-one-platform-plan.md` 和 split plan 的最终状态只由主协调会话在 integration checkpoint 后更新。
+
+## 9. Integration Checkpoints
+
+integration checkpoint 由主协调会话执行。AL 分支默认合入 `integration/function-one-acceleration`，不得直接进入 `main`。
+
+| Checkpoint | Scope | Required Verification |
+| --- | --- | --- |
+| IC0 | AL00 收尾，冻结配置和运行设置输入 | AL00 focused backend tests、OpenAPI/API checks、`git status --short` |
+| IC1 | AL01 + AL02 最小 run/event/projection/SSE skeleton | focused backend domain/API/projection tests、SSE tests |
+| IC2 | AL03 + AL04 deterministic runtime 和 human-loop skeleton | runtime command tests、tool registry tests、demo delivery tests |
+| IC3 | AL05 provider/langgraph/context 接入 | provider/context/langgraph focused tests、LangChain/LangGraph API docs check when API usage is unclear |
+| IC4 | AL06 前端真实 API/SSE 切换 | `npm --prefix frontend test`, `npm --prefix frontend build` |
+| IC5 | QA 回归和发布候选 | backend regression、OpenAPI、Playwright、frontend error regression、log audit regression |
+
+每个 checkpoint 通过后，主协调会话统一执行以下状态收敛：
+
+- 将已验证 claim 从 `implemented` 或 `mock_ready` 更新为 `integrated` 或 `done`。
+- 将满足验收标准的 platform plan 与 split plan 任务标记为 `[x]`。
+- 将只完成 mock-first 或部分接入的任务保持为 `[/]`，并记录 merge gate。
+- 为下一批 ready claim 生成 worker prompt。
+
+## 10. Merge Gates
+
+| Completion Type | Gate |
+| --- | --- |
+| `implemented` | Worker evidence 完整，focused tests 通过，未修改其它 lane owner 共享入口。 |
+| `mock_ready` | mock/fixture 来源写明，真实 owner 未完成或未进入 integration，任务不得标 `[x]`。 |
+| `integrated` | Claim 已合入 integration 分支，相关 focused tests 和 impacted tests 通过。 |
+| `done` | integration checkpoint 通过，platform plan、split plan、实现代码、测试和验收标准一致。 |
+| `main-ready` | integration 分支通过本轮主线验证，剩余问题有明确后续 claim，且不会破坏已完成用户流程。 |
+
+## 11. Stop Conditions
+
+遇到以下情况必须停止当前 claim，并向主协调会话报告：
+
+- 当前分支不匹配本文件 Lane Registry 中的 branch。
+- 子任务不在当前 lane coverage 或 lane queue 中。
+- 子任务依赖未满足，且 start gate 未允许 mock-first。
+- 需要修改其它 lane owner 的共享入口。
+- platform plan 与 split plan 状态冲突。
+- implementation plan 放宽或改写已评审任务语义。
+- 当前 specs、split plan 或现有实现之间出现来源追溯冲突。
+- 验证失败且 focused 调试后仍不能收敛。
+- Worker 需要 Git 写操作、依赖安装、lock/manifest 变更、迁移执行或环境文件变更但没有用户批准。
+
+## 12. Worker Prompt Template
+
+```text
+你现在位于 <worktree-path>，当前分支必须是 <branch-name>。
+
+使用 $slice-workflow 执行 acceleration claim：
+
+Claim: <claim-id>
+Lane: <lane-id>
+Task: <task-id>
+Base: <base-commit>
+Evidence report: docs/plans/acceleration/reports/<claim-id>.md
+
+只在该 lane owner scope 和该 task slice 范围内工作。不要修改其它 lane owner 的共享入口。不要更新 function-one-acceleration-execution-plan.md、function-one-platform-plan.md 或 split plan 的最终完成状态；这些由主协调会话在 integration checkpoint 后统一更新。
+
+必须写或更新 implementation plan，按 TDD 执行，运行 claim 范围验证，并在 evidence report 中记录 red/green、验证命令、关键输出、mock-first 状态和阻塞项。
+
+完成后停止并报告 implemented、mock_ready 或 blocked。不要自行 claim 下一个任务，不要合并 integration，不要提交 main。
+```

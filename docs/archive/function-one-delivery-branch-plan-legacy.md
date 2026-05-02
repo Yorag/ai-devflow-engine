@@ -1,6 +1,9 @@
-# Function One Delivery Branch Plan
+# Function One Delivery Branch Plan (Legacy)
 
-本文件对应 [function-one-platform-plan.md](function-one-platform-plan.md) 的 `9.1 Delivery Branch Plan` 索引入口。
+> 状态：Archived. 本文件仅保留 DB00-DB34 交付分支批次历史，不再作为功能一后续执行调度入口。
+> 当前执行调度入口为 `docs/plans/function-one-acceleration-execution-plan.md`。
+
+本文件原对应 [function-one-platform-plan.md](../plans/function-one-platform-plan.md) 的旧 `9.1 Delivery Branch Plan` 索引入口。当前 `9.1` 已切换为 Acceleration Execution Plan。
 
 本表定义交付分支边界，用于控制跨分支协作、PR/MR review boundary 与合入顺序。本表不替代 Git 状态、PR/MR 状态或子任务完成事实；`main` 上的进度追踪表仍是全局事实来源。每个分支内仍按单个 slice 顺序执行：实施计划、TDD、验证、状态更新、提交申请。
 
