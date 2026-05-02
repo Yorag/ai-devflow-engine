@@ -5,7 +5,7 @@
 本计划采用“子任务依赖队列 + lane 冲突域分支 + integration checkpoint”的执行模型：
 
 - `docs/plans/function-one-platform-plan.md` 与对应 split plan 仍是子任务范围、验收标准和最终完成状态的事实来源。
-- 本文件只控制剩余任务如何 claim、分配到 lane、隔离共享写集、收敛到 integration 分支并更新主线事实。
+- 本文件控制剩余任务如何分配到 lane、隔离共享写集、收敛到 integration 分支并更新主线事实。实时 claim 状态由 git common dir 下的共享 coordination store 承载。
 - Worker 分支不得直接把全局任务状态标记为最终完成；最终 `[x]` 状态只在 integration checkpoint 通过后由主协调会话统一更新。
 - 旧 DB12-DB34 不再作为可启动分支或前置门槛；其覆盖范围已被本文件的 lane queue 接管。
 
@@ -20,6 +20,8 @@
 | Stable branch | `main` |
 | Current baseline | claim 时的当前 `main` 或最新 integration checkpoint |
 | Legacy branch plan | `docs/archive/function-one-delivery-branch-plan-legacy.md` |
+| Live coordination store | `<git-common-dir>/codex-coordination/function-one.sqlite` |
+| Coordination CLI | `.codex/skills/acceleration-workflow/scripts/coordination_store.py` |
 
 ## 2. Status Model
 
@@ -52,7 +54,7 @@
 | Field | Meaning |
 | --- | --- |
 | `Coordination Base` | 主协调会话分配 claim 时记录的当前基线提交，用于判断任务资格和 owner 冲突。初始 claim 使用当时的 `main` HEAD；存在 integration checkpoint 后使用最新 integration 基线，除非主协调会话另行记录。 |
-| `Worker HEAD` | 主协调会话在 ingest 时读取并写入 Claim Ledger 的分支提交。Worker 不在 evidence report 中声明权威 Worker HEAD。`reported` 状态下它只标识当前 worktree 的已提交基线，必须结合 dirty status 和本地 diff 读取；`implemented` 或 `mock_ready` 状态下它必须是包含 evidence report 的 checkpoint commit。 |
+| `Worker HEAD` | 主协调会话在 ingest 时读取并写入共享 coordination store 的分支提交。Worker 不在 evidence report 中声明权威 Worker HEAD。`reported` 状态下它只标识当前 worktree 的已提交基线，必须结合 dirty status 和本地 diff 读取；`implemented` 或 `mock_ready` 状态下它必须是包含 evidence report 的 checkpoint commit。 |
 | `Integration Base` | integration checkpoint 使用的目标分支提交，通常是 `integration/function-one-acceleration` 的当前 HEAD。 |
 
 ## 3. Lane Registry
@@ -99,9 +101,19 @@ Start gate 只允许开始实现或 mock-first；它不等于完成 gate。
 | AL06 gate | AL06 可基于冻结 projection/event/mock payload 先行所有 runtime UI；最终完成必须切换到真实 API/SSE、真实 error contract 和真实 delivery/result payload。 |
 | QA gate | QA 可提前创建测试骨架、fixture 和 checklist；任何回归任务的 `done` 必须基于 integration 分支的真实实现验证。 |
 
-## 6. Claim Ledger
+## 6. Coordination Store And Checkpoint Snapshot
 
-主协调会话独占更新本表。Worker 只能执行已经被分配的 claim，不得自行从 queue 抢任务。
+主协调会话独占写入共享 coordination store。Worker 只能只读校验已经被分配的 claim，不得自行从 queue 抢任务，不得写入 coordination store。
+
+共享 store 通过以下命令定位和读取：
+
+```powershell
+uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py store-path
+uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py list --json
+uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py show --claim <claim-id> --json
+```
+
+下表只作为最近一次 coordination checkpoint snapshot 或审计摘录，不是 live source of truth。不要为了 claim、reported、implemented 或 mock_ready 的高频状态变化提交本文档；这些状态写入共享 coordination store。integration checkpoint、主线状态收敛或调度规则变更时，主协调会话可以更新本 snapshot。
 
 | Claim | Task | Lane | Branch | Status | Coordination Base | Worker HEAD | Evidence | Blocker |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -110,7 +122,7 @@ Start gate 只允许开始实现或 mock-first；它不等于完成 gate。
 | AL05-A4.8 | A4.8 | AL05 | `feat/al-provider-langgraph-context` | claimed | 5d44d4a | - | `docs/plans/acceleration/reports/AL05-A4.8.md` | - |
 | AL06-F3.1 | F3.1 | AL06 | `feat/al-frontend-runtime-ui` | claimed | 5d44d4a | - | `docs/plans/acceleration/reports/AL06-F3.1.md` | - |
 
-当前基线不预置 claim。主协调会话在认领 ready task 时新增 Claim Ledger 行，并记录当时的 Coordination Base。
+当前基线不预置 live claim。主协调会话在认领 ready task 时写入共享 coordination store，并记录当时的 Coordination Base。
 
 ## 7. Lane Queues
 
@@ -136,14 +148,14 @@ Worker 分支完成 claim 后写入本地证据，不直接更新全局完成状
 - 代码、测试和必要 fixture。
 - `docs/plans/acceleration/reports/<claim-id>.md`，记录 claim、lane、task、Coordination Base、变更文件、TDD red/green、验证命令、mock-first 状态、owner conflict、commit readiness 和剩余 gate。
 
-Worker evidence report 只声明本地结果：`reported` 或 `blocked`，并写明提交后预期由主协调会话收敛为 `implemented` 还是 `mock_ready`。`implemented` 和 `mock_ready` 是主协调会话在确认 worker checkpoint commit 后写入 Claim Ledger 的状态。`function-one-acceleration-execution-plan.md`、`function-one-platform-plan.md` 和 split plan 的最终状态只由主协调会话在 integration checkpoint 后更新。
+Worker evidence report 只声明本地结果：`reported` 或 `blocked`，并写明提交后预期由主协调会话收敛为 `implemented` 还是 `mock_ready`。`implemented` 和 `mock_ready` 是主协调会话在确认 worker checkpoint commit 后写入共享 coordination store 的状态。`function-one-acceleration-execution-plan.md`、`function-one-platform-plan.md` 和 split plan 的最终状态只由主协调会话在 integration checkpoint 后更新。
 
-主协调会话通过以下方式读取 worker evidence：
+主协调会话通过以下方式读取 worker evidence 并更新共享 coordination store：
 
-- Local Progress Ingest：从已存在的 worker worktree 读取 `docs/plans/acceleration/reports/<claim-id>.md`，同时读取 `git -C <worktree> status --short`、`git -C <worktree> diff --stat` 和 `git -C <worktree> rev-parse --short HEAD`。如果报告、claim、lane、task 和 Coordination Base 一致，Claim Ledger 最多更新为 `reported` 或 `blocked`。本地 dirty worktree 不得更新为 `implemented` 或 `mock_ready`。
-- Committed Progress Ingest：使用 `git show <branch>:docs/plans/acceleration/reports/<claim-id>.md` 读取报告，并使用 `git rev-parse --short <branch>` 记录 Worker HEAD。只有当 evidence report、implementation plan、代码和测试都包含在该 branch commit 中，Claim Ledger 才能更新为 `implemented` 或 `mock_ready`。
-- 如果报告不存在、分支不可读，或报告中的 `Claim` / `Lane` / `Task` / `Coordination Base` 与 Claim Ledger 不一致，Progress Ingest 停止。
-- Progress Ingest 只更新 Claim Ledger、Worker HEAD 和 blocker 信息；不合并代码，不更新 platform plan 或 split plan。
+- Local Progress Ingest：从已存在的 worker worktree 读取 `docs/plans/acceleration/reports/<claim-id>.md`，同时读取 `git -C <worktree> status --short`、`git -C <worktree> diff --stat` 和 `git -C <worktree> rev-parse --short HEAD`。如果报告、claim、lane、task 和 Coordination Base 一致，共享 coordination store 最多更新为 `reported` 或 `blocked`。本地 dirty worktree 不得更新为 `implemented` 或 `mock_ready`。
+- Committed Progress Ingest：使用 `git show <branch>:docs/plans/acceleration/reports/<claim-id>.md` 读取报告，并使用 `git rev-parse --short <branch>` 记录 Worker HEAD。只有当 evidence report、implementation plan、代码和测试都包含在该 branch commit 中，共享 coordination store 才能更新为 `implemented` 或 `mock_ready`。
+- 如果报告不存在、分支不可读，或报告中的 `Claim` / `Lane` / `Task` / `Coordination Base` 与共享 coordination store 不一致，Progress Ingest 停止。
+- Progress Ingest 只更新共享 coordination store 中的状态、Worker HEAD 和 blocker 信息；不合并代码，不更新 platform plan 或 split plan，不为高频 ingest 提交本文档。
 
 ## 9. Integration Checkpoints
 

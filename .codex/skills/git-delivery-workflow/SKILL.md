@@ -221,7 +221,7 @@ Pre-merge checklist:
 
 Acceleration lane pre-merge checklist:
 - Target branch is `integration/function-one-acceleration`.
-- Claim ids are present in `docs/plans/function-one-acceleration-execution-plan.md`.
+- Claim ids are present in the shared coordination store and covered by `docs/plans/function-one-acceleration-execution-plan.md` lane rules.
 - Worker evidence reports exist in the worker branch checkpoint commit for each claim being integrated.
 - Claims are `implemented` or `mock_ready`; `reported` claims, dirty worker worktrees, and uncommitted evidence reports are not mergeable integration inputs.
 - The lane did not modify another lane owner's shared entry, or the owner conflict has been resolved in the integration checkpoint plan.
@@ -242,7 +242,7 @@ Do not merge when:
 - An AL lane branch is targeting `main` directly.
 - Worker evidence is missing from the checkpoint commit for included claims.
 - Included claims are only `reported`, exist only as local dirty worktree changes, or lack a user-approved checkpoint commit.
-- Central Claim Ledger and platform/split plan status disagree.
+- Shared coordination store, checkpoint snapshot, and platform/split plan status disagree.
 - Integration checkpoint verification is stale or has not run.
 
 After merge approval, optionally propose local branch deletion only if:
