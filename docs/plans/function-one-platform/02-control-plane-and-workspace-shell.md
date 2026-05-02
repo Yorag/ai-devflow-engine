@@ -676,9 +676,10 @@
 ## F2.3 Workspace Shell 与 Project Sidebar
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现控制台三栏外壳和左侧 Project / Session Sidebar，为后续 Narrative Workspace 提供页面骨架。
 **实施计划**：`docs/plans/implementation/f2.3-workspace-shell-sidebar.md`
+**验证摘要**：`npm --prefix frontend run test -- --run src/features/workspace/__tests__/WorkspaceShell.test.tsx` 通过，覆盖三栏 shell、Project Switcher、默认 Project 阻塞态、项目切换、默认交付摘要、Session 状态与 shell-only 删除阻塞态；`npm --prefix frontend run test -- --run src/pages/__tests__/ConsolePage.test.tsx` 通过，覆盖 Console 路由挂载、SPA provider 和 route landmarks；`npm --prefix frontend run test -- --run` 通过，5 个测试文件 / 24 个测试；`npm --prefix frontend run build` 通过。本切片只实现 Workspace shell、Project / Session Sidebar、Narrative Workspace 插槽和默认关闭 Inspector；未实现设置弹窗、模板空态、模板编辑、真实 Project 加载 / 移除、真实 Session 重命名 / 删除、run 控制或 Inspector 详情。
 
 **修改文件列表**：
 - Create: `frontend/src/features/workspace/WorkspaceShell.tsx`
@@ -718,9 +719,10 @@
 ## F2.4 统一设置弹窗
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现统一设置入口、通用配置页、模型提供商页和导入导出页，使项目级 DeliveryChannel、Provider 配置与项目作用域配置包能力不进入模板编辑区。
 **实施计划**：`docs/plans/implementation/f2.4-settings-modal.md`
+**验证摘要**：`npm --prefix frontend run test -- --run src/features/settings/__tests__/SettingsModal.test.tsx` 通过，覆盖全局设置入口、三页签、DeliveryChannel 编辑表单、Provider 身份只读与连接 / 模型 / 能力字段编辑、配置包导出 / 导入、导入后配置查询刷新、禁止暴露平台运行设置 / 启动环境 / 系统提示词资产字段、弹窗焦点管理和项目切换时的 stale 数据防护；`npm --prefix frontend run test -- --run` 通过，6 个测试文件 / 36 个测试；`npm --prefix frontend run build` 通过。本切片只实现统一设置弹窗与 mock/API client 驱动的前端交互，不实现后端持久化保存、模板空态、模板编辑或 F2.5/F2.6 范围。
 
 **修改文件列表**：
 - Create: `frontend/src/features/settings/SettingsModal.tsx`
@@ -767,14 +769,18 @@
 ## F2.5 模板空态与模板选择
 
 **计划周期**：Week 3-4
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现 draft 会话中的模板空态、系统模板列表和模板选择，使空白会话属于 Narrative Feed 空态内容。
 **实施计划**：`docs/plans/implementation/f2.5-template-empty-state-selector.md`
+**验证摘要**：`npm --prefix frontend run test -- --run src/features/templates/__tests__/TemplateSelector.test.tsx` 通过，覆盖 draft 会话模板空态、默认 `新功能开发流程`、模板切换、固定阶段摘要和禁止暴露配置边界字段；`npm --prefix frontend run test -- --run src/features/workspace/__tests__/WorkspaceShell.test.tsx` 通过，覆盖 Narrative Workspace 中的模板空态集成和本地模板选择切换；`npm --prefix frontend run test -- --run` 通过，7 个测试文件 / 41 个测试；`npm --prefix frontend run build` 通过。本切片只实现 F2.5 模板空态、模板选择和 mock/API client 驱动的前端展示，不实现 F2.6 模板编辑、脏状态守卫、保存、覆盖、删除、Composer 或 run 启动。
 
 **修改文件列表**：
 - Create: `frontend/src/features/templates/TemplateEmptyState.tsx`
 - Create: `frontend/src/features/templates/TemplateSelector.tsx`
 - Create: `frontend/src/features/templates/__tests__/TemplateSelector.test.tsx`
+- Modify: `frontend/src/features/workspace/WorkspaceShell.tsx`
+- Modify: `frontend/src/features/workspace/__tests__/WorkspaceShell.test.tsx`
+- Modify: `frontend/src/styles/global.css`
 
 **实现类/函数**：
 - `TemplateEmptyState`
@@ -799,14 +805,19 @@
 ## F2.6 模板编辑与脏状态守卫
 
 **计划周期**：Week 3-4
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现模板允许字段编辑、另存/覆盖/删除和脏状态拦截，使首条需求启动前的运行配置可控。
 **实施计划**：`docs/plans/implementation/f2.6-template-editor-dirty-guard.md`
+**验证摘要**：`npm --prefix frontend run test -- --run src/features/templates/__tests__/TemplateEditor.test.tsx` 通过，覆盖允许字段编辑、系统模板另存、用户模板覆盖/另存/删除、脏状态启动守卫、最大自动回归重试次数错误、配置边界字段不暴露和本地另存模板保留；`npm --prefix frontend run test -- --run src/features/templates/__tests__/TemplateSelector.test.tsx` 通过；`npm --prefix frontend run test -- --run src/features/workspace/__tests__/WorkspaceShell.test.tsx` 通过，覆盖 Narrative Workspace 中模板编辑集成和脏状态启动拦截；`npm --prefix frontend run test -- --run` 通过，8 个测试文件 / 54 个测试；`npm --prefix frontend run build` 通过。本切片只实现 draft 会话中模板运行前配置编辑、保存动作模拟和前端脏状态守卫，不实现后端模板持久化、Composer、真实 run 启动或平台硬上限编辑入口。
 
 **修改文件列表**：
 - Create: `frontend/src/features/templates/TemplateEditor.tsx`
 - Create: `frontend/src/features/templates/template-state.ts`
 - Create: `frontend/src/features/templates/__tests__/TemplateEditor.test.tsx`
+- Modify: `frontend/src/features/templates/TemplateEmptyState.tsx`
+- Modify: `frontend/src/features/workspace/WorkspaceShell.tsx`
+- Modify: `frontend/src/features/workspace/__tests__/WorkspaceShell.test.tsx`
+- Modify: `frontend/src/styles/global.css`
 
 **实现类/函数**：
 - `TemplateEditor`
