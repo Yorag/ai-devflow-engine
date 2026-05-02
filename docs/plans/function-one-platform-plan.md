@@ -315,18 +315,18 @@
 
 ### 9.1 Acceleration Execution Plan
 
-本节索引功能一剩余实现的加速执行控制表。完整调度表位于 [function-one-acceleration-execution-plan.md](function-one-acceleration-execution-plan.md)，用于子任务依赖队列、lane 冲突域分支、claim ledger、共享写集 owner 和 integration checkpoint 控制。
+本节索引功能一剩余实现的加速执行控制表。完整调度规则位于 [function-one-acceleration-execution-plan.md](function-one-acceleration-execution-plan.md)，用于子任务依赖队列、lane 冲突域分支、共享写集 owner、checkpoint snapshot 和 integration checkpoint 控制。实时 claim 状态由 git common dir 下的 shared coordination store 承载。
 
 旧的 DB batch 交付分支表已归档为 [function-one-delivery-branch-plan-legacy.md](../archive/function-one-delivery-branch-plan-legacy.md)，仅作为历史参考，不再作为主动调度入口。
 
 | 文档 | 内容 | 读取时机 |
 | --- | --- | --- |
-| [function-one-acceleration-execution-plan.md](function-one-acceleration-execution-plan.md) | Mode、Lane Registry、Claim Ledger、Lane Queue、Shared Ownership、Start Gate、Merge Gate、Integration Checkpoints | 主协调会话 claim 子任务、生成 worker prompt、检查 owner 冲突、执行 integration checkpoint |
+| [function-one-acceleration-execution-plan.md](function-one-acceleration-execution-plan.md) | Mode、Lane Registry、checkpoint snapshot、Lane Queue、Shared Ownership、Start Gate、Merge Gate、Integration Checkpoints | 主协调会话读取静态 lane / queue / owner 规则、生成 worker prompt、检查 owner 冲突、执行 integration checkpoint |
 | `function-one-platform-plan.md` 第 9 节 | 全局子任务进度、负责人模型和 split-plan 入口 | 全局进度检查、integration checkpoint 后更新任务状态、选择或验证具体 slice |
 | [function-one-platform/](function-one-platform/) | split-plan 任务细则、修改文件列表、验收标准和验证命令 | 选定 slice 后解析范围、编写实施计划和执行验证 |
 | [function-one-delivery-branch-plan-legacy.md](../archive/function-one-delivery-branch-plan-legacy.md) | DB00-DB34 历史交付分支表 | 只在审计旧分支边界或追溯已合入历史时读取 |
 
-主线进度事实仍由本文件第 9 节和对应 split-plan 任务状态共同构成；加速执行控制表只维护 claim、lane、共享写集和 integration checkpoint。Worker 分支不得直接更新全局最终完成状态，最终状态由主协调会话在 integration checkpoint 通过后统一收敛。
+主线进度事实仍由本文件第 9 节和对应 split-plan 任务状态共同构成；加速执行控制表维护 lane、共享写集、checkpoint snapshot 和 integration checkpoint 规则。实时 claim、reported、implemented、mock_ready、blocked 状态由 shared coordination store 维护。Worker 分支不得直接更新全局最终完成状态，最终状态由主协调会话在 integration checkpoint 通过后统一收敛。
 
 ## 10. 每周验收清单
 
