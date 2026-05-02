@@ -19,7 +19,13 @@ def test_api_error_uses_stable_code_message_and_request_id() -> None:
 
     client = TestClient(app, raise_server_exceptions=False)
 
-    response = client.get("/api/test-error", headers={"X-Request-ID": "req-error-1"})
+    response = client.get(
+        "/api/test-error",
+        headers={
+            "X-Request-ID": "req-error-1",
+            "X-Correlation-ID": "corr-error-1",
+        },
+    )
 
     assert response.status_code == 422
     assert response.headers["x-request-id"] == "req-error-1"
@@ -27,19 +33,27 @@ def test_api_error_uses_stable_code_message_and_request_id() -> None:
         "error_code": "config_invalid_value",
         "message": "Configuration value is invalid.",
         "request_id": "req-error-1",
+        "correlation_id": "corr-error-1",
     }
 
 
 def test_http_errors_use_unified_response_contract() -> None:
     client = TestClient(create_app(), raise_server_exceptions=False)
 
-    response = client.get("/api/missing", headers={"X-Request-ID": "req-missing-1"})
+    response = client.get(
+        "/api/missing",
+        headers={
+            "X-Request-ID": "req-missing-1",
+            "X-Correlation-ID": "corr-missing-1",
+        },
+    )
 
     assert response.status_code == 404
     assert response.json() == {
         "error_code": "not_found",
         "message": "Not Found",
         "request_id": "req-missing-1",
+        "correlation_id": "corr-missing-1",
     }
 
 
@@ -55,7 +69,10 @@ def test_validation_errors_use_unified_response_contract() -> None:
     response = client.get(
         "/api/test-validation",
         params={"limit": "not-a-number"},
-        headers={"X-Request-ID": "req-validation-1"},
+        headers={
+            "X-Request-ID": "req-validation-1",
+            "X-Correlation-ID": "corr-validation-1",
+        },
     )
 
     assert response.status_code == 422
@@ -63,6 +80,7 @@ def test_validation_errors_use_unified_response_contract() -> None:
         "error_code": "validation_error",
         "message": "Request validation failed.",
         "request_id": "req-validation-1",
+        "correlation_id": "corr-validation-1",
     }
 
 
@@ -75,13 +93,20 @@ def test_unhandled_errors_do_not_leak_stack_or_exception_text() -> None:
 
     client = TestClient(app, raise_server_exceptions=False)
 
-    response = client.get("/api/test-unhandled", headers={"X-Request-ID": "req-500-1"})
+    response = client.get(
+        "/api/test-unhandled",
+        headers={
+            "X-Request-ID": "req-500-1",
+            "X-Correlation-ID": "corr-500-1",
+        },
+    )
 
     assert response.status_code == 500
     assert response.json() == {
         "error_code": "internal_error",
         "message": "Internal server error.",
         "request_id": "req-500-1",
+        "correlation_id": "corr-500-1",
     }
     assert "do not leak" not in response.text
     assert "Traceback" not in response.text

@@ -39,7 +39,7 @@
 | DB04 | `feat/core-schema-contracts` | C1.1-C1.4 | DB02 | S | merged | 全局枚举、核心 Schema、事件 payload、Projection Schema | 全局枚举、控制面、Run/Feed/Event 和 Inspector 契约 |
 | DB05 | `feat/runtime-prompt-log-contracts` | C1.10, C1.10a, L1.1 | DB04 | Y | merged | 运行设置 Schema、PromptAsset Schema、TraceContext | 运行设置、提示词资产和日志审计契约 |
 | DB06 | `feat/persistence-boundaries` | C1.5-C1.9, L1.2 | DB04, DB05 | S | merged | 数据库 session、control/runtime/graph/event/log models、Alembic migration 链 | 多 SQLite 职责库、模型和迁移边界 |
-| DB07 | `feat/observability-control-audit` | L2.1-L2.4 | DB05, DB06 | S | planned | request context、redaction、JSONL writer、AuditService | API 关联上下文、payload 裁剪、日志写入和控制面审计 |
+| DB07 | `feat/observability-control-audit` | L2.1-L2.4 | DB05, DB06 | S | merged | request context、redaction、JSONL writer、AuditService | API 关联上下文、payload 裁剪、日志写入和控制面审计 |
 | DB08 | `feat/control-plane-core` | C2.1-C2.4 | DB05, DB06, DB07 | S | planned | control routes、Project/Session/Template service、audit hooks | Project、Session、系统模板和用户模板核心控制面 |
 | DB09 | `feat/provider-delivery-runtime-settings` | C2.5, C2.6, C2.7, C2.7a, C2.8 | DB05, DB06, DB07, DB08 | S | planned | Provider、DeliveryChannel、配置包、PlatformRuntimeSettings service | Provider、DeliveryChannel、配置包和平台运行设置管理 |
 | DB10 | `feat/frontend-control-plane-client` | F2.1, F2.2 | DB03, DB04, DB05 | Y | merged | 前端 API client 类型入口、mock fixtures | 前端 API client、mock fixtures 和 query hooks |

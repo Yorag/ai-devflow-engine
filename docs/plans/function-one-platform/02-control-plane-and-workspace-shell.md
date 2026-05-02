@@ -15,15 +15,18 @@
 ## L2.1 API 请求与关联上下文
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立 API request/correlation 上下文，使统一错误响应、控制面命令和后续日志审计入口能够共享 `request_id`、`trace_id`、`correlation_id` 与 `span_id`。
 **实施计划**：`docs/plans/implementation/l2.1-api-correlation-context.md`
+**验证摘要**：`uv run --no-sync python -m pytest backend/tests/api/test_request_correlation_context.py -v` 通过 3 个 L2.1 request correlation middleware tests；`uv run --no-sync python -m pytest backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/api/test_request_correlation_context.py -q` 通过 API regression；`uv run --no-sync python -m pytest backend/tests/schemas/test_observability_schemas.py backend/tests/db/test_log_model_boundary.py backend/tests/api/test_request_correlation_context.py -q` 通过 observability/schema regression；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/api/test_request_correlation_context.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_prompt_asset_schemas.py backend/tests/schemas/test_observability_schemas.py backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py backend/tests/db/test_runtime_model_boundary.py backend/tests/db/test_graph_model_boundary.py backend/tests/db/test_event_model_boundary.py backend/tests/db/test_log_model_boundary.py -q` 通过 103 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 103 个 backend tests 且无收集错误。TDD RED 先观察到缺少 `backend.app.observability.context`、响应头缺少 `X-Correlation-ID`、错误响应和 OpenAPI 缺少 `correlation_id`，再按请求上下文传播、错误响应关联字段和 OpenAPI 契约转绿。内联评审未发现 Critical 或 Important 问题。
 
 **修改文件列表**：
 - Create: `backend/app/observability/context.py`
 - Modify: `backend/app/main.py`
 - Modify: `backend/app/api/errors.py`
 - Create: `backend/tests/api/test_request_correlation_context.py`
+- Modify: `backend/tests/api/test_error_contract.py`
+- Modify: `backend/tests/api/test_health.py`
 
 **实现类/函数**：
 - `RequestCorrelationMiddleware`
@@ -44,9 +47,10 @@
 ## L2.2 基础 RedactionPolicy 与 payload summarizer
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立日志与审计载荷的基础裁剪、摘要和敏感字段阻断策略，作为 L2.3 JSONL 写入和 L2.4 审计记录的统一前置处理。
 **实施计划**：`docs/plans/implementation/l2.2-redaction-payload-summarizer.md`
+**验证摘要**：实施计划 `docs/plans/implementation/l2.2-redaction-payload-summarizer.md` 已完成。TDD RED 先观察到缺少 `backend.app.observability.redaction`，随后 review 驱动补充等价敏感字段、camelCase 字段、`auth_header` / `authHeader` 和 `api_key_ref` / `apiKeyRef` 边界测试，分别先观察到原实现泄露或误裁剪后转绿。`uv run --no-sync python -m pytest backend/tests/observability/test_redaction_policy.py -v` 通过 9 个 L2.2 tests；`uv run --no-sync python -m pytest backend/tests/schemas/test_observability_schemas.py backend/tests/db/test_log_model_boundary.py backend/tests/observability/test_redaction_policy.py -q` 通过 21 个 observability regression tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/api/test_request_correlation_context.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/observability/test_redaction_policy.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_prompt_asset_schemas.py backend/tests/schemas/test_observability_schemas.py backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py backend/tests/db/test_runtime_model_boundary.py backend/tests/db/test_graph_model_boundary.py backend/tests/db/test_event_model_boundary.py backend/tests/db/test_log_model_boundary.py -q` 通过 112 个 foundation regression tests。Spec compliance reviewer 与 code quality reviewer 均未留下 Critical 或 Important 发现。
 
 **修改文件列表**：
 - Create: `backend/app/observability/redaction.py`
@@ -71,9 +75,10 @@
 ## L2.3 JSONL writer 与 log index
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立本地 JSONL 日志写入与 `log.db` 轻量索引入口，使服务日志、run 日志和审计副本具备统一落盘格式和可查询定位信息。
 **实施计划**：`docs/plans/implementation/l2.3-jsonl-writer-log-index.md`
+**验证摘要**：实施计划 `docs/plans/implementation/l2.3-jsonl-writer-log-index.md` 已完成。TDD RED 先观察到缺少 `backend.app.observability.log_writer` / `log_index`，随后 review 驱动补充不安全 `run_id` 路径片段和 log index 失败隔离测试，分别先观察到原实现未拒绝 unsafe run id、rollback 失败逃出 `append_run_log_index()` 后转绿；并发定位回归先观察到同一 JSONL 文件的两个并发写入返回重复 `line_offset` / `line_number`，随后通过 per-file append critical section 转绿。`uv run --no-sync python -m pytest backend/tests/observability/test_jsonl_log_writer.py -v` 通过 10 个 L2.3 tests；`uv run --no-sync python -m pytest backend/tests/observability/test_jsonl_log_writer.py::test_jsonl_writer_returns_actual_positions_for_concurrent_writes backend/tests/observability/test_audit_service.py::test_audit_log_db_write_failure_raises_clear_error_without_soft_downgrade backend/tests/observability/test_audit_service.py::test_audit_service_commits_ledger_before_writing_audit_jsonl_copy -q` 通过 3 个 focused regressions；`uv run --no-sync python -m pytest --collect-only -q` 收集 129 个 backend tests；`uv run --no-sync python -m pytest -q` 通过 129 个 backend tests。Spec compliance reviewer 未发现问题；code quality reviewer 初审提出的 unsafe run id 和 index failure containment 两个 Important 发现已修复并通过 re-review，后续 JSONL concurrency blocker 已修复并通过 re-review。
 
 **修改文件列表**：
 - Create: `backend/app/observability/log_writer.py`
@@ -102,9 +107,11 @@
 ## L2.4 AuditService 与控制面命令审计
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立控制面命令可复用的 AuditService 入口，使 Project、Session、Template、Provider 和 DeliveryChannel 后续切片能够按统一结构记录成功、失败和被拒绝结果。
 **实施计划**：`docs/plans/implementation/l2.4-audit-service-control-plane.md`
+
+**验证摘要**：实施计划 `docs/plans/implementation/l2.4-audit-service-control-plane.md` 已完成。TDD RED 先观察到缺少 `backend.app.observability.audit`；代码评审修复阶段按审计台账优先语义补充 ledger-first 回归，先观察到台账失败会留下孤立 `audit.jsonl` 副本、`write_audit_copy()` 在台账提交前运行，再改为先提交初始审计台账、写 audit JSONL 副本、最后将 `audit_file_*` 结果写回同一台账行。当前 L2.4 行为明确使用两次提交：第一次提交审计台账，第二次提交 audit JSONL 副本结果元数据。`uv run --no-sync python -m pytest backend/tests/observability/test_audit_service.py -v` 通过 7 个 L2.4 tests；`uv run --no-sync python -m pytest backend/tests/observability/test_jsonl_log_writer.py::test_jsonl_writer_returns_actual_positions_for_concurrent_writes backend/tests/observability/test_audit_service.py::test_audit_log_db_write_failure_raises_clear_error_without_soft_downgrade backend/tests/observability/test_audit_service.py::test_audit_service_commits_ledger_before_writing_audit_jsonl_copy -q` 通过 3 个 focused regressions；`uv run --no-sync python -m pytest --collect-only -q` 收集 129 个 backend tests；`uv run --no-sync python -m pytest -q` 通过 129 个 backend tests。Spec compliance reviewer 未发现问题；code quality reviewer 确认 JSONL concurrency blocker 已修复，后续 audit ledger/copy ordering handoff drift 已修正。
 
 **修改文件列表**：
 - Create: `backend/app/observability/audit.py`
