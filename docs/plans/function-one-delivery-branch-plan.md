@@ -43,7 +43,7 @@
 | DB08 | `feat/control-plane-core` | C2.1-C2.4 | DB05, DB06, DB07 | S | planned | control routes、Project/Session/Template service、audit hooks | Project、Session、系统模板和用户模板核心控制面 |
 | DB09 | `feat/provider-delivery-runtime-settings` | C2.5, C2.6, C2.7, C2.7a, C2.8 | DB05, DB06, DB07, DB08 | S | planned | Provider、DeliveryChannel、配置包、PlatformRuntimeSettings service | Provider、DeliveryChannel、配置包和平台运行设置管理 |
 | DB10 | `feat/frontend-control-plane-client` | F2.1, F2.2 | DB03, DB04, DB05 | Y | merged | 前端 API client 类型入口、mock fixtures | 前端 API client、mock fixtures 和 query hooks |
-| DB11 | `feat/frontend-workspace-template-ui` | F2.3-F2.6 | DB10 | Y | ready_for_review | App shell、前端全局 store、设置弹窗、模板 UI | Workspace shell、设置弹窗和模板交互 |
+| DB11 | `feat/frontend-workspace-template-ui` | F2.3-F2.6 | DB10 | Y | merged | App shell、前端全局 store、设置弹窗、模板 UI | Workspace shell、设置弹窗和模板交互 |
 | DB12 | `feat/run-core-events-snapshots` | R3.1, E3.1, R3.4-R3.7 | DB06, DB08, DB09 | S | planned | Run 状态机、EventStore、snapshot services、GraphDefinition、StageRun、StageArtifact | Run 核心领域规则、事件、快照、图定义和阶段产物 |
 | DB13 | `feat/run-start-retry-history` | R3.2, R3.3, C2.9a, C2.9b | DB08, DB12 | S | planned | run start transaction、retry service、Project/Session history visibility | 首条需求启动、retry 内部创建和历史可见性命令 |
 | DB14 | `feat/backend-projections-streams` | Q3.1-Q3.4a, E3.2, L3.1 | DB07, DB12, DB13 | S | planned | Projection services、SSE endpoint、run/stage log routes | Workspace、Timeline、Inspector、SSE 和日志轻查询 |
