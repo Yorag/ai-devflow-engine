@@ -49,6 +49,7 @@ class RedactionStatus(StrEnum):
     NOT_REQUIRED = "not_required"
     REDACTED = "redacted"
     BLOCKED = "blocked"
+    UNSERIALIZABLE = "unserializable"
 
 
 class _TimeRangeQuery(_StrictBaseModel):

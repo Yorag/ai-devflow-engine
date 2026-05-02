@@ -47,9 +47,10 @@
 ## L2.2 基础 RedactionPolicy 与 payload summarizer
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立日志与审计载荷的基础裁剪、摘要和敏感字段阻断策略，作为 L2.3 JSONL 写入和 L2.4 审计记录的统一前置处理。
 **实施计划**：`docs/plans/implementation/l2.2-redaction-payload-summarizer.md`
+**验证摘要**：实施计划 `docs/plans/implementation/l2.2-redaction-payload-summarizer.md` 已完成。TDD RED 先观察到缺少 `backend.app.observability.redaction`，随后 review 驱动补充等价敏感字段、camelCase 字段、`auth_header` / `authHeader` 和 `api_key_ref` / `apiKeyRef` 边界测试，分别先观察到原实现泄露或误裁剪后转绿。`uv run --no-sync python -m pytest backend/tests/observability/test_redaction_policy.py -v` 通过 9 个 L2.2 tests；`uv run --no-sync python -m pytest backend/tests/schemas/test_observability_schemas.py backend/tests/db/test_log_model_boundary.py backend/tests/observability/test_redaction_policy.py -q` 通过 21 个 observability regression tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/api/test_request_correlation_context.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/observability/test_redaction_policy.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_prompt_asset_schemas.py backend/tests/schemas/test_observability_schemas.py backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py backend/tests/db/test_runtime_model_boundary.py backend/tests/db/test_graph_model_boundary.py backend/tests/db/test_event_model_boundary.py backend/tests/db/test_log_model_boundary.py -q` 通过 112 个 foundation regression tests。Spec compliance reviewer 与 code quality reviewer 均未留下 Critical 或 Important 发现。
 
 **修改文件列表**：
 - Create: `backend/app/observability/redaction.py`
