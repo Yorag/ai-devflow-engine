@@ -75,9 +75,10 @@
 ## L2.3 JSONL writer 与 log index
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立本地 JSONL 日志写入与 `log.db` 轻量索引入口，使服务日志、run 日志和审计副本具备统一落盘格式和可查询定位信息。
 **实施计划**：`docs/plans/implementation/l2.3-jsonl-writer-log-index.md`
+**验证摘要**：实施计划 `docs/plans/implementation/l2.3-jsonl-writer-log-index.md` 已完成。TDD RED 先观察到缺少 `backend.app.observability.log_writer` / `log_index`，随后 review 驱动补充不安全 `run_id` 路径片段和 log index 失败隔离测试，分别先观察到原实现未拒绝 unsafe run id、rollback 失败逃出 `append_run_log_index()` 后转绿。`uv run --no-sync python -m pytest backend/tests/observability/test_jsonl_log_writer.py -v` 通过 9 个 L2.3 tests；`uv run --no-sync python -m pytest backend/tests/observability/test_redaction_policy.py backend/tests/db/test_log_model_boundary.py backend/tests/observability/test_jsonl_log_writer.py -q` 通过 25 个 observability regression tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/api/test_request_correlation_context.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/observability/test_redaction_policy.py backend/tests/observability/test_jsonl_log_writer.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_prompt_asset_schemas.py backend/tests/schemas/test_observability_schemas.py backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py backend/tests/db/test_runtime_model_boundary.py backend/tests/db/test_graph_model_boundary.py backend/tests/db/test_event_model_boundary.py backend/tests/db/test_log_model_boundary.py -q` 通过 121 个 backend tests；`uv run --no-sync python -m pytest --collect-only` 收集 121 个 backend tests 且无收集错误。Spec compliance reviewer 未发现问题；code quality reviewer 初审提出的 unsafe run id 和 index failure containment 两个 Important 发现已修复并通过 re-review。
 
 **修改文件列表**：
 - Create: `backend/app/observability/log_writer.py`
