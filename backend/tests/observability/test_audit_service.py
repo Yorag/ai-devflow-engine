@@ -241,6 +241,68 @@ def test_audit_log_db_write_failure_raises_clear_error_without_soft_downgrade(
 
     assert failing_session.rolled_back is True
     assert not (tmp_path / "runtime" / "logs" / "app.jsonl").exists()
+    assert not (tmp_path / "runtime" / "logs" / "audit.jsonl").exists()
+
+
+def test_audit_service_commits_ledger_before_writing_audit_jsonl_copy(
+    tmp_path,
+) -> None:
+    from backend.app.observability.audit import AuditService
+    from backend.app.observability.log_writer import JsonlLogWriter
+
+    class CountingSession:
+        commit_count = 0
+        rolled_back = False
+        objects: list[object]
+
+        def __init__(self) -> None:
+            self.objects = []
+
+        def add(self, value: object) -> None:
+            self.objects.append(value)
+
+        def flush(self) -> None:
+            pass
+
+        def commit(self) -> None:
+            self.commit_count += 1
+
+        def rollback(self) -> None:
+            self.rolled_back = True
+
+    class CommitAwareWriter(JsonlLogWriter):
+        def __init__(self, runtime_settings, session: CountingSession):
+            super().__init__(runtime_settings)
+            self._session = session
+
+        def write_audit_copy(self, record):  # noqa: ANN001
+            assert self._session.commit_count == 1
+            return super().write_audit_copy(record)
+
+    runtime_settings = make_runtime_settings(tmp_path)
+    session = CountingSession()
+
+    result = AuditService(
+        session,
+        audit_writer=CommitAwareWriter(runtime_settings, session),
+    ).record_command_result(
+        actor_type=AuditActorType.USER,
+        actor_id="user-local",
+        action="project.load",
+        target_type="project",
+        target_id="project:sha256-root",
+        result=AuditResult.SUCCEEDED,
+        reason="Project loaded.",
+        metadata={"visible": "kept"},
+        trace_context=make_trace_context(),
+        created_at=NOW,
+    )
+
+    assert session.rolled_back is False
+    assert session.commit_count == 2
+    assert result.entry.audit_file_ref == "logs/audit.jsonl"
+    assert result.entry.audit_file_generation == "audit"
+    assert result.entry.audit_file_write_failed is False
 
 
 def test_audit_jsonl_copy_failure_persists_audit_and_writes_service_error(
@@ -293,7 +355,7 @@ def test_audit_jsonl_copy_failure_persists_audit_and_writes_service_error(
     assert "audit jsonl unavailable" not in json.dumps(service_row, ensure_ascii=False)
 
 
-def test_audit_service_persists_ledger_once_with_audit_file_metadata(
+def test_audit_service_records_audit_file_metadata_after_successful_copy(
     tmp_path,
 ) -> None:
     from backend.app.observability.audit import AuditService
@@ -338,7 +400,7 @@ def test_audit_service_persists_ledger_once_with_audit_file_metadata(
         created_at=NOW,
     )
 
-    assert session.commit_count == 1
+    assert session.commit_count == 2
     assert session.rolled_back is False
     assert result.entry.audit_file_ref == "logs/audit.jsonl"
     assert result.entry.audit_file_generation == "audit"

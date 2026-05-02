@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Lock
+from typing import ClassVar
 from uuid import uuid4
 
 from backend.app.domain.trace_context import TraceContext
@@ -62,6 +65,9 @@ class JsonlWriteResult:
 
 
 class JsonlLogWriter:
+    _write_locks_guard: ClassVar[Lock] = Lock()
+    _write_locks: ClassVar[dict[str, Lock]] = {}
+
     def __init__(self, runtime_settings: RuntimeDataSettings) -> None:
         self._runtime_root = runtime_settings.root.resolve(strict=False)
         self._logs_dir = runtime_settings.logs_dir.resolve(strict=False)
@@ -94,8 +100,6 @@ class JsonlLogWriter:
         path.parent.mkdir(parents=True, exist_ok=True)
         log_id = record.log_id or f"log-{uuid4().hex}"
         created_at = record.created_at or datetime.now(UTC)
-        line_offset = path.stat().st_size if path.exists() else 0
-        line_number = self._next_line_number(path)
         payload = self._json_payload(
             record=record,
             log_id=log_id,
@@ -110,8 +114,11 @@ class JsonlLogWriter:
             )
             + "\n"
         ).encode("utf-8")
-        with path.open("ab") as file:
-            file.write(encoded)
+        with self._write_lock_for_path(path):
+            line_offset = path.stat().st_size if path.exists() else 0
+            line_number = self._next_line_number(path)
+            with path.open("ab") as file:
+                file.write(encoded)
         return JsonlWriteResult(
             log_id=log_id,
             log_file_ref=log_file_ref,
@@ -161,7 +168,12 @@ class JsonlLogWriter:
         }
 
     def _runtime_relative_ref(self, path: Path) -> str:
-        return path.resolve(strict=False).relative_to(self._runtime_root).as_posix()
+        path_text = self._absolute_path_text(path)
+        runtime_root_text = self._absolute_path_text(self._runtime_root)
+        common_path = os.path.commonpath([path_text, runtime_root_text])
+        if os.path.normcase(common_path) != os.path.normcase(runtime_root_text):
+            raise ValueError(f"{path!s} is not under {self._runtime_root!s}")
+        return Path(os.path.relpath(path_text, runtime_root_text)).as_posix()
 
     def _validate_run_id_segment(self, run_id: str) -> None:
         if (
@@ -172,6 +184,27 @@ class JsonlLogWriter:
             or "\0" in run_id
         ):
             raise ValueError("run_id must be a safe path segment")
+
+    def _write_lock_for_path(self, path: Path) -> Lock:
+        lock_key = os.path.normcase(self._absolute_path_text(path))
+        with self._write_locks_guard:
+            lock = self._write_locks.get(lock_key)
+            if lock is None:
+                lock = Lock()
+                self._write_locks[lock_key] = lock
+            return lock
+
+    def _absolute_path_text(self, path: Path) -> str:
+        return os.path.normpath(
+            self._without_windows_extended_prefix(os.path.abspath(os.fspath(path)))
+        )
+
+    def _without_windows_extended_prefix(self, path: str) -> str:
+        if path.startswith("\\\\?\\UNC\\"):
+            return "\\\\" + path[8:]
+        if path.startswith("\\\\?\\"):
+            return path[4:]
+        return path
 
     def _next_line_number(self, path: Path) -> int:
         if not path.exists():

@@ -98,13 +98,6 @@ class AuditService:
             metadata=metadata or {},
         )
         payload = self._payload_model(audit_id, payload_summary, created)
-        copy_result = self._try_write_audit_copy(
-            audit_id=audit_id,
-            result=result,
-            trace_context=trace_context,
-            payload=payload_summary,
-            created_at=created,
-        )
         entry = self._entry_model(
             audit_id=audit_id,
             actor_type=actor_type,
@@ -117,20 +110,21 @@ class AuditService:
             trace_context=trace_context,
             payload=payload,
             metadata_excerpt=payload_summary.excerpt,
-            audit_file_ref=(
-                copy_result.write_result.log_file_ref
-                if copy_result.write_result is not None
-                else None
-            ),
-            audit_file_generation=(
-                copy_result.write_result.log_file_generation
-                if copy_result.write_result is not None
-                else None
-            ),
-            audit_file_write_failed=copy_result.write_failed,
+            audit_file_ref=None,
+            audit_file_generation=None,
+            audit_file_write_failed=False,
             created_at=created,
         )
         self._persist_or_raise(payload, entry)
+
+        copy_result = self._try_write_audit_copy(
+            audit_id=audit_id,
+            result=result,
+            trace_context=trace_context,
+            payload=payload_summary,
+            created_at=created,
+        )
+        self._record_audit_copy_result_or_raise(entry, copy_result)
 
         if copy_result.error_type is not None:
             self._write_audit_copy_failure(
@@ -350,6 +344,29 @@ class AuditService:
         try:
             self._session.add(payload)
             self._session.flush()
+            self._session.add(entry)
+            self._session.commit()
+        except SQLAlchemyError as exc:
+            try:
+                self._session.rollback()
+            except Exception:
+                pass
+            raise AuditWriteError("Audit log entry write failed.") from exc
+
+    def _record_audit_copy_result_or_raise(
+        self,
+        entry: AuditLogEntryModel,
+        copy_result: _AuditCopyResult,
+    ) -> None:
+        if copy_result.write_result is not None:
+            entry.audit_file_ref = copy_result.write_result.log_file_ref
+            entry.audit_file_generation = copy_result.write_result.log_file_generation
+            entry.audit_file_write_failed = False
+        else:
+            entry.audit_file_ref = None
+            entry.audit_file_generation = None
+            entry.audit_file_write_failed = copy_result.write_failed
+        try:
             self._session.add(entry)
             self._session.commit()
         except SQLAlchemyError as exc:

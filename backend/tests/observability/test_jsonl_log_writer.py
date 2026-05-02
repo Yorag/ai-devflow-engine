@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -170,6 +171,52 @@ def test_jsonl_writer_writes_run_log_and_audit_copy_to_expected_runtime_refs(
     assert run_row["redaction_status"] == "not_required"
     assert audit_row["log_id"] == audit_result.log_id
     assert audit_row["message"] == "Tool confirmation required."
+
+
+def test_jsonl_writer_returns_actual_positions_for_concurrent_writes(tmp_path) -> None:
+    from backend.app.observability.log_writer import JsonlLogWriter
+
+    class CoordinatedJsonlLogWriter(JsonlLogWriter):
+        def __init__(self, runtime_settings):
+            super().__init__(runtime_settings)
+            self._barrier = threading.Barrier(2)
+
+        def _json_payload(self, **kwargs):  # noqa: ANN003
+            payload = super()._json_payload(**kwargs)
+            self._barrier.wait(timeout=5)
+            return payload
+
+    runtime_settings = make_runtime_settings(tmp_path)
+    writer = CoordinatedJsonlLogWriter(runtime_settings)
+    results = []
+
+    def write(message: str) -> None:
+        results.append(writer.write(make_record(message=message)))
+
+    threads = [
+        threading.Thread(target=write, args=("Concurrent request 1.",)),
+        threading.Thread(target=write, args=("Concurrent request 2.",)),
+    ]
+
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert len(results) == 2
+
+    app_log_path = runtime_settings.root / "logs" / "app.jsonl"
+    line_starts: dict[str, tuple[int, int]] = {}
+    offset = 0
+    with app_log_path.open("rb") as file:
+        for line_number, line in enumerate(file, start=1):
+            line_starts[json.loads(line)["log_id"]] = (offset, line_number)
+            offset += len(line)
+
+    assert len(line_starts) == 2
+    for result in results:
+        assert (result.line_offset, result.line_number) == line_starts[result.log_id]
 
 
 def test_jsonl_writer_requires_run_id_for_run_log_path(tmp_path) -> None:
