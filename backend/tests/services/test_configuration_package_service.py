@@ -559,6 +559,43 @@ def test_import_package_returns_field_errors_and_rolls_back_invalid_provider(
     assert action_records(audit, "configuration_package.import.rejected")
 
 
+def test_import_rejects_non_ascii_provider_api_key_ref_without_changes(
+    tmp_path: Path,
+) -> None:
+    from backend.app.services.configuration_packages import ConfigurationPackageService
+
+    manager = build_manager(tmp_path)
+    audit = RecordingAuditService()
+    log_writer = RecordingLogWriter()
+
+    with manager.session(DatabaseRole.CONTROL) as session:
+        template_id = seed_user_visible_config(session, audit)
+        invalid_package = package_request(template_id)
+        invalid_package.providers[0].api_key_ref = "env:AI_DEVFLOW_CREDENTIAL_密钥"
+        result = ConfigurationPackageService(
+            session,
+            audit_service=audit,
+            log_writer=log_writer,
+            now=lambda: LATER,
+        ).import_project_package(
+            DEFAULT_PROJECT_ID,
+            invalid_package,
+            trace_context=build_trace(),
+        )
+        provider = session.get(ProviderModel, "provider-deepseek")
+
+    assert result.changed_objects == []
+    assert [error.model_dump() for error in result.field_errors] == [
+        {
+            "field": "providers[0].api_key_ref",
+            "message": "Provider api_key_ref must use an env: credential reference.",
+        }
+    ]
+    assert provider is not None
+    assert provider.api_key_ref == "env:DEEPSEEK_API_KEY"
+    assert action_records(audit, "configuration_package.import.rejected")
+
+
 def test_import_rejects_unsupported_version_and_scope_mismatch_without_changes(
     tmp_path: Path,
 ) -> None:

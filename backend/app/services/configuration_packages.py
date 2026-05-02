@@ -1210,7 +1210,9 @@ class ConfigurationPackageService:
         if value is None:
             return True
         env_name = value.removeprefix("env:")
-        env_name_has_valid_chars = env_name.replace("_", "").isalnum()
+        env_name_has_valid_chars = all(
+            char == "_" or char.isascii() and char.isalnum() for char in env_name
+        )
         env_name_has_allowed_prefix = any(
             env_name.startswith(prefix) for prefix in self._credential_env_prefixes
         )
