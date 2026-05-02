@@ -181,11 +181,16 @@
 ## C2.2 系统模板与内置 Provider seed
 
 **计划周期**：Week 3
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现三个系统模板和两个内置 Provider 的初始化，使 draft Session 可以稳定关联默认模板。
 **实施计划**：`docs/plans/implementation/c2.2-system-template-provider-seed.md`
 
+**验证摘要**：实施计划 `docs/plans/implementation/c2.2-system-template-provider-seed.md` 已完成。TDD RED 先观察到缺少 `backend.app.services.templates`、缺少 `backend.app.services.providers`、模板/Provider API 返回 `404`，随后实现五个 `agent_role_seed` 提示词资产、`TemplateService`、`ProviderService`、`GET /api/pipeline-templates`、`GET /api/pipeline-templates/{templateId}`、`GET /api/providers` 和 startup seed。代码评审后修复两个 Important 发现：已存在系统模板时 read path 不再加载本地 prompt asset；系统模板和内置 Provider seed 改为各写一条 batch audit，并在 audit 成功后才提交控制面 seed 行，audit 失败会 rollback 控制行。`uv run --no-sync python -m pytest backend/tests/services/test_template_seed.py -v` 通过 7 个 template seed tests；`uv run --no-sync python -m pytest backend/tests/services/test_provider_seed.py -v` 通过 7 个 provider seed tests；`uv run --no-sync python -m pytest backend/tests/prompts/test_agent_role_seed_assets.py backend/tests/services/test_template_seed.py backend/tests/services/test_provider_seed.py backend/tests/api/test_template_provider_seed_api.py -q` 通过 23 个 C2.2 focused tests；`uv run --no-sync python -m pytest backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/api/test_request_correlation_context.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/services/test_project_service.py backend/tests/api/test_project_api.py backend/tests/prompts/test_agent_role_seed_assets.py backend/tests/services/test_template_seed.py backend/tests/services/test_provider_seed.py backend/tests/api/test_template_provider_seed_api.py -q` 通过 57 个 DB08/API regression tests；`uv run --no-sync python -m pytest --collect-only -q` 收集 164 个 backend tests 且无收集错误；`uv run --no-sync python -m pytest -q` 通过 164 个 backend tests。Spec compliance reviewer 未发现问题；code quality reviewer 初审提出的两个 Important 发现已修复，后续内联复审未发现 Critical 或 Important 问题。
+
 **修改文件列表**：
+- Modify: `backend/app/main.py`
+- Modify: `backend/app/api/router.py`
+- Modify: `backend/tests/api/test_project_api.py`
 - Create: `backend/app/prompts/assets/roles/requirement_analyst.md`
 - Create: `backend/app/prompts/assets/roles/solution_designer.md`
 - Create: `backend/app/prompts/assets/roles/code_generator.md`

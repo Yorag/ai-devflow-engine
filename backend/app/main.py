@@ -17,7 +17,9 @@ from backend.app.observability.audit import AuditService
 from backend.app.observability.context import RequestCorrelationMiddleware
 from backend.app.observability.log_writer import JsonlLogWriter
 from backend.app.observability.runtime_data import RuntimeDataPreflight, RuntimeDataSettings
+from backend.app.services.providers import ProviderService
 from backend.app.services.projects import ProjectService
+from backend.app.services.templates import TemplateService
 
 
 @asynccontextmanager
@@ -26,6 +28,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.environment_settings
     ).ensure_runtime_data_ready()
     ensure_startup_default_project(app)
+    ensure_startup_control_plane_seed(app)
     yield
 
 
@@ -52,6 +55,28 @@ def ensure_startup_default_project(app: FastAPI) -> None:
             settings=settings,
             audit_service=AuditService(log_session, audit_writer=audit_writer),
         ).ensure_default_project(trace_context=_startup_trace_context())
+    finally:
+        control_session.close()
+        log_session.close()
+
+
+def ensure_startup_control_plane_seed(app: FastAPI) -> None:
+    settings = app.state.environment_settings
+    manager: DatabaseManager = app.state.database_manager
+    control_session = manager.session(DatabaseRole.CONTROL)
+    log_session = manager.session(DatabaseRole.LOG)
+    audit_writer = JsonlLogWriter(RuntimeDataSettings.from_environment_settings(settings))
+    audit_service = AuditService(log_session, audit_writer=audit_writer)
+    trace_context = _startup_trace_context()
+    try:
+        ProviderService(
+            control_session,
+            audit_service=audit_service,
+        ).seed_builtin_providers(trace_context=trace_context)
+        TemplateService(
+            control_session,
+            audit_service=audit_service,
+        ).seed_system_templates(trace_context=trace_context)
     finally:
         control_session.close()
         log_session.close()

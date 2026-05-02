@@ -41,7 +41,11 @@ def test_startup_registers_default_project_channel_and_audit_before_requests(
             project = session.get(ProjectModel, "project-default")
             channel = session.get(DeliveryChannelModel, "delivery-default")
         with manager.session(DatabaseRole.LOG) as session:
-            audit = session.query(AuditLogEntryModel).one_or_none()
+            audit = (
+                session.query(AuditLogEntryModel)
+                .filter(AuditLogEntryModel.action == "project.ensure_default")
+                .one_or_none()
+            )
 
     assert project is not None
     assert project.root_path == str(default_root.resolve())
