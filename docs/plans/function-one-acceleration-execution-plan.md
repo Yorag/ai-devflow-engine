@@ -140,6 +140,7 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | AL04-W5.0 | W5.0 | AL04 | `feat/al-tools-deterministic-delivery` | done | 67f5290 | 2b78be5 | `docs/plans/acceleration/reports/AL04-W5.0.md` | - |
 | AL04-W5.0a | W5.0a | AL04 | `feat/al-tools-deterministic-delivery` | done | 74578b0 | e2c777c | `docs/plans/acceleration/reports/AL04-W5.0a.md` | - |
 | AL04-W5.0b | W5.0b | AL04 | `feat/al-tools-deterministic-delivery` | done | 7aeff59 | 41f80c8 | `docs/plans/acceleration/reports/AL04-W5.0b.md` | - |
+| AL04-W5.1 | W5.1 | AL04 | `feat/al-tools-deterministic-delivery` | done | 5376b2e | fdaf066 | `docs/plans/acceleration/reports/AL04-W5.1.md` | - |
 | AL05-A4.8 | A4.8 | AL05 | `feat/al-provider-langgraph-context` | done | 5d44d4a | aee52fb | `docs/plans/acceleration/reports/AL05-A4.8.md` | - |
 | AL05-A4.8a | A4.8a | AL05 | `feat/al-provider-langgraph-context` | blocked | 4ea6251 | - | `docs/plans/acceleration/reports/AL05-A4.8a.md` | Source Trace Conflict Gate: run-start validation hook requires AL01 run-start surface or explicit owner reassignment. |
 | AL06-F3.1 | F3.1 | AL06 | `feat/al-frontend-runtime-ui` | done | 5d44d4a | 564624a | `docs/plans/acceleration/reports/AL06-F3.1.md` | - |
