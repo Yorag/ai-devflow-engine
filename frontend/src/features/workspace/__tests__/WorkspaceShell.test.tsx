@@ -1,8 +1,12 @@
+import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiRequestOptions } from "../../../api/client";
-import type { ExecutionNodeProjection } from "../../../api/types";
+import { terminateRun } from "../../../api/runs";
+import type { ExecutionNodeProjection, SessionStatus } from "../../../api/types";
+import { createQueryClient } from "../../../app/query-client";
 import { renderWithAppProviders } from "../../../app/test-utils";
 import {
   mockSessionWorkspaces,
@@ -13,11 +17,23 @@ import {
   mockApiRequestOptions,
 } from "../../../mocks/handlers";
 import { ConsolePage } from "../../../pages/ConsolePage";
+import { TerminateRunAction } from "../../runs/TerminateRunAction";
 import { useWorkspaceStore } from "../workspace-store";
+
+vi.mock("../../../api/runs", async () => {
+  const actual = await vi.importActual<typeof import("../../../api/runs")>(
+    "../../../api/runs",
+  );
+  return {
+    ...actual,
+    terminateRun: vi.fn(),
+  };
+});
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   useWorkspaceStore.getState().resetWorkspace();
 });
 
@@ -506,7 +522,7 @@ describe("WorkspaceShell", () => {
 
     expect(await screen.findByRole("form", { name: "Composer" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
-    expect(screen.getByLabelText("Composer input")).toBeTruthy();
+    expect(screen.getByLabelText("当前输入")).toBeTruthy();
   });
 
   it("keeps Composer send-enabled for waiting clarification sessions", async () => {
@@ -519,13 +535,14 @@ describe("WorkspaceShell", () => {
     );
 
     expect(await screen.findByRole("button", { name: "发送" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "暂停当前运行" })).toBeTruthy();
     expect(screen.getByText(/等待你的澄清回复/u)).toBeTruthy();
   });
 
   it("resets unsent Composer input when the selected session changes", async () => {
     renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
-    const input = await screen.findByLabelText("Composer input");
+    const input = await screen.findByLabelText("当前输入");
     fireEvent.change(input, {
       target: { value: "This draft should not leak into another session." },
     });
@@ -541,7 +558,7 @@ describe("WorkspaceShell", () => {
     );
 
     expect(await screen.findByRole("button", { name: "发送" })).toBeTruthy();
-    expect(screen.getByLabelText("Composer input")).toHaveProperty("value", "");
+    expect(screen.getByLabelText("当前输入")).toHaveProperty("value", "");
   });
 
   it("appends a draft requirement to Narrative Feed after Composer submit", async () => {
@@ -551,7 +568,7 @@ describe("WorkspaceShell", () => {
       />,
     );
 
-    fireEvent.change(await screen.findByLabelText("Composer input"), {
+    fireEvent.change(await screen.findByLabelText("当前输入"), {
       target: { value: "Persist the first requirement in the feed." },
     });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
@@ -581,7 +598,7 @@ describe("WorkspaceShell", () => {
       }),
     );
 
-    fireEvent.change(await screen.findByLabelText("Composer input"), {
+    fireEvent.change(await screen.findByLabelText("当前输入"), {
       target: { value: "Use the configured default provider." },
     });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
@@ -598,7 +615,7 @@ describe("WorkspaceShell", () => {
     });
 
     expect(await screen.findByRole("button", { name: "暂停" })).toBeTruthy();
-    expect(screen.getByLabelText("Composer input")).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", true);
   });
 
   it("shows the pause presentation when the active run is still in requirement analysis", async () => {
@@ -639,7 +656,7 @@ describe("WorkspaceShell", () => {
     );
 
     expect(await screen.findByRole("button", { name: "暂停" })).toBeTruthy();
-    expect(screen.getByLabelText("Composer input")).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", true);
   });
 
   it("updates Composer from live session status changes", async () => {
@@ -699,7 +716,87 @@ describe("WorkspaceShell", () => {
       } as MessageEvent<string>);
 
     expect(await screen.findByRole("button", { name: "暂停" })).toBeTruthy();
-    expect(screen.getByLabelText("Composer input")).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", true);
+  });
+
+  it("shows a terminate entry in the workspace toolbar for the current active run only", async () => {
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Add workspace shell" }),
+    );
+
+    expect(await screen.findByRole("button", { name: "终止当前运行" })).toBeTruthy();
+  });
+
+  it("hides the terminate entry for completed sessions without an active run", async () => {
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Renamed checkout flow fix" }),
+    );
+
+    expect(screen.queryByRole("button", { name: "终止当前运行" })).toBeNull();
+  });
+});
+
+describe("TerminateRunAction", () => {
+  it("confirms before calling terminate for the current active run", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(terminateRun).mockResolvedValue({
+      run_id: "run-running",
+      attempt_index: 1,
+      status: "terminated",
+      trigger_source: "initial_requirement",
+      started_at: "2026-05-01T09:10:00.000Z",
+      ended_at: "2026-05-01T09:26:00.000Z",
+      current_stage_type: "solution_design",
+      is_active: false,
+    });
+    const queryClient = createQueryClient();
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <TerminateRunAction
+          projectId="project-default"
+          sessionId="session-running"
+          runId="run-running"
+          sessionStatus={"running" satisfies SessionStatus}
+          secondaryActions={["terminate"]}
+        />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "终止当前运行" }));
+
+    await waitFor(() => {
+      expect(terminateRun).toHaveBeenCalledWith("run-running", expect.anything());
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ["sessions", "session-running", "workspace"],
+        refetchType: "all",
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ["projects", "project-default", "sessions"],
+        refetchType: "all",
+      });
+    });
+  });
+
+  it("hides terminate when the projection omits the terminate action", () => {
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <TerminateRunAction
+          projectId="project-default"
+          sessionId="session-running"
+          runId="run-running"
+          sessionStatus={"running" satisfies SessionStatus}
+          secondaryActions={[]}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByRole("button", { name: "终止当前运行" })).toBeNull();
   });
 });
 

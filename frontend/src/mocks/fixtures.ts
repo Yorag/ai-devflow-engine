@@ -982,7 +982,12 @@ function createWorkspace(
             : terminal
               ? "disabled"
               : "pause",
-      secondary_actions: session.status === "draft" || terminal ? [] : ["terminate"],
+      secondary_actions:
+        session.status === "draft" || terminal
+          ? []
+          : session.status === "waiting_clarification"
+            ? ["pause", "terminate"]
+            : ["terminate"],
       bound_run_id: session.current_run_id,
     },
   };
