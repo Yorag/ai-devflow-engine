@@ -93,6 +93,52 @@ def _seed_control_item_projection(app) -> None:
         session.commit()
 
 
+def _seed_tool_confirmation_detail_projection(app) -> None:
+    with app.state.database_manager.session(DatabaseRole.RUNTIME) as session:
+        session.add_all(
+            [
+                RunControlRecordModel(
+                    control_record_id="control-tool-confirmation-1",
+                    run_id="run-active",
+                    stage_run_id="stage-active",
+                    control_type=RunControlRecordType.TOOL_CONFIRMATION,
+                    source_stage_type=StageType.CODE_GENERATION,
+                    target_stage_type=StageType.CODE_GENERATION,
+                    payload_ref="tool-confirmation-1",
+                    graph_interrupt_ref="interrupt-tool-1",
+                    occurred_at=NOW.replace(minute=7),
+                    created_at=NOW.replace(minute=7),
+                ),
+                StageArtifactModel(
+                    artifact_id="artifact-tool-confirmation-1",
+                    run_id="run-active",
+                    stage_run_id="stage-active",
+                    artifact_type="tool_confirmation_trace",
+                    payload_ref="payload-tool-confirmation-1",
+                    process={
+                        "tool_confirmation_id": "tool-confirmation-1",
+                        "confirmation_object_ref": "tool-call-1",
+                        "tool_confirmation_trace_ref": "process-tool-confirmation-1",
+                        "tool_call_ref": "tool-call-1",
+                        "tool_result_ref": "tool-result-1",
+                        "audit_ref": "audit-tool-confirmation-1",
+                        "side_effect_refs": ["side-effect-package-lock"],
+                        "context_refs": ["requirement-tool-confirmation-1"],
+                        "result_snapshot": {
+                            "result_status": "waiting_tool_confirmation",
+                            "follow_up_result": "awaiting user decision",
+                            "tool_result_ref": "tool-result-1",
+                        },
+                        "log_refs": ["log-tool-confirmation-1"],
+                    },
+                    metrics={"retry_index": 0, "source_attempt_index": 1},
+                    created_at=NOW.replace(minute=7, second=5),
+                ),
+            ]
+        )
+        session.commit()
+
+
 def test_get_session_workspace_returns_projection_and_unified_not_found(
     tmp_path: Path,
 ) -> None:
@@ -331,6 +377,71 @@ def test_get_control_item_detail_returns_projection_and_unified_not_found(
     }
 
 
+def test_get_tool_confirmation_detail_returns_projection_and_unified_not_found(
+    tmp_path: Path,
+) -> None:
+    app = build_query_api_app(tmp_path)
+    _seed_tool_confirmation_detail_projection(app)
+
+    with TestClient(app) as client:
+        ok_response = client.get(
+            "/api/tool-confirmations/tool-confirmation-1",
+            headers={
+                "X-Request-ID": "req-tool-confirmation",
+                "X-Correlation-ID": "corr-tool-confirmation",
+            },
+        )
+        missing_response = client.get(
+            "/api/tool-confirmations/tool-confirmation-missing",
+            headers={
+                "X-Request-ID": "req-tool-confirmation-missing",
+                "X-Correlation-ID": "corr-tool-confirmation-missing",
+            },
+        )
+
+    assert ok_response.status_code == 200
+    payload = ok_response.json()
+    assert payload["tool_confirmation_id"] == "tool-confirmation-1"
+    assert payload["run_id"] == "run-active"
+    assert payload["stage_run_id"] == "stage-active"
+    assert payload["status"] == "pending"
+    assert payload["tool_name"] == "bash"
+    assert payload["risk_level"] == "high_risk"
+    assert payload["decision"] is None
+    assert payload["process"]["records"]["control_record_id"] == (
+        "control-tool-confirmation-1"
+    )
+    assert payload["process"]["records"]["process_ref"] == (
+        "process-tool-confirmation-1"
+    )
+    assert payload["process"]["records"]["confirmation_object_ref"] == "tool-call-1"
+    assert payload["process"]["records"]["tool_result_refs"] == ["tool-result-1"]
+    assert payload["process"]["records"]["audit_refs"] == [
+        "audit-tool-confirmation-1"
+    ]
+    assert payload["output"]["records"]["result_status"] == (
+        "waiting_tool_confirmation"
+    )
+    assert payload["output"]["records"]["follow_up_result"] == (
+        "awaiting user decision"
+    )
+    assert payload["output"]["records"]["tool_result_ref"] == "tool-result-1"
+    assert payload["artifacts"]["records"]["artifact_refs"] == [
+        "artifact-tool-confirmation-1"
+    ]
+    assert payload["artifacts"]["records"]["confirmation_object_ref"] == "tool-call-1"
+    assert payload["artifacts"]["records"]["tool_result_refs"] == ["tool-result-1"]
+    assert payload["artifacts"]["log_refs"] == ["log-tool-confirmation-1"]
+
+    assert missing_response.status_code == 404
+    assert missing_response.json() == {
+        "error_code": "not_found",
+        "message": "Tool confirmation inspector was not found.",
+        "request_id": "req-tool-confirmation-missing",
+        "correlation_id": "corr-tool-confirmation-missing",
+    }
+
+
 def test_get_session_workspace_rejects_removed_session(
     tmp_path: Path,
 ) -> None:
@@ -518,6 +629,33 @@ def test_query_workspace_route_is_documented_in_openapi(tmp_path: Path) -> None:
             == "#/components/schemas/ErrorResponse"
         )
 
+    tool_confirmation_route = paths[
+        "/api/tool-confirmations/{toolConfirmationId}"
+    ]["get"]
+    assert set(tool_confirmation_route["responses"]) == {"200", "404", "422", "500"}
+    assert (
+        tool_confirmation_route["responses"]["200"]["content"]["application/json"][
+            "schema"
+        ]["$ref"]
+        == "#/components/schemas/ToolConfirmationInspectorProjection"
+    )
+    tool_confirmation_id_parameter = next(
+        parameter
+        for parameter in tool_confirmation_route["parameters"]
+        if parameter["name"] == "toolConfirmationId"
+    )
+    assert tool_confirmation_id_parameter["in"] == "path"
+    assert tool_confirmation_id_parameter["required"] is True
+    assert tool_confirmation_id_parameter["schema"]["type"] == "string"
+    for status_code in ("404", "422", "500"):
+        assert (
+            tool_confirmation_route["responses"][status_code]["content"][
+                "application/json"
+            ]["schema"]["$ref"]
+            == "#/components/schemas/ErrorResponse"
+        )
+
     assert "StageInspectorProjection" in schemas
     assert "ControlItemInspectorProjection" in schemas
+    assert "ToolConfirmationInspectorProjection" in schemas
     assert "ErrorResponse" in schemas

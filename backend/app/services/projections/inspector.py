@@ -20,16 +20,18 @@ from backend.app.db.models.runtime import (
     StageRunModel,
     ToolConfirmationRequestModel,
 )
-from backend.app.domain.enums import StageType
+from backend.app.domain.enums import RunControlRecordType, StageType
 from backend.app.schemas.feed import (
     ControlItemFeedEntry,
     ExecutionNodeProjection,
     ProviderCallStageItem,
+    ToolConfirmationFeedEntry,
 )
 from backend.app.schemas.inspector import (
     ControlItemInspectorProjection,
     InspectorSection,
     StageInspectorProjection,
+    ToolConfirmationInspectorProjection,
 )
 from backend.app.schemas.metrics import MetricSet
 from backend.app.schemas.run import (
@@ -41,8 +43,12 @@ from backend.app.services.events import EventStore
 
 EXECUTION_NODE_ADAPTER = TypeAdapter(ExecutionNodeProjection)
 CONTROL_ITEM_ADAPTER = TypeAdapter(ControlItemFeedEntry)
+TOOL_CONFIRMATION_ADAPTER = TypeAdapter(ToolConfirmationFeedEntry)
 STAGE_INSPECTOR_NOT_FOUND_MESSAGE = "Stage inspector was not found."
 CONTROL_ITEM_INSPECTOR_NOT_FOUND_MESSAGE = "Control item inspector was not found."
+TOOL_CONFIRMATION_INSPECTOR_NOT_FOUND_MESSAGE = (
+    "Tool confirmation inspector was not found."
+)
 
 
 class InspectorProjectionServiceError(RuntimeError):
@@ -166,6 +172,56 @@ class InspectorProjectionService:
             source_stage_type=control_record.source_stage_type,
             target_stage_type=control_record.target_stage_type,
             occurred_at=self._projection_datetime(control_record.occurred_at),
+            identity=sections["identity"],
+            input=sections["input"],
+            process=sections["process"],
+            output=sections["output"],
+            artifacts=sections["artifacts"],
+            metrics=sections["metrics"],
+        )
+
+    def get_tool_confirmation_detail(
+        self,
+        tool_confirmation_id: str,
+    ) -> ToolConfirmationInspectorProjection:
+        confirmation, run, stage = self._get_visible_tool_confirmation_context(
+            tool_confirmation_id
+        )
+        control_record = self._tool_confirmation_control_record(confirmation, stage)
+        artifacts = self._stage_artifacts_for_tool_confirmation(confirmation)
+        confirmation_event = self._tool_confirmation_event(run, confirmation)
+        stage_nodes = self._stage_nodes(run, stage)
+        decision = self._tool_confirmation_decision(
+            confirmation,
+            artifacts,
+            confirmation_event,
+        )
+        sections = self.build_tool_confirmation_sections(
+            confirmation,
+            run,
+            stage,
+            artifacts,
+            confirmation_event,
+            stage_nodes,
+            control_record,
+            decision,
+        )
+
+        return ToolConfirmationInspectorProjection(
+            tool_confirmation_id=confirmation.tool_confirmation_id,
+            run_id=run.run_id,
+            stage_run_id=stage.stage_run_id,
+            status=confirmation.status,
+            requested_at=self._projection_datetime(confirmation.requested_at),
+            responded_at=self._projection_datetime(confirmation.responded_at),
+            tool_name=confirmation.tool_name,
+            command_preview=confirmation.command_preview,
+            target_summary=confirmation.target_summary,
+            risk_level=confirmation.risk_level,
+            risk_categories=confirmation.risk_categories,
+            reason=confirmation.reason,
+            expected_side_effects=confirmation.expected_side_effects,
+            decision=decision,
             identity=sections["identity"],
             input=sections["input"],
             process=sections["process"],
@@ -382,6 +438,289 @@ class InspectorProjectionService:
             "metrics": metrics,
         }
 
+    def build_tool_confirmation_sections(
+        self,
+        confirmation: ToolConfirmationRequestModel,
+        run: PipelineRunModel,
+        stage: StageRunModel,
+        artifacts: Sequence[StageArtifactModel],
+        confirmation_event: ToolConfirmationFeedEntry | None,
+        stage_nodes: Sequence[ExecutionNodeProjection],
+        control_record: RunControlRecordModel,
+        decision: str | None,
+    ) -> dict[str, InspectorSection | MetricSet]:
+        artifact_processes = self._artifact_processes(artifacts)
+        process_trace = self.build_tool_confirmation_process_trace(
+            confirmation,
+            artifacts,
+            stage_nodes,
+        )
+        result_snapshot = self._latest_tool_confirmation_result_snapshot(
+            artifact_processes
+        )
+        event_payload = (
+            self._scrub_raw_graph_state(confirmation_event.model_dump(mode="json"))
+            if confirmation_event is not None
+            else None
+        )
+        alternative_path_summary = confirmation.alternative_path_summary
+        if alternative_path_summary is None:
+            for process in reversed(artifact_processes):
+                value = process.get("alternative_path_summary")
+                if isinstance(value, str) and value:
+                    alternative_path_summary = value
+                    break
+        if (
+            alternative_path_summary is None
+            and confirmation_event is not None
+            and confirmation_event.disabled_reason
+        ):
+            alternative_path_summary = confirmation_event.disabled_reason
+        log_refs = self._log_refs(artifacts)
+        metrics = self._control_metrics(artifacts)
+        artifact_refs = [artifact.artifact_id for artifact in artifacts]
+        payload_refs = [artifact.payload_ref for artifact in artifacts]
+        result_status = self._tool_confirmation_result_status(
+            result_snapshot,
+            confirmation,
+            stage,
+            run,
+        )
+        follow_up_refs = (
+            self._string_list(result_snapshot.get("follow_up_ref"))
+            + self._string_list(result_snapshot.get("follow_up_refs"))
+            if isinstance(result_snapshot, Mapping)
+            else []
+        )
+        follow_up_refs = self._unique_strings(follow_up_refs)
+        follow_up_result = (
+            result_snapshot.get("follow_up_result")
+            if isinstance(result_snapshot, Mapping)
+            and isinstance(result_snapshot.get("follow_up_result"), str)
+            and result_snapshot.get("follow_up_result")
+            else follow_up_refs[-1] if follow_up_refs else None
+        )
+        tool_result_ref = (
+            process_trace["tool_result_refs"][-1]
+            if process_trace["tool_result_refs"]
+            else None
+        )
+        denied_path_result = (
+            self._scrub_raw_graph_state(result_snapshot.get("denied_path_result"))
+            if isinstance(result_snapshot, Mapping)
+            and isinstance(result_snapshot.get("denied_path_result"), Mapping)
+            else None
+        )
+        alternative_path_judgment = {
+            "alternative_path_summary": alternative_path_summary,
+            "result_status": result_status,
+        }
+        allowed_tool_execution_process = (
+            {
+                "tool_call_refs": process_trace["tool_call_refs"],
+                "tool_result_refs": process_trace["tool_result_refs"],
+                "result_status": result_status,
+                "side_effect_refs": process_trace["side_effect_refs"],
+            }
+            if decision == "allowed"
+            else None
+        )
+
+        identity = InspectorSection(
+            title="identity",
+            records={
+                "tool_confirmation_id": confirmation.tool_confirmation_id,
+                "run_id": run.run_id,
+                "stage_run_id": stage.stage_run_id,
+                "stage_type": stage.stage_type.value,
+                "status": confirmation.status.value,
+                "requested_at": self._projection_datetime(confirmation.requested_at),
+                "responded_at": self._projection_datetime(confirmation.responded_at),
+            },
+            stable_refs=self._unique_strings(
+                [
+                    confirmation.tool_confirmation_id,
+                    run.run_id,
+                    stage.stage_run_id,
+                ]
+            ),
+        )
+        input_section = InspectorSection(
+            title="input",
+            records={
+                "confirmation_object_ref": confirmation.confirmation_object_ref,
+                "tool_name": confirmation.tool_name,
+                "command_preview": confirmation.command_preview,
+                "target_summary": confirmation.target_summary,
+                "risk_level": confirmation.risk_level.value,
+                "risk_categories": list(confirmation.risk_categories),
+                "reason": confirmation.reason,
+                "expected_side_effects": list(confirmation.expected_side_effects),
+                "alternative_path_summary": alternative_path_summary,
+                "context_refs": process_trace["context_refs"],
+            },
+            stable_refs=self._unique_strings(
+                [
+                    confirmation.confirmation_object_ref,
+                    *process_trace["context_refs"],
+                ]
+            ),
+        )
+        process = InspectorSection(
+            title="process",
+            records={
+                "tool_confirmation_event": event_payload,
+                "tool_confirmation_trace_refs": process_trace[
+                    "tool_confirmation_trace_refs"
+                ],
+                "tool_call_refs": process_trace["tool_call_refs"],
+                "tool_result_refs": process_trace["tool_result_refs"],
+                "user_decision": decision,
+                "process_ref": confirmation.process_ref,
+                "audit_log_ref": confirmation.audit_log_ref,
+                "alternative_path_summary": alternative_path_summary,
+                "confirmation_object_ref": confirmation.confirmation_object_ref,
+                "control_record_id": control_record.control_record_id,
+                "alternative_path_judgment": alternative_path_judgment,
+                "allowed_tool_execution_process": allowed_tool_execution_process,
+                "audit_refs": process_trace["audit_refs"],
+                "stage_node_refs": process_trace["stage_node_refs"],
+                "stage_status": (
+                    stage_nodes[-1].status.value if stage_nodes else stage.status.value
+                ),
+                "graph_interrupt_ref": confirmation.graph_interrupt_ref,
+            },
+            stable_refs=self._unique_strings(
+                [
+                    *process_trace["tool_confirmation_trace_refs"],
+                    *process_trace["tool_call_refs"],
+                    *process_trace["tool_result_refs"],
+                    *process_trace["stage_node_refs"],
+                ]
+            ),
+            log_refs=log_refs,
+        )
+        output = InspectorSection(
+            title="output",
+            records={
+                "decision": decision,
+                "user_decision": decision,
+                "result_status": result_status,
+                "result_snapshot": result_snapshot,
+                "follow_up_refs": follow_up_refs,
+                "follow_up_result": follow_up_result,
+                "tool_result_ref": tool_result_ref,
+                "tool_result_refs": process_trace["tool_result_refs"],
+                "side_effect_refs": process_trace["side_effect_refs"],
+                "denied_path_result": denied_path_result,
+                "responded_at": self._projection_datetime(confirmation.responded_at),
+                "alternative_path_summary": alternative_path_summary,
+            },
+            stable_refs=self._unique_strings(process_trace["tool_result_refs"]),
+        )
+        artifacts_section = InspectorSection(
+            title="artifacts",
+            records={
+                "artifact_refs": artifact_refs,
+                "payload_refs": payload_refs,
+                "artifact_types": [artifact.artifact_type for artifact in artifacts],
+                "audit_refs": process_trace["audit_refs"],
+                "side_effect_refs": process_trace["side_effect_refs"],
+                "context_refs": process_trace["context_refs"],
+                "tool_result_refs": process_trace["tool_result_refs"],
+                "confirmation_object_ref": confirmation.confirmation_object_ref,
+            },
+            stable_refs=self._unique_strings(
+                [
+                    *artifact_refs,
+                    *payload_refs,
+                    *process_trace["audit_refs"],
+                    *process_trace["side_effect_refs"],
+                    *process_trace["context_refs"],
+                    *process_trace["tool_result_refs"],
+                ]
+            ),
+            log_refs=log_refs,
+        )
+        return {
+            "identity": identity,
+            "input": input_section,
+            "process": process,
+            "output": output,
+            "artifacts": artifacts_section,
+            "metrics": metrics,
+        }
+
+    def build_tool_confirmation_process_trace(
+        self,
+        confirmation: ToolConfirmationRequestModel,
+        artifacts: Sequence[StageArtifactModel],
+        stage_nodes: Sequence[ExecutionNodeProjection],
+    ) -> dict[str, list[str]]:
+        trace_refs: list[str] = []
+        tool_call_refs: list[str] = []
+        tool_result_refs: list[str] = []
+        audit_refs: list[str] = []
+        side_effect_refs: list[str] = []
+        context_refs: list[str] = []
+        self._extend_unique(tool_call_refs, [confirmation.confirmation_object_ref])
+        self._extend_unique(trace_refs, self._string_list(confirmation.process_ref))
+        self._extend_unique(audit_refs, self._string_list(confirmation.audit_log_ref))
+
+        for process in self._artifact_processes(artifacts):
+            self._extend_unique(
+                trace_refs,
+                self._string_list(process.get("tool_confirmation_trace_ref")),
+            )
+            self._extend_unique(
+                trace_refs,
+                self._string_list(process.get("tool_confirmation_trace_refs")),
+            )
+            self._extend_unique(
+                tool_call_refs,
+                self._string_list(process.get("tool_call_ref")),
+            )
+            self._extend_unique(
+                tool_call_refs,
+                self._string_list(process.get("tool_call_refs")),
+            )
+            self._extend_unique(
+                tool_result_refs,
+                self._string_list(process.get("tool_result_ref")),
+            )
+            self._extend_unique(
+                tool_result_refs,
+                self._string_list(process.get("tool_result_refs")),
+            )
+            self._extend_unique(audit_refs, self._string_list(process.get("audit_ref")))
+            self._extend_unique(audit_refs, self._string_list(process.get("audit_refs")))
+            self._extend_unique(
+                audit_refs,
+                self._string_list(process.get("audit_log_ref")),
+            )
+            self._extend_unique(
+                side_effect_refs,
+                self._string_list(process.get("side_effect_ref")),
+            )
+            self._extend_unique(
+                side_effect_refs,
+                self._string_list(process.get("side_effect_refs")),
+            )
+            self._extend_unique(
+                context_refs,
+                self._string_list(process.get("context_refs")),
+            )
+
+        return {
+            "tool_confirmation_trace_refs": trace_refs,
+            "tool_call_refs": tool_call_refs,
+            "tool_result_refs": tool_result_refs,
+            "audit_refs": audit_refs,
+            "side_effect_refs": side_effect_refs,
+            "context_refs": context_refs,
+            "stage_node_refs": [node.entry_id for node in stage_nodes],
+        }
+
     def _get_visible_stage_context(
         self,
         stage_run_id: str,
@@ -401,6 +740,32 @@ class InspectorProjectionService:
         if session.project_id != run.project_id:
             self._raise_not_found()
         return stage, run
+
+    def _get_visible_tool_confirmation_context(
+        self,
+        tool_confirmation_id: str,
+    ) -> tuple[ToolConfirmationRequestModel, PipelineRunModel, StageRunModel]:
+        confirmation = self._runtime_session.get(
+            ToolConfirmationRequestModel,
+            tool_confirmation_id,
+        )
+        if confirmation is None:
+            self._raise_tool_confirmation_not_found()
+        run = self._runtime_session.get(PipelineRunModel, confirmation.run_id)
+        if run is None:
+            self._raise_tool_confirmation_not_found()
+        stage = self._runtime_session.get(StageRunModel, confirmation.stage_run_id)
+        if stage is None or stage.run_id != run.run_id:
+            self._raise_tool_confirmation_not_found()
+        session = self._control_session.get(SessionModel, run.session_id)
+        if session is None or not session.is_visible:
+            self._raise_tool_confirmation_not_found()
+        project = self._control_session.get(ProjectModel, run.project_id)
+        if project is None or not project.is_visible:
+            self._raise_tool_confirmation_not_found()
+        if session.project_id != run.project_id:
+            self._raise_tool_confirmation_not_found()
+        return confirmation, run, stage
 
     def _get_visible_control_context(
         self,
@@ -445,6 +810,28 @@ class InspectorProjectionService:
             )
         )
         return list(self._runtime_session.execute(statement).scalars().all())
+
+    def _stage_artifacts_for_tool_confirmation(
+        self,
+        confirmation: ToolConfirmationRequestModel,
+    ) -> list[StageArtifactModel]:
+        statement = (
+            select(StageArtifactModel)
+            .where(
+                StageArtifactModel.run_id == confirmation.run_id,
+                StageArtifactModel.stage_run_id == confirmation.stage_run_id,
+            )
+            .order_by(
+                StageArtifactModel.created_at.asc(),
+                StageArtifactModel.artifact_id.asc(),
+            )
+        )
+        artifacts = list(self._runtime_session.execute(statement).scalars().all())
+        return [
+            artifact
+            for artifact in artifacts
+            if self._artifact_matches_tool_confirmation(artifact, confirmation)
+        ]
 
     def _stage_artifacts_for_control(
         self,
@@ -529,6 +916,31 @@ class InspectorProjectionService:
                 matched = control_item
         return matched
 
+    def _tool_confirmation_event(
+        self,
+        run: PipelineRunModel,
+        confirmation: ToolConfirmationRequestModel,
+    ) -> ToolConfirmationFeedEntry | None:
+        matched: ToolConfirmationFeedEntry | None = None
+        for event in self._event_store.list_for_session(run.session_id):
+            if event.run_id != run.run_id or event.stage_run_id != confirmation.stage_run_id:
+                continue
+            payload = event.payload.get("tool_confirmation")
+            if payload is None:
+                continue
+            try:
+                tool_confirmation = TOOL_CONFIRMATION_ADAPTER.validate_python(payload)
+            except ValidationError:
+                continue
+            if (
+                tool_confirmation.tool_confirmation_id
+                == confirmation.tool_confirmation_id
+                and tool_confirmation.run_id == run.run_id
+                and tool_confirmation.stage_run_id == confirmation.stage_run_id
+            ):
+                matched = tool_confirmation
+        return matched
+
     def _clarification_record(
         self,
         control_record: RunControlRecordModel,
@@ -564,6 +976,42 @@ class InspectorProjectionService:
             if isinstance(process_metrics, Mapping):
                 self._merge_known_metrics(metric_values, process_metrics, allowed_fields)
         return MetricSet.model_validate(metric_values)
+
+    def _tool_confirmation_control_record(
+        self,
+        confirmation: ToolConfirmationRequestModel,
+        stage: StageRunModel,
+    ) -> RunControlRecordModel:
+        statement = (
+            select(RunControlRecordModel)
+            .where(
+                RunControlRecordModel.control_type
+                == RunControlRecordType.TOOL_CONFIRMATION,
+                RunControlRecordModel.payload_ref
+                == confirmation.tool_confirmation_id,
+            )
+            .order_by(
+                RunControlRecordModel.created_at.asc(),
+                RunControlRecordModel.control_record_id.asc(),
+            )
+        )
+        records = list(self._runtime_session.execute(statement).scalars().all())
+        matched: RunControlRecordModel | None = None
+        for record in records:
+            if (
+                record.run_id != confirmation.run_id
+                or record.stage_run_id != confirmation.stage_run_id
+                or record.source_stage_type is not stage.stage_type
+                or (
+                    record.target_stage_type is not None
+                    and record.target_stage_type is not stage.stage_type
+                )
+            ):
+                self._raise_tool_confirmation_not_found()
+            matched = record
+        if matched is None:
+            self._raise_tool_confirmation_not_found()
+        return matched
 
     def _approval_requests(
         self,
@@ -901,6 +1349,50 @@ class InspectorProjectionService:
         return process_control_record_id == control_record_id
 
     @staticmethod
+    def _artifact_matches_tool_confirmation(
+        artifact: StageArtifactModel,
+        confirmation: ToolConfirmationRequestModel,
+    ) -> bool:
+        if (
+            artifact.artifact_type != "tool_confirmation_trace"
+            or not isinstance(artifact.process, Mapping)
+        ):
+            return False
+        process = artifact.process
+        if (
+            process.get("tool_confirmation_id") is not None
+            and process.get("tool_confirmation_id") != confirmation.tool_confirmation_id
+        ):
+            return False
+        if process.get("tool_confirmation_id") == confirmation.tool_confirmation_id:
+            return True
+        if process.get("confirmation_object_ref") == confirmation.confirmation_object_ref:
+            return True
+        if (
+            confirmation.process_ref is not None
+            and process.get("tool_confirmation_trace_ref") == confirmation.process_ref
+        ):
+            return True
+        if (
+            confirmation.process_ref is not None
+            and confirmation.process_ref
+            in InspectorProjectionService._string_list(
+                process.get("tool_confirmation_trace_refs")
+            )
+        ):
+            return True
+        if (
+            confirmation.audit_log_ref is not None
+            and process.get("audit_ref") == confirmation.audit_log_ref
+        ):
+            return True
+        return (
+            confirmation.audit_log_ref is not None
+            and confirmation.audit_log_ref
+            in InspectorProjectionService._string_list(process.get("audit_refs"))
+        )
+
+    @staticmethod
     def _control_trigger_reason(
         artifact_processes: Sequence[Mapping[str, Any]],
         control_event: ControlItemFeedEntry | None,
@@ -952,6 +1444,68 @@ class InspectorProjectionService:
                 return value
         if source_stage is not None:
             return source_stage.status.value
+        return run.status.value
+
+    @classmethod
+    def _latest_tool_confirmation_result_snapshot(
+        cls,
+        artifact_processes: Sequence[Mapping[str, Any]],
+    ) -> Mapping[str, Any] | None:
+        for process in reversed(artifact_processes):
+            value = process.get("result_snapshot")
+            if isinstance(value, Mapping):
+                return cls._scrub_raw_graph_state(value)
+        return None
+
+    @classmethod
+    def _tool_confirmation_decision(
+        cls,
+        confirmation: ToolConfirmationRequestModel,
+        artifacts: Sequence[StageArtifactModel],
+        confirmation_event: ToolConfirmationFeedEntry | None,
+    ) -> str | None:
+        if confirmation.user_decision is not None:
+            return cls._supported_tool_confirmation_decision(
+                confirmation.user_decision.value
+            )
+        if confirmation_event is not None and confirmation_event.decision is not None:
+            decision = cls._supported_tool_confirmation_decision(
+                confirmation_event.decision.value
+            )
+            if decision is not None:
+                return decision
+        for process in reversed(cls._artifact_processes(artifacts)):
+            result_snapshot = process.get("result_snapshot")
+            if not isinstance(result_snapshot, Mapping):
+                continue
+            value = result_snapshot.get("decision")
+            if isinstance(value, str) and value:
+                decision = cls._supported_tool_confirmation_decision(value)
+                if decision is not None:
+                    return decision
+        return None
+
+    @staticmethod
+    def _supported_tool_confirmation_decision(value: str) -> str | None:
+        if value in {"allowed", "denied"}:
+            return value
+        return None
+
+    @staticmethod
+    def _tool_confirmation_result_status(
+        result_snapshot: Mapping[str, Any] | None,
+        confirmation: ToolConfirmationRequestModel,
+        stage: StageRunModel,
+        run: PipelineRunModel,
+    ) -> str:
+        if isinstance(result_snapshot, Mapping):
+            value = result_snapshot.get("result_status")
+            if isinstance(value, str) and value:
+                return value
+        if confirmation.status is not None:
+            return confirmation.status.value
+        if stage.status is not None:
+            return stage.status.value
         return run.status.value
 
     @staticmethod
@@ -1028,6 +1582,14 @@ class InspectorProjectionService:
         raise InspectorProjectionServiceError(
             ErrorCode.NOT_FOUND,
             CONTROL_ITEM_INSPECTOR_NOT_FOUND_MESSAGE,
+            404,
+        )
+
+    @staticmethod
+    def _raise_tool_confirmation_not_found() -> None:
+        raise InspectorProjectionServiceError(
+            ErrorCode.NOT_FOUND,
+            TOOL_CONFIRMATION_INSPECTOR_NOT_FOUND_MESSAGE,
             404,
         )
 
