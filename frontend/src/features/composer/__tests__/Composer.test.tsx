@@ -49,6 +49,37 @@ function renderComposerForWorkspace(
   );
 }
 
+function buildPausedWorkspace(): SessionWorkspaceProjection {
+  const base = mockSessionWorkspaces["session-running"];
+
+  return {
+    ...base,
+    session: {
+      ...base.session,
+      status: "paused",
+      current_run_id: "run-paused",
+      latest_stage_type: "solution_design",
+    },
+    runs: base.runs.map((run) => ({
+      ...run,
+      run_id: "run-paused",
+      status: "paused",
+      current_stage_type: "solution_design",
+      is_active: true,
+    })),
+    current_run_id: "run-paused",
+    current_stage_type: "solution_design",
+    composer_state: {
+      ...base.composer_state,
+      mode: "paused",
+      is_input_enabled: false,
+      primary_action: "resume",
+      secondary_actions: ["terminate"],
+      bound_run_id: "run-paused",
+    },
+  };
+}
+
 describe("composer-mode", () => {
   it("treats draft and waiting clarification as sendable modes", () => {
     expect(resolveComposerMode(getComposerState("session-draft"), null)).toEqual({
@@ -159,6 +190,35 @@ describe("Composer component", () => {
     expect(input).toHaveProperty("disabled", true);
     expect(button).toHaveProperty("disabled", true);
     expect(screen.getByText(/当前输入框不承担发送动作/u)).toBeTruthy();
+  });
+
+  it("keeps the lifecycle button bound to the current active run during waiting approval", () => {
+    renderComposerForWorkspace(mockSessionWorkspaces["session-waiting-approval"]);
+
+    const button = screen.getByRole("button", { name: "暂停" });
+    expect(screen.getByText("绑定 run run-waiting-approval")).toBeTruthy();
+    expect(button).toHaveProperty("disabled", true);
+    expect(button.getAttribute("type")).toBe("button");
+    expect(screen.getByLabelText("Composer input")).toHaveProperty("disabled", true);
+  });
+
+  it("shows resume presentation for paused runs without turning the button into send", () => {
+    renderComposerForWorkspace(buildPausedWorkspace());
+
+    const button = screen.getByRole("button", { name: "恢复" });
+    expect(button).toHaveProperty("disabled", true);
+    expect(button.getAttribute("type")).toBe("button");
+    expect(screen.getByLabelText("Composer input")).toHaveProperty("disabled", true);
+  });
+
+  it("keeps a disabled lifecycle placeholder for completed runs", () => {
+    renderComposerForWorkspace(mockSessionWorkspaces["session-completed"]);
+
+    const button = screen.getByRole("button", { name: "不可用" });
+    expect(button).toHaveProperty("disabled", true);
+    expect(button.getAttribute("type")).toBe("button");
+    expect(screen.getByText("绑定 run run-completed")).toBeTruthy();
+    expect(screen.getByLabelText("Composer input")).toHaveProperty("disabled", true);
   });
 
   it("resets unsent local input when the bound session changes", () => {
