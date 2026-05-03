@@ -920,6 +920,8 @@ V1 运行环境必须满足以下约束：
 - `risk_categories`
 - `reason`
 - `expected_side_effects`
+- `deny_followup_action`
+- `deny_followup_summary`
 - `status`
 - `payload_ref`
 - `requested_at`
@@ -937,6 +939,8 @@ V1 运行环境必须满足以下约束：
 - 必须在工具执行前创建；用户允许前不得执行对应高风险工具动作
 - 用户允许只覆盖本次确认请求中的具体工具动作、命令、目标和风险说明，不得作为同阶段后续高风险动作的通用授权
 - 用户拒绝后，Stage Agent Runtime 可以寻找低风险替代路径继续当前阶段；不存在替代路径时必须使当前 `StageRun.status` 与 `PipelineRun.status` 进入 `failed`，或响应用户显式 `pause` / `terminate`
+- `deny_followup_action` 在用户尚未拒绝时必须为 `null`；用户拒绝后只允许取 `continue_current_stage`、`run_failed` 或 `awaiting_run_control`
+- `deny_followup_summary` 在用户尚未拒绝时必须为 `null`；用户拒绝后必须返回稳定产品语义摘要，供顶层 `tool_confirmation` 投影、查询接口和 SSE 直接消费，不得要求前端从 Inspector、原始运行状态或 runtime 内部字段自行推断
 - 确认请求、用户决定、后续工具执行结果、替代路径判断和审计记录必须写入 `StageArtifact.process`、`RunControlRecord` 或等价稳定过程记录
 - 工具确认拒绝不得触发 `solution_design_approval` 或 `code_review_approval` 的 `Reject` 回退语义
 
@@ -1976,11 +1980,18 @@ Inspector 投影必须满足以下总规则：
 - `requested_at`
 - `responded_at`
 - `decision`
+- `deny_followup_action`
+- `deny_followup_summary`
 - `disabled_reason`
 
 其中：
 - `status` 至少支持 `pending`、`allowed`、`denied`、`cancelled`
 - `decision` 在用户尚未处理时为 `null`；用户处理后返回 `allowed` 或 `denied`
+- `deny_followup_action` 在 `decision != denied` 时必须为 `null`；当 `decision = denied` 时只允许取 `continue_current_stage`、`run_failed` 或 `awaiting_run_control`
+- `deny_followup_summary` 在 `decision != denied` 时必须为 `null`；当 `decision = denied` 时必须返回稳定产品语义摘要
+- 当 `deny_followup_action = continue_current_stage` 时，后端必须已确认存在低风险替代路径，且 `deny_followup_summary` 必须明确当前阶段将继续执行
+- 当 `deny_followup_action = run_failed` 时，后端必须明确当前 run 将进入失败路径，且前端不得把该结果表达为审批拒绝或 rollback
+- 当 `deny_followup_action = awaiting_run_control` 时，后端必须明确当前 run 正等待用户显式 `pause` 或 `terminate` 一类运行控制决定，且前端不得把该结果表达为自动阶段回退
 - 当当前 run 因暂停而暂时不可确认时，`is_actionable = false`，且 `disabled_reason` 必须返回“当前运行已暂停，恢复后继续等待工具确认”或等价明确信息
 - `tool_confirmation` 不得包含 `approval_id`、`approval_type`、`approve_action` 或 `reject_action`
 
@@ -2106,7 +2117,7 @@ Inspector 投影必须满足以下总规则：
 - `POST /api/approvals/{approvalId}/approve` 与 `POST /api/approvals/{approvalId}/reject` 在 run 未暂停时，必须通过恢复对应 `GraphInterrupt` 来继续执行图
 - `POST /api/approvals/{approvalId}/approve` 与 `POST /api/approvals/{approvalId}/reject` 在 run 已暂停时，必须被拒绝，并返回明确的“当前运行已暂停，恢复后继续等待审批”错误信息
 - `POST /api/tool-confirmations/{toolConfirmationId}/allow` 在 run 未暂停时，必须只允许执行该确认请求覆盖的具体工具动作，并恢复同一个 `GraphThread`
-- `POST /api/tool-confirmations/{toolConfirmationId}/deny` 在 run 未暂停时，必须记录拒绝决定并恢复同一个 `GraphThread` 进入替代路径判断或失败处理
+- `POST /api/tool-confirmations/{toolConfirmationId}/deny` 在 run 未暂停时，必须记录拒绝决定，稳定写入 `deny_followup_action` 与 `deny_followup_summary`，并恢复同一个 `GraphThread` 进入替代路径判断或失败处理
 - `POST /api/tool-confirmations/{toolConfirmationId}/allow` 与 `POST /api/tool-confirmations/{toolConfirmationId}/deny` 在 run 已暂停时，必须被拒绝，并返回明确的“当前运行已暂停，恢复后继续等待工具确认”错误信息
 - 工具确认 API 不得创建 `ApprovalDecision`，不得返回 `approval_result`
 

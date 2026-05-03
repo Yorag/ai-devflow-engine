@@ -351,6 +351,7 @@
 - `SessionWorkspaceProjection` 包含项目摘要、会话状态、run summaries、按 run 归属可分段的 Narrative Feed 和 Composer 状态。
 - `RunTimelineProjection.entries[].type` 只允许正式顶层条目枚举。
 - SSE `payload` 中的 `message_item`、`stage_node`、`approval_request`、`approval_result`、`tool_confirmation`、`control_item`、`delivery_result`、`system_status` 与查询投影同语义。
+- `ToolConfirmationFeedEntry` 必须为顶层 `tool_confirmation` 条目提供稳定拒绝后续语义字段 `deny_followup_action` 与 `deny_followup_summary`；其字段语义在查询投影与 SSE `tool_confirmation_requested` / `tool_confirmation_result` 中完全一致。
 - `SolutionDesignArtifactRead` 必须包含 `implementation_plan`，并能表达稳定任务标识、任务顺序、依赖关系、修改范围、测试策略和下游引用所需字段；`Code Generation`、`Test Generation & Execution` 与 `Code Review` 的 Schema 必须能引用同一 `implementation_plan`。
 - `tool_confirmation_requested` 与 `tool_confirmation_result` 事件载荷必须携带同名 `tool_confirmation` 投影，不得携带 `approval_id`、`approval_type`、`approve_action` 或 `reject_action`。
 - `tool_confirmation` 必须是独立顶层 Narrative Feed 条目，不得作为 `approval_request` 或 `control_item` 的替代结构。
@@ -517,7 +518,7 @@
 - `StageRun.stage_type` 只允许六个正式业务阶段。
 - `StageRun.status` 必须支持 C1.1 定义的全部 `StageStatus`，包括运行终止时使用的 `terminated`。
 - `RunControlRecord.control_type` 至少支持 `clarification_wait`、`rollback`、`retry`、`tool_confirmation`；`tool_confirmation` 只作为过程留痕，不作为可见 `ControlItemType`。
-- `ToolConfirmationRequestModel` 必须记录确认对象、工具名称、命令或参数摘要、目标资源、风险等级、风险分类、预期副作用、替代路径判断、用户决定、状态、关联 StageRun、关联 GraphInterrupt、审计引用和过程记录引用。
+- `ToolConfirmationRequestModel` 或其绑定的稳定过程记录必须记录确认对象、工具名称、命令或参数摘要、目标资源、风险等级、风险分类、预期副作用、替代路径判断、拒绝后续处理语义、用户决定、状态、关联 StageRun、关联 GraphInterrupt、审计引用和过程记录引用，并能稳定重建顶层 `tool_confirmation.deny_followup_action` / `deny_followup_summary`。
 - `ToolConfirmationRequestModel.status` 使用 `ToolConfirmationStatus`，不得复用 `ApprovalStatus` 或创建 `ApprovalDecisionModel`。
 - run 尾部 `system_status` 不作为 `RunControlRecord.control_type` 持久化。
 - `DeliveryRecord` 是正式领域对象，不由临时交付详情投影替代。

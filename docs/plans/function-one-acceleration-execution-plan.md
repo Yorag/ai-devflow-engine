@@ -63,9 +63,9 @@
 
 | Lane | Branch | Coverage | Status | Owner Scope | Review Boundary |
 | --- | --- | --- | --- | --- | --- |
-| AL01 | `feat/al-run-core-events` | R3.1, E3.1, R3.2, R3.3, R3.4, R3.4a, R3.4b, R3.5, R3.6, R3.7, C2.9a, C2.9b | claimed | Run 状态机、PipelineRun、EventStore、snapshot、GraphDefinition、StageRun、StageArtifact、历史可见性命令 | Run 和事件真源 |
-| AL02 | `feat/al-projections-streams` | Q3.1, Q3.2, Q3.3, Q3.4, Q3.4a, E3.2, L3.1, L4.2 | complete | Projection services、SSE、run/stage log query、audit query route | 查询投影、实时流和轻查询 API |
-| AL03 | `feat/al-runtime-human-loop` | A4.0, L4.1, H4.1, H4.3, D4.0, H4.4, H4.4a, H4.5, H4.6, H4.7 | claimed | RuntimeOrchestrationService、clarification、approval、delivery snapshot gate、runtime control commands | 运行编排和人工介入后端 |
+| AL01 | `feat/al-run-core-events` | R3.1, E3.1, R3.2a, R3.2, R3.3, R3.4, R3.4a, R3.4b, R3.5, R3.6, R3.7, C2.9a, C2.9b | claimed | Run 状态机、PipelineRun、EventStore、snapshot、GraphDefinition、StageRun、StageArtifact、历史可见性命令 | Run 和事件真源 |
+| AL02 | `feat/al-projections-streams` | Q3.1, Q3.2, Q3.3, Q3.4, Q3.4a, E3.2, L3.1, L4.2, Q3.4b | claimed | Projection services、SSE、run/stage log query、audit query route | 查询投影、实时流和轻查询 API |
+| AL03 | `feat/al-runtime-human-loop` | A4.0, L4.1, H4.1, H4.3, D4.0, H4.4, H4.4a, H4.4b, H4.5, H4.6, H4.7 | claimed | RuntimeOrchestrationService、clarification、approval、delivery snapshot gate、runtime control commands | 运行编排和人工介入后端 |
 | AL04 | `feat/al-tools-deterministic-delivery` | A4.1, W5.0, W5.0a, W5.0b, W5.0c, W5.0d, W5.1, W5.2, W5.3, W5.4, W5.5, W5.6, A4.2, A4.3, A4.4, D4.1, D4.2, D4.3, D5.1, D5.2, D5.3, D5.4 | planned | RuntimeEngine、ToolProtocol、ToolRegistry、Workspace tools、ChangeSet、PreviewTarget、deterministic runtime、DeliveryRecord、delivery adapters | 工具、deterministic runtime 和交付适配 |
 | AL05 | `feat/al-provider-langgraph-context` | A4.5, A4.6, A4.7, A4.8, A4.8a, A4.8b, A4.8c, A4.8d, A4.9, A4.9a, A4.9e, A4.9b, A4.9c, A4.9d, A4.10, A4.11 | claimed | LangGraph runtime、Provider registry、PromptValidation、PromptRegistry、PromptRenderer、ContextEnvelope、Provider adapter、AgentDecision、StageAgentRuntime | Provider、LangGraph、上下文和 Stage Agent |
 | AL06 | `feat/al-frontend-runtime-ui` | F3.1, F3.2, F3.3, F3.4, F3.5, F3.6, F3.7, H4.2, F4.1, F4.2, F4.3, F4.3a, F4.4, F5.1, F5.2a, F5.2b | claimed | frontend workspace store、SSE reducer、Feed、StageNode、Inspector、Composer、Approval、Tool Confirmation、Delivery UI | 前端运行工作台和交付展示 |
@@ -79,12 +79,15 @@
 | --- | --- | --- |
 | Provider、DeliveryChannel、ConfigurationPackage、PlatformRuntimeSettings API 与 service | current baseline | AL01, AL03, AL04, AL05, AL06 |
 | Run 状态枚举转换、PipelineRun、StageRun、StageArtifact、GraphDefinition、EventStore | AL01 | AL02, AL03, AL04, AL05, AL06, QA |
+| 高影响多库公开语义 / publication boundary，以及为 enforce 该边界而做的 startup workspace/timeline/SSE visibility filter | AL01 | AL02, AL03, QA |
 | Projection payload、SSE payload、run/stage log query route、audit query route | AL02 | AL06, QA |
 | RuntimeOrchestrationService、clarification、approval、tool confirmation、runtime control command semantics | AL03 | AL04, AL05, AL06, QA |
 | ToolProtocol、ToolRegistry、WorkspaceManager、Workspace tools、ChangeSet、PreviewTarget、DeliveryRecord、delivery adapter | AL04 | AL03, AL05, AL06, QA |
 | Prompt、Context、Provider adapter、LangGraph node/checkpoint、AgentDecision、StageAgentRuntime | AL05 | AL01, AL03, AL04, AL06, QA |
 | frontend API client runtime-facing additions、workspace store、Feed/Inspector/Composer/Approval/Delivery components | AL06 | QA |
 | OpenAPI/e2e/regression harness and release checklist | QA | all lanes |
+
+`R3.2a` owner decision：AL01 被授权直接修改 `backend/app/services/projections/workspace.py`、`backend/app/services/projections/timeline.py`、`backend/app/api/routes/events.py`，但仅限于 enforce publication boundary 的 reader visibility filter。该例外不转移 AL02 对通用 projection payload、SSE payload、query route 和 projection contract 演进的 owner scope。
 
 ## 5. Dependency And Start Gates
 
@@ -93,12 +96,12 @@ Start gate 只允许开始实现或 mock-first；它不等于完成 gate。
 | Gate | Rule |
 | --- | --- |
 | Baseline gate | 运行快照、交付快照、Provider adapter 和配置回归从当前基线读取 Provider、DeliveryChannel、ConfigurationPackage、PlatformRuntimeSettings 契约；需要修改这些共享入口时必须停止并报告 owner conflict。 |
-| AL01 gate | AL01 可从当前基线开始 R3.1、E3.1、R3.5-R3.7 的纯领域和持久化实现；R3.4a、R3.4b 的最终完成必须接入真实运行状态和配置契约。R3.2 只有在 C2.8 已把 `PlatformRuntimeSettings.internal_model_bindings` 三类选择固定为正式配置真源，且 R3.2 已按 split plan 承接首个 `graph_thread_ref` 创建与最小 `workspace_ref` 分配规则后，才允许 claim 并继续实现。 |
-| AL02 gate | AL02 可基于 AL01 提供的事件 fixture 或冻结 projection contract 先行；最终完成必须读取真实 EventStore、StageArtifact 或 runtime model。 |
-| AL03 gate | AL03 可基于 AL01/AL02 的 stub 接口先行 A4.0、L4.1、H4.1、H4.3；审批命令、运行控制和 tool confirmation 的最终完成必须接入真实 run state 和 projection events。 |
+| AL01 gate | AL01 可从当前基线开始 R3.1、E3.1、R3.5-R3.7 和 R3.2a 的纯领域、持久化与公开语义边界实现；R3.4a、R3.4b 的最终完成必须接入真实运行状态和配置契约。R3.2 只有在 C2.8 已把 `PlatformRuntimeSettings.internal_model_bindings` 三类选择固定为正式配置真源，且 R3.2 已按 split plan 承接首个 `graph_thread_ref` 创建与最小 `workspace_ref` 分配规则后，才允许 claim 并继续实现；最终完成必须复用 R3.2a 的多库公开语义边界，不得把 reader visibility 缺口继续留在 R3.2 本身。 |
+| AL02 gate | AL02 可基于 AL01 提供的事件 fixture 或冻结 projection contract 先行；最终完成必须读取真实 EventStore、StageArtifact 或 runtime model。Q3.4b 必须暴露顶层 `tool_confirmation.deny_followup_action` / `deny_followup_summary`；若 H4.4b 未先提供稳定 deny follow-up source，AL02 必须停止并回报 owner dependency，而不是以 `alternative_path_summary` 或 run 终态猜测映射补齐契约。 |
+| AL03 gate | AL03 可基于 AL01/AL02 的 stub 接口先行 A4.0、L4.1、H4.1、H4.3；审批命令、运行控制和 tool confirmation 的最终完成必须接入真实 run state 和 projection events；H4.4 的最终完成必须复用 R3.2a 的 publication boundary。H4.4b 必须为 deny 路径固化 `continue_current_stage`、`run_failed`、`awaiting_run_control` 三类稳定后续处理语义来源。 |
 | AL04 gate | AL04 可立即开始 ToolProtocol、错误码、WorkspaceManager、纯工具和 fixture；deterministic runtime 与 delivery adapter 的最终完成必须接入 AL01 run truth、AL03 runtime boundary 和当前基线的 delivery settings。 |
 | AL05 gate | AL05 可立即开始 PromptValidation、PromptRegistry、PromptRenderer、Context schema 和 provider registry；LangGraph 与 StageAgentRuntime 的最终完成必须接入 AL01、AL03、AL04。 |
-| AL06 gate | AL06 可基于冻结 projection/event/mock payload 先行所有 runtime UI；最终完成必须切换到真实 API/SSE、真实 error contract 和真实 delivery/result payload。 |
+| AL06 gate | AL06 可基于冻结 projection/event/mock payload 先行所有 runtime UI；最终完成必须切换到真实 API/SSE、真实 error contract 和真实 delivery/result payload。F4.3a 的最终完成必须读取 Q3.4b 暴露的顶层 `tool_confirmation.deny_followup_action` / `deny_followup_summary`，不得从 Inspector、run terminal status 或 `alternative_path_summary` 私有字段自行推断拒绝后的后续运行语义。 |
 | QA gate | QA 可提前创建测试骨架、fixture 和 checklist；任何回归任务的 `done` 必须基于 integration 分支的真实实现验证。 |
 
 ## 6. Coordination Store And Checkpoint Snapshot
@@ -169,9 +172,9 @@ Lane queue 记录任务归属和 lane 内执行顺序。任务资格仍必须由
 
 | Lane | Queue |
 | --- | --- |
-| AL01 | R3.1 -> E3.1 -> R3.4 -> R3.4a -> R3.4b -> R3.5 -> R3.6 -> R3.7 -> R3.2 -> R3.3 -> C2.9a -> C2.9b |
-| AL02 | Q3.1 -> Q3.2 -> Q3.3 -> Q3.4 -> Q3.4a -> E3.2 -> L3.1 -> L4.2 |
-| AL03 | A4.0 -> L4.1 -> H4.1 -> H4.3 -> D4.0 -> H4.4 -> H4.4a -> H4.5 -> H4.6 -> H4.7 |
+| AL01 | R3.1 -> E3.1 -> R3.4 -> R3.4a -> R3.4b -> R3.5 -> R3.6 -> R3.7 -> R3.2a -> R3.2 -> R3.3 -> C2.9a -> C2.9b |
+| AL02 | Q3.1 -> Q3.2 -> Q3.3 -> Q3.4 -> Q3.4a -> E3.2 -> L3.1 -> L4.2 -> Q3.4b |
+| AL03 | A4.0 -> L4.1 -> H4.1 -> H4.3 -> D4.0 -> H4.4 -> H4.4a -> H4.4b -> H4.5 -> H4.6 -> H4.7 |
 | AL04 | A4.1 -> W5.0 -> W5.0a -> W5.0b -> W5.0c -> W5.0d -> W5.1 -> W5.2 -> W5.3 -> W5.4 -> W5.5 -> W5.6 -> A4.2 -> A4.3 -> A4.4 -> D4.1 -> D4.2 -> D4.3 -> D5.1 -> D5.2 -> D5.3 -> D5.4 |
 | AL05 | A4.8 -> A4.8a -> A4.8c -> A4.8d -> A4.8b -> A4.9 -> A4.9a -> A4.9e -> A4.9b -> A4.5 -> A4.6 -> A4.7 -> A4.9c -> A4.9d -> A4.10 -> A4.11 |
 | AL06 | F3.1 -> F3.2 -> F3.3 -> F3.4 -> F3.5 -> F3.6 -> F3.7 -> H4.2 -> F4.1 -> F4.2 -> F4.3 -> F4.3a -> F4.4 -> F5.1 -> F5.2a -> F5.2b |

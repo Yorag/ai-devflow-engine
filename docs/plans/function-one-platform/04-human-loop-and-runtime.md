@@ -342,6 +342,7 @@
 - 创建后必须把当前 `PipelineRun.status` 与当前 `StageRun.status` 投影为 `waiting_tool_confirmation`。
 - `POST /api/tool-confirmations/{toolConfirmationId}/allow` 只能执行该确认请求覆盖的具体工具动作，不得扩大到同类命令、同类路径或后续工具调用。
 - `POST /api/tool-confirmations/{toolConfirmationId}/deny` 必须记录用户决定和后续处理结果；存在低风险替代路径时恢复运行到替代路径，不存在替代路径时进入结构化失败或等待用户显式暂停、终止。
+- deny 结果必须稳定产出 `deny_followup_action` 与 `deny_followup_summary`；当存在低风险替代路径时固定为 `continue_current_stage`，当进入失败路径时固定为 `run_failed`，当等待用户显式运行控制时固定为 `awaiting_run_control`。
 - 工具确认允许或拒绝都必须生成 `tool_confirmation_result` 领域事件，并更新顶层 `tool_confirmation` 投影。
 - 工具确认不得创建 `ApprovalRequest`、`ApprovalDecision` 或顶层 `approval_result`，也不得触发审批 Reject 的 rollback 语义。
 - paused run 拒绝 allow / deny 提交并返回稳定错误；resume 后恢复到同一个 `waiting_tool_confirmation` 检查点。
@@ -349,6 +350,41 @@
 - 工具确认请求、允许、拒绝、取消、低风险替代路径判断、无替代失败和 runtime resume 失败必须写入审计记录与运行日志摘要。
 - 审计写入失败时不得提交工具确认决定、`tool_confirmation_result` 事件或执行对应工具动作。
 - API 测试必须断言 `POST /api/tool-confirmations/{toolConfirmationId}/allow`、`POST /api/tool-confirmations/{toolConfirmationId}/deny` 的请求/响应 Schema、paused 错误、终态错误和 OpenAPI path/method 已进入 `/api/openapi.json`。
+
+**测试方法**：
+- `pytest backend/tests/services/test_tool_confirmation_commands.py -v`
+- `pytest backend/tests/api/test_tool_confirmation_api.py -v`
+
+<a id="h44b"></a>
+
+## H4.4b ToolConfirmation 拒绝后续处理语义固化
+
+**计划周期**：Week 6-7
+**状态**：`[ ]`
+**目标**：为工具确认拒绝结果固化稳定的后续处理语义来源，使 query / SSE 顶层 `tool_confirmation` 能直接读取 deny 后运行结果，而不依赖 Inspector 或 run 终态推断。
+**实施计划**：`docs/plans/implementation/h4.4b-tool-confirmation-deny-followup-source.md`
+
+**修改文件列表**：
+- Modify: `backend/app/db/models/runtime.py`
+- Modify: `backend/app/services/tool_confirmations.py`
+- Modify: `backend/app/services/control_records.py`
+- Modify: `backend/tests/services/test_tool_confirmation_commands.py`
+- Modify: `backend/tests/api/test_tool_confirmation_api.py`
+
+**实现类/函数**：
+- `ToolConfirmationRequestModel`
+- `ToolConfirmationService.deny()`
+- `ToolConfirmationService.build_tool_confirmation_projection()`
+
+**验收标准**：
+- deny 路径必须稳定写入 `deny_followup_action` 与 `deny_followup_summary`，不得只依赖 `alternative_path_summary` 或事后读取 run 终态推断。
+- `deny_followup_action` 只允许 `continue_current_stage`、`run_failed`、`awaiting_run_control`。
+- 当存在低风险替代路径并继续当前阶段时，必须写入 `continue_current_stage` 和稳定摘要。
+- 当无替代路径并直接进入失败路径时，必须写入 `run_failed` 和稳定摘要。
+- 当拒绝后等待用户显式 `pause` / `terminate` 一类运行控制决定时，必须写入 `awaiting_run_control` 和稳定摘要。
+- 这些字段必须进入 `ToolConfirmationService.build_tool_confirmation_projection()` 的稳定来源，供后续 Q3.4b 暴露到 query / workspace / timeline / SSE。
+- 审计写入失败或 deny 处理失败时，不得留下已拒绝但无后续处理语义的半成品记录。
+- 服务与 API 测试必须覆盖三种 deny 后续结果分支，以及 paused / terminal run 的稳定错误语义。
 
 **测试方法**：
 - `pytest backend/tests/services/test_tool_confirmation_commands.py -v`
@@ -616,6 +652,7 @@
 **验收标准**：
 - `tool_confirmation` 以 Narrative Feed 顶层交互块展示，不渲染为 Approval Block、Control Item 或阶段内部条目。
 - 工具确认块必须展示工具名称、命令或参数摘要、目标资源、风险等级、风险分类、预期副作用、替代路径摘要和当前状态。
+- 工具确认块必须直接消费顶层 `tool_confirmation.deny_followup_action` 与 `tool_confirmation.deny_followup_summary` 展示拒绝后的后续运行语义，不得依赖 `ToolConfirmationInspectorProjection`、原始 run 终态推断或 runtime 私有字段。
 - 主操作文案使用 `允许本次执行` / `拒绝本次执行` 或等价权限动作，不使用 `Approve` / `Reject`。
 - paused、历史 run、terminated、failed、completed 状态下的工具确认块不可提交，并展示稳定禁用原因。
 - 拒绝工具动作后，前端不得展示审批拒绝、方案回退或 rollback 文案；后端进入替代路径、失败或等待运行控制时，按对应投影展示。
