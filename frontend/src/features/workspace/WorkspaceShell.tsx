@@ -100,7 +100,11 @@ export function WorkspaceShell(): JSX.Element {
               onTemplateChange={handleTemplateChange}
             />
           ) : workspace ? (
-            <NarrativeFeed entries={workspace.narrative_feed} />
+            <NarrativeFeed
+              entries={workspace.narrative_feed}
+              runs={workspace.runs}
+              currentRunId={workspace.current_run_id}
+            />
           ) : (
             <div className="workspace-main__empty">
               <p className="workspace-eyebrow">Narrative Workspace</p>
