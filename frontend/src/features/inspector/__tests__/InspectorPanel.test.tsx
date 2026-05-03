@@ -10,6 +10,7 @@ import type {
 } from "../../../api/types";
 import { renderWithAppProviders } from "../../../app/test-utils";
 import { mockFeedEntriesByType } from "../../../mocks/fixtures";
+import { mockApiRequestOptions } from "../../../mocks/handlers";
 import { ConsolePage } from "../../../pages/ConsolePage";
 import { FeedEntryRenderer } from "../../feed/FeedEntryRenderer";
 import { NarrativeFeed } from "../../feed/NarrativeFeed";
@@ -243,7 +244,7 @@ describe("Feed Inspector opening", () => {
   });
 
   it("mounts the Inspector shell from the selected workspace projection", async () => {
-    renderWithAppProviders(<ConsolePage />);
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
     fireEvent.click(
       await screen.findByRole("button", { name: "Open Add workspace shell" }),
@@ -259,7 +260,7 @@ describe("Feed Inspector opening", () => {
   });
 
   it("closes and clears the Inspector target when the selected session changes", async () => {
-    renderWithAppProviders(<ConsolePage />);
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
     fireEvent.click(
       await screen.findByRole("button", { name: "Open Add workspace shell" }),
@@ -282,7 +283,7 @@ describe("Feed Inspector opening", () => {
   });
 
   it("closes and clears the Inspector target when the selected project changes", async () => {
-    renderWithAppProviders(<ConsolePage />);
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
     fireEvent.click(
       await screen.findByRole("button", { name: "Open Add workspace shell" }),

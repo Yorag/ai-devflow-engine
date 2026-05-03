@@ -130,6 +130,7 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | AL04-A4.1 | A4.1 | AL04 | `feat/al-tools-deterministic-delivery` | done | cf4828c | 3cba4f8 | `docs/plans/acceleration/reports/AL04-A4.1.md` | - |
 | AL04-W5.0 | W5.0 | AL04 | `feat/al-tools-deterministic-delivery` | done | 67f5290 | 2b78be5 | `docs/plans/acceleration/reports/AL04-W5.0.md` | - |
 | AL04-W5.0a | W5.0a | AL04 | `feat/al-tools-deterministic-delivery` | done | 74578b0 | e2c777c | `docs/plans/acceleration/reports/AL04-W5.0a.md` | - |
+| AL04-W5.0b | W5.0b | AL04 | `feat/al-tools-deterministic-delivery` | done | 7aeff59 | 41f80c8 | `docs/plans/acceleration/reports/AL04-W5.0b.md` | - |
 | AL05-A4.8 | A4.8 | AL05 | `feat/al-provider-langgraph-context` | done | 5d44d4a | aee52fb | `docs/plans/acceleration/reports/AL05-A4.8.md` | - |
 | AL05-A4.8a | A4.8a | AL05 | `feat/al-provider-langgraph-context` | blocked | 4ea6251 | - | `docs/plans/acceleration/reports/AL05-A4.8a.md` | Source Trace Conflict Gate: run-start validation hook requires AL01 run-start surface or explicit owner reassignment. |
 | AL06-F3.1 | F3.1 | AL06 | `feat/al-frontend-runtime-ui` | done | 5d44d4a | 564624a | `docs/plans/acceleration/reports/AL06-F3.1.md` | - |
@@ -137,6 +138,10 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | AL06-F3.3 | F3.3 | AL06 | `feat/al-frontend-runtime-ui` | done | ab9e0d3 | 47946f8 | `docs/plans/acceleration/reports/AL06-F3.3.md` | - |
 | AL06-F3.4 | F3.4 | AL06 | `feat/al-frontend-runtime-ui` | done | 67f5290 | f694762 | `docs/plans/acceleration/reports/AL06-F3.4.md` | - |
 | AL06-F3.5 | F3.5 | AL06 | `feat/al-frontend-runtime-ui` | done | 74578b0 | 4042594 | `docs/plans/acceleration/reports/AL06-F3.5.md` | - |
+| AL06-F3.6 | F3.6 | AL06 | `feat/al-frontend-runtime-ui` | done | 7aeff59 | 59b8280 | `docs/plans/acceleration/reports/AL06-F3.6.md` | - |
+| AL03-D4.0 | D4.0 | AL03 | `feat/al-runtime-human-loop` | done | 7aeff59 | 4c58b8a | `docs/plans/acceleration/reports/AL03-D4.0.md` | - |
+| AL02-Q3.3 | Q3.3 | AL02 | `feat/al-projections-streams` | done | 7aeff59 | d9fb331 | `docs/plans/acceleration/reports/AL02-Q3.3.md` | - |
+| AL01-R3.4b | R3.4b | AL01 | `feat/al-run-core-events` | done | 7aeff59 | 6734a07 | `docs/plans/acceleration/reports/AL01-R3.4b.md` | - |
 
 当前基线不预置 live claim。主协调会话在认领 ready task 时写入共享 coordination store，并记录当时的 Coordination Base。
 

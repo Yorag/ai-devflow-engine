@@ -88,7 +88,7 @@
 ## L4.2 审计日志查询 API
 
 **计划周期**：Week 6
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现平台审计日志只读查询，使本地诊断与运维可以按主体、动作、目标、run 和结果过滤审计记录。
 **实施计划**：`docs/plans/implementation/l4.2-audit-log-query-api.md`
 
@@ -226,7 +226,7 @@
 ## D4.0 Delivery snapshot gate
 
 **计划周期**：Week 6
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：在审批命令落地前固定最终审批通过时的交付快照固化边界，使 `code_review_approval` 的 Approve 不产生先 approve、后补 snapshot 的两段语义。
 **实施计划**：`docs/plans/implementation/d4.0-delivery-snapshot-gate.md`
 

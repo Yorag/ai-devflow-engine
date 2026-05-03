@@ -94,7 +94,7 @@
 ## W5.1 WorkspaceManager 隔离工作区
 
 **计划周期**：Week 7
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现每个 PipelineRun 的独立工作区创建、定位和清理，避免 run 之间泄漏未交付改动。
 **实施计划**：`docs/plans/implementation/w5.1-workspace-manager.md`
 
@@ -124,7 +124,7 @@
 ## W5.0b ToolRegistry execution gate
 
 **计划周期**：Week 7-8
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：在具体 workspace tools、delivery tools、LangGraph runtime 和 Provider adapter 之间建立唯一工具执行入口，集中校验工具名、阶段 `allowed_tools`、输入 Schema、工作区边界、超时策略和审计策略。
 **实施计划**：`docs/plans/implementation/w5.0b-tool-registry-execution-gate.md`
 
