@@ -3,18 +3,33 @@ from __future__ import annotations
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from backend.app.api.error_codes import ErrorCode
 from backend.app.db.models.runtime import (
     ModelBindingSnapshotModel,
+    ProviderCallPolicySnapshotModel,
     ProviderSnapshotModel,
+    RuntimeLimitSnapshotModel,
+)
+from backend.app.domain.provider_call_policy_snapshot import (
+    ProviderCallPolicySnapshot,
 )
 from backend.app.domain.provider_snapshot import (
     ModelBindingSnapshot,
     ProviderSnapshot,
 )
+from backend.app.domain.runtime_limit_snapshot import RuntimeLimitSnapshot
 
 
 class RuntimeSnapshotRepositoryError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str = "Runtime snapshot storage is unavailable.",
+        *,
+        error_code: ErrorCode = ErrorCode.CONFIG_STORAGE_UNAVAILABLE,
+    ) -> None:
+        self.error_code = error_code
+        self.message = message
+        super().__init__(message)
 
 
 class RuntimeSnapshotRepository:
@@ -45,9 +60,7 @@ class RuntimeSnapshotRepository:
             self._session.flush()
             return model
         except SQLAlchemyError as exc:
-            raise RuntimeSnapshotRepositoryError(
-                "Runtime snapshot storage is unavailable."
-            ) from exc
+            raise RuntimeSnapshotRepositoryError() from exc
 
     def save_model_binding_snapshot(
         self,
@@ -74,9 +87,49 @@ class RuntimeSnapshotRepository:
             self._session.flush()
             return model
         except SQLAlchemyError as exc:
-            raise RuntimeSnapshotRepositoryError(
-                "Runtime snapshot storage is unavailable."
-            ) from exc
+            raise RuntimeSnapshotRepositoryError() from exc
+
+    def save_runtime_limit_snapshot(
+        self,
+        snapshot: RuntimeLimitSnapshot,
+    ) -> RuntimeLimitSnapshotModel:
+        try:
+            model = RuntimeLimitSnapshotModel(
+                snapshot_id=snapshot.snapshot_id,
+                run_id=snapshot.run_id,
+                agent_limits=snapshot.agent_limits.model_dump(mode="python"),
+                context_limits=snapshot.context_limits.model_dump(mode="python"),
+                source_config_version=snapshot.source_config_version,
+                hard_limits_version=snapshot.hard_limits_version,
+                schema_version=snapshot.schema_version,
+                created_at=snapshot.created_at,
+            )
+            self._session.add(model)
+            self._session.flush()
+            return model
+        except SQLAlchemyError as exc:
+            raise RuntimeSnapshotRepositoryError() from exc
+
+    def save_provider_call_policy_snapshot(
+        self,
+        snapshot: ProviderCallPolicySnapshot,
+    ) -> ProviderCallPolicySnapshotModel:
+        try:
+            model = ProviderCallPolicySnapshotModel(
+                snapshot_id=snapshot.snapshot_id,
+                run_id=snapshot.run_id,
+                provider_call_policy=snapshot.provider_call_policy.model_dump(
+                    mode="python"
+                ),
+                source_config_version=snapshot.source_config_version,
+                schema_version=snapshot.schema_version,
+                created_at=snapshot.created_at,
+            )
+            self._session.add(model)
+            self._session.flush()
+            return model
+        except SQLAlchemyError as exc:
+            raise RuntimeSnapshotRepositoryError() from exc
 
 
 __all__ = [
