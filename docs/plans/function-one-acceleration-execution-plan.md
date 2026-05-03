@@ -142,6 +142,7 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | AL04-W5.2 | W5.2 | AL04 | `feat/al-tools-deterministic-delivery` | done | 161432a | 723c3f0 | `docs/plans/acceleration/reports/AL04-W5.2.md` | - |
 | AL05-A4.8 | A4.8 | AL05 | `feat/al-provider-langgraph-context` | done | 5d44d4a | aee52fb | `docs/plans/acceleration/reports/AL05-A4.8.md` | - |
 | AL05-A4.8a | A4.8a | AL05 | `feat/al-provider-langgraph-context` | done | 874161e | 8d7a5e8 | `docs/plans/acceleration/reports/AL05-A4.8a.md` | - |
+| AL05-A4.8b | A4.8b | AL05 | `feat/al-provider-langgraph-context` | done | dd28f74 | 1e9ac9c | `docs/plans/acceleration/reports/AL05-A4.8b.md` | - |
 | AL05-A4.8c | A4.8c | AL05 | `feat/al-provider-langgraph-context` | done | 59529e1 | c32dfc4 | `docs/plans/acceleration/reports/AL05-A4.8c.md` | - |
 | AL06-F3.1 | F3.1 | AL06 | `feat/al-frontend-runtime-ui` | done | 5d44d4a | 564624a | `docs/plans/acceleration/reports/AL06-F3.1.md` | - |
 | AL06-F3.2 | F3.2 | AL06 | `feat/al-frontend-runtime-ui` | done | 4ea6251 | c5f11d1 | `docs/plans/acceleration/reports/AL06-F3.2.md` | - |
