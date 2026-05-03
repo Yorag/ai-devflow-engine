@@ -20,6 +20,11 @@ class RollbackControlResult:
     control_item: ControlItemFeedEntry
 
 
+@dataclass(frozen=True)
+class ToolConfirmationControlResult:
+    control_record: RunControlRecordModel
+
+
 class ControlRecordService:
     def __init__(
         self,
@@ -80,8 +85,35 @@ class ControlRecordService:
             control_item=control_item,
         )
 
+    def append_tool_confirmation_control_record(
+        self,
+        *,
+        run_id: str,
+        stage_run_id: str,
+        source_stage_type: StageType,
+        payload_ref: str,
+        graph_interrupt_ref: str,
+        occurred_at: datetime | None = None,
+    ) -> ToolConfirmationControlResult:
+        timestamp = occurred_at or self._now()
+        control_record = RunControlRecordModel(
+            control_record_id=f"control-record-{uuid4().hex}",
+            run_id=run_id,
+            stage_run_id=stage_run_id,
+            control_type=RunControlRecordType.TOOL_CONFIRMATION,
+            source_stage_type=source_stage_type,
+            target_stage_type=None,
+            payload_ref=payload_ref,
+            graph_interrupt_ref=graph_interrupt_ref,
+            occurred_at=timestamp,
+            created_at=timestamp,
+        )
+        self._runtime_session.add(control_record)
+        return ToolConfirmationControlResult(control_record=control_record)
+
 
 __all__ = [
     "ControlRecordService",
     "RollbackControlResult",
+    "ToolConfirmationControlResult",
 ]
