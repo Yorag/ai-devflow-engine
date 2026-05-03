@@ -12,6 +12,7 @@ import { Composer } from "../composer/Composer";
 import { NarrativeFeed } from "../feed/NarrativeFeed";
 import { InspectorPanel } from "../inspector/InspectorPanel";
 import { useInspector } from "../inspector/useInspector";
+import { TerminateRunAction } from "../runs/TerminateRunAction";
 import { SettingsModal } from "../settings/SettingsModal";
 import { TemplateEmptyState } from "../templates/TemplateEmptyState";
 import { ProjectSidebar } from "./ProjectSidebar";
@@ -23,6 +24,7 @@ type WorkspaceShellProps = {
 };
 
 export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Element {
+  const [isWorkspaceActionBusy, setWorkspaceActionBusy] = useState(false);
   const [currentProjectId, setCurrentProjectId] = useState("");
   const [currentProject, setCurrentProject] = useState<ProjectRead | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState("");
@@ -165,6 +167,18 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
       />
       <section className="workspace-main" aria-label="Narrative workspace">
         <div className="workspace-toolbar" aria-label="Global tools">
+          {workspace ? (
+            <TerminateRunAction
+              projectId={workspace.project.project_id}
+              sessionId={workspace.session.session_id}
+              runId={workspace.current_run_id}
+              sessionStatus={workspace.session.status}
+              secondaryActions={workspace.composer_state.secondary_actions}
+              isBusy={isWorkspaceActionBusy}
+              onBusyChange={setWorkspaceActionBusy}
+              request={request}
+            />
+          ) : null}
           <button
             className="workspace-button workspace-button--secondary workspace-button--compact"
             type="button"
@@ -207,6 +221,8 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
             session={workspace.session}
             composerState={workspace.composer_state}
             currentStageType={workspace.current_stage_type}
+            isBusy={isWorkspaceActionBusy}
+            onBusyChange={setWorkspaceActionBusy}
             request={request}
           />
         ) : null}

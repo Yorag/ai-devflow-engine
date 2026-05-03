@@ -420,6 +420,7 @@ a {
 
 .workspace-toolbar {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
   margin-bottom: 18px;
@@ -492,6 +493,18 @@ a {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.composer__run-controls,
+.composer__primary-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.composer__primary-actions {
+  margin-left: auto;
 }
 
 .narrative-feed__entries {
@@ -2215,6 +2228,11 @@ a {
 
   .composer__actions {
     align-items: stretch;
+  }
+
+  .composer__run-controls,
+  .composer__primary-actions {
+    width: 100%;
   }
 
   .composer__actions .workspace-button {

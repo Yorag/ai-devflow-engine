@@ -126,7 +126,7 @@ describe("Composer component", () => {
 
     renderComposerForWorkspace(mockSessionWorkspaces["session-draft"], { fetcher });
 
-    fireEvent.change(screen.getByLabelText("Composer input"), {
+    fireEvent.change(screen.getByLabelText("当前输入"), {
       target: { value: "Add runtime composer mode." },
     });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
@@ -143,7 +143,7 @@ describe("Composer component", () => {
         }),
       );
     });
-    expect(screen.getByLabelText("Composer input")).toHaveProperty("value", "");
+    expect(screen.getByLabelText("当前输入")).toHaveProperty("value", "");
   });
 
   it("submits clarification replies in waiting clarification mode", async () => {
@@ -154,7 +154,7 @@ describe("Composer component", () => {
       { fetcher },
     );
 
-    fireEvent.change(screen.getByLabelText("Composer input"), {
+    fireEvent.change(screen.getByLabelText("当前输入"), {
       target: { value: "Use the current project default provider." },
     });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
@@ -185,7 +185,7 @@ describe("Composer component", () => {
 
     renderComposerForWorkspace(workspace);
 
-    const input = screen.getByLabelText("Composer input");
+    const input = screen.getByLabelText("当前输入");
     const button = screen.getByRole("button", { name: "暂停" });
     expect(input).toHaveProperty("disabled", true);
     expect(button).toHaveProperty("disabled", true);
@@ -199,7 +199,7 @@ describe("Composer component", () => {
     expect(screen.getByText("绑定 run run-waiting-approval")).toBeTruthy();
     expect(button).toHaveProperty("disabled", true);
     expect(button.getAttribute("type")).toBe("button");
-    expect(screen.getByLabelText("Composer input")).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", true);
   });
 
   it("shows resume presentation for paused runs without turning the button into send", () => {
@@ -208,7 +208,7 @@ describe("Composer component", () => {
     const button = screen.getByRole("button", { name: "恢复" });
     expect(button).toHaveProperty("disabled", true);
     expect(button.getAttribute("type")).toBe("button");
-    expect(screen.getByLabelText("Composer input")).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", true);
   });
 
   it("keeps a disabled lifecycle placeholder for completed runs", () => {
@@ -218,7 +218,7 @@ describe("Composer component", () => {
     expect(button).toHaveProperty("disabled", true);
     expect(button.getAttribute("type")).toBe("button");
     expect(screen.getByText("绑定 run run-completed")).toBeTruthy();
-    expect(screen.getByLabelText("Composer input")).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", true);
   });
 
   it("resets unsent local input when the bound session changes", () => {
@@ -234,10 +234,10 @@ describe("Composer component", () => {
       </QueryClientProvider>,
     );
 
-    fireEvent.change(screen.getByLabelText("Composer input"), {
+    fireEvent.change(screen.getByLabelText("当前输入"), {
       target: { value: "Leak candidate" },
     });
-    expect(screen.getByLabelText("Composer input")).toHaveProperty(
+    expect(screen.getByLabelText("当前输入")).toHaveProperty(
       "value",
       "Leak candidate",
     );
@@ -257,6 +257,6 @@ describe("Composer component", () => {
       </QueryClientProvider>,
     );
 
-    expect(screen.getByLabelText("Composer input")).toHaveProperty("value", "");
+    expect(screen.getByLabelText("当前输入")).toHaveProperty("value", "");
   });
 });
