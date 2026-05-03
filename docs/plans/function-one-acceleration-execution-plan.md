@@ -127,6 +127,10 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | AL03-L4.1 | L4.1 | AL03 | `feat/al-runtime-human-loop` | done | 4ea6251 | c6290f5 | `docs/plans/acceleration/reports/AL03-L4.1.md` | - |
 | AL03-H4.1 | H4.1 | AL03 | `feat/al-runtime-human-loop` | done | 67f5290 | 8040668 | `docs/plans/acceleration/reports/AL03-H4.1.md` | - |
 | AL03-H4.3 | H4.3 | AL03 | `feat/al-runtime-human-loop` | done | 74578b0 | 3cd8bb7 | `docs/plans/acceleration/reports/AL03-H4.3.md` | - |
+| AL03-D4.0 | D4.0 | AL03 | `feat/al-runtime-human-loop` | done | 7aeff59 | 4c58b8a | `docs/plans/acceleration/reports/AL03-D4.0.md` | - |
+| AL03-H4.4 | H4.4 | AL03 | `feat/al-runtime-human-loop` | done | 7819aad | c86b54e | `docs/plans/acceleration/reports/AL03-H4.4.md` | - |
+| AL03-H4.4a | H4.4a | AL03 | `feat/al-runtime-human-loop` | done | 969a43c | 96ceb48 | `docs/plans/acceleration/reports/AL03-H4.4a.md` | - |
+| AL03-H4.5 | H4.5 | AL03 | `feat/al-runtime-human-loop` | done | 5707ce3 | 94b1376 | `docs/plans/acceleration/reports/AL03-H4.5.md` | - |
 | AL04-A4.1 | A4.1 | AL04 | `feat/al-tools-deterministic-delivery` | done | cf4828c | 3cba4f8 | `docs/plans/acceleration/reports/AL04-A4.1.md` | - |
 | AL04-W5.0 | W5.0 | AL04 | `feat/al-tools-deterministic-delivery` | done | 67f5290 | 2b78be5 | `docs/plans/acceleration/reports/AL04-W5.0.md` | - |
 | AL04-W5.0a | W5.0a | AL04 | `feat/al-tools-deterministic-delivery` | done | 74578b0 | e2c777c | `docs/plans/acceleration/reports/AL04-W5.0a.md` | - |

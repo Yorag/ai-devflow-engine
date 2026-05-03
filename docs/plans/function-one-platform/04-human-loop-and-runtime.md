@@ -358,22 +358,24 @@
 ## H4.5 Pause/Resume checkpoint 语义
 
 **计划周期**：Week 6
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现暂停和恢复命令副作用，使 running、waiting_clarification、waiting_approval、waiting_tool_confirmation 都能保存可恢复状态。
 **实施计划**：`docs/plans/implementation/h4.5-pause-resume-checkpoint.md`
 
 **修改文件列表**：
 - Modify: `backend/app/services/runs.py`
-- Modify: `backend/app/services/control_records.py`
 - Create: `backend/app/api/routes/runs.py`
+- Modify: `backend/app/api/router.py`
+- Modify: `backend/app/schemas/run.py`
 - Create: `backend/tests/services/test_pause_resume.py`
 - Create: `backend/tests/api/test_pause_resume_api.py`
 
 **实现类/函数**：
 - `RunLifecycleService.pause_run()`
 - `RunLifecycleService.resume_run()`
-- `RunLifecycleService.save_resume_checkpoint()`
-- `ControlRecordService.append_control_item()`
+- `RunLifecycleService._persist_recovery_checkpoint()`
+- `RunLifecycleService._refresh_pending_wait_entry_for_pause()`
+- `RunLifecycleService._refresh_pending_wait_entry_for_resume()`
 - `RuntimeOrchestrationService.pause_thread()`
 - `RuntimeOrchestrationService.resume_thread()`
 
@@ -381,11 +383,13 @@
 - pause 可发生在 `running`、`waiting_clarification`、`waiting_approval`、`waiting_tool_confirmation`。
 - pause 调用成功后通过 A4.0 runtime boundary 保存可恢复 checkpoint 与工作区快照引用。
 - H4.5 创建 `backend/app/api/routes/runs.py` 并注册 run 控制路由，后续 H4.6/H4.7 在同一路由文件扩展终止与重新尝试命令。
+- pause 不新增 `control_item` 或新的 `RunControlRecordType`；暂停和恢复语义通过 `RUN_PAUSED`、`RUN_RESUMED` 以及已有等待条目的刷新事件表达。
 - waiting_approval 下暂停后审批不可提交，投影 `is_actionable = false`。
 - waiting_tool_confirmation 下暂停后工具确认不可提交，投影 `is_actionable = false`。
 - resume 继续同一 run 和同一 GraphThreadRef，不创建新 run。
 - 若 run 暂停前停留于审批等待，resume 后恢复到同一个 `waiting_approval` 检查点。
 - 若 run 暂停前停留于工具确认等待，resume 后恢复到同一个 `waiting_tool_confirmation` 检查点。
+- pause 保持当前 `StageRun.status` 为暂停前的 waiting/running 状态，resume 从最新 `recovery_checkpoint` artifact 恢复同一 run 的暂停前 run/session 语义。
 - pause 接受、pause 成功、resume 接受、resume 成功、非法状态拒绝和 checkpoint 保存失败必须写入审计记录和运行日志。
 - API 测试必须断言 `POST /api/runs/{runId}/pause`、`POST /api/runs/{runId}/resume` 的请求/响应 Schema、非法状态错误响应和 OpenAPI path/method 已进入 `/api/openapi.json`。
 
