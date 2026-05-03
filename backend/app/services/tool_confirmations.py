@@ -303,6 +303,7 @@ class ToolConfirmationService:
         *,
         run_id: str,
         trace_context: TraceContext,
+        commit: bool = True,
     ) -> ToolConfirmationCancellationResult:
         timestamp = self._now()
         requests = (
@@ -379,12 +380,14 @@ class ToolConfirmationService:
                         occurred_at=timestamp,
                     )
                 )
-            self._runtime_session.commit()
+            if commit:
+                self._runtime_session.commit()
             return ToolConfirmationCancellationResult(
                 cancelled_confirmations=cancelled_confirmations
             )
         except Exception:
-            self._rollback_sessions()
+            if commit:
+                self._rollback_sessions()
             raise
 
     def build_tool_confirmation_projection(

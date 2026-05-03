@@ -39,6 +39,10 @@ class RunResumeRequest(_StrictBaseModel):
     pass
 
 
+class RunTerminateRequest(_StrictBaseModel):
+    pass
+
+
 class RunCommandResponse(_StrictBaseModel):
     session: SessionRead
     run: RunSummaryProjection
@@ -143,6 +147,7 @@ __all__ = [
     "RunConfigurationSnapshotRead",
     "RunPauseRequest",
     "RunResumeRequest",
+    "RunTerminateRequest",
     "RunSummaryProjection",
     "RunTimelineProjection",
     "SolutionDesignArtifactRead",
