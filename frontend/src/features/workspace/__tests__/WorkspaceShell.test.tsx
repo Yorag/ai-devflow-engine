@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ApiRequestOptions } from "../../../api/client";
 import type { ExecutionNodeProjection } from "../../../api/types";
 import { renderWithAppProviders } from "../../../app/test-utils";
-import { mockStageInspectorProjection } from "../../../mocks/fixtures";
+import {
+  mockSessionWorkspaces,
+  mockStageInspectorProjection,
+} from "../../../mocks/fixtures";
 import {
   createMockApiFetcher,
   mockApiRequestOptions,
@@ -496,6 +499,207 @@ describe("WorkspaceShell", () => {
     });
     expect(screen.getByRole("heading", { name: "Stage details" })).toBeTruthy();
     expect(screen.getByText("Draft execution plan")).toBeTruthy();
+  });
+
+  it("renders Composer beneath the draft template workspace and allows first requirement input", async () => {
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
+
+    expect(await screen.findByRole("form", { name: "Composer" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
+    expect(screen.getByLabelText("Composer input")).toBeTruthy();
+  });
+
+  it("keeps Composer send-enabled for waiting clarification sessions", async () => {
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Open Clarify provider behavior",
+      }),
+    );
+
+    expect(await screen.findByRole("button", { name: "发送" })).toBeTruthy();
+    expect(screen.getByText(/等待你的澄清回复/u)).toBeTruthy();
+  });
+
+  it("resets unsent Composer input when the selected session changes", async () => {
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
+
+    const input = await screen.findByLabelText("Composer input");
+    fireEvent.change(input, {
+      target: { value: "This draft should not leak into another session." },
+    });
+    expect(input).toHaveProperty(
+      "value",
+      "This draft should not leak into another session.",
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Open Clarify provider behavior",
+      }),
+    );
+
+    expect(await screen.findByRole("button", { name: "发送" })).toBeTruthy();
+    expect(screen.getByLabelText("Composer input")).toHaveProperty("value", "");
+  });
+
+  it("appends a draft requirement to Narrative Feed after Composer submit", async () => {
+    renderWithAppProviders(
+      <ConsolePage
+        request={{ fetcher: createMockApiFetcher({ persistSessionMessages: true }) }}
+      />,
+    );
+
+    fireEvent.change(await screen.findByLabelText("Composer input"), {
+      target: { value: "Persist the first requirement in the feed." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => {
+      const userEntries = screen.getAllByRole("article", {
+        name: "User message feed entry",
+      });
+      expect(
+        userEntries.some((entry) =>
+          within(entry).queryByText("Persist the first requirement in the feed."),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("appends a clarification reply to Narrative Feed after Composer submit", async () => {
+    renderWithAppProviders(
+      <ConsolePage
+        request={{ fetcher: createMockApiFetcher({ persistSessionMessages: true }) }}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Open Clarify provider behavior",
+      }),
+    );
+
+    fireEvent.change(await screen.findByLabelText("Composer input"), {
+      target: { value: "Use the configured default provider." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => {
+      const userEntries = screen.getAllByRole("article", {
+        name: "User message feed entry",
+      });
+      expect(
+        userEntries.some((entry) =>
+          within(entry).queryByText("Use the configured default provider."),
+        ),
+      ).toBe(true);
+    });
+
+    expect(await screen.findByRole("button", { name: "暂停" })).toBeTruthy();
+    expect(screen.getByLabelText("Composer input")).toHaveProperty("disabled", true);
+  });
+
+  it("shows the pause presentation when the active run is still in requirement analysis", async () => {
+    const baseFetcher = createMockApiFetcher();
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.endsWith("/api/sessions/session-running/workspace")) {
+          const workspace = mockSessionWorkspaces["session-running"];
+          return new Response(
+            JSON.stringify({
+              ...workspace,
+              session: {
+                ...workspace.session,
+                latest_stage_type: "requirement_analysis",
+              },
+              current_stage_type: "requirement_analysis",
+              runs: workspace.runs.map((run) => ({
+                ...run,
+                current_stage_type: "requirement_analysis",
+              })),
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }
+
+        return baseFetcher(input, init);
+      },
+    };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Add workspace shell" }),
+    );
+
+    expect(await screen.findByRole("button", { name: "暂停" })).toBeTruthy();
+    expect(screen.getByLabelText("Composer input")).toHaveProperty("disabled", true);
+  });
+
+  it("updates Composer from live session status changes", async () => {
+    const eventSources: MockEventSource[] = [];
+    vi.stubGlobal(
+      "EventSource",
+      vi.fn(function EventSourceMock(this: MockEventSource, url: string) {
+        this.url = url;
+        this.close = vi.fn();
+        this.listeners = new Map();
+        this.addEventListener = vi.fn(
+          (type: string, listener: (event: MessageEvent<string>) => void) => {
+            this.listeners.set(type, listener);
+          },
+        );
+        this.removeEventListener = vi.fn((type: string) => {
+          this.listeners.delete(type);
+        });
+        eventSources.push(this);
+      }),
+    );
+
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Open Clarify provider behavior",
+      }),
+    );
+    expect(await screen.findByRole("button", { name: "发送" })).toBeTruthy();
+
+    await waitFor(() => {
+      expect(
+        eventSources.some((source) =>
+          source.url.includes("session-waiting-clarification"),
+        ),
+      ).toBe(true);
+    });
+
+    eventSources
+      .find((source) => source.url.includes("session-waiting-clarification"))
+      ?.listeners.get("session_status_changed")
+      ?.( {
+        data: JSON.stringify({
+          event_id: "event-clarification-resumed",
+          session_id: "session-waiting-clarification",
+          run_id: "run-waiting-clarification",
+          event_type: "session_status_changed",
+          occurred_at: "2026-05-01T09:39:00.000Z",
+          payload: {
+            session_id: "session-waiting-clarification",
+            status: "running",
+            current_run_id: "run-waiting-clarification",
+            current_stage_type: "requirement_analysis",
+          },
+        }),
+      } as MessageEvent<string>);
+
+    expect(await screen.findByRole("button", { name: "暂停" })).toBeTruthy();
+    expect(screen.getByLabelText("Composer input")).toHaveProperty("disabled", true);
   });
 });
 
