@@ -15,6 +15,7 @@ from backend.app.db.session import DatabaseManager
 from backend.app.schemas.inspector import (
     ControlItemInspectorProjection,
     StageInspectorProjection,
+    ToolConfirmationInspectorProjection,
 )
 from backend.app.schemas.run import RunTimelineProjection
 from backend.app.schemas.workspace import SessionWorkspaceProjection
@@ -269,5 +270,24 @@ def get_control_item_detail(
 ) -> ControlItemInspectorProjection:
     try:
         return service.get_control_item_detail(controlRecordId)
+    except InspectorProjectionServiceError as exc:
+        _raise_api_error(exc)
+
+
+@router.get(
+    "/tool-confirmations/{toolConfirmationId}",
+    response_model=ToolConfirmationInspectorProjection,
+    responses={
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+def get_tool_confirmation_detail(
+    toolConfirmationId: str,
+    service: InspectorProjectionService = Depends(get_inspector_projection_service),
+) -> ToolConfirmationInspectorProjection:
+    try:
+        return service.get_tool_confirmation_detail(toolConfirmationId)
     except InspectorProjectionServiceError as exc:
         _raise_api_error(exc)
