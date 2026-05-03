@@ -3,6 +3,8 @@ import type {
   ConfigErrorCode,
   ConfigurationPackageExport,
   ConfigurationPackageImportResult,
+  ControlItemInspectorProjection,
+  DeliveryResultDetailProjection,
   PipelineTemplateRead,
   ProjectDeliveryChannelDetailProjection,
   ProjectRead,
@@ -12,6 +14,8 @@ import type {
   SessionRead,
   SessionStatus,
   SessionWorkspaceProjection,
+  StageInspectorProjection,
+  ToolConfirmationInspectorProjection,
   TopLevelFeedEntry,
 } from "../api/types";
 
@@ -390,6 +394,328 @@ export const mockFeedEntriesByType = {
   delivery_result: deliveryResult,
   system_status: systemStatus,
 } satisfies Record<TopLevelFeedEntry["type"], TopLevelFeedEntry>;
+
+export const mockStageInspectorProjection: StageInspectorProjection = {
+  stage_run_id: "stage-solution-design-running",
+  run_id: "run-running",
+  stage_type: "solution_design",
+  status: "running",
+  attempt_index: 1,
+  started_at: "2026-05-01T09:12:00.000Z",
+  ended_at: null,
+  identity: {
+    title: "Identity",
+    records: {
+      run_id: "run-running",
+      stage_run_id: "stage-solution-design-running",
+      stage_type: "solution_design",
+      status: "running",
+      started_at: "2026-05-01T09:12:00.000Z",
+    },
+    stable_refs: ["stage-identity-ref-1"],
+    log_refs: [],
+    truncated: false,
+    redaction_status: "none",
+  },
+  input: {
+    title: "Input",
+    records: {
+      structured_requirement:
+        "Add grouped Inspector detail rendering for runtime objects.",
+      clarification_summary:
+        "Keep the feed centered and move complete detail to the right rail.",
+    },
+    stable_refs: ["solution-input-ref-1"],
+    log_refs: [],
+    truncated: false,
+    redaction_status: "none",
+  },
+  process: {
+    title: "Process",
+    records: {
+      design_decisions: [
+        "Use grouped sections in the order identity/input/process/output/artifacts/metrics.",
+        "Keep tool confirmation as its own projection instead of folding it into stage detail.",
+      ],
+      provider_retry_state: "retrying",
+      provider_circuit_breaker_state: "closed",
+    },
+    stable_refs: ["solution-process-ref-1"],
+    log_refs: ["stage-log-1"],
+    truncated: false,
+    redaction_status: "none",
+  },
+  output: {
+    title: "Output",
+    records: {
+      design_summary: "Draft execution plan",
+      impact_scope: [
+        "frontend/src/features/inspector/InspectorPanel.tsx",
+        "frontend/src/features/inspector/InspectorSections.tsx",
+      ],
+    },
+    stable_refs: ["solution-output-ref-1"],
+    log_refs: [],
+    truncated: false,
+    redaction_status: "none",
+  },
+  artifacts: {
+    title: "Artifacts",
+    records: {
+      target_modules: ["InspectorPanel", "InspectorSections", "MetricGrid"],
+      verification_commands: [
+        "npm --prefix frontend run test -- InspectorSections",
+        "npm --prefix frontend run test -- InspectorPanel",
+      ],
+    },
+    stable_refs: ["solution-artifact-ref-1"],
+    log_refs: [],
+    truncated: false,
+    redaction_status: "none",
+  },
+  metrics: {
+    duration_ms: 120000,
+    input_tokens: 2100,
+    output_tokens: 2700,
+    total_tokens: 4800,
+    reasoning_step_count: 5,
+    tool_call_count: 1,
+    changed_file_count: 2,
+    failed_test_count: 0,
+  },
+  implementation_plan: {
+    plan_id: "design-plan-1",
+    source_stage_run_id: "stage-solution-design-running",
+    created_at: "2026-05-01T09:18:00.000Z",
+    downstream_refs: ["docs/plans/implementation/f3.7-inspector-sections-metrics.md"],
+    tasks: [
+      {
+        task_id: "task-1",
+        order_index: 1,
+        title: "Render grouped inspector sections",
+        depends_on_task_ids: [],
+        target_files: ["frontend/src/features/inspector/InspectorSections.tsx"],
+        target_modules: ["InspectorSections"],
+        acceptance_refs: ["F3.7"],
+        verification_commands: ["npm --prefix frontend run test -- InspectorSections"],
+        risk_handling: "Do not invent new Inspector target semantics.",
+      },
+    ],
+  },
+  tool_confirmation_trace_refs: ["tool-confirmation-trace-1"],
+  provider_retry_trace_refs: ["provider-retry-trace-1"],
+  provider_circuit_breaker_trace_refs: ["provider-circuit-trace-1"],
+  approval_result_refs: ["approval-result-ref-1"],
+};
+
+export const mockControlItemInspectorProjection: ControlItemInspectorProjection = {
+  control_record_id: "control-clarification",
+  run_id: "run-waiting-clarification",
+  control_type: "clarification_wait",
+  source_stage_type: "requirement_analysis",
+  target_stage_type: "requirement_analysis",
+  occurred_at: "2026-05-01T09:35:00.000Z",
+  identity: {
+    title: "Identity",
+    records: {
+      control_record_id: "control-clarification",
+      control_type: "clarification_wait",
+    },
+    stable_refs: [],
+    log_refs: [],
+    truncated: false,
+    redaction_status: "none",
+  },
+  input: {
+    title: "Input",
+    records: {
+      trigger_reason: "The target provider behavior is ambiguous.",
+    },
+    stable_refs: ["artifact-clarification-1"],
+    log_refs: [],
+    truncated: false,
+    redaction_status: "none",
+  },
+  process: {
+    title: "Process",
+    records: {
+      historical_attempts: ["attempt-1"],
+    },
+    stable_refs: [],
+    log_refs: [],
+    truncated: false,
+    redaction_status: "none",
+  },
+  output: {
+    title: "Output",
+    records: {
+      target_stage_type: "requirement_analysis",
+      result_status: "waiting_clarification",
+    },
+    stable_refs: [],
+    log_refs: [],
+    truncated: false,
+    redaction_status: "none",
+  },
+  artifacts: {
+    title: "Artifacts",
+    records: {},
+    stable_refs: ["artifact-clarification-1"],
+    log_refs: [],
+    truncated: false,
+    redaction_status: "none",
+  },
+  metrics: {
+    duration_ms: 1500,
+  },
+};
+
+export const mockToolConfirmationInspectorProjection: ToolConfirmationInspectorProjection = {
+  tool_confirmation_id: "tool-confirmation-1",
+  run_id: "run-running",
+  stage_run_id: "stage-code-generation-running",
+  status: "pending",
+  requested_at: "2026-05-01T09:20:00.000Z",
+  responded_at: null,
+  tool_name: "bash",
+  command_preview: "npm install",
+  target_summary: "frontend/package-lock.json",
+  risk_level: "high_risk",
+  risk_categories: ["dependency_change", "network_download"],
+  reason: "Installing dependencies changes lock files and downloads packages.",
+  expected_side_effects: ["package-lock update"],
+  decision: null,
+  identity: {
+    title: "Identity",
+    records: {
+      tool_confirmation_id: "tool-confirmation-1",
+      status: "pending",
+    },
+    stable_refs: [],
+    log_refs: [],
+    truncated: false,
+    redaction_status: "none",
+  },
+  input: {
+    title: "Input",
+    records: {
+      tool_name: "bash",
+      command_preview: "npm install",
+      target_summary: "frontend/package-lock.json",
+      risk_categories: ["dependency_change", "network_download"],
+    },
+    stable_refs: [],
+    log_refs: [],
+    truncated: false,
+    redaction_status: "none",
+  },
+  process: {
+    title: "Process",
+    records: {
+      risk_reason: "Installing dependencies changes lock files and downloads packages.",
+    },
+    stable_refs: ["tool-confirmation-trace-1"],
+    log_refs: [],
+    truncated: false,
+    redaction_status: "none",
+  },
+  output: {
+    title: "Output",
+    records: {
+      decision: "pending",
+      fallback_path: "Await explicit operator confirmation.",
+    },
+    stable_refs: [],
+    log_refs: [],
+    truncated: false,
+    redaction_status: "none",
+  },
+  artifacts: {
+    title: "Artifacts",
+    records: {
+      expected_side_effects: ["package-lock update"],
+    },
+    stable_refs: ["audit-tool-confirmation-1"],
+    log_refs: [],
+    truncated: false,
+    redaction_status: "none",
+  },
+  metrics: {
+    duration_ms: 0,
+    tool_call_count: 0,
+  },
+};
+
+export const mockDeliveryResultDetailProjection: DeliveryResultDetailProjection = {
+  delivery_record_id: "delivery-record-1",
+  run_id: "run-completed",
+  delivery_mode: "demo_delivery",
+  status: "succeeded",
+  created_at: "2026-05-01T08:44:00.000Z",
+  identity: {
+    title: "Identity",
+    records: {
+      delivery_record_id: "delivery-record-1",
+      delivery_mode: "demo_delivery",
+      status: "succeeded",
+    },
+    stable_refs: ["delivery-identity-ref-1"],
+    log_refs: [],
+    truncated: false,
+    redaction_status: "none",
+  },
+  input: {
+    title: "Input",
+    records: {
+      source_run_id: "run-completed",
+      delivery_channel: "demo_delivery",
+    },
+    stable_refs: ["delivery-input-ref-1"],
+    log_refs: [],
+    truncated: false,
+    redaction_status: "none",
+  },
+  process: {
+    title: "Process",
+    records: {
+      integration_summary: "Prepared reviewable delivery summary for demo output.",
+      review_status: "ready_for_review",
+      review_notes: "Checklist preserved.\nNo semantic rewrites.",
+    },
+    stable_refs: ["delivery-process-ref-1"],
+    log_refs: [],
+    truncated: false,
+    redaction_status: "none",
+  },
+  output: {
+    title: "Output",
+    records: {
+      branch_name: "feat/runtime-inspector",
+      commit_sha: "abc1234",
+      code_review_url: "https://example.test/pr/17",
+    },
+    stable_refs: ["delivery-output-ref-1"],
+    log_refs: [],
+    truncated: false,
+    redaction_status: "none",
+  },
+  artifacts: {
+    title: "Artifacts",
+    records: {
+      test_summary: "12 tests passed.",
+      result_ref: "delivery-result-ref-1",
+    },
+    stable_refs: ["delivery-result-ref-1"],
+    log_refs: [],
+    truncated: false,
+    redaction_status: "none",
+  },
+  metrics: {
+    duration_ms: 32000,
+    passed_test_count: 12,
+    delivery_artifact_count: 1,
+  },
+};
 
 export const mockSessionWorkspaces: Record<string, SessionWorkspaceProjection> = {
   "session-draft": createWorkspace("session-draft", []),

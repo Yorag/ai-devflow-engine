@@ -1,9 +1,11 @@
 import type { ApiRequestOptions } from "../api/client";
 import {
   mockApiError,
+  mockControlItemInspectorProjection,
   mockConfigurationPackageExport,
   mockConfigurationPackageImportFieldError,
   mockConfigurationPackageImportSuccess,
+  mockDeliveryResultDetailProjection,
   mockGitProjectDeliveryChannel,
   mockPipelineTemplates,
   mockProjectDeliveryChannel,
@@ -11,7 +13,9 @@ import {
   mockProviderList,
   mockRunTimelines,
   mockSessionList,
+  mockStageInspectorProjection,
   mockSessionWorkspaces,
+  mockToolConfirmationInspectorProjection,
 } from "./fixtures";
 
 type MockRoute = {
@@ -58,6 +62,18 @@ function createMockRoutes(options: MockApiFetcherOptions): MockRoute[] {
       jsonResponse(mockPipelineTemplates),
     ),
     route("GET", /^\/api\/providers$/u, () => jsonResponse(mockProviderList)),
+    route("GET", /^\/api\/stages\/stage-solution-design-running\/inspector$/u, () =>
+      jsonResponse(mockStageInspectorProjection),
+    ),
+    route("GET", /^\/api\/control-records\/control-clarification$/u, () =>
+      jsonResponse(mockControlItemInspectorProjection),
+    ),
+    route("GET", /^\/api\/tool-confirmations\/tool-confirmation-1$/u, () =>
+      jsonResponse(mockToolConfirmationInspectorProjection),
+    ),
+    route("GET", /^\/api\/delivery-records\/delivery-record-1$/u, () =>
+      jsonResponse(mockDeliveryResultDetailProjection),
+    ),
     route("GET", /^\/api\/projects\/project-default\/delivery-channel$/u, () =>
       jsonResponse(mockProjectDeliveryChannel),
     ),
