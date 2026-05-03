@@ -12,6 +12,10 @@ from backend.app.db.models.control import PipelineTemplateModel, ProjectModel, S
 from backend.app.domain.enums import SessionStatus
 from backend.app.domain.trace_context import TraceContext
 from backend.app.schemas.observability import AuditActorType, AuditResult
+from backend.app.services.clarifications import (
+    ClarificationAnswerResult,
+    ClarificationService,
+)
 from backend.app.services.templates import TemplateService
 
 
@@ -271,6 +275,20 @@ class SessionService:
             self._session.rollback()
             raise
         return model
+
+    def append_clarification_reply(
+        self,
+        *,
+        session_id: str,
+        content: str,
+        clarification_service: ClarificationService,
+        trace_context: TraceContext,
+    ) -> ClarificationAnswerResult:
+        return clarification_service.answer_clarification(
+            session_id=session_id,
+            answer=content,
+            trace_context=trace_context,
+        )
 
     def _visible_project(self, project_id: str) -> ProjectModel | None:
         return (

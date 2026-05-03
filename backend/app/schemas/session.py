@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.app.schemas import common
+from backend.app.schemas.feed import MessageFeedEntry
 
 
 class _StrictBaseModel(BaseModel):
@@ -30,6 +31,16 @@ class SessionTemplateUpdateRequest(_StrictBaseModel):
     template_id: str = Field(min_length=1)
 
 
+class SessionMessageAppendRequest(_StrictBaseModel):
+    message_type: Literal["clarification_reply"]
+    content: str = Field(min_length=1)
+
+
+class SessionMessageAppendResponse(_StrictBaseModel):
+    session: SessionRead
+    message_item: MessageFeedEntry
+
+
 class SessionDeleteResult(_StrictBaseModel):
     session_id: str = Field(min_length=1)
     project_id: str = Field(min_length=1)
@@ -48,6 +59,8 @@ class SessionDeleteResult(_StrictBaseModel):
 
 __all__ = [
     "SessionDeleteResult",
+    "SessionMessageAppendRequest",
+    "SessionMessageAppendResponse",
     "SessionRead",
     "SessionRenameRequest",
     "SessionTemplateUpdateRequest",
