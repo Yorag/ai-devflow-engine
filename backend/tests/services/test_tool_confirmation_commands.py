@@ -340,6 +340,8 @@ def seed_running_target(manager: ToolConfirmationTestDatabaseManager) -> None:
                     stage_type=StageType.CODE_GENERATION,
                     status=StageStatus.RUNNING,
                     attempt_index=1,
+                    graph_node_key="code_generation.main",
+                    stage_contract_ref="stage-contract-code-generation",
                     input_ref=None,
                     output_ref=None,
                     summary="Generating code.",

@@ -190,6 +190,8 @@ def seed_tool_confirmation(app, **kwargs) -> str:
                 stage_type=StageType.CODE_GENERATION,
                 status=stage_status,
                 attempt_index=1,
+                graph_node_key="code_generation.main",
+                stage_contract_ref="stage-contract-code-generation",
                 input_ref=None,
                 output_ref=None,
                 summary="Waiting for tool confirmation.",

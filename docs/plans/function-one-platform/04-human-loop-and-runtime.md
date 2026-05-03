@@ -258,7 +258,7 @@
 ## H4.4 审批命令与交付就绪阻塞
 
 **计划周期**：Week 6
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现 Approve、Reject、拒绝理由、回退控制记录、回退目标和 code review 交付就绪 gate，使审批结果、交付快照固化和 runtime 恢复保持单一公开入口。
 **实施计划**：`docs/plans/implementation/h4.4-approval-commands-readiness-gate.md`
 
