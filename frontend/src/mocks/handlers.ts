@@ -2,6 +2,7 @@ import type { ApiRequestOptions } from "../api/client";
 import type { MessageFeedEntry, SessionWorkspaceProjection } from "../api/types";
 import {
   mockApiError,
+  mockCodeGenerationInspectorProjection,
   mockControlItemInspectorProjection,
   mockConfigurationPackageExport,
   mockConfigurationPackageImportFieldError,
@@ -70,6 +71,9 @@ function createMockRoutes(
     route("GET", /^\/api\/providers$/u, () => jsonResponse(mockProviderList)),
     route("GET", /^\/api\/stages\/stage-solution-design-running\/inspector$/u, () =>
       jsonResponse(mockStageInspectorProjection),
+    ),
+    route("GET", /^\/api\/stages\/stage-code-generation-running\/inspector$/u, () =>
+      jsonResponse(mockCodeGenerationInspectorProjection),
     ),
     route("GET", /^\/api\/control-records\/control-clarification$/u, () =>
       jsonResponse(mockControlItemInspectorProjection),

@@ -77,7 +77,11 @@ export function StageNode({
         ))}
       </div>
 
-      <StageNodeItems items={entry.items} />
+      <StageNodeItems
+        items={entry.items}
+        stageType={entry.stage_type}
+        stageMetrics={entry.metrics}
+      />
     </article>
   );
 }
