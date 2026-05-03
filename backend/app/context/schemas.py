@@ -352,6 +352,7 @@ class ContextManifest(_StrictFrozenModel):
         template_version: str,
         output_schema_ref: str,
         tool_schema_version: str,
+        system_prompt_ref: str | None = None,
         runtime_limit_snapshot_ref: str | None = None,
         compression_threshold_ratio: float | None = None,
         compression_trigger_token_threshold: int | None = None,
@@ -385,10 +386,16 @@ class ContextManifest(_StrictFrozenModel):
             *envelope.reasoning_trace,
             *envelope.recent_observations,
         ]
-        resolved_prompt_refs = [
-            *_prompt_refs_from_blocks(blocks),
-            *(prompt_refs or []),
-        ]
+        block_prompt_refs = _prompt_refs_from_blocks(blocks)
+        if prompt_refs is None:
+            resolved_prompt_refs = block_prompt_refs
+        elif len(prompt_refs) == 0:
+            resolved_prompt_refs = []
+        else:
+            resolved_prompt_refs = [
+                *block_prompt_refs,
+                *prompt_refs,
+            ]
         unique_prompt_refs = _dedupe_prompt_refs(resolved_prompt_refs)
 
         records: list[ContextManifestRecord] = []
@@ -428,8 +435,10 @@ class ContextManifest(_StrictFrozenModel):
             for record in records
             if record.estimated_chars is not None
         ]
-        system_prompt_ref = _system_prompt_ref_from_blocks(
-            envelope.agent_role_prompt
+        resolved_system_prompt_ref = (
+            system_prompt_ref
+            if system_prompt_ref is not None
+            else _system_prompt_ref_from_blocks(envelope.agent_role_prompt)
         )
 
         return cls(
@@ -445,7 +454,7 @@ class ContextManifest(_StrictFrozenModel):
             provider_snapshot_ref=provider_snapshot.snapshot_id,
             model_binding_snapshot_ref=envelope.model_binding_snapshot_ref,
             provider_binding_model_id=provider_snapshot.model_id,
-            system_prompt_ref=system_prompt_ref,
+            system_prompt_ref=resolved_system_prompt_ref,
             prompt_refs=unique_prompt_refs,
             prompt_asset_sources=tuple(
                 prompt_ref.source_ref for prompt_ref in unique_prompt_refs
