@@ -6,17 +6,13 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from backend.app.prompts.definitions import (
-    AGENT_ROLE_SEED_PROMPT_IDS,
     PROMPT_ASSET_ROOT,
     REQUIRED_BUILTIN_PROMPT_IDS,
     applies_to_stage_types_for_prompt_id,
     expected_source_ref,
 )
 from backend.app.schemas.prompts import (
-    ModelCallType,
     PromptAssetRead,
-    PromptAuthorityLevel,
-    PromptCacheScope,
     PromptSectionRead,
     PromptType,
     PromptVersionRef,
@@ -129,8 +125,7 @@ class PromptRegistry:
         metadata = parsed.metadata
         body = parsed.body
         expected_ref = expected_source_ref(asset_root, asset_path)
-        prompt_id = metadata.get("prompt_id")
-        if "source_ref" not in metadata and prompt_id not in AGENT_ROLE_SEED_PROMPT_IDS:
+        if "source_ref" not in metadata:
             raise PromptAssetMetadataError(
                 "prompt asset front matter is missing keys: ['source_ref']",
                 asset_path=asset_path,
@@ -142,6 +137,7 @@ class PromptRegistry:
             )
 
         normalized = cls._normalize_metadata(metadata, expected_ref=expected_ref)
+        cls._version_sort_key(normalized["prompt_version"])
         prompt_id = normalized["prompt_id"]
         title = cls._derive_title(prompt_id=prompt_id, body=body, metadata=metadata)
         try:
@@ -153,7 +149,7 @@ class PromptRegistry:
                 model_call_type=normalized["model_call_type"],
                 cache_scope=normalized["cache_scope"],
                 source_ref=normalized["source_ref"],
-                content_hash=cls.compute_content_hash(markdown),
+                content_hash=cls.compute_content_hash(body),
                 sections=[
                     PromptSectionRead(
                         section_id=metadata.get("role_id", prompt_id),
@@ -188,14 +184,6 @@ class PromptRegistry:
         prompt_id = metadata["prompt_id"]
         normalized = dict(metadata)
         normalized["source_ref"] = metadata.get("source_ref", expected_ref)
-        if prompt_id in AGENT_ROLE_SEED_PROMPT_IDS:
-            normalized.setdefault("prompt_type", PromptType.AGENT_ROLE_SEED.value)
-            normalized.setdefault(
-                "authority_level",
-                PromptAuthorityLevel.AGENT_ROLE_PROMPT.value,
-            )
-            normalized.setdefault("model_call_type", ModelCallType.STAGE_EXECUTION.value)
-            normalized.setdefault("cache_scope", PromptCacheScope.GLOBAL_STATIC.value)
 
         required_keys = {
             "prompt_id",

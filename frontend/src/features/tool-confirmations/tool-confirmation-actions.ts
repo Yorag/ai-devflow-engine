@@ -12,10 +12,12 @@ export function submitToolConfirmationDecision(
   decision: ToolConfirmationDecision,
   options?: ApiRequestOptions,
 ): Promise<ToolConfirmationDecisionResponse> {
+  const body = {};
   return apiRequest(
     `/api/tool-confirmations/${entry.tool_confirmation_id}/${decision}`,
     {
       ...options,
+      body,
       method: "POST",
     },
   );

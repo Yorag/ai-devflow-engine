@@ -593,6 +593,16 @@ class ToolExecutionGate:
                 reason=assessment.reason,
                 expected_side_effects=list(assessment.expected_side_effects),
                 alternative_path_summary=assessment.alternative_path_summary,
+                planned_deny_followup_action=(
+                    "continue_current_stage"
+                    if assessment.alternative_path_summary
+                    else "run_failed"
+                ),
+                planned_deny_followup_summary=(
+                    "The current stage will continue with a low-risk alternative path."
+                    if assessment.alternative_path_summary
+                    else "The current run will fail because no low-risk alternative path exists."
+                ),
                 trace_context=request.trace_context,
             )
         except Exception:

@@ -14,7 +14,11 @@ from backend.app.db.models.runtime import ToolConfirmationRequestModel
 from backend.app.db.session import DatabaseManager
 from backend.app.schemas.feed import ToolConfirmationFeedEntry
 from backend.app.services.events import DomainEvent, EventStore, SseEventEncoder
-from backend.app.services.publication_boundary import PublicationBoundaryService
+from backend.app.services.publication_boundary import (
+    PublicationBoundaryService,
+    PublicationBoundaryServiceError,
+)
+from backend.app.api.errors import ApiError
 
 
 router = APIRouter(tags=["query"])
@@ -68,6 +72,17 @@ def stream_session_events(
         runtime_session=runtime_session,
         event_session=event_session,
     )
+    try:
+        publication_boundary.assert_session_visible(
+            session_id=sessionId,
+            not_found_message="Session workspace was not found.",
+        )
+    except PublicationBoundaryServiceError as exc:
+        raise ApiError(
+            error_code=exc.error_code,
+            message=exc.message,
+            status_code=exc.status_code,
+        ) from exc
 
     async def event_frames() -> AsyncIterator[str]:
         nonlocal cursor
@@ -77,6 +92,16 @@ def stream_session_events(
                 event_session.rollback()
                 control_session.rollback()
                 runtime_session.rollback()
+                event_session.expire_all()
+                control_session.expire_all()
+                runtime_session.expire_all()
+                try:
+                    publication_boundary.assert_session_visible(
+                        session_id=sessionId,
+                        not_found_message="Session workspace was not found.",
+                    )
+                except PublicationBoundaryServiceError:
+                    break
                 hidden_run_ids = publication_boundary.hidden_run_ids_for_session(
                     session_id=sessionId
                 )
@@ -87,6 +112,13 @@ def stream_session_events(
                 )
                 if events:
                     for event in events:
+                        try:
+                            publication_boundary.assert_session_visible(
+                                session_id=sessionId,
+                                not_found_message="Session workspace was not found.",
+                            )
+                        except PublicationBoundaryServiceError:
+                            return
                         cursor = event.sequence_index
                         if event.run_id is not None and event.run_id in hidden_run_ids:
                             continue

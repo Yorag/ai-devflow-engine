@@ -71,6 +71,8 @@ class ToolConfirmationRequestPort(Protocol):
         reason: str,
         expected_side_effects: list[str],
         alternative_path_summary: str | None,
+        planned_deny_followup_action: str | None = None,
+        planned_deny_followup_summary: str | None = None,
         trace_context: TraceContext,
     ) -> Any: ...
 
@@ -192,7 +194,9 @@ class ToolRiskClassifier:
                 input_digest=input_digest,
                 confirmation_object_ref=confirmation_object_ref,
                 expected_side_effects=_side_effects_for(high_risk_categories),
-                alternative_path_summary="Use a read-only inspection or a narrower edit when possible.",
+                alternative_path_summary=_alternative_path_summary_for(
+                    high_risk_categories
+                ),
             )
 
         if tool.name in _READ_ONLY_TOOLS:
@@ -522,6 +526,25 @@ def _side_effects_for(categories: list[ToolRiskCategory]) -> list[str]:
     if not effects:
         effects.append("May change workspace or external state.")
     return effects
+
+
+def _alternative_path_summary_for(
+    categories: list[ToolRiskCategory],
+) -> str | None:
+    no_safe_fallback = {
+        ToolRiskCategory.DEPENDENCY_CHANGE,
+        ToolRiskCategory.LOCKFILE_CHANGE,
+        ToolRiskCategory.ENVIRONMENT_CONFIG_CHANGE,
+        ToolRiskCategory.DATABASE_MIGRATION,
+        ToolRiskCategory.FILE_DELETE_OR_MOVE,
+        ToolRiskCategory.NETWORK_DOWNLOAD,
+        ToolRiskCategory.UNKNOWN_COMMAND,
+    }
+    if any(category in no_safe_fallback for category in categories):
+        return None
+    if ToolRiskCategory.BROAD_WRITE in categories:
+        return "Use a narrower edit scope or a read-only inspection when possible."
+    return None
 
 
 def _dedupe_categories(

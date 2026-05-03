@@ -39,6 +39,10 @@ from backend.app.schemas.run import (
     SolutionImplementationPlanRead,
 )
 from backend.app.services.events import EventStore
+from backend.app.services.publication_boundary import (
+    PublicationBoundaryService,
+    PublicationBoundaryServiceError,
+)
 
 
 EXECUTION_NODE_ADAPTER = TypeAdapter(ExecutionNodeProjection)
@@ -74,6 +78,11 @@ class InspectorProjectionService:
         self._control_session = control_session
         self._runtime_session = runtime_session
         self._event_store = EventStore(event_session)
+        self._publication_boundary = PublicationBoundaryService(
+            control_session=control_session,
+            runtime_session=runtime_session,
+            event_session=event_session,
+        )
 
     def get_stage_inspector(self, stage_run_id: str) -> StageInspectorProjection:
         stage, run = self._get_visible_stage_context(stage_run_id)
@@ -725,17 +734,16 @@ class InspectorProjectionService:
         self,
         stage_run_id: str,
     ) -> tuple[StageRunModel, PipelineRunModel]:
-        stage = self._runtime_session.get(StageRunModel, stage_run_id)
-        if stage is None:
-            self._raise_not_found()
-        run = self._runtime_session.get(PipelineRunModel, stage.run_id)
-        if run is None:
+        try:
+            stage, run = self._publication_boundary.assert_stage_visible(
+                stage_run_id=stage_run_id,
+                not_found_message=STAGE_INSPECTOR_NOT_FOUND_MESSAGE,
+            )
+        except PublicationBoundaryServiceError:
             self._raise_not_found()
         session = self._control_session.get(SessionModel, run.session_id)
-        if session is None or not session.is_visible:
-            self._raise_not_found()
         project = self._control_session.get(ProjectModel, run.project_id)
-        if project is None or not project.is_visible:
+        if session is None or project is None or not project.is_visible:
             self._raise_not_found()
         if session.project_id != run.project_id:
             self._raise_not_found()
@@ -751,17 +759,18 @@ class InspectorProjectionService:
         )
         if confirmation is None:
             self._raise_tool_confirmation_not_found()
-        run = self._runtime_session.get(PipelineRunModel, confirmation.run_id)
-        if run is None:
+        try:
+            stage, run = self._publication_boundary.assert_stage_visible(
+                stage_run_id=confirmation.stage_run_id,
+                not_found_message=TOOL_CONFIRMATION_INSPECTOR_NOT_FOUND_MESSAGE,
+            )
+        except PublicationBoundaryServiceError:
             self._raise_tool_confirmation_not_found()
-        stage = self._runtime_session.get(StageRunModel, confirmation.stage_run_id)
-        if stage is None or stage.run_id != run.run_id:
+        if confirmation.run_id != run.run_id or stage.run_id != run.run_id:
             self._raise_tool_confirmation_not_found()
         session = self._control_session.get(SessionModel, run.session_id)
-        if session is None or not session.is_visible:
-            self._raise_tool_confirmation_not_found()
         project = self._control_session.get(ProjectModel, run.project_id)
-        if project is None or not project.is_visible:
+        if session is None or project is None or not project.is_visible:
             self._raise_tool_confirmation_not_found()
         if session.project_id != run.project_id:
             self._raise_tool_confirmation_not_found()
@@ -776,14 +785,19 @@ class InspectorProjectionService:
             self._raise_control_item_not_found()
         if control_record.control_type.value == "tool_confirmation":
             self._raise_control_item_not_found()
+        try:
+            self._publication_boundary.assert_run_visible(
+                run_id=control_record.run_id,
+                not_found_message=CONTROL_ITEM_INSPECTOR_NOT_FOUND_MESSAGE,
+            )
+        except PublicationBoundaryServiceError:
+            self._raise_control_item_not_found()
         run = self._runtime_session.get(PipelineRunModel, control_record.run_id)
         if run is None:
             self._raise_control_item_not_found()
         session = self._control_session.get(SessionModel, run.session_id)
-        if session is None or not session.is_visible:
-            self._raise_control_item_not_found()
         project = self._control_session.get(ProjectModel, run.project_id)
-        if project is None or not project.is_visible:
+        if session is None or project is None or not project.is_visible:
             self._raise_control_item_not_found()
         if session.project_id != run.project_id:
             self._raise_control_item_not_found()

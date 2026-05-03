@@ -584,6 +584,44 @@ def test_get_stage_logs_scopes_to_stage_and_rejects_invalid_limit(
     }
 
 
+def test_get_logs_reject_pending_startup_targets(tmp_path: Path) -> None:
+    from backend.tests.api.test_startup_publication_visibility import _seed_pending_startup
+
+    app = build_query_api_app(tmp_path)
+    seeded = _seed_pending_startup(app)
+
+    with TestClient(app) as client:
+        run_response = client.get(
+            f"/api/runs/{seeded.run_id}/logs",
+            headers={
+                "X-Request-ID": "req-run-logs-startup-pending",
+                "X-Correlation-ID": "corr-run-logs-startup-pending",
+            },
+        )
+        stage_response = client.get(
+            f"/api/stages/{seeded.stage_run_id}/logs",
+            headers={
+                "X-Request-ID": "req-stage-logs-startup-pending",
+                "X-Correlation-ID": "corr-stage-logs-startup-pending",
+            },
+        )
+
+    assert run_response.status_code == 404
+    assert run_response.json() == {
+        "error_code": "not_found",
+        "message": "Run logs were not found.",
+        "request_id": "req-run-logs-startup-pending",
+        "correlation_id": "corr-run-logs-startup-pending",
+    }
+    assert stage_response.status_code == 404
+    assert stage_response.json() == {
+        "error_code": "not_found",
+        "message": "Stage logs were not found.",
+        "request_id": "req-stage-logs-startup-pending",
+        "correlation_id": "corr-stage-logs-startup-pending",
+    }
+
+
 def test_get_run_logs_returns_config_unavailable_when_runtime_settings_missing(
     tmp_path: Path,
 ) -> None:
@@ -708,6 +746,30 @@ def test_get_stage_inspector_returns_projection_and_unified_not_found(
         "message": "Stage inspector was not found.",
         "request_id": "req-inspector-missing",
         "correlation_id": "corr-inspector-missing",
+    }
+
+
+def test_get_stage_inspector_rejects_pending_startup_stage(tmp_path: Path) -> None:
+    from backend.tests.api.test_startup_publication_visibility import _seed_pending_startup
+
+    app = build_query_api_app(tmp_path)
+    seeded = _seed_pending_startup(app)
+
+    with TestClient(app) as client:
+        response = client.get(
+            f"/api/stages/{seeded.stage_run_id}/inspector",
+            headers={
+                "X-Request-ID": "req-inspector-startup-pending",
+                "X-Correlation-ID": "corr-inspector-startup-pending",
+            },
+        )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "error_code": "not_found",
+        "message": "Stage inspector was not found.",
+        "request_id": "req-inspector-startup-pending",
+        "correlation_id": "corr-inspector-startup-pending",
     }
 
 

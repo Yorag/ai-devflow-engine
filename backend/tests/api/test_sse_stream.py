@@ -8,11 +8,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.db.base import DatabaseRole
+from backend.app.db.models.control import SessionModel
 from backend.app.db.models.runtime import ToolConfirmationRequestModel
 from backend.app.domain.enums import SseEventType
 from backend.app.schemas import common
 from backend.app.schemas.feed import (
     ExecutionNodeProjection,
+    MessageFeedEntry,
     ProviderCallStageItem,
     ToolConfirmationFeedEntry,
 )
@@ -221,6 +223,92 @@ def test_session_event_stream_openapi_documents_route_parameters_and_error(
         ]
         == "#/components/schemas/ErrorResponse"
     )
+
+
+def test_session_event_stream_returns_not_found_for_hidden_session(
+    tmp_path: Path,
+) -> None:
+    app = build_query_api_app(tmp_path)
+    with app.state.database_manager.session(DatabaseRole.CONTROL) as session:
+        row = session.get(SessionModel, "session-1")
+        assert row is not None
+        row.is_visible = False
+        row.visibility_removed_at = NOW
+        session.add(row)
+        session.commit()
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/sessions/session-1/events/stream",
+            headers={
+                "X-Request-ID": "req-event-stream-hidden-session",
+                "X-Correlation-ID": "corr-event-stream-hidden-session",
+            },
+            params={"limit": 1},
+        )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "error_code": "not_found",
+        "message": "Session workspace was not found.",
+        "request_id": "req-event-stream-hidden-session",
+        "correlation_id": "corr-event-stream-hidden-session",
+    }
+
+
+def test_session_event_stream_does_not_emit_events_after_session_becomes_hidden(
+    tmp_path: Path,
+) -> None:
+    app = build_query_api_app(tmp_path)
+
+    with TestClient(app) as client:
+        with client.stream(
+            "GET",
+            "/api/sessions/session-1/events/stream",
+            headers={
+                "Last-Event-ID": "3",
+                "X-Request-ID": "req-event-stream-hide-after-check",
+                "X-Correlation-ID": "corr-event-stream-hide-after-check",
+            },
+            params={"after": 0, "limit": 1},
+        ) as response:
+            assert response.status_code == 200
+
+            with app.state.database_manager.session(DatabaseRole.CONTROL) as session:
+                row = session.get(SessionModel, "session-1")
+                assert row is not None
+                row.is_visible = False
+                row.visibility_removed_at = NOW
+                session.add(row)
+                session.commit()
+
+            with app.state.database_manager.session(DatabaseRole.EVENT) as session:
+                store = EventStore(
+                    session,
+                    now=lambda: NOW + timedelta(minutes=9),
+                    id_factory=iter(["event-hidden-after-check"]).__next__,
+                )
+                store.append(
+                    DomainEventType.SESSION_MESSAGE_APPENDED,
+                    payload={
+                        "message_item": MessageFeedEntry(
+                            entry_id="entry-hidden-after-check",
+                            run_id="run-active",
+                            type=common.FeedEntryType.USER_MESSAGE,
+                            occurred_at=NOW + timedelta(minutes=9),
+                            message_id="message-hidden-after-check",
+                            author="user",
+                            content="This hidden event must not leak.",
+                            stage_run_id="stage-active",
+                        ).model_dump(mode="json")
+                    },
+                    trace_context=_trace(run_id="run-active", stage_run_id="stage-active"),
+                )
+                session.commit()
+
+            frames = _read_sse_frames(response)
+
+    assert frames == []
 
 
 def _append_reconnect_replay_events(app) -> None:

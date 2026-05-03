@@ -410,6 +410,7 @@ def test_public_contract_models_are_stable_strict_value_objects() -> None:
         command_preview="npm install vite",
         target_summary="command: npm install vite",
         expected_side_effects=["May modify dependencies."],
+        alternative_path_summary=None,
         input_digest="abc123",
         confirmation_object_ref="tool-call:bash:call-bash:abc123",
     )
@@ -421,3 +422,20 @@ def test_public_contract_models_are_stable_strict_value_objects() -> None:
     assert grant.tool_name == "bash"
     assert assessment.requires_confirmation is True
     assert record.tool_confirmation_id == "tool-confirmation-1"
+
+
+def test_high_risk_dependency_change_does_not_imply_continue_current_stage_followup() -> None:
+    classifier = ToolRiskClassifier()
+    bash_tool = fake_tool_fixture(
+        name="bash",
+        side_effect_level=ToolSideEffectLevel.PROCESS_EXECUTION,
+    )
+
+    assessment = classifier.classify(
+        tool=bash_tool,
+        request=build_request("bash", {"command": "npm install vite"}),
+    )
+
+    assert assessment.risk_level is ToolRiskLevel.HIGH_RISK
+    assert assessment.risk_categories == [ToolRiskCategory.DEPENDENCY_CHANGE]
+    assert assessment.alternative_path_summary is None

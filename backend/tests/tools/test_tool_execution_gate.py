@@ -991,7 +991,23 @@ def test_execute_high_risk_action_returns_waiting_confirmation_without_running_t
     assert result.error.safe_details["target_summary"] == "command: npm install vite"
     assert result.error.safe_details["risk_categories"] == ["dependency_change"]
     assert confirmations.calls[0]["tool_name"] == "bash"
+    assert confirmations.calls[0]["planned_deny_followup_action"] == "run_failed"
+    assert (
+        confirmations.calls[0]["planned_deny_followup_summary"]
+        == "The current run will fail because no low-risk alternative path exists."
+    )
     assert tool.calls == []
+
+
+def test_confirmation_port_protocol_accepts_planned_deny_followup_fields() -> None:
+    from inspect import signature
+
+    from backend.app.tools.risk import ToolConfirmationRequestPort
+
+    params = signature(ToolConfirmationRequestPort.create_request).parameters
+
+    assert "planned_deny_followup_action" in params
+    assert "planned_deny_followup_summary" in params
 
 
 def test_execute_blocked_action_returns_tool_risk_blocked_without_confirmation() -> None:

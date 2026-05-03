@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.error_codes import ErrorCode
 from backend.app.db.models.control import SessionModel, StartupPublicationModel
+from backend.app.db.models.control import ProjectModel
 from backend.app.db.models.event import DomainEventModel
 from backend.app.db.models.graph import GraphDefinitionModel, GraphThreadModel
 from backend.app.db.models.runtime import (
@@ -279,11 +280,56 @@ class PublicationBoundaryService:
         *,
         session_id: str,
     ) -> set[str]:
+        all_run_ids = set(
+            self._runtime_session.execute(
+                select(PipelineRunModel.run_id).where(
+                    PipelineRunModel.session_id == session_id
+                )
+            ).scalars()
+        )
+        session = self._control_session.execute(
+            select(SessionModel).where(SessionModel.session_id == session_id)
+        ).scalar_one_or_none()
+        if session is None:
+            return set()
+        if not session.is_visible:
+            return all_run_ids
+        project = self._control_session.execute(
+            select(ProjectModel).where(ProjectModel.project_id == session.project_id)
+        ).scalar_one_or_none()
+        if project is None or not project.is_visible:
+            return all_run_ids
         statement = select(StartupPublicationModel.run_id).where(
             StartupPublicationModel.session_id == session_id,
             StartupPublicationModel.publication_state != PUBLICATION_STATE_PUBLISHED,
         )
-        return set(self._control_session.execute(statement).scalars())
+        return all_run_ids & set(self._control_session.execute(statement).scalars())
+
+    def assert_session_visible(
+        self,
+        *,
+        session_id: str,
+        not_found_message: str,
+    ) -> SessionModel:
+        session = self._control_session.execute(
+            select(SessionModel).where(SessionModel.session_id == session_id)
+        ).scalar_one_or_none()
+        if session is None or not session.is_visible:
+            raise PublicationBoundaryServiceError(
+                ErrorCode.NOT_FOUND,
+                not_found_message,
+                404,
+            )
+        project = self._control_session.execute(
+            select(ProjectModel).where(ProjectModel.project_id == session.project_id)
+        ).scalar_one_or_none()
+        if project is None or not project.is_visible:
+            raise PublicationBoundaryServiceError(
+                ErrorCode.NOT_FOUND,
+                not_found_message,
+                404,
+            )
+        return session
 
     def is_run_hidden(
         self,
@@ -299,6 +345,7 @@ class PublicationBoundaryService:
         self,
         *,
         run_id: str,
+        not_found_message: str = "Run timeline was not found.",
     ) -> str:
         publication = self._control_session.execute(
             select(StartupPublicationModel).where(StartupPublicationModel.run_id == run_id)
@@ -306,7 +353,7 @@ class PublicationBoundaryService:
         if publication is not None and publication.publication_state != PUBLICATION_STATE_PUBLISHED:
             raise PublicationBoundaryServiceError(
                 ErrorCode.NOT_FOUND,
-                "Run timeline was not found.",
+                not_found_message,
                 404,
             )
 
@@ -314,10 +361,46 @@ class PublicationBoundaryService:
         if run is None:
             raise PublicationBoundaryServiceError(
                 ErrorCode.NOT_FOUND,
-                "Run timeline was not found.",
+                not_found_message,
+                404,
+            )
+        session = self.assert_session_visible(
+            session_id=run.session_id,
+            not_found_message=not_found_message,
+        )
+        if session.project_id != run.project_id:
+            raise PublicationBoundaryServiceError(
+                ErrorCode.NOT_FOUND,
+                not_found_message,
                 404,
             )
         return run.session_id
+
+    def assert_stage_visible(
+        self,
+        *,
+        stage_run_id: str,
+        not_found_message: str,
+    ) -> tuple[StageRunModel, PipelineRunModel]:
+        stage = self._runtime_session.get(StageRunModel, stage_run_id)
+        if stage is None:
+            raise PublicationBoundaryServiceError(
+                ErrorCode.NOT_FOUND,
+                not_found_message,
+                404,
+            )
+        self.assert_run_visible(
+            run_id=stage.run_id,
+            not_found_message=not_found_message,
+        )
+        run = self._runtime_session.get(PipelineRunModel, stage.run_id)
+        if run is None:
+            raise PublicationBoundaryServiceError(
+                ErrorCode.NOT_FOUND,
+                not_found_message,
+                404,
+            )
+        return stage, run
 
     def _startup_claim_error_after_guard_loss(
         self,

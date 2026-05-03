@@ -81,6 +81,40 @@ def _dedupe_prompt_refs(
     return tuple(ordered)
 
 
+def _prompt_refs_from_blocks(
+    blocks: list["ContextBlock"],
+) -> list[PromptVersionRef]:
+    return [
+        prompt_section.prompt_ref
+        for block in blocks
+        for prompt_section in block.prompt_section_refs
+    ]
+
+
+def _system_prompt_ref_from_blocks(
+    blocks: tuple["ContextBlock", ...],
+) -> str | None:
+    preferred = next(
+        (
+            source.source_ref
+            for block in blocks
+            for source in block.sources
+            if source.source_kind == "template_snapshot_stage_role_prompt"
+        ),
+        None,
+    )
+    if preferred is not None:
+        return preferred
+    return next(
+        (
+            source.source_ref
+            for block in blocks
+            for source in block.sources
+        ),
+        None,
+    )
+
+
 class ContextEnvelopeSection(StrEnum):
     RUNTIME_INSTRUCTIONS = "runtime_instructions"
     STAGE_CONTRACT = "stage_contract"
@@ -154,6 +188,11 @@ class ContextBlock(_StrictFrozenModel):
 
     @model_validator(mode="after")
     def validate_trust_boundary(self) -> Self:
+        if self.trust_level is ContextTrustLevel.SYSTEM_TRUSTED:
+            if any(source.source_kind != "prompt_asset" for source in self.sources):
+                raise ValueError(
+                    "system_trusted blocks may only reference prompt_asset sources"
+                )
         if self.section is ContextEnvelopeSection.RUNTIME_INSTRUCTIONS:
             if self.trust_level is not ContextTrustLevel.SYSTEM_TRUSTED:
                 raise ValueError(
@@ -317,6 +356,16 @@ class ContextManifest(_StrictFrozenModel):
         compression_threshold_ratio: float | None = None,
         compression_trigger_token_threshold: int | None = None,
     ) -> "ContextManifest":
+        if envelope.trace_context.session_id != envelope.session_id:
+            raise ValueError(
+                "trace_context.session_id must match ContextEnvelope.session_id"
+            )
+        if envelope.trace_context.run_id != envelope.run_id:
+            raise ValueError("trace_context.run_id must match ContextEnvelope.run_id")
+        if envelope.trace_context.stage_run_id != envelope.stage_run_id:
+            raise ValueError(
+                "trace_context.stage_run_id must match ContextEnvelope.stage_run_id"
+            )
         if provider_snapshot.run_id != envelope.run_id:
             raise ValueError("provider_snapshot.run_id must match ContextEnvelope.run_id")
         if provider_snapshot.snapshot_id != envelope.provider_snapshot_ref:
@@ -336,10 +385,9 @@ class ContextManifest(_StrictFrozenModel):
             *envelope.reasoning_trace,
             *envelope.recent_observations,
         ]
-        resolved_prompt_refs = prompt_refs or [
-            prompt_section.prompt_ref
-            for block in blocks
-            for prompt_section in block.prompt_section_refs
+        resolved_prompt_refs = [
+            *_prompt_refs_from_blocks(blocks),
+            *(prompt_refs or []),
         ]
         unique_prompt_refs = _dedupe_prompt_refs(resolved_prompt_refs)
 
@@ -380,7 +428,9 @@ class ContextManifest(_StrictFrozenModel):
             for record in records
             if record.estimated_chars is not None
         ]
-        system_prompt_ref = unique_prompt_refs[0].source_ref if unique_prompt_refs else None
+        system_prompt_ref = _system_prompt_ref_from_blocks(
+            envelope.agent_role_prompt
+        )
 
         return cls(
             session_id=envelope.session_id,

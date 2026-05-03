@@ -18,6 +18,7 @@ from backend.app.db.models.control import (
 )
 from backend.app.domain.enums import SessionStatus, StageType, TemplateSource
 from backend.app.domain.trace_context import TraceContext
+from backend.app.prompts.definitions import expected_source_ref
 from backend.app.runtime.prompt_validation import (
     PromptValidationError,
     PromptValidationService,
@@ -184,21 +185,27 @@ def build_agent_role_seed_asset(
     applies_to_stage_types: Iterable[StageType],
 ) -> PromptAssetRead:
     metadata, body = parse_front_matter(markdown)
+    expected_ref = expected_source_ref(
+        ROLE_ASSET_DIR.parent,
+        ROLE_ASSET_DIR / source_file_name,
+    )
+    if metadata["source_ref"] != expected_ref:
+        raise ValueError("Agent role seed source_ref does not match asset path.")
     return PromptAssetRead(
         prompt_id=metadata["prompt_id"],
         prompt_version=metadata["prompt_version"],
-        prompt_type=PromptType.AGENT_ROLE_SEED,
-        authority_level=PromptAuthorityLevel.AGENT_ROLE_PROMPT,
-        model_call_type=ModelCallType.STAGE_EXECUTION,
-        cache_scope=PromptCacheScope.GLOBAL_STATIC,
-        source_ref=f"backend://prompts/roles/{source_file_name}",
+        prompt_type=PromptType(metadata["prompt_type"]),
+        authority_level=PromptAuthorityLevel(metadata["authority_level"]),
+        model_call_type=ModelCallType(metadata["model_call_type"]),
+        cache_scope=PromptCacheScope(metadata["cache_scope"]),
+        source_ref=metadata["source_ref"],
         content_hash=PromptAssetRead.calculate_content_hash(markdown),
         sections=[
             PromptSectionRead(
                 section_id=metadata["role_id"],
                 title=metadata["role_name"],
                 body=body,
-                cache_scope=PromptCacheScope.GLOBAL_STATIC,
+                cache_scope=PromptCacheScope(metadata["cache_scope"]),
             )
         ],
         applies_to_stage_types=list(applies_to_stage_types),

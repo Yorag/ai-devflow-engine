@@ -62,7 +62,10 @@ describe("submitToolConfirmationDecision", () => {
     expect(result.tool_confirmation.status).toBe("allowed");
     expect(fetcher).toHaveBeenCalledWith(
       "/api/tool-confirmations/tool-confirmation-1/allow",
-      expect.objectContaining({ method: "POST" }),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
     );
   });
 
@@ -95,7 +98,10 @@ describe("submitToolConfirmationDecision", () => {
     expect(result.tool_confirmation.deny_followup_action).toBe("run_failed");
     expect(fetcher).toHaveBeenCalledWith(
       "/api/tool-confirmations/tool-confirmation-1/deny",
-      expect.objectContaining({ method: "POST" }),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
     );
   });
 

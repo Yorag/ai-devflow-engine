@@ -25,6 +25,10 @@ from backend.app.schemas.observability import (
     RunLogQueryResponse,
 )
 from backend.app.schemas.runtime_settings import LogPolicy, PlatformHardLimits
+from backend.app.services.publication_boundary import (
+    PublicationBoundaryService,
+    PublicationBoundaryServiceError,
+)
 
 
 RUN_LOGS_NOT_FOUND_MESSAGE = "Run logs were not found."
@@ -84,6 +88,10 @@ class LogQueryService:
         self._control_session = control_session
         self._runtime_session = runtime_session
         self._log_session = log_session
+        self._publication_boundary = PublicationBoundaryService(
+            control_session=control_session,
+            runtime_session=runtime_session,
+        )
 
     def list_run_logs(
         self,
@@ -300,13 +308,23 @@ class LogQueryService:
         } <= log_policy.keys()
 
     def _get_visible_stage(self, stage_run_id: str) -> StageRunModel:
-        stage = self._runtime_session.get(StageRunModel, stage_run_id)
-        if stage is None:
+        try:
+            stage, _run = self._publication_boundary.assert_stage_visible(
+                stage_run_id=stage_run_id,
+                not_found_message=STAGE_LOGS_NOT_FOUND_MESSAGE,
+            )
+        except PublicationBoundaryServiceError:
             raise self._not_found(STAGE_LOGS_NOT_FOUND_MESSAGE)
-        self._get_visible_run(stage.run_id, message=STAGE_LOGS_NOT_FOUND_MESSAGE)
         return stage
 
     def _get_visible_run(self, run_id: str, *, message: str) -> PipelineRunModel:
+        try:
+            self._publication_boundary.assert_run_visible(
+                run_id=run_id,
+                not_found_message=message,
+            )
+        except PublicationBoundaryServiceError:
+            raise self._not_found(message)
         run = self._runtime_session.get(PipelineRunModel, run_id)
         if run is None:
             raise self._not_found(message)

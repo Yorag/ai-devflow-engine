@@ -59,6 +59,22 @@ def test_agent_role_seed_assets_parse_front_matter_and_hash_body() -> None:
         assert asset.applies_to_stage_types
 
 
+def test_agent_role_seed_assets_declare_full_builtin_metadata() -> None:
+    from backend.app.services.templates import ROLE_ASSET_DIR, parse_front_matter
+
+    for _role_id, (file_name, prompt_id) in EXPECTED_ASSETS.items():
+        metadata, _body = parse_front_matter(
+            (ROLE_ASSET_DIR / file_name).read_text(encoding="utf-8")
+        )
+
+        assert metadata["prompt_id"] == prompt_id
+        assert metadata["prompt_type"] == "agent_role_seed"
+        assert metadata["authority_level"] == "agent_role_prompt"
+        assert metadata["model_call_type"] == "stage_execution"
+        assert metadata["cache_scope"] == "global_static"
+        assert metadata["source_ref"] == f"backend://prompts/roles/{file_name}"
+
+
 def test_role_assets_cover_model_driven_stage_prompts() -> None:
     from backend.app.services.templates import load_default_agent_role_seed_assets
 
@@ -87,6 +103,11 @@ def test_agent_role_seed_asset_rejects_version_in_filename(tmp_path: Path) -> No
         "---\n"
         "prompt_id: agent_role_seed.bad\n"
         "prompt_version: 2026-05-02.1\n"
+        "prompt_type: agent_role_seed\n"
+        "authority_level: agent_role_prompt\n"
+        "model_call_type: stage_execution\n"
+        "cache_scope: global_static\n"
+        "source_ref: backend://prompts/roles/bad-2026-05-02.1.md\n"
         "role_id: role-bad\n"
         "role_name: Bad Role\n"
         "---\n"

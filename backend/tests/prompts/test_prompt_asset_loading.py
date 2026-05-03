@@ -247,6 +247,30 @@ def test_load_builtin_assets_rejects_illegal_agent_role_seed_authority(tmp_path:
         PromptRegistry.load_builtin_assets(asset_root=tmp_path)
 
 
+def test_load_builtin_assets_rejects_agent_role_seed_missing_explicit_builtin_metadata(
+    tmp_path: Path,
+) -> None:
+    from backend.app.prompts.registry import PromptAssetMetadataError, PromptRegistry
+
+    seed_required_assets(tmp_path)
+    write_asset(
+        tmp_path,
+        "roles/requirement_analyst.md",
+        (
+            "---\n"
+            "prompt_id: agent_role_seed.requirement_analyst\n"
+            "prompt_version: 2026-05-02.1\n"
+            "role_id: role-requirement-analyst\n"
+            "role_name: Requirement Analyst\n"
+            "---\n"
+            "# Requirement Analyst\n\nMissing builtin metadata must fail.\n"
+        ),
+    )
+
+    with pytest.raises(PromptAssetMetadataError, match="missing keys"):
+        PromptRegistry.load_builtin_assets(asset_root=tmp_path)
+
+
 def test_get_without_version_selects_latest_numeric_prompt_version(tmp_path: Path) -> None:
     from backend.app.prompts.registry import PromptRegistry
 
@@ -295,3 +319,26 @@ def test_get_unknown_asset_raises_structured_lookup_error() -> None:
 
     with pytest.raises(PromptAssetNotFoundError, match="1900-01-01.1"):
         registry.get("runtime_instructions", "1900-01-01.1")
+
+
+def test_load_builtin_assets_rejects_invalid_prompt_version_format(tmp_path: Path) -> None:
+    from backend.app.prompts.registry import PromptAssetMetadataError, PromptRegistry
+
+    seed_required_assets(tmp_path)
+    write_asset(
+        tmp_path,
+        "runtime/runtime_instructions.md",
+        valid_asset(
+            prompt_id="runtime_instructions",
+            prompt_version="not-a-version",
+            prompt_type="runtime_instructions",
+            authority_level="system_trusted",
+            model_call_type="stage_execution",
+            cache_scope="global_static",
+            source_ref="backend://prompts/runtime/runtime_instructions.md",
+            body="# Runtime Instructions\n\nInvalid prompt version format.",
+        ),
+    )
+
+    with pytest.raises(PromptAssetMetadataError, match="invalid prompt_version format"):
+        PromptRegistry.load_builtin_assets(asset_root=tmp_path)
