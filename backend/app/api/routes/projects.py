@@ -23,7 +23,11 @@ from backend.app.schemas.delivery_channel import (
     ProjectDeliveryChannelUpdateRequest,
     ProjectDeliveryChannelValidationResult,
 )
-from backend.app.schemas.project import ProjectCreateRequest, ProjectRead
+from backend.app.schemas.project import (
+    ProjectCreateRequest,
+    ProjectRead,
+    ProjectRemoveResult,
+)
 from backend.app.services.delivery_channels import (
     DeliveryChannelService,
     DeliveryChannelServiceError,
@@ -119,9 +123,19 @@ def get_control_session(request: Request) -> Iterator[Session]:
         session.close()
 
 
+def get_runtime_session(request: Request) -> Iterator[Session]:
+    manager: DatabaseManager = request.app.state.database_manager
+    session = manager.session(DatabaseRole.RUNTIME)
+    try:
+        yield session
+    finally:
+        session.close()
+
+
 def get_project_service(
     request: Request,
     session: Session = Depends(get_control_session),
+    runtime_session: Session = Depends(get_runtime_session),
 ) -> Iterator[ProjectService]:
     manager: DatabaseManager = request.app.state.database_manager
     settings = request.app.state.environment_settings
@@ -133,6 +147,7 @@ def get_project_service(
             session,
             settings=settings,
             audit_service=audit_service,
+            runtime_session=runtime_session,
         )
     finally:
         log_session.close()
@@ -213,6 +228,33 @@ def create_project(
             status_code=exc.status_code,
         ) from exc
     return _project_read(project)
+
+
+@router.delete(
+    "/projects/{projectId}",
+    response_model=ProjectRemoveResult,
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+def delete_project(
+    projectId: str,
+    service: ProjectService = Depends(get_project_service),
+) -> ProjectRemoveResult:
+    try:
+        return service.remove_project(
+            project_id=projectId,
+            trace_context=get_trace_context(),
+        )
+    except ProjectServiceError as exc:
+        raise ApiError(
+            error_code=exc.error_code,
+            message=exc.message,
+            status_code=exc.status_code,
+        ) from exc
 
 
 @router.get(
