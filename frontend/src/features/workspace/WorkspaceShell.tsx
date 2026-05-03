@@ -8,6 +8,7 @@ import {
 } from "../../api/hooks";
 import type { ApiRequestOptions } from "../../api/client";
 import type { ProjectRead, SessionEvent, SseEventType } from "../../api/types";
+import { Composer } from "../composer/Composer";
 import { NarrativeFeed } from "../feed/NarrativeFeed";
 import { InspectorPanel } from "../inspector/InspectorPanel";
 import { useInspector } from "../inspector/useInspector";
@@ -51,6 +52,10 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
   const workspaceRuns = useWorkspaceStore((state) => state.runs);
   const workspaceNarrativeFeed = useWorkspaceStore((state) => state.narrativeFeed);
   const workspaceCurrentRunId = useWorkspaceStore((state) => state.currentRunId);
+  const workspaceCurrentStageType = useWorkspaceStore(
+    (state) => state.currentStageType,
+  );
+  const workspaceComposerState = useWorkspaceStore((state) => state.composerState);
   const initializeFromSnapshot = useWorkspaceStore(
     (state) => state.initializeFromSnapshot,
   );
@@ -67,6 +72,8 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
           runs: workspaceRuns,
           narrative_feed: workspaceNarrativeFeed,
           current_run_id: workspaceCurrentRunId,
+          current_stage_type: workspaceCurrentStageType,
+          composer_state: workspaceComposerState ?? snapshot.composer_state,
         }
       : snapshot;
   const selectedTemplateId =
@@ -195,6 +202,14 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
             </div>
           )}
         </div>
+        {workspace ? (
+          <Composer
+            session={workspace.session}
+            composerState={workspace.composer_state}
+            currentStageType={workspace.current_stage_type}
+            request={request}
+          />
+        ) : null}
       </section>
       <InspectorPanel
         isOpen={inspector.isOpen}
