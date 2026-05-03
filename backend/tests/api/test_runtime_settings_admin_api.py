@@ -62,6 +62,9 @@ def test_get_runtime_settings_initializes_persisted_defaults_and_audits(
     assert body["settings_id"] == "platform-runtime-settings"
     assert body["version"]["config_version"] == "runtime-settings-v1"
     assert body["agent_limits"]["max_react_iterations_per_stage"] == 30
+    assert body["internal_model_bindings"]["context_compression"]["model_id"] == (
+        "deepseek-chat"
+    )
     assert body["context_limits"]["compression_threshold_ratio"] == 0.8
     assert "compression_prompt" not in str(body)
 
@@ -99,6 +102,15 @@ def test_put_runtime_settings_updates_partial_groups_and_records_audit(
                     **current["agent_limits"],
                     "max_tool_calls_per_stage": 70,
                 },
+                "internal_model_bindings": {
+                    **current["internal_model_bindings"],
+                    "context_compression": {
+                        "provider_id": "provider-deepseek",
+                        "model_id": "deepseek-reasoner",
+                        "model_parameters": {"temperature": 0},
+                        "source_config_version": current["version"]["config_version"],
+                    },
+                },
                 "context_limits": {
                     **current["context_limits"],
                     "compression_threshold_ratio": 0.75,
@@ -114,6 +126,9 @@ def test_put_runtime_settings_updates_partial_groups_and_records_audit(
     body = response.json()
     assert body["version"]["config_version"] == "runtime-settings-v2"
     assert body["agent_limits"]["max_tool_calls_per_stage"] == 70
+    assert body["internal_model_bindings"]["context_compression"]["model_id"] == (
+        "deepseek-reasoner"
+    )
     assert body["context_limits"]["compression_threshold_ratio"] == 0.75
 
     with app.state.database_manager.session(DatabaseRole.LOG) as session:
@@ -331,6 +346,8 @@ def test_runtime_settings_routes_are_documented_in_openapi(tmp_path: Path) -> No
         "PlatformRuntimeSettingsVersion",
         "PlatformHardLimits",
         "AgentRuntimeLimits",
+        "InternalModelBindingSelection",
+        "InternalModelBindings",
         "ProviderCallPolicy",
         "ContextLimits",
         "LogPolicy",
@@ -351,5 +368,6 @@ def test_runtime_settings_routes_are_documented_in_openapi(tmp_path: Path) -> No
     schema_text = str(schemas["PlatformRuntimeSettingsRead"]) + str(
         schemas["PlatformRuntimeSettingsUpdate"]
     )
+    assert "internal_model_bindings" in schema_text
     for name in forbidden:
         assert name not in schema_text

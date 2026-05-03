@@ -129,11 +129,25 @@ class PlatformRuntimeSettingsVersion(_StrictBaseModel):
     updated_at: datetime
 
 
+class InternalModelBindingSelection(_StrictBaseModel):
+    provider_id: str = Field(min_length=1)
+    model_id: str = Field(min_length=1)
+    model_parameters: JsonObject = Field(default_factory=dict)
+    source_config_version: str = Field(min_length=1)
+
+
+class InternalModelBindings(_StrictBaseModel):
+    context_compression: InternalModelBindingSelection
+    structured_output_repair: InternalModelBindingSelection
+    validation_pass: InternalModelBindingSelection
+
+
 class PlatformRuntimeSettingsRead(_StrictBaseModel):
     settings_id: str = Field(min_length=1)
     version: PlatformRuntimeSettingsVersion
     agent_limits: AgentRuntimeLimits
     provider_call_policy: ProviderCallPolicy
+    internal_model_bindings: InternalModelBindings
     context_limits: ContextLimits
     log_policy: LogPolicy
     hard_limits: PlatformHardLimits
@@ -143,6 +157,7 @@ class PlatformRuntimeSettingsUpdate(_StrictBaseModel):
     expected_config_version: str = Field(min_length=1)
     agent_limits: AgentRuntimeLimits | None = None
     provider_call_policy: ProviderCallPolicy | None = None
+    internal_model_bindings: InternalModelBindings | None = None
     context_limits: ContextLimits | None = None
     log_policy: LogPolicy | None = None
 
@@ -219,6 +234,8 @@ __all__ = [
     "AgentRuntimeLimits",
     "ContextHardLimits",
     "ContextLimits",
+    "InternalModelBindingSelection",
+    "InternalModelBindings",
     "LogPolicy",
     "LogPolicyHardLimits",
     "ModelBindingSnapshotRead",

@@ -16,6 +16,8 @@ from backend.app.schemas.observability import AuditActorType, AuditResult
 from backend.app.schemas.runtime_settings import (
     AgentRuntimeLimits,
     ContextLimits,
+    InternalModelBindingSelection,
+    InternalModelBindings,
     LogPolicy,
     PlatformRuntimeSettingsUpdate,
     ProviderCallPolicy,
@@ -81,6 +83,8 @@ def build_trace() -> TraceContext:
 
 
 def build_manager(tmp_path: Path) -> DatabaseManager:
+    from backend.app.services.providers import ProviderService
+
     manager = DatabaseManager(
         _database_paths={role: tmp_path / f"{role.value}.db" for role in DatabaseRole},
         _database_urls={
@@ -89,6 +93,12 @@ def build_manager(tmp_path: Path) -> DatabaseManager:
         },
     )
     ControlBase.metadata.create_all(manager.engine(DatabaseRole.CONTROL))
+    with manager.session(DatabaseRole.CONTROL) as session:
+        ProviderService(
+            session,
+            audit_service=RecordingAuditService(),
+            now=lambda: NOW,
+        ).seed_builtin_providers(trace_context=build_trace())
     return manager
 
 
@@ -123,6 +133,7 @@ def test_get_current_settings_initializes_defaults_once_and_audits(
     assert settings.version.hard_limits_version == "platform-hard-limits-v1"
     assert settings.agent_limits.max_react_iterations_per_stage == 30
     assert settings.provider_call_policy.request_timeout_seconds == 60
+    assert settings.internal_model_bindings.context_compression.model_id == "deepseek-chat"
     assert settings.context_limits.compression_threshold_ratio == 0.8
     assert settings.log_policy.log_query_default_limit == 100
     assert settings_again.version.config_version == settings.version.config_version
@@ -187,6 +198,26 @@ def test_update_settings_merges_partial_groups_increments_version_and_audits(
             PlatformRuntimeSettingsUpdate(
                 expected_config_version=current.version.config_version,
                 agent_limits=AgentRuntimeLimits(max_tool_calls_per_stage=70),
+                internal_model_bindings=InternalModelBindings(
+                    context_compression=InternalModelBindingSelection(
+                        provider_id="provider-deepseek",
+                        model_id="deepseek-reasoner",
+                        model_parameters={"temperature": 0},
+                        source_config_version="runtime-settings-v1",
+                    ),
+                    structured_output_repair=InternalModelBindingSelection(
+                        provider_id="provider-deepseek",
+                        model_id="deepseek-chat",
+                        model_parameters={"temperature": 0},
+                        source_config_version="runtime-settings-v1",
+                    ),
+                    validation_pass=InternalModelBindingSelection(
+                        provider_id="provider-deepseek",
+                        model_id="deepseek-chat",
+                        model_parameters={"temperature": 0},
+                        source_config_version="runtime-settings-v1",
+                    ),
+                ),
                 context_limits=ContextLimits(compression_threshold_ratio=0.75),
             ),
             trace_context=build_trace(),
@@ -197,10 +228,12 @@ def test_update_settings_merges_partial_groups_increments_version_and_audits(
     assert updated.version.updated_at == LATER
     assert updated.agent_limits.max_tool_calls_per_stage == 70
     assert updated.agent_limits.max_react_iterations_per_stage == 30
+    assert updated.internal_model_bindings.context_compression.model_id == "deepseek-reasoner"
     assert updated.context_limits.compression_threshold_ratio == 0.75
     assert updated.provider_call_policy.request_timeout_seconds == 60
     assert row is not None
     assert row.config_version == "runtime-settings-v2"
+    assert row.internal_model_bindings["context_compression"]["model_id"] == "deepseek-reasoner"
     assert row.updated_by_actor_id == "api-user"
     update_audit = action_records(audit, "runtime_settings.update")[0]
     assert update_audit["actor_type"] is AuditActorType.USER
@@ -214,6 +247,10 @@ def test_update_settings_merges_partial_groups_increments_version_and_audits(
     )
     assert (
         "context_limits.compression_threshold_ratio"
+        in update_audit["metadata"]["changed_fields"]
+    )
+    assert (
+        "internal_model_bindings.context_compression"
         in update_audit["metadata"]["changed_fields"]
     )
     assert log_writer.records[-1].payload.payload_type == "runtime_settings_update"
@@ -611,3 +648,62 @@ def test_validate_against_hard_limits_covers_provider_context_and_log_policy(
             with pytest.raises(RuntimeSettingsServiceError) as exc_info:
                 service.update_settings(body, trace_context=build_trace())
             assert exc_info.value.error_code is ErrorCode.CONFIG_HARD_LIMIT_EXCEEDED
+
+
+def test_update_settings_rejects_unknown_provider_or_unsupported_internal_binding_model(
+    tmp_path: Path,
+) -> None:
+    from backend.app.services.runtime_settings import (
+        PlatformRuntimeSettingsService,
+        RuntimeSettingsServiceError,
+    )
+
+    manager = build_manager(tmp_path)
+    audit = RecordingAuditService()
+    log_writer = RecordingLogWriter()
+
+    with manager.session(DatabaseRole.CONTROL) as session:
+        service = PlatformRuntimeSettingsService(
+            session,
+            audit_service=audit,
+            log_writer=log_writer,
+            now=lambda: NOW,
+        )
+        current = service.get_current_settings(trace_context=build_trace())
+
+        unknown_provider = PlatformRuntimeSettingsUpdate(
+            expected_config_version=current.version.config_version,
+            internal_model_bindings=InternalModelBindings(
+                context_compression=InternalModelBindingSelection(
+                    provider_id="provider-missing",
+                    model_id="deepseek-chat",
+                    model_parameters={"temperature": 0},
+                    source_config_version="runtime-settings-v1",
+                ),
+                structured_output_repair=current.internal_model_bindings.structured_output_repair,
+                validation_pass=current.internal_model_bindings.validation_pass,
+            ),
+        )
+        with pytest.raises(RuntimeSettingsServiceError) as unknown_provider_error:
+            service.update_settings(unknown_provider, trace_context=build_trace())
+
+        unsupported_model = PlatformRuntimeSettingsUpdate(
+            expected_config_version=current.version.config_version,
+            internal_model_bindings=InternalModelBindings(
+                context_compression=InternalModelBindingSelection(
+                    provider_id="provider-deepseek",
+                    model_id="gpt-4.1-mini",
+                    model_parameters={"temperature": 0},
+                    source_config_version="runtime-settings-v1",
+                ),
+                structured_output_repair=current.internal_model_bindings.structured_output_repair,
+                validation_pass=current.internal_model_bindings.validation_pass,
+            ),
+        )
+        with pytest.raises(RuntimeSettingsServiceError) as unsupported_model_error:
+            service.update_settings(unsupported_model, trace_context=build_trace())
+
+    assert unknown_provider_error.value.error_code is ErrorCode.CONFIG_INVALID_VALUE
+    assert "unknown provider" in unknown_provider_error.value.message
+    assert unsupported_model_error.value.error_code is ErrorCode.CONFIG_INVALID_VALUE
+    assert "not supported by provider provider-deepseek" in unsupported_model_error.value.message

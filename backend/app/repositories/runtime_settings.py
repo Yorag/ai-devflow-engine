@@ -86,6 +86,7 @@ class PlatformRuntimeSettingsRepository:
             "hard_limits_version": model.hard_limits_version,
             "agent_limits": dict(model.agent_limits),
             "provider_call_policy": dict(model.provider_call_policy),
+            "internal_model_bindings": dict(model.internal_model_bindings),
             "context_limits": dict(model.context_limits),
             "log_policy": dict(model.log_policy),
             "created_by_actor_id": model.created_by_actor_id,

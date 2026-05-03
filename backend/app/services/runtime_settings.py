@@ -10,7 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.app.api.error_codes import ErrorCode
-from backend.app.db.models.control import PlatformRuntimeSettingsModel
+from backend.app.db.models.control import PlatformRuntimeSettingsModel, ProviderModel
 from backend.app.domain.trace_context import TraceContext
 from backend.app.observability.log_writer import LogPayloadSummary, LogRecordInput
 from backend.app.observability.redaction import RedactionPolicy
@@ -29,6 +29,8 @@ from backend.app.schemas.observability import (
 from backend.app.schemas.runtime_settings import (
     AgentRuntimeLimits,
     ContextLimits,
+    InternalModelBindingSelection,
+    InternalModelBindings,
     LogPolicy,
     PlatformHardLimits,
     PlatformRuntimeSettingsRead,
@@ -99,6 +101,9 @@ class PlatformRuntimeSettingsService:
             return self._to_read(current)
 
         model = self._default_model(trace_context=trace_context)
+        self._validate_internal_model_bindings(
+            self._default_internal_model_bindings(),
+        )
         try:
             self._repository.save_new_version(model)
             self._session.commit()
@@ -110,6 +115,7 @@ class PlatformRuntimeSettingsService:
                     changed_groups=[
                         "agent_limits",
                         "provider_call_policy",
+                        "internal_model_bindings",
                         "context_limits",
                         "log_policy",
                     ],
@@ -186,6 +192,9 @@ class PlatformRuntimeSettingsService:
                 "provider_call_policy": ProviderCallPolicy.model_validate(
                     merged["provider_call_policy"],
                 ),
+                "internal_model_bindings": InternalModelBindings.model_validate(
+                    merged["internal_model_bindings"],
+                ),
                 "context_limits": ContextLimits.model_validate(
                     merged["context_limits"],
                 ),
@@ -211,6 +220,9 @@ class PlatformRuntimeSettingsService:
                 context_limits=validated["context_limits"],
                 log_policy=validated["log_policy"],
             )
+            self._validate_internal_model_bindings(
+                validated["internal_model_bindings"],
+            )
         except RuntimeSettingsServiceError as exc:
             self._raise_rejected(
                 message=exc.message,
@@ -233,6 +245,9 @@ class PlatformRuntimeSettingsService:
 
         model.agent_limits = validated["agent_limits"].model_dump(mode="python")
         model.provider_call_policy = validated["provider_call_policy"].model_dump(
+            mode="python",
+        )
+        model.internal_model_bindings = validated["internal_model_bindings"].model_dump(
             mode="python",
         )
         model.context_limits = validated["context_limits"].model_dump(mode="python")
@@ -374,6 +389,9 @@ class PlatformRuntimeSettingsService:
             hard_limits_version=hard_limits.hard_limits_version,
             agent_limits=AgentRuntimeLimits().model_dump(mode="python"),
             provider_call_policy=ProviderCallPolicy().model_dump(mode="python"),
+            internal_model_bindings=self._default_internal_model_bindings().model_dump(
+                mode="python",
+            ),
             context_limits=ContextLimits().model_dump(mode="python"),
             log_policy=LogPolicy().model_dump(mode="python"),
             created_by_actor_id=SYSTEM_ACTOR_ID,
@@ -400,6 +418,9 @@ class PlatformRuntimeSettingsService:
                 provider_call_policy=ProviderCallPolicy.model_validate(
                     model.provider_call_policy,
                 ),
+                internal_model_bindings=InternalModelBindings.model_validate(
+                    model.internal_model_bindings,
+                ),
                 context_limits=ContextLimits.model_validate(model.context_limits),
                 log_policy=LogPolicy.model_validate(model.log_policy),
                 hard_limits=PlatformHardLimits(),
@@ -421,6 +442,9 @@ class PlatformRuntimeSettingsService:
             "provider_call_policy": current.provider_call_policy.model_dump(
                 mode="python",
             ),
+            "internal_model_bindings": current.internal_model_bindings.model_dump(
+                mode="python",
+            ),
             "context_limits": current.context_limits.model_dump(mode="python"),
             "log_policy": current.log_policy.model_dump(mode="python"),
         }
@@ -431,6 +455,13 @@ class PlatformRuntimeSettingsService:
         if body.provider_call_policy is not None:
             merged["provider_call_policy"].update(
                 body.provider_call_policy.model_dump(
+                    mode="python",
+                    exclude_unset=True,
+                ),
+            )
+        if body.internal_model_bindings is not None:
+            merged["internal_model_bindings"].update(
+                body.internal_model_bindings.model_dump(
                     mode="python",
                     exclude_unset=True,
                 ),
@@ -455,6 +486,9 @@ class PlatformRuntimeSettingsService:
             "provider_call_policy": current.provider_call_policy.model_dump(
                 mode="python",
             ),
+            "internal_model_bindings": current.internal_model_bindings.model_dump(
+                mode="python",
+            ),
             "context_limits": current.context_limits.model_dump(mode="python"),
             "log_policy": current.log_policy.model_dump(mode="python"),
         }
@@ -471,6 +505,8 @@ class PlatformRuntimeSettingsService:
             changed_groups.append("agent_limits")
         if body.provider_call_policy is not None:
             changed_groups.append("provider_call_policy")
+        if body.internal_model_bindings is not None:
+            changed_groups.append("internal_model_bindings")
         if body.context_limits is not None:
             changed_groups.append("context_limits")
         if body.log_policy is not None:
@@ -482,6 +518,7 @@ class PlatformRuntimeSettingsService:
         return (
             body.agent_limits is None
             and body.provider_call_policy is None
+            and body.internal_model_bindings is None
             and body.context_limits is None
             and body.log_policy is None
         )
@@ -561,6 +598,26 @@ class PlatformRuntimeSettingsService:
                 422,
             )
 
+    def _validate_internal_model_bindings(
+        self,
+        bindings: InternalModelBindings,
+    ) -> None:
+        binding_map = bindings.model_dump(mode="python")
+        for binding_name, binding in binding_map.items():
+            provider = self._session.get(ProviderModel, binding["provider_id"])
+            if provider is None:
+                raise RuntimeSettingsServiceError(
+                    ErrorCode.CONFIG_INVALID_VALUE,
+                    f"internal_model_bindings.{binding_name}.provider_id references an unknown provider.",
+                    422,
+                )
+            if binding["model_id"] not in provider.supported_model_ids:
+                raise RuntimeSettingsServiceError(
+                    ErrorCode.CONFIG_INVALID_VALUE,
+                    f"internal_model_bindings.{binding_name}.model_id is not supported by provider {provider.provider_id}.",
+                    422,
+                )
+
     def _record_settings_log(
         self,
         *,
@@ -611,6 +668,7 @@ class PlatformRuntimeSettingsService:
                 changed_groups=[
                     "agent_limits",
                     "provider_call_policy",
+                    "internal_model_bindings",
                     "context_limits",
                     "log_policy",
                 ],
@@ -747,12 +805,16 @@ class PlatformRuntimeSettingsService:
             "provider_call_policy": current.provider_call_policy.model_dump(
                 mode="python",
             ),
+            "internal_model_bindings": current.internal_model_bindings.model_dump(
+                mode="python",
+            ),
             "context_limits": current.context_limits.model_dump(mode="python"),
             "log_policy": current.log_policy.model_dump(mode="python"),
         }
         new_values = {
             "agent_limits": dict(model.agent_limits),
             "provider_call_policy": dict(model.provider_call_policy),
+            "internal_model_bindings": dict(model.internal_model_bindings),
             "context_limits": dict(model.context_limits),
             "log_policy": dict(model.log_policy),
         }
@@ -779,6 +841,29 @@ class PlatformRuntimeSettingsService:
     def _field_value(groups: dict[str, dict[str, Any]], field_path: str) -> Any:
         group_name, field_name = field_path.split(".", 1)
         return groups[group_name][field_name]
+
+    @staticmethod
+    def _default_internal_model_bindings() -> InternalModelBindings:
+        return InternalModelBindings(
+            context_compression=InternalModelBindingSelection(
+                provider_id="provider-deepseek",
+                model_id="deepseek-chat",
+                model_parameters={"temperature": 0},
+                source_config_version=INITIAL_RUNTIME_SETTINGS_VERSION,
+            ),
+            structured_output_repair=InternalModelBindingSelection(
+                provider_id="provider-deepseek",
+                model_id="deepseek-chat",
+                model_parameters={"temperature": 0},
+                source_config_version=INITIAL_RUNTIME_SETTINGS_VERSION,
+            ),
+            validation_pass=InternalModelBindingSelection(
+                provider_id="provider-deepseek",
+                model_id="deepseek-reasoner",
+                model_parameters={"temperature": 0},
+                source_config_version=INITIAL_RUNTIME_SETTINGS_VERSION,
+            ),
+        )
 
     @staticmethod
     def _ensure_utc(value: datetime) -> datetime:

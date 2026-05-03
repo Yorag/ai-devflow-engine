@@ -13,6 +13,8 @@ def test_platform_runtime_settings_groups_versions_and_forbidden_prompt_boundary
     from backend.app.schemas.runtime_settings import (
         AgentRuntimeLimits,
         ContextLimits,
+        InternalModelBindingSelection,
+        InternalModelBindings,
         LogPolicy,
         PlatformHardLimits,
         PlatformRuntimeSettingsRead,
@@ -31,6 +33,26 @@ def test_platform_runtime_settings_groups_versions_and_forbidden_prompt_boundary
         ),
         agent_limits=AgentRuntimeLimits(),
         provider_call_policy=ProviderCallPolicy(),
+        internal_model_bindings=InternalModelBindings(
+            context_compression=InternalModelBindingSelection(
+                provider_id="provider-deepseek",
+                model_id="deepseek-chat",
+                model_parameters={"temperature": 0},
+                source_config_version="runtime-settings-v1",
+            ),
+            structured_output_repair=InternalModelBindingSelection(
+                provider_id="provider-deepseek",
+                model_id="deepseek-chat",
+                model_parameters={"temperature": 0},
+                source_config_version="runtime-settings-v1",
+            ),
+            validation_pass=InternalModelBindingSelection(
+                provider_id="provider-deepseek",
+                model_id="deepseek-reasoner",
+                model_parameters={"temperature": 0},
+                source_config_version="runtime-settings-v1",
+            ),
+        ),
         context_limits=ContextLimits(),
         log_policy=LogPolicy(),
         hard_limits=PlatformHardLimits(),
@@ -56,20 +78,49 @@ def test_platform_runtime_settings_groups_versions_and_forbidden_prompt_boundary
         "circuit_breaker_failure_threshold": 5,
         "circuit_breaker_recovery_seconds": 60,
     }
+    assert dumped["internal_model_bindings"]["context_compression"] == {
+        "provider_id": "provider-deepseek",
+        "model_id": "deepseek-chat",
+        "model_parameters": {"temperature": 0},
+        "source_config_version": "runtime-settings-v1",
+    }
     assert dumped["context_limits"]["compression_threshold_ratio"] == 0.8
     assert dumped["log_policy"]["log_query_default_limit"] == 100
     assert dumped["log_policy"]["log_query_max_limit"] == 500
     assert dumped["hard_limits"]["agent_limits"]["max_react_iterations_per_stage"] == 50
     assert "compression_prompt" not in PlatformRuntimeSettingsRead.model_fields
     assert "compression_prompt" not in PlatformRuntimeSettingsUpdate.model_fields
+    assert "internal_model_bindings" in PlatformRuntimeSettingsRead.model_fields
+    assert "internal_model_bindings" in PlatformRuntimeSettingsUpdate.model_fields
 
     update = PlatformRuntimeSettingsUpdate(
         expected_config_version="runtime-settings-v1",
         agent_limits=AgentRuntimeLimits(max_tool_calls_per_stage=70),
+        internal_model_bindings=InternalModelBindings(
+            context_compression=InternalModelBindingSelection(
+                provider_id="provider-deepseek",
+                model_id="deepseek-reasoner",
+                model_parameters={"temperature": 0},
+                source_config_version="runtime-settings-v1",
+            ),
+            structured_output_repair=InternalModelBindingSelection(
+                provider_id="provider-deepseek",
+                model_id="deepseek-chat",
+                model_parameters={"temperature": 0},
+                source_config_version="runtime-settings-v1",
+            ),
+            validation_pass=InternalModelBindingSelection(
+                provider_id="provider-deepseek",
+                model_id="deepseek-chat",
+                model_parameters={"temperature": 0},
+                source_config_version="runtime-settings-v1",
+            ),
+        ),
         context_limits=ContextLimits(compression_threshold_ratio=0.75),
     )
     assert update.expected_config_version == "runtime-settings-v1"
     assert update.agent_limits is not None
+    assert update.internal_model_bindings is not None
     assert update.context_limits is not None
 
     with pytest.raises(ValidationError):

@@ -190,6 +190,7 @@ class PlatformRuntimeSettingsModel(ControlBase, TimestampMixin):
     hard_limits_version: Mapped[str] = mapped_column(String(120), nullable=False)
     agent_limits: Mapped[JsonObject] = mapped_column(JSON, nullable=False)
     provider_call_policy: Mapped[JsonObject] = mapped_column(JSON, nullable=False)
+    internal_model_bindings: Mapped[JsonObject] = mapped_column(JSON, nullable=False)
     context_limits: Mapped[JsonObject] = mapped_column(JSON, nullable=False)
     log_policy: Mapped[JsonObject] = mapped_column(JSON, nullable=False)
     created_by_actor_id: Mapped[str | None] = mapped_column(String(120), nullable=True)

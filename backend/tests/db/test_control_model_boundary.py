@@ -293,6 +293,26 @@ def test_platform_runtime_settings_model_stores_groups_versions_and_audit_refs_o
         hard_limits_version="platform-hard-limits-v1",
         agent_limits={"max_react_iterations_per_stage": 30},
         provider_call_policy={"request_timeout_seconds": 60},
+        internal_model_bindings={
+            "context_compression": {
+                "provider_id": "provider-deepseek",
+                "model_id": "deepseek-chat",
+                "model_parameters": {"temperature": 0},
+                "source_config_version": "runtime-settings-v1",
+            },
+            "structured_output_repair": {
+                "provider_id": "provider-deepseek",
+                "model_id": "deepseek-chat",
+                "model_parameters": {"temperature": 0},
+                "source_config_version": "runtime-settings-v1",
+            },
+            "validation_pass": {
+                "provider_id": "provider-deepseek",
+                "model_id": "deepseek-reasoner",
+                "model_parameters": {"temperature": 0},
+                "source_config_version": "runtime-settings-v1",
+            },
+        },
         context_limits={"compression_threshold_ratio": 0.8},
         log_policy={"log_query_default_limit": 100, "log_query_max_limit": 500},
         created_by_actor_id="system",
@@ -304,6 +324,9 @@ def test_platform_runtime_settings_model_stores_groups_versions_and_audit_refs_o
     )
 
     columns = set(PlatformRuntimeSettingsModel.__table__.columns.keys())
+    assert settings.internal_model_bindings["context_compression"]["model_id"] == (
+        "deepseek-chat"
+    )
     assert settings.context_limits["compression_threshold_ratio"] == 0.8
     assert {
         "settings_id",
@@ -312,6 +335,7 @@ def test_platform_runtime_settings_model_stores_groups_versions_and_audit_refs_o
         "hard_limits_version",
         "agent_limits",
         "provider_call_policy",
+        "internal_model_bindings",
         "context_limits",
         "log_policy",
         "created_by_actor_id",
