@@ -308,6 +308,8 @@ def test_solution_design_inspector_returns_implementation_plan_and_approval_resu
                 stage_type=StageType.SOLUTION_DESIGN,
                 status=StageStatus.COMPLETED,
                 attempt_index=1,
+                graph_node_key="solution_design.main",
+                stage_contract_ref="stage-contract-solution-design",
                 input_ref="input-solution-design-1",
                 output_ref="artifact-solution-design-1",
                 summary="Solution design completed.",

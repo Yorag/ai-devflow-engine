@@ -209,6 +209,8 @@ class StageRunModel(RuntimeBase, TimestampMixin):
         nullable=False,
     )
     attempt_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    graph_node_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    stage_contract_ref: Mapped[str] = mapped_column(String(160), nullable=False)
     input_ref: Mapped[str | None] = mapped_column(String(160), nullable=True)
     output_ref: Mapped[str | None] = mapped_column(String(160), nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
