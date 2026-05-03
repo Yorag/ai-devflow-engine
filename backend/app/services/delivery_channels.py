@@ -167,6 +167,43 @@ class DeliveryChannelService:
             )
         return channel
 
+    def resolve_current_project_channel(
+        self,
+        project_id: str,
+        *,
+        trace_context: TraceContext,
+    ) -> DeliveryChannelModel:
+        del trace_context
+        project = self._session.get(
+            ProjectModel,
+            project_id,
+            populate_existing=True,
+        )
+        if project is None or not project.is_visible:
+            raise DeliveryChannelServiceError(
+                ErrorCode.NOT_FOUND,
+                PROJECT_NOT_FOUND_MESSAGE,
+                404,
+            )
+        if not project.default_delivery_channel_id:
+            raise DeliveryChannelServiceError(
+                ErrorCode.NOT_FOUND,
+                DELIVERY_CHANNEL_NOT_FOUND_MESSAGE,
+                404,
+            )
+        channel = self._session.get(
+            DeliveryChannelModel,
+            project.default_delivery_channel_id,
+            populate_existing=True,
+        )
+        if channel is None or channel.project_id != project.project_id:
+            raise DeliveryChannelServiceError(
+                ErrorCode.NOT_FOUND,
+                DELIVERY_CHANNEL_NOT_FOUND_MESSAGE,
+                404,
+            )
+        return channel
+
     def credential_ref_for_projection(self, value: str | None) -> str | None:
         return self._audit_credential_ref(value)
 
