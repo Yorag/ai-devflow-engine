@@ -23,6 +23,10 @@ from backend.app.tools.protocol import (
     ToolSideEffectLevel,
 )
 from backend.app.tools.registry import ToolRegistry
+from backend.app.tools.risk import (
+    ToolConfirmationGrant,
+    ToolConfirmationRequestRecord,
+)
 
 
 NOW = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
@@ -242,6 +246,18 @@ class RecordingRiskHook:
         trace_context: TraceContext,
     ) -> None:
         self.calls.append(f"{tool_name}:{request.call_id}:{trace_context.span_id}")
+
+
+class RecordingConfirmationPort:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def create_request(self, **kwargs: object) -> ToolConfirmationRequestRecord:
+        self.calls.append(dict(kwargs))
+        return ToolConfirmationRequestRecord(
+            tool_confirmation_id="tool-confirmation-1",
+            confirmation_object_ref=str(kwargs["confirmation_object_ref"]),
+        )
 
 
 class ExplodingRiskHook:
@@ -752,12 +768,16 @@ def test_execute_blocks_side_effect_when_audit_intent_ref_is_missing() -> None:
 
 def test_execute_records_audit_intent_runs_risk_hook_and_returns_tool_result() -> None:
     tool = ExecutableFakeTool(
-        name="write_file",
-        description="Write one file.",
+        name="edit_file",
+        description="Edit one file.",
         input_schema={
             "type": "object",
-            "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
-            "required": ["path", "content"],
+            "properties": {
+                "path": {"type": "string"},
+                "old_text": {"type": "string"},
+                "new_text": {"type": "string"},
+            },
+            "required": ["path", "old_text", "new_text"],
             "additionalProperties": False,
         },
         side_effect_level=ToolSideEffectLevel.WORKSPACE_WRITE,
@@ -769,9 +789,16 @@ def test_execute_records_audit_intent_runs_risk_hook_and_returns_tool_result() -
     log = RecordingLog()
 
     result = registry.execute(
-        request("write_file", {"path": "src/app.py", "content": "print('ok')"}),
+        request(
+            "edit_file",
+            {
+                "path": "src/app.py",
+                "old_text": "value = 1",
+                "new_text": "value = 2",
+            },
+        ),
         context(
-            allowed_tools=["write_file"],
+            allowed_tools=["edit_file"],
             workspace_boundary=WorkspaceBoundary(),
             audit_recorder=audit,
             risk_policy=risk_hook,
@@ -783,8 +810,8 @@ def test_execute_records_audit_intent_runs_risk_hook_and_returns_tool_result() -
     assert result.audit_ref is not None
     assert result.audit_ref.action == "tool.intent"
     assert tool.calls[0].side_effect_intent_ref == result.audit_ref.audit_id
-    assert audit.intents == ["write_file"]
-    assert risk_hook.calls == ["write_file:call-write-file:span-tool-exec-1"]
+    assert audit.intents == ["edit_file"]
+    assert risk_hook.calls == ["edit_file:call-edit-file:span-tool-exec-1"]
     assert log.records[-1]["status"] == "succeeded"
 
 
@@ -797,12 +824,16 @@ def test_execute_normalizes_mismatched_concrete_audit_ref_to_gate_intent() -> No
         metadata_ref="payload-concrete-drift",
     )
     tool = ExecutableFakeTool(
-        name="write_file",
-        description="Write one file.",
+        name="edit_file",
+        description="Edit one file.",
         input_schema={
             "type": "object",
-            "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
-            "required": ["path", "content"],
+            "properties": {
+                "path": {"type": "string"},
+                "old_text": {"type": "string"},
+                "new_text": {"type": "string"},
+            },
+            "required": ["path", "old_text", "new_text"],
             "additionalProperties": False,
         },
         side_effect_level=ToolSideEffectLevel.WORKSPACE_WRITE,
@@ -814,9 +845,16 @@ def test_execute_normalizes_mismatched_concrete_audit_ref_to_gate_intent() -> No
     audit = RecordingAudit()
 
     result = registry.execute(
-        request("write_file", {"path": "src/app.py", "content": "print('ok')"}),
+        request(
+            "edit_file",
+            {
+                "path": "src/app.py",
+                "old_text": "value = 1",
+                "new_text": "value = 2",
+            },
+        ),
         context(
-            allowed_tools=["write_file"],
+            allowed_tools=["edit_file"],
             workspace_boundary=WorkspaceBoundary(),
             audit_recorder=audit,
         ),
@@ -824,10 +862,11 @@ def test_execute_normalizes_mismatched_concrete_audit_ref_to_gate_intent() -> No
 
     assert result.status is ToolResultStatus.FAILED
     assert result.audit_ref is not None
-    assert result.audit_ref.audit_id == "audit-call-write-file"
+    assert result.audit_ref.audit_id == "audit-call-edit-file"
     assert result.audit_ref != concrete_audit_ref
     assert result.error is not None
     assert result.error.audit_ref == result.audit_ref
+    assert tool.calls
 
 
 def test_execute_converts_tool_timeout_to_structured_error() -> None:
@@ -910,6 +949,250 @@ def test_execute_converts_risk_hook_failure_to_structured_internal_error() -> No
     assert result.error.safe_details["reason"] == "risk_policy_failed"
     assert tool.calls == []
     assert log.records[-1]["error_code"] == "internal_error"
+
+
+def test_execute_high_risk_action_returns_waiting_confirmation_without_running_tool() -> None:
+    tool = ExecutableFakeTool(
+        name="bash",
+        side_effect_level=ToolSideEffectLevel.PROCESS_EXECUTION,
+        permission_boundary=ToolPermissionBoundary(
+            boundary_type="workspace",
+            requires_workspace=False,
+            resource_scopes=(),
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"command": {"type": "string", "minLength": 1}},
+            "required": ["command"],
+            "additionalProperties": False,
+        },
+    )
+    registry = ToolRegistry([tool])
+    confirmations = RecordingConfirmationPort()
+    audit = RecordingAudit()
+    base_context = context(
+        allowed_tools=["bash"],
+        audit_recorder=audit,
+    )
+    execution_context = ToolExecutionContext(
+        **{**base_context.__dict__, "confirmation_port": confirmations}
+    )
+
+    result = registry.execute(
+        request("bash", {"command": "npm install vite"}),
+        execution_context,
+    )
+
+    assert result.status is ToolResultStatus.WAITING_CONFIRMATION
+    assert result.error is not None
+    assert result.error.error_code is ErrorCode.TOOL_CONFIRMATION_REQUIRED
+    assert result.tool_confirmation_ref == "tool-confirmation-1"
+    assert result.error.safe_details["input_digest"]
+    assert result.error.safe_details["target_summary"] == "command: npm install vite"
+    assert result.error.safe_details["risk_categories"] == ["dependency_change"]
+    assert confirmations.calls[0]["tool_name"] == "bash"
+    assert tool.calls == []
+
+
+def test_execute_blocked_action_returns_tool_risk_blocked_without_confirmation() -> None:
+    tool = ExecutableFakeTool(
+        name="write_file",
+        description="Write one file.",
+        input_schema={
+            "type": "object",
+            "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+            "required": ["path", "content"],
+            "additionalProperties": False,
+        },
+        side_effect_level=ToolSideEffectLevel.WORKSPACE_WRITE,
+    )
+    registry = ToolRegistry([tool])
+    confirmations = RecordingConfirmationPort()
+    audit = RecordingAudit()
+    base_context = context(
+        allowed_tools=["write_file"],
+        workspace_boundary=WorkspaceBoundary(),
+        audit_recorder=audit,
+    )
+    execution_context = ToolExecutionContext(
+        **{**base_context.__dict__, "confirmation_port": confirmations}
+    )
+
+    result = registry.execute(
+        request("write_file", {"path": ".runtime/logs/run.jsonl", "content": "tamper"}),
+        execution_context,
+    )
+
+    assert result.status is ToolResultStatus.BLOCKED
+    assert result.error is not None
+    assert result.error.error_code is ErrorCode.TOOL_RISK_BLOCKED
+    assert confirmations.calls == []
+    assert audit.rejections[-1] == "tool_risk_blocked"
+    assert tool.calls == []
+
+
+def test_execute_confirmed_high_risk_action_runs_only_when_grant_matches() -> None:
+    tool = ExecutableFakeTool(
+        name="bash",
+        side_effect_level=ToolSideEffectLevel.PROCESS_EXECUTION,
+        permission_boundary=ToolPermissionBoundary(
+            boundary_type="workspace",
+            requires_workspace=False,
+            resource_scopes=(),
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"command": {"type": "string", "minLength": 1}},
+            "required": ["command"],
+            "additionalProperties": False,
+        },
+    )
+    registry = ToolRegistry([tool])
+    confirmations = RecordingConfirmationPort()
+    audit = RecordingAudit()
+    base_context = context(allowed_tools=["bash"], audit_recorder=audit)
+    pending_context = ToolExecutionContext(
+        **{**base_context.__dict__, "confirmation_port": confirmations}
+    )
+    pending = registry.execute(
+        request("bash", {"command": "pip install pytest"}),
+        pending_context,
+    )
+    matching_request = request("bash", {"command": "pip install pytest"})
+    confirmation_trace = matching_request.trace_context.model_copy(
+        update={"tool_confirmation_id": "tool-confirmation-1"}
+    )
+    matching_request = ToolExecutionRequest(
+        **{
+            **matching_request.model_dump(),
+            "trace_context": confirmation_trace,
+            "confirmation_grant": ToolConfirmationGrant(
+                tool_confirmation_id="tool-confirmation-1",
+                confirmation_object_ref=confirmations.calls[0][
+                    "confirmation_object_ref"
+                ],
+                tool_name="bash",
+                input_digest=pending.error.safe_details["input_digest"],
+                target_summary=pending.error.safe_details["target_summary"],
+                risk_level=ToolRiskLevel.HIGH_RISK,
+                risk_categories=[ToolRiskCategory.DEPENDENCY_CHANGE],
+            ),
+        }
+    )
+
+    result = registry.execute(matching_request, pending_context)
+
+    assert result.status is ToolResultStatus.SUCCEEDED
+    assert len(confirmations.calls) == 1
+    assert tool.calls
+
+
+def test_execute_reissues_confirmation_when_grant_lacks_resumed_confirmation_context() -> None:
+    tool = ExecutableFakeTool(
+        name="bash",
+        side_effect_level=ToolSideEffectLevel.PROCESS_EXECUTION,
+        permission_boundary=ToolPermissionBoundary(
+            boundary_type="workspace",
+            requires_workspace=False,
+            resource_scopes=(),
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"command": {"type": "string", "minLength": 1}},
+            "required": ["command"],
+            "additionalProperties": False,
+        },
+    )
+    registry = ToolRegistry([tool])
+    confirmations = RecordingConfirmationPort()
+    audit = RecordingAudit()
+    execution_context = ToolExecutionContext(
+        **{
+            **context(allowed_tools=["bash"], audit_recorder=audit).__dict__,
+            "confirmation_port": confirmations,
+        }
+    )
+    pending = registry.execute(
+        request("bash", {"command": "pip install pytest"}),
+        execution_context,
+    )
+    unresumed_request = request("bash", {"command": "pip install pytest"})
+    unresumed_request = ToolExecutionRequest(
+        **{
+            **unresumed_request.model_dump(),
+            "confirmation_grant": ToolConfirmationGrant(
+                tool_confirmation_id="tool-confirmation-1",
+                confirmation_object_ref=confirmations.calls[0][
+                    "confirmation_object_ref"
+                ],
+                tool_name="bash",
+                input_digest=pending.error.safe_details["input_digest"],
+                target_summary=pending.error.safe_details["target_summary"],
+                risk_level=ToolRiskLevel.HIGH_RISK,
+                risk_categories=[ToolRiskCategory.DEPENDENCY_CHANGE],
+            ),
+        }
+    )
+
+    result = registry.execute(unresumed_request, execution_context)
+
+    assert result.status is ToolResultStatus.WAITING_CONFIRMATION
+    assert result.error is not None
+    assert result.error.error_code is ErrorCode.TOOL_CONFIRMATION_REQUIRED
+    assert len(confirmations.calls) == 2
+    assert tool.calls == []
+
+
+def test_execute_reissues_confirmation_when_grant_does_not_match() -> None:
+    tool = ExecutableFakeTool(
+        name="bash",
+        side_effect_level=ToolSideEffectLevel.PROCESS_EXECUTION,
+        permission_boundary=ToolPermissionBoundary(
+            boundary_type="workspace",
+            requires_workspace=False,
+            resource_scopes=(),
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"command": {"type": "string", "minLength": 1}},
+            "required": ["command"],
+            "additionalProperties": False,
+        },
+    )
+    registry = ToolRegistry([tool])
+    confirmations = RecordingConfirmationPort()
+    audit = RecordingAudit()
+    execution_context = ToolExecutionContext(
+        **{
+            **context(allowed_tools=["bash"], audit_recorder=audit).__dict__,
+            "confirmation_port": confirmations,
+        }
+    )
+    drifted = ToolExecutionRequest(
+        tool_name="bash",
+        call_id="call-bash",
+        input_payload={"command": "pip install pytest-cov"},
+        trace_context=build_trace(),
+        coordination_key="coordination-bash",
+        confirmation_grant=ToolConfirmationGrant(
+            tool_confirmation_id="tool-confirmation-1",
+            confirmation_object_ref="tool-call:bash:call-bash:old-digest",
+            tool_name="bash",
+            input_digest="old-digest",
+            target_summary="Install dependencies",
+            risk_level=ToolRiskLevel.HIGH_RISK,
+            risk_categories=[ToolRiskCategory.DEPENDENCY_CHANGE],
+        ),
+    )
+
+    result = registry.execute(drifted, execution_context)
+
+    assert result.status is ToolResultStatus.WAITING_CONFIRMATION
+    assert result.error is not None
+    assert result.error.error_code is ErrorCode.TOOL_CONFIRMATION_REQUIRED
+    assert result.tool_confirmation_ref == "tool-confirmation-1"
+    assert len(confirmations.calls) == 1
+    assert tool.calls == []
 
 
 def test_execute_converts_unexpected_workspace_boundary_failure_to_structured_internal_error() -> None:

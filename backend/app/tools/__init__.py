@@ -15,6 +15,7 @@ from backend.app.tools.protocol import (
 from backend.app.tools.execution_gate import (
     ToolAuditPolicy,
     ToolAuditRecorderPort,
+    ToolConfirmationRequestPort,
     ToolExecutionContext,
     ToolExecutionGate,
     ToolExecutionRequest,
@@ -32,6 +33,12 @@ from backend.app.tools.registry import (
     ToolRegistryError,
     UnknownToolError,
 )
+from backend.app.tools.risk import (
+    ToolConfirmationGrant,
+    ToolConfirmationRequestRecord,
+    ToolRiskAssessment,
+    ToolRiskClassifier,
+)
 
 
 __all__ = [
@@ -41,6 +48,9 @@ __all__ = [
     "ToolAuditPolicy",
     "ToolAuditRecorderPort",
     "ToolBindableDescription",
+    "ToolConfirmationGrant",
+    "ToolConfirmationRequestPort",
+    "ToolConfirmationRequestRecord",
     "ToolError",
     "ToolExecutionContext",
     "ToolExecutionGate",
@@ -54,6 +64,8 @@ __all__ = [
     "ToolRegistryError",
     "ToolResult",
     "ToolResultStatus",
+    "ToolRiskAssessment",
+    "ToolRiskClassifier",
     "ToolRiskInspectionPort",
     "ToolRiskCategory",
     "ToolRiskLevel",
