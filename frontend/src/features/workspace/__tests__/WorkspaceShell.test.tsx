@@ -1,8 +1,14 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { ApiRequestOptions } from "../../../api/client";
+import type { ExecutionNodeProjection } from "../../../api/types";
 import { renderWithAppProviders } from "../../../app/test-utils";
-import { mockApiRequestOptions } from "../../../mocks/handlers";
+import { mockStageInspectorProjection } from "../../../mocks/fixtures";
+import {
+  createMockApiFetcher,
+  mockApiRequestOptions,
+} from "../../../mocks/handlers";
 import { ConsolePage } from "../../../pages/ConsolePage";
 import { useWorkspaceStore } from "../workspace-store";
 
@@ -271,6 +277,225 @@ describe("WorkspaceShell", () => {
         type: "user_message",
       }),
     );
+  });
+
+  it("refreshes open inspector detail when the matching live stage entry updates", async () => {
+    let useUpdatedDetail = false;
+    const baseFetcher = createMockApiFetcher();
+    const updatedStageInspectorProjection = {
+      ...mockStageInspectorProjection,
+      output: {
+        ...mockStageInspectorProjection.output,
+        records: {
+          ...mockStageInspectorProjection.output.records,
+          design_summary: "Refined execution plan",
+        },
+      },
+    };
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.endsWith("/api/stages/stage-solution-design-running/inspector")) {
+          return new Response(
+            JSON.stringify(
+              useUpdatedDetail
+                ? updatedStageInspectorProjection
+                : mockStageInspectorProjection,
+            ),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }
+
+        return baseFetcher(input, init);
+      },
+    };
+    const eventSources: MockEventSource[] = [];
+    vi.stubGlobal(
+      "EventSource",
+      vi.fn(function EventSourceMock(this: MockEventSource, url: string) {
+        this.url = url;
+        this.close = vi.fn();
+        this.listeners = new Map();
+        this.addEventListener = vi.fn(
+          (type: string, listener: (event: MessageEvent<string>) => void) => {
+            this.listeners.set(type, listener);
+          },
+        );
+        this.removeEventListener = vi.fn((type: string) => {
+          this.listeners.delete(type);
+        });
+        eventSources.push(this);
+      }),
+    );
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Add workspace shell" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Solution Design details" }),
+    );
+
+    expect(await screen.findByText("Draft execution plan")).toBeTruthy();
+    await waitFor(() => {
+      expect(eventSources.some((source) => source.url.includes("session-running"))).toBe(
+        true,
+      );
+    });
+
+    useUpdatedDetail = true;
+    const updatedStageNode: ExecutionNodeProjection = {
+      ...(useWorkspaceStore
+        .getState()
+        .narrativeFeed.find((entry) => entry.type === "stage_node") as ExecutionNodeProjection),
+      occurred_at: "2026-05-01T09:19:00.000Z",
+      summary: "Design refined after live workspace update.",
+    };
+    eventSources
+      .find((source) => source.url.includes("session-running"))
+      ?.listeners.get("stage_updated")
+      ?.({
+        data: JSON.stringify({
+          event_id: "event-stage-update-inspector-refresh",
+          session_id: "session-running",
+          run_id: "run-running",
+          event_type: "stage_updated",
+          occurred_at: "2026-05-01T09:19:00.000Z",
+          payload: {
+            stage_node: updatedStageNode,
+          },
+        }),
+      } as MessageEvent<string>);
+
+    expect(await screen.findByText("Refined execution plan")).toBeTruthy();
+  });
+
+  it("refreshes open stage inspector detail when a same-run approval result arrives", async () => {
+    let useUpdatedDetail = false;
+    const baseFetcher = createMockApiFetcher();
+    const updatedStageInspectorProjection = {
+      ...mockStageInspectorProjection,
+      artifacts: {
+        ...mockStageInspectorProjection.artifacts,
+        records: {
+          ...mockStageInspectorProjection.artifacts.records,
+          approval_summary: "Approval recorded in stage detail",
+        },
+      },
+    };
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.endsWith("/api/stages/stage-solution-design-running/inspector")) {
+          return new Response(
+            JSON.stringify(
+              useUpdatedDetail
+                ? updatedStageInspectorProjection
+                : mockStageInspectorProjection,
+            ),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }
+
+        return baseFetcher(input, init);
+      },
+    };
+    const eventSources: MockEventSource[] = [];
+    vi.stubGlobal(
+      "EventSource",
+      vi.fn(function EventSourceMock(this: MockEventSource, url: string) {
+        this.url = url;
+        this.close = vi.fn();
+        this.listeners = new Map();
+        this.addEventListener = vi.fn(
+          (type: string, listener: (event: MessageEvent<string>) => void) => {
+            this.listeners.set(type, listener);
+          },
+        );
+        this.removeEventListener = vi.fn((type: string) => {
+          this.listeners.delete(type);
+        });
+        eventSources.push(this);
+      }),
+    );
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Add workspace shell" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Solution Design details" }),
+    );
+
+    expect(await screen.findByText("Draft execution plan")).toBeTruthy();
+    await waitFor(() => {
+      expect(eventSources.some((source) => source.url.includes("session-running"))).toBe(
+        true,
+      );
+    });
+
+    useUpdatedDetail = true;
+    eventSources
+      .find((source) => source.url.includes("session-running"))
+      ?.listeners.get("approval_result")
+      ?.({
+        data: JSON.stringify({
+          event_id: "event-approval-result-inspector-refresh",
+          session_id: "session-running",
+          run_id: "run-running",
+          event_type: "approval_result",
+          occurred_at: "2026-05-01T09:21:00.000Z",
+          payload: {
+            approval_result: {
+              entry_id: "entry-approval-result-live",
+              run_id: "run-running",
+              type: "approval_result",
+              occurred_at: "2026-05-01T09:21:00.000Z",
+              approval_id: "approval-solution-design-live",
+              approval_type: "solution_design_approval",
+              decision: "approved",
+              reason: null,
+              created_at: "2026-05-01T09:21:00.000Z",
+              next_stage_type: "code_generation",
+            },
+          },
+        }),
+      } as MessageEvent<string>);
+
+    expect(await screen.findByText("Approval recorded in stage detail")).toBeTruthy();
+  });
+
+  it("keeps the inspector open when Escape is pressed inside settings", async () => {
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Add workspace shell" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Solution Design details" }),
+    );
+
+    expect(await screen.findByText("Draft execution plan")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    expect(dialog).toBeTruthy();
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+    });
+    expect(screen.getByRole("heading", { name: "Stage details" })).toBeTruthy();
+    expect(screen.getByText("Draft execution plan")).toBeTruthy();
   });
 });
 

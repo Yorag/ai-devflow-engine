@@ -200,6 +200,7 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
         isOpen={inspector.isOpen}
         target={inspector.target}
         onClose={inspector.close}
+        request={request}
       />
       <SettingsModal
         isOpen={isSettingsOpen}

@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { ApiRequestOptions } from "../../../api/client";
 import type {
   ControlItemFeedEntry,
   DeliveryResultFeedEntry,
@@ -25,8 +27,10 @@ afterEach(() => {
 
 function InspectorHarness({
   entries,
+  request = mockApiRequestOptions,
 }: {
   entries: TopLevelFeedEntry[];
+  request?: ApiRequestOptions;
 }): JSX.Element {
   const inspector = useInspector();
 
@@ -45,6 +49,7 @@ function InspectorHarness({
         isOpen={inspector.isOpen}
         target={inspector.target}
         onClose={inspector.close}
+        request={request}
       />
     </section>
   );
@@ -113,7 +118,14 @@ describe("Inspector target mapping", () => {
 
 describe("InspectorPanel", () => {
   it("renders closed by default without a selected target", () => {
-    render(<InspectorPanel isOpen={false} target={null} onClose={() => undefined} />);
+    renderWithAppProviders(
+      <InspectorPanel
+        isOpen={false}
+        target={null}
+        onClose={() => undefined}
+        request={mockApiRequestOptions}
+      />,
+    );
 
     const inspector = screen.getByRole("complementary", { name: "Inspector" });
     expect(within(inspector).getByText("Inspector closed")).toBeTruthy();
@@ -122,26 +134,17 @@ describe("InspectorPanel", () => {
     ).toBeNull();
   });
 
-  it("renders a selected stage target and closes with Escape", () => {
-    let open = true;
+  it("renders a selected stage target and closes with Escape", async () => {
     const target = {
       type: "stage",
       runId: "run-running",
       stageRunId: "stage-solution-design-running",
     } as const;
-    const { rerender } = render(
-      <InspectorPanel
-        isOpen={open}
-        target={target}
-        onClose={() => {
-          open = false;
-        }}
-      />,
-    );
+    renderWithAppProviders(<ControlledInspectorPanel target={target} />);
 
     const inspector = screen.getByRole("complementary", { name: "Inspector" });
     expect(within(inspector).getByRole("heading", { name: "Stage details" })).toBeTruthy();
-    expect(within(inspector).getByText("stage-solution-design-running")).toBeTruthy();
+    expect(await within(inspector).findByText("stage-solution-design-running")).toBeTruthy();
     expect(within(inspector).getByText("run-running")).toBeTruthy();
     expect(within(inspector).queryByRole("button", { name: /approve/i })).toBeNull();
     expect(
@@ -149,22 +152,13 @@ describe("InspectorPanel", () => {
     ).toBeNull();
 
     fireEvent.keyDown(inspector, { key: "Escape" });
-    rerender(
-      <InspectorPanel
-        isOpen={open}
-        target={open ? target : null}
-        onClose={() => {
-          open = false;
-        }}
-      />,
-    );
 
     expect(screen.getByText("Inspector closed")).toBeTruthy();
   });
 });
 
 describe("Feed Inspector opening", () => {
-  it("opens stage, control item, tool confirmation, and delivery result details", () => {
+  it("opens stage, control item, tool confirmation, and delivery result details", async () => {
     const entries: TopLevelFeedEntry[] = [
       mockFeedEntriesByType.stage_node,
       mockFeedEntriesByType.control_item,
@@ -172,21 +166,23 @@ describe("Feed Inspector opening", () => {
       mockFeedEntriesByType.delivery_result,
     ];
 
-    render(<InspectorHarness entries={entries} />);
+    renderWithAppProviders(
+      <InspectorHarness entries={entries} request={mockApiRequestOptions} />,
+    );
 
     expect(screen.getByText("Inspector closed")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Open Solution Design details" }));
     expect(screen.getByRole("heading", { name: "Stage details" })).toBeTruthy();
-    expect(screen.getByText("stage-solution-design-running")).toBeTruthy();
+    expect(await screen.findByText("stage-solution-design-running")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Open Clarification needed details" }));
     expect(screen.getByRole("heading", { name: "Control item details" })).toBeTruthy();
-    expect(screen.getByText("control-clarification")).toBeTruthy();
+    expect(await screen.findByText("control-clarification")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Open Allow dependency install details" }));
     expect(screen.getByRole("heading", { name: "Tool confirmation details" })).toBeTruthy();
-    expect(screen.getByText("tool-confirmation-1")).toBeTruthy();
+    expect(await screen.findByText("tool-confirmation-1")).toBeTruthy();
     const toolEntry = screen.getByRole("article", {
       name: "Tool confirmation feed entry",
     });
@@ -195,11 +191,11 @@ describe("Feed Inspector opening", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Open demo_delivery details" }));
     expect(screen.getByRole("heading", { name: "Delivery result details" })).toBeTruthy();
-    expect(screen.getByText("delivery-record-1")).toBeTruthy();
+    expect(await screen.findByText("delivery-record-1")).toBeTruthy();
   });
 
   it("does not expose approval_result as an independent Inspector target", () => {
-    render(
+    renderWithAppProviders(
       <InspectorHarness
         entries={[
           mockFeedEntriesByType.approval_request,
@@ -216,7 +212,12 @@ describe("Feed Inspector opening", () => {
   });
 
   it("closes the Inspector with the close button", () => {
-    render(<InspectorHarness entries={[mockFeedEntriesByType.stage_node]} />);
+    renderWithAppProviders(
+      <InspectorHarness
+        entries={[mockFeedEntriesByType.stage_node]}
+        request={mockApiRequestOptions}
+      />,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Open Solution Design details" }));
     expect(screen.getByRole("heading", { name: "Stage details" })).toBeTruthy();
@@ -227,10 +228,13 @@ describe("Feed Inspector opening", () => {
   });
 
   it("closes the Inspector with Escape after focus leaves the panel", () => {
-    render(
+    renderWithAppProviders(
       <>
         <button type="button">Outside action</button>
-        <InspectorHarness entries={[mockFeedEntriesByType.stage_node]} />
+        <InspectorHarness
+          entries={[mockFeedEntriesByType.stage_node]}
+          request={mockApiRequestOptions}
+        />
       </>,
     );
 
@@ -255,7 +259,7 @@ describe("Feed Inspector opening", () => {
 
     expect(await screen.findByRole("heading", { name: "Stage details" })).toBeTruthy();
     const inspector = screen.getByRole("complementary", { name: "Inspector" });
-    expect(within(inspector).getByText("stage-solution-design-running")).toBeTruthy();
+    expect(await within(inspector).findByText("stage-solution-design-running")).toBeTruthy();
     expect(within(inspector).getByText("run-running")).toBeTruthy();
   });
 
@@ -270,7 +274,7 @@ describe("Feed Inspector opening", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Stage details" })).toBeTruthy();
-    expect(screen.getByText("stage-solution-design-running")).toBeTruthy();
+    expect(await screen.findByText("stage-solution-design-running")).toBeTruthy();
 
     fireEvent.click(
       screen.getByRole("button", { name: "Open Clarify provider behavior" }),
@@ -293,7 +297,7 @@ describe("Feed Inspector opening", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Stage details" })).toBeTruthy();
-    expect(screen.getByText("stage-solution-design-running")).toBeTruthy();
+    expect(await screen.findByText("stage-solution-design-running")).toBeTruthy();
 
     fireEvent.change(await screen.findByLabelText("Switch project"), {
       target: { value: "project-loaded" },
@@ -310,6 +314,27 @@ describe("Feed Inspector opening", () => {
     expect(within(inspector).queryByText("stage-solution-design-running")).toBeNull();
   });
 });
+
+function ControlledInspectorPanel({
+  target,
+}: {
+  target: {
+    type: "stage";
+    runId: string;
+    stageRunId: string;
+  };
+}): JSX.Element {
+  const [isOpen, setIsOpen] = useState(true);
+
+  return (
+    <InspectorPanel
+      isOpen={isOpen}
+      target={isOpen ? target : null}
+      onClose={() => setIsOpen(false)}
+      request={mockApiRequestOptions}
+    />
+  );
+}
 
 describe("Inspector trigger preservation", () => {
   it("keeps feed-only rendering working when no Inspector handler is passed", () => {

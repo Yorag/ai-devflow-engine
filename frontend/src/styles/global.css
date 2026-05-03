@@ -1516,6 +1516,110 @@ a {
   overflow-wrap: anywhere;
 }
 
+.inspector-panel__section--error {
+  border-color: oklch(77% 0.07 32);
+  background: oklch(97.2% 0.013 32);
+}
+
+.inspector-section__records {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.inspector-section__meta {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.inspector-record {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.inspector-record strong {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.inspector-record__text {
+  color: oklch(29% 0.024 248);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.inspector-record__code {
+  margin: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: oklch(97.4% 0.005 248);
+  color: oklch(28% 0.024 248);
+  padding: 10px 12px;
+  font-size: 0.73rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.inspector-record__code code {
+  font-family:
+    ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+
+.inspector-ref-list {
+  margin: 0;
+  padding-left: 18px;
+  color: oklch(29% 0.024 248);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.inspector-plan-block {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.inspector-plan-block p {
+  margin: 0;
+  color: oklch(29% 0.024 248);
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.inspector-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.inspector-metric-grid__item {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: oklch(97.9% 0.005 248);
+  padding: 10px;
+}
+
+.inspector-metric-grid__item span {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.inspector-metric-grid__item strong {
+  color: oklch(29% 0.024 248);
+  font-size: 0.86rem;
+  line-height: 1.25;
+}
+
 .settings-backdrop {
   position: fixed;
   inset: 0;
