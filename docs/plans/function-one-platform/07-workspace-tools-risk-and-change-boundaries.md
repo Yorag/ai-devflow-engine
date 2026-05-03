@@ -212,9 +212,10 @@
 ## W5.0d Tool risk classifier 与 confirmation gate
 
 **计划周期**：Week 7-8
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现工具风险分级和高风险确认门禁，使所有工具动作在执行前统一判定 `read_only`、`low_risk_write`、`high_risk` 或 `blocked`，并把高风险动作转入 H4.4a 工具确认流程。
 **实施计划**：`docs/plans/implementation/w5.0d-tool-risk-confirmation-gate.md`
+**验证摘要**：实施计划 `docs/plans/implementation/w5.0d-tool-risk-confirmation-gate.md` 已完成并在 integration checkpoint 合入 `c01767d`。`uv run pytest backend/tests/tools/test_tool_risk_classifier.py backend/tests/tools/test_tool_execution_gate.py backend/tests/tools/test_tool_protocol_registry.py backend/tests/errors/test_error_code_catalog.py backend/tests/services/test_tool_confirmation_commands.py -v` 通过 97 个 focused / impacted tool-confirmation tests；`uv run pytest backend/tests/runtime/test_runtime_engine_contract.py backend/tests/providers/test_provider_registry.py -v` 通过 16 个 runtime/provider regressions；`uv run pytest backend/tests/services/test_delivery_snapshot_gate.py backend/tests/services/test_delivery_channel_readiness.py -v` 通过 31 个 delivery gate regressions；`uv run pytest backend/tests -q` 通过 771 个 backend tests。
 
 **修改文件列表**：
 - Modify: `backend/app/tools/protocol.py`
