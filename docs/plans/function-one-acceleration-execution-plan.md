@@ -120,7 +120,7 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | AL01-R3.1 | R3.1 | AL01 | `feat/al-run-core-events` | done | 5d44d4a | 222396d | `docs/plans/acceleration/reports/AL01-R3.1.md` | - |
 | AL01-E3.1 | E3.1 | AL01 | `feat/al-run-core-events` | done | 4ea6251 | 38defe9 | `docs/plans/acceleration/reports/AL01-E3.1.md` | - |
 | AL01-R3.4 | R3.4 | AL01 | `feat/al-run-core-events` | done | 67f5290 | d1fcb14 | `docs/plans/acceleration/reports/AL01-R3.4.md` | - |
-| AL01-R3.4a | R3.4a | AL01 | `feat/al-run-core-events` | claimed | 74578b0 | - | `docs/plans/acceleration/reports/AL01-R3.4a.md` | - |
+| AL01-R3.4a | R3.4a | AL01 | `feat/al-run-core-events` | done | 74578b0 | ec0b023 | `docs/plans/acceleration/reports/AL01-R3.4a.md` | - |
 | AL02-Q3.1 | Q3.1 | AL02 | `feat/al-projections-streams` | done | 67f5290 | d07f094 | `docs/plans/acceleration/reports/AL02-Q3.1.md` | - |
 | AL02-Q3.2 | Q3.2 | AL02 | `feat/al-projections-streams` | done | 74578b0 | 827d4dd | `docs/plans/acceleration/reports/AL02-Q3.2.md` | - |
 | AL03-A4.0 | A4.0 | AL03 | `feat/al-runtime-human-loop` | done | 5d44d4a | ebfcb61 | `docs/plans/acceleration/reports/AL03-A4.0.md` | - |
