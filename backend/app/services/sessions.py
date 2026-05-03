@@ -16,6 +16,10 @@ from backend.app.domain.trace_context import TraceContext
 from backend.app.observability.log_writer import JsonlLogWriter
 from backend.app.observability.redaction import RedactionPolicy
 from backend.app.observability.runtime_data import RuntimeDataSettings
+from backend.app.runtime.prompt_validation import (
+    PromptValidationError,
+    PromptValidationService,
+)
 from backend.app.schemas.feed import MessageFeedEntry
 from backend.app.schemas.observability import AuditActorType, AuditResult
 from backend.app.services.clarifications import (
@@ -488,7 +492,9 @@ class SessionService:
     def _run_prompt_validation_service(self):
         if self._prompt_validation_service is not None:
             return self._prompt_validation_service
-        return _TemplatePromptValidationAdapter(self._templates)
+        return _TemplatePromptValidationAdapter(
+            settings_service=self._runtime_settings_service(),
+        )
 
 
 class _NoopSessionLogWriter:
@@ -502,8 +508,12 @@ class _NoopSettingsLogWriter:
 
 
 class _TemplatePromptValidationAdapter:
-    def __init__(self, templates: TemplateService) -> None:
-        self._templates = templates
+    def __init__(
+        self,
+        *,
+        settings_service: PlatformRuntimeSettingsService,
+    ) -> None:
+        self._settings_service = settings_service
 
     def validate_run_prompt_snapshots(
         self,
@@ -511,18 +521,16 @@ class _TemplatePromptValidationAdapter:
         template_snapshot,
         trace_context,  # noqa: ANN001
     ) -> None:
-        bindings = [
-            {
-                "stage_type": binding.stage_type.value,
-                "role_id": binding.role_id,
-                "system_prompt": binding.system_prompt,
-                "provider_id": binding.provider_id,
-            }
-            for binding in template_snapshot.stage_role_bindings
-        ]
         try:
-            self._templates.validate_template_prompts_before_save(bindings)
-        except TemplateServiceError as exc:
+            validator = PromptValidationService(
+                settings_read=self._settings_service.get_current_settings(
+                    trace_context=trace_context,
+                )
+            )
+            validator.validate_run_prompt_snapshots(
+                template_snapshot=template_snapshot,
+            )
+        except PromptValidationError as exc:
             raise RunPromptValidationError(
                 exc.message,
                 error_code=exc.error_code,
