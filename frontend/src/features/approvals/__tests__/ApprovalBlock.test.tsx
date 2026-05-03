@@ -10,7 +10,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { approveApproval, rejectApproval } from "../../../api/approvals";
-import type { ApprovalRequestFeedEntry } from "../../../api/types";
+import type { ApprovalRequestFeedEntry, SessionStatus } from "../../../api/types";
 import { createQueryClient } from "../../../app/query-client";
 import { ApprovalBlock } from "../ApprovalBlock";
 
@@ -61,6 +61,7 @@ function renderApprovalBlock(
   entry: ApprovalRequestFeedEntry,
   options: {
     currentRunId?: string | null;
+    currentSessionStatus?: SessionStatus | null;
     sessionId?: string;
     projectId?: string;
     onOpenSettings?: () => void;
@@ -75,6 +76,7 @@ function renderApprovalBlock(
         <ApprovalBlock
           entry={entry}
           currentRunId={options.currentRunId ?? "run-waiting-approval"}
+          currentSessionStatus={options.currentSessionStatus ?? "waiting_approval"}
           sessionId={options.sessionId ?? "session-waiting-approval"}
           projectId={options.projectId ?? "project-default"}
           onOpenSettings={options.onOpenSettings}
@@ -208,5 +210,51 @@ describe("ApprovalBlock", () => {
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
     expect(screen.getByText("Pending")).toBeTruthy();
+  });
+
+  it("keeps a current pending approval visible but non-submittable after the bound run has terminated", () => {
+    renderApprovalBlock(buildApprovalEntry(), {
+      currentSessionStatus: "terminated",
+    });
+
+    expect(screen.getByRole("button", { name: "Approve" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(screen.getByRole("button", { name: "Reject" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(
+      screen.getByText("Current run has terminated. Retry starts a new run."),
+    ).toBeTruthy();
+  });
+
+  it("closes an already-open reject form when the current bound run becomes terminal", () => {
+    const { rerender } = renderApprovalBlock(buildApprovalEntry());
+
+    fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+    expect(
+      screen.getByRole("form", { name: "Reject approval with reason" }),
+    ).toBeTruthy();
+
+    rerender(
+      <QueryClientProvider client={createQueryClient()}>
+        <ApprovalBlock
+          entry={buildApprovalEntry()}
+          currentRunId="run-waiting-approval"
+          currentSessionStatus="terminated"
+          sessionId="session-waiting-approval"
+          projectId="project-default"
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(
+      screen.queryByRole("form", { name: "Reject approval with reason" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Submit reject reason" }),
+    ).toBeNull();
   });
 });

@@ -588,6 +588,11 @@ a {
   scroll-margin-top: 18px;
 }
 
+.run-boundary:focus {
+  outline: 2px solid oklch(64% 0.14 252);
+  outline-offset: 4px;
+}
+
 .run-boundary__header,
 .run-boundary__identity,
 .run-boundary__status-row,
@@ -822,6 +827,19 @@ a {
 .feed-entry__actions button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+.rerun-action {
+  display: grid;
+  gap: 10px;
+}
+
+.rerun-action__notice,
+.rerun-action__error {
+  margin: 0;
+  color: oklch(40% 0.08 26);
+  font-size: 0.82rem;
+  line-height: 1.45;
 }
 
 .feed-entry--user-message {

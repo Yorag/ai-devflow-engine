@@ -75,7 +75,6 @@ describe("FeedEntryRenderer", () => {
       name: "System status feed entry",
     });
     expect(within(systemEntry).getByText("Run failed")).toBeTruthy();
-    expect(within(systemEntry).getByRole("button", { name: "Retry run" })).toBeTruthy();
   });
 
   it("preserves the provided top-level feed order", () => {
@@ -206,6 +205,35 @@ describe("FeedEntryRenderer", () => {
     ).toBeTruthy();
     expect(screen.getByText("拒绝后当前运行将失败")).toBeTruthy();
     expect(screen.queryByText("approval rollback")).toBeNull();
+  });
+
+  it("renders rerun only for the current terminal run", () => {
+    const currentStatus = {
+      ...mockFeedEntriesByType.system_status,
+      run_id: "run-failed",
+    };
+
+    const { rerender } = renderWithAppProviders(
+      renderFeedEntryByType(currentStatus, {
+        currentRunId: "run-failed",
+        sessionId: "session-failed",
+        projectId: "project-default",
+      }),
+    );
+
+    expect(screen.getByRole("button", { name: "Retry run" })).toBeTruthy();
+
+    rerender(
+      <QueryClientProvider client={createQueryClient()}>
+        {renderFeedEntryByType(currentStatus, {
+          currentRunId: "run-retry",
+          sessionId: "session-failed",
+          projectId: "project-default",
+        })}
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Retry run" })).toBeNull();
   });
 });
 

@@ -1,5 +1,9 @@
 import type { ApiRequestOptions } from "../../api/client";
-import type { RunSummaryProjection, TopLevelFeedEntry } from "../../api/types";
+import type {
+  RunSummaryProjection,
+  SessionStatus,
+  TopLevelFeedEntry,
+} from "../../api/types";
 import { renderFeedEntryByType } from "./FeedEntryRenderer";
 import { groupEntriesByRun, RunBoundary } from "./RunBoundary";
 import { RunSwitcher } from "./RunSwitcher";
@@ -8,6 +12,7 @@ export type NarrativeFeedProps = {
   entries: TopLevelFeedEntry[];
   runs?: RunSummaryProjection[];
   currentRunId?: string | null;
+  currentSessionStatus?: SessionStatus | null;
   sessionId?: string;
   projectId?: string;
   request?: ApiRequestOptions;
@@ -19,6 +24,7 @@ export function NarrativeFeed({
   entries,
   runs = [],
   currentRunId = null,
+  currentSessionStatus = null,
   sessionId,
   projectId,
   request,
@@ -46,6 +52,7 @@ export function NarrativeFeed({
                   <li className="narrative-feed__item" key={entry.entry_id}>
                     {renderFeedEntryByType(entry, {
                       currentRunId,
+                      currentSessionStatus,
                       sessionId,
                       projectId,
                       request,
@@ -80,6 +87,7 @@ export function NarrativeFeed({
         <li className="narrative-feed__item" key={entry.entry_id}>
           {renderFeedEntryByType(entry, {
             currentRunId,
+            currentSessionStatus,
             sessionId,
             projectId,
             request,
