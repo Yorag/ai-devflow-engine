@@ -8,10 +8,7 @@ This file records project-level collaboration rules for AI agents working in thi
 
 1. Use the repo-local skill `git-delivery-workflow` at `.codex/skills/git-delivery-workflow` before starting non-trivial development, deciding whether to create or reuse a branch, proposing a commit, proposing a PR, merging to `main`, or preparing a release branch or tag.
 
-2. Do not run Git write actions proactively.
-The agent may propose `branch`, `commit`, `merge`, `tag`, or branch cleanup actions when the workflow says they are ready, but must wait for explicit user approval before running them.
-
-3. Do not submit or commit spec documents before user review.
+2. Do not submit or commit spec documents before user review.
 Keep draft spec documents in the working tree until the user explicitly approves them.
 
 ## Project Constraints
