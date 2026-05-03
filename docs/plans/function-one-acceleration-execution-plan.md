@@ -124,6 +124,7 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | AL01-E3.1 | E3.1 | AL01 | `feat/al-run-core-events` | done | 4ea6251 | 38defe9 | `docs/plans/acceleration/reports/AL01-E3.1.md` | - |
 | AL01-R3.4 | R3.4 | AL01 | `feat/al-run-core-events` | done | 67f5290 | d1fcb14 | `docs/plans/acceleration/reports/AL01-R3.4.md` | - |
 | AL01-R3.4a | R3.4a | AL01 | `feat/al-run-core-events` | done | 74578b0 | ec0b023 | `docs/plans/acceleration/reports/AL01-R3.4a.md` | - |
+| AL01-R3.2a | R3.2a | AL01 | `feat/al-run-core-events` | done | 60cc934 | 3888945 | `docs/plans/acceleration/reports/AL01-R3.2a.md` | - |
 | AL02-Q3.1 | Q3.1 | AL02 | `feat/al-projections-streams` | done | 67f5290 | d07f094 | `docs/plans/acceleration/reports/AL02-Q3.1.md` | - |
 | AL02-Q3.2 | Q3.2 | AL02 | `feat/al-projections-streams` | done | 74578b0 | 827d4dd | `docs/plans/acceleration/reports/AL02-Q3.2.md` | - |
 | AL03-A4.0 | A4.0 | AL03 | `feat/al-runtime-human-loop` | done | 5d44d4a | ebfcb61 | `docs/plans/acceleration/reports/AL03-A4.0.md` | - |
@@ -133,6 +134,7 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | AL03-D4.0 | D4.0 | AL03 | `feat/al-runtime-human-loop` | done | 7aeff59 | 4c58b8a | `docs/plans/acceleration/reports/AL03-D4.0.md` | - |
 | AL03-H4.4 | H4.4 | AL03 | `feat/al-runtime-human-loop` | done | 7819aad | c86b54e | `docs/plans/acceleration/reports/AL03-H4.4.md` | - |
 | AL03-H4.4a | H4.4a | AL03 | `feat/al-runtime-human-loop` | done | 969a43c | 96ceb48 | `docs/plans/acceleration/reports/AL03-H4.4a.md` | - |
+| AL03-H4.4b | H4.4b | AL03 | `feat/al-runtime-human-loop` | done | 3c5f689 | 76ea445 | `docs/plans/acceleration/reports/AL03-H4.4b.md` | - |
 | AL03-H4.5 | H4.5 | AL03 | `feat/al-runtime-human-loop` | done | 5707ce3 | 94b1376 | `docs/plans/acceleration/reports/AL03-H4.5.md` | - |
 | AL04-A4.1 | A4.1 | AL04 | `feat/al-tools-deterministic-delivery` | done | cf4828c | 3cba4f8 | `docs/plans/acceleration/reports/AL04-A4.1.md` | - |
 | AL04-W5.0 | W5.0 | AL04 | `feat/al-tools-deterministic-delivery` | done | 67f5290 | 2b78be5 | `docs/plans/acceleration/reports/AL04-W5.0.md` | - |

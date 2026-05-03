@@ -222,7 +222,7 @@
 | C2.9a | Session 删除命令与历史可见性 | Week 4 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c29a) |
 | C2.9b | Project 移除命令与级联历史可见性 | Week 4 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c29b) |
 | E3.1 | 领域事件 Schema 与 EventStore | Week 4 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#e31) |
-| R3.2a | 首个 run 启动多库可见性边界 | Week 4 | [ ] | 后端核心 | [03](function-one-platform/03-run-projection-and-feed.md#r32a) |
+| R3.2a | 首个 run 启动多库可见性边界 | Week 4 | [x] | 后端核心 | [03](function-one-platform/03-run-projection-and-feed.md#r32a) |
 | R3.2 | 首条需求启动首个 run | Week 4 | [ ] | 后端核心 | [03](function-one-platform/03-run-projection-and-feed.md#r32) |
 | R3.3 | 重新尝试领域规则与内部创建基础 | Week 4 | [ ] | 后端核心 | [03](function-one-platform/03-run-projection-and-feed.md#r33) |
 | R3.4 | 模板快照固化 | Week 4 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#r34) |
@@ -255,7 +255,7 @@
 | D4.0 | Delivery snapshot gate | Week 6 | [x] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#d40) |
 | H4.4 | 审批命令与交付就绪阻塞 | Week 6 | [x] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#h44) |
 | H4.4a | ToolConfirmationRequest 与工具确认命令 | Week 6-7 | [x] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#h44a) |
-| H4.4b | ToolConfirmation 拒绝后续处理语义固化 | Week 6-7 | [ ] | 后端契约 | [04](function-one-platform/04-human-loop-and-runtime.md#h44b) |
+| H4.4b | ToolConfirmation 拒绝后续处理语义固化 | Week 6-7 | [x] | 后端契约 | [04](function-one-platform/04-human-loop-and-runtime.md#h44b) |
 | H4.5 | Pause/Resume checkpoint 语义 | Week 6 | [x] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#h45) |
 | H4.6 | Terminate 与 system_status | Week 6 | [x] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#h46) |
 | H4.7 | 重新尝试命令与多 run 分界 | Week 6 | [x] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#h47) |

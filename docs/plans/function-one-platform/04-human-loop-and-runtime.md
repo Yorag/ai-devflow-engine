@@ -361,9 +361,10 @@
 ## H4.4b ToolConfirmation 拒绝后续处理语义固化
 
 **计划周期**：Week 6-7
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：为工具确认拒绝结果固化稳定的 runtime-side 后续处理语义来源，供 `Q3.4b` 读取并暴露到顶层 `tool_confirmation` payload；本切片不直接扩展 query / SSE 顶层契约。
 **实施计划**：`docs/plans/implementation/h4.4b-tool-confirmation-deny-followup-source.md`
+**验证摘要**：实施计划 `docs/plans/implementation/h4.4b-tool-confirmation-deny-followup-source.md` 已完成并在 integration checkpoint 合入 `76ea445` 与 `35750c0`。`uv run python -m pytest backend/tests/services/test_tool_confirmation_commands.py -v` 通过 17 个 focused service tests；`uv run python -m pytest backend/tests/api/test_tool_confirmation_api.py -v` 通过 13 个 focused API/OpenAPI tests；`uv run python -m pytest backend/tests/db/test_runtime_model_boundary.py backend/tests/projections/test_tool_confirmation_detail_projection.py backend/tests/services/test_terminate_run.py -q` 通过 27 个 impacted regressions。
 
 **修改文件列表**：
 - Modify: `backend/app/db/models/runtime.py`
