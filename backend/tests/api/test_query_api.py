@@ -74,6 +74,56 @@ def test_get_session_workspace_returns_projection_and_unified_not_found(
     }
 
 
+def test_get_run_timeline_returns_projection_and_unified_not_found(
+    tmp_path: Path,
+) -> None:
+    app = build_query_api_app(tmp_path)
+
+    with TestClient(app) as client:
+        ok_response = client.get(
+            "/api/runs/run-active/timeline",
+            headers={
+                "X-Request-ID": "req-timeline",
+                "X-Correlation-ID": "corr-timeline",
+            },
+        )
+        missing_response = client.get(
+            "/api/runs/run-missing/timeline",
+            headers={
+                "X-Request-ID": "req-timeline-missing",
+                "X-Correlation-ID": "corr-timeline-missing",
+            },
+        )
+
+    assert ok_response.status_code == 200
+    payload = ok_response.json()
+    assert payload["run_id"] == "run-active"
+    assert payload["session_id"] == "session-1"
+    assert payload["attempt_index"] == 2
+    assert payload["trigger_source"] == "retry"
+    assert payload["status"] == "waiting_tool_confirmation"
+    assert payload["current_stage_type"] == "code_generation"
+    assert [entry["run_id"] for entry in payload["entries"]] == [
+        "run-active",
+        "run-active",
+        "run-active",
+    ]
+    assert [entry["type"] for entry in payload["entries"]] == [
+        "user_message",
+        "stage_node",
+        "tool_confirmation",
+    ]
+    assert any(entry["type"] == "tool_confirmation" for entry in payload["entries"])
+
+    assert missing_response.status_code == 404
+    assert missing_response.json() == {
+        "error_code": "not_found",
+        "message": "Run timeline was not found.",
+        "request_id": "req-timeline-missing",
+        "correlation_id": "corr-timeline-missing",
+    }
+
+
 def test_get_session_workspace_rejects_removed_session(
     tmp_path: Path,
 ) -> None:
@@ -162,3 +212,29 @@ def test_query_workspace_route_is_documented_in_openapi(tmp_path: Path) -> None:
     assert "SessionWorkspaceProjection" in schemas
     assert "ComposerStateProjection" in schemas
     assert "RunSummaryProjection" in schemas
+
+    timeline_route = paths["/api/runs/{runId}/timeline"]["get"]
+    assert set(timeline_route["responses"]) == {"200", "404", "422", "500"}
+    assert (
+        timeline_route["responses"]["200"]["content"]["application/json"]["schema"][
+            "$ref"
+        ]
+        == "#/components/schemas/RunTimelineProjection"
+    )
+    run_id_parameter = next(
+        parameter
+        for parameter in timeline_route["parameters"]
+        if parameter["name"] == "runId"
+    )
+    assert run_id_parameter["in"] == "path"
+    assert run_id_parameter["required"] is True
+    assert run_id_parameter["schema"]["type"] == "string"
+    for status_code in ("404", "422", "500"):
+        assert (
+            timeline_route["responses"][status_code]["content"]["application/json"][
+                "schema"
+            ]["$ref"]
+            == "#/components/schemas/ErrorResponse"
+        )
+
+    assert "RunTimelineProjection" in schemas
