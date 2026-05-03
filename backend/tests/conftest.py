@@ -6,3 +6,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+
+pytest_plugins = (
+    "backend.tests.fixtures.settings",
+    "backend.tests.fixtures.providers",
+    "backend.tests.fixtures.tools",
+    "backend.tests.fixtures.workspace",
+    "backend.tests.fixtures.delivery",
+)
