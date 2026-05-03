@@ -266,7 +266,7 @@
 | W5.0a | 统一错误码字典与错误响应契约 | Week 7 | [x] | 后端契约 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w50a) |
 | W5.1 | WorkspaceManager 隔离工作区 | Week 7 | [ ] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w51) |
 | W5.0b | ToolRegistry execution gate | Week 7-8 | [x] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w50b) |
-| W5.0c | 后端测试 fixture、fake provider 与 fake tool 契约 | Week 7-8 | [ ] | 后端测试 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w50c) |
+| W5.0c | 后端测试 fixture、fake provider 与 fake tool 契约 | Week 7-8 | [x] | 后端测试 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w50c) |
 | W5.0d | Tool risk classifier 与 confirmation gate | Week 7-8 | [ ] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w50d) |
 | W5.2 | 文件工具 read_file/write_file/edit_file/glob | Week 7-8 | [ ] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w52) |
 | W5.3 | grep 工具 | Week 7-8 | [ ] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w53) |

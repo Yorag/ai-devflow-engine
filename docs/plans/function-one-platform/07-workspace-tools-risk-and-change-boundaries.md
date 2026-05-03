@@ -166,7 +166,7 @@
 ## W5.0c 后端测试 fixture、fake provider 与 fake tool 契约
 
 **计划周期**：Week 7-8
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立后端跨切片测试 fixture 契约，使 deterministic test runtime、Provider adapter、ToolRegistry、workspace tools、delivery tools、配置快照回归和完整 API flow 测试共享正式抽象，不再各自定义临时 fake 字段、临时设置入口或临时工具调用路径。
 **实施计划**：`docs/plans/implementation/w5.0c-backend-test-fixtures-contract.md`
 
