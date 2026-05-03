@@ -333,7 +333,7 @@
 ## W5.4 bash 工具与白名单审计
 
 **计划周期**：Week 7-8
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现受控 `bash` 工具、命令白名单和工具调用日志审计记录，使测试执行和命令执行可追踪。
 **实施计划**：`docs/plans/implementation/w5.4-workspace-bash-audit.md`
 
@@ -375,6 +375,7 @@
 **测试方法**：
 - `pytest backend/tests/workspace/test_workspace_bash.py -v`
 - `pytest backend/tests/tools/test_tool_audit.py -v`
+**验证摘要**：实施计划 `docs/plans/implementation/w5.4-workspace-bash-audit.md` 已完成并在 integration checkpoint 合入 `6798ce9`。`uv run pytest backend/tests/workspace/test_workspace_bash.py -v` 通过 15 个 focused bash tests；`uv run pytest backend/tests/tools/test_tool_audit.py -v` 通过 2 个 focused audit tests；本次批量 integration verification 中后端聚合回归通过 59 个 tests，覆盖 bash allowlist、审计持久化、prompt renderer 与 project-history 相关切片。
 
 <a id="w55"></a>
 

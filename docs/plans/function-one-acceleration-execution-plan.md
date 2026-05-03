@@ -170,8 +170,12 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | AL06-F4.2 | F4.2 | AL06 | `feat/al-frontend-runtime-ui` | done | 147563b | 23636ef | `docs/plans/acceleration/reports/AL06-F4.2.md` | - |
 | AL06-F4.3a | F4.3a | AL06 | `feat/al-frontend-runtime-ui` | done | 90a2437 | 5e73325 | `docs/plans/acceleration/reports/AL06-F4.3a.md` | - |
 | AL06-F4.4 | F4.4 | AL06 | `feat/al-frontend-runtime-ui` | done | 5cc45f2 | d58895c | `docs/plans/acceleration/reports/AL06-F4.4.md` | - |
+| AL06-F5.1 | F5.1 | AL06 | `feat/al-frontend-runtime-ui` | integrated | 47c3899 | 060cda4 | `docs/plans/acceleration/reports/AL06-F5.1.md` | Mock-first frontend slice integrated against frozen projection and mock payload shape; final completion still depends on a later checkpoint proving real backend `code_generation` / `test_generation_execution` payloads and inspector detail semantics. |
 | AL01-R3.7 | R3.7 | AL01 | `feat/al-run-core-events` | done | 5707ce3 | 3313a4a | `docs/plans/acceleration/reports/AL01-R3.7.md` | - |
 | AL01-C2.9a | C2.9a | AL01 | `feat/al-run-core-events` | done | 874161e | d06be5c | `docs/plans/acceleration/reports/AL01-C2.9a.md` | - |
+| AL01-C2.9b | C2.9b | AL01 | `feat/al-run-core-events` | done | f03d52b | eeb54a3 | `docs/plans/acceleration/reports/AL01-C2.9b.md` | - |
+| AL04-W5.4 | W5.4 | AL04 | `feat/al-tools-deterministic-delivery` | done | 15a92a3 | 6798ce9 | `docs/plans/acceleration/reports/AL04-W5.4.md` | - |
+| AL05-A4.8d | A4.8d | AL05 | `feat/al-provider-langgraph-context` | done | 62535c5 | a9d28f3 | `docs/plans/acceleration/reports/AL05-A4.8d.md` | Integrated with candidate-a context provenance and trace hardening in `backend/app/context/schemas.py`. |
 
 当前基线不预置 live claim。主协调会话在认领 ready task 时写入共享 coordination store，并记录当时的 Coordination Base。
 

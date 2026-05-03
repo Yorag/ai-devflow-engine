@@ -558,7 +558,7 @@
 ## C2.9b Project 移除命令与级联历史可见性
 
 **计划周期**：Week 4
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现已加载 Project 的移除语义，使非默认项目可从产品历史中移除，并级联隐藏该项目下用于产品回看的 Session 历史。
 **实施计划**：`docs/plans/implementation/c2.9b-project-remove-history.md`
 
@@ -587,6 +587,7 @@
 **测试方法**：
 - `pytest backend/tests/services/test_project_remove_history.py -v`
 - `pytest backend/tests/api/test_project_remove_api.py -v`
+**验证摘要**：实施计划 `docs/plans/implementation/c2.9b-project-remove-history.md` 已完成并在 integration checkpoint 合入 `eeb54a3`。`uv run pytest backend/tests/services/test_project_remove_history.py backend/tests/api/test_project_remove_api.py -v` 通过 18 个 focused tests；`uv run pytest backend/tests/services/test_project_service.py backend/tests/services/test_session_service.py backend/tests/api/test_project_api.py backend/tests/api/test_session_api.py backend/tests/api/test_query_api.py -v` 通过 40 个 impacted regressions；本次批量 integration verification 中后端聚合回归通过 59 个 tests，覆盖 project remove、bash tool、prompt renderer 与 context manifest 相关切片。
 
 <a id="f21"></a>
 

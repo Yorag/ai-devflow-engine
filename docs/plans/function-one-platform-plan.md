@@ -220,7 +220,7 @@
 | F2.6 | 模板编辑与脏状态守卫 | Week 3-4 | [x] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f26) |
 | R3.1 | Run 状态机纯领域规则 | Week 4 | [x] | 后端核心 | [03](function-one-platform/03-run-projection-and-feed.md#r31) |
 | C2.9a | Session 删除命令与历史可见性 | Week 4 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c29a) |
-| C2.9b | Project 移除命令与级联历史可见性 | Week 4 | [ ] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c29b) |
+| C2.9b | Project 移除命令与级联历史可见性 | Week 4 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c29b) |
 | E3.1 | 领域事件 Schema 与 EventStore | Week 4 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#e31) |
 | R3.2a | 首个 run 启动多库可见性边界 | Week 4 | [x] | 后端核心 | [03](function-one-platform/03-run-projection-and-feed.md#r32a) |
 | R3.2 | 首条需求启动首个 run | Week 4 | [ ] | 后端核心 | [03](function-one-platform/03-run-projection-and-feed.md#r32) |
@@ -273,7 +273,7 @@
 | W5.0d | Tool risk classifier 与 confirmation gate | Week 7-8 | [x] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w50d) |
 | W5.2 | 文件工具 read_file/write_file/edit_file/glob | Week 7-8 | [x] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w52) |
 | W5.3 | grep 工具 | Week 7-8 | [x] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w53) |
-| W5.4 | bash 工具与白名单审计 | Week 7-8 | [ ] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w54) |
+| W5.4 | bash 工具与白名单审计 | Week 7-8 | [x] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w54) |
 | A4.2 | deterministic test runtime 六阶段推进 | Week 7 | [ ] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#a42) |
 | A4.3 | deterministic test runtime 澄清与审批中断 | Week 7 | [ ] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#a43) |
 | A4.4 | deterministic test runtime 终态控制 | Week 7 | [ ] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#a44) |
@@ -287,7 +287,7 @@
 | A4.8a | PromptValidation 边界校验 | Week 8 | [x] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48a) |
 | A4.8b | ContextEnvelope 与 ContextManifest Schema | Week 8 | [x] | 后端契约 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48b) |
 | A4.8c | PromptRegistry 与系统提示词资产加载 | Week 8 | [x] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48c) |
-| A4.8d | PromptRenderer 与消息序列渲染 | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48d) |
+| A4.8d | PromptRenderer 与消息序列渲染 | Week 8 | [x] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48d) |
 | A4.9 | LangChain Provider Adapter | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a49) |
 | A4.9a | ContextEnvelope Builder 与 ContextManifest 记录 | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a49a) |
 | A4.9e | Provider retry、backoff 与 circuit breaker | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a49e) |
@@ -302,7 +302,7 @@
 | D5.2 | prepare_branch 与 create_commit | Week 10 | [ ] | 后端 | [08](function-one-platform/08-git-delivery-and-result-display.md#d52) |
 | D5.3 | push_branch 与 create_code_review_request | Week 10 | [ ] | 后端 | [08](function-one-platform/08-git-delivery-and-result-display.md#d53) |
 | D5.4 | git_auto_delivery 编排与 snapshot readiness 测试 | Week 10 | [ ] | 后端 | [08](function-one-platform/08-git-delivery-and-result-display.md#d54) |
-| F5.1 | 工具调用、Diff 与测试结果展示 | Week 9-10 | [ ] | 前端 | [08](function-one-platform/08-git-delivery-and-result-display.md#f51) |
+| F5.1 | 工具调用、Diff 与测试结果展示 | Week 9-10 | [/] | 前端 | [08](function-one-platform/08-git-delivery-and-result-display.md#f51) |
 | F5.2a | demo_delivery 结果展示 | Week 9 | [ ] | 前端 | [08](function-one-platform/08-git-delivery-and-result-display.md#f52a) |
 | F5.2b | git_auto_delivery 结果展示 | Week 10 | [ ] | 前端 | [08](function-one-platform/08-git-delivery-and-result-display.md#f52b) |
 | V6.1 | 后端完整 API flow 测试 | Week 11 | [ ] | 跨端 | [09](function-one-platform/09-regression-hardening-and-logs.md#v61) |
