@@ -8,7 +8,11 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.error_codes import ErrorCode
 from backend.app.db.models.control import ProjectModel, SessionModel
-from backend.app.db.models.runtime import PipelineRunModel, StageRunModel
+from backend.app.db.models.runtime import (
+    PipelineRunModel,
+    StageRunModel,
+    ToolConfirmationRequestModel,
+)
 from backend.app.domain.enums import RunStatus
 from backend.app.schemas.feed import ApprovalResultFeedEntry, TopLevelFeedEntry
 from backend.app.schemas.run import RunTimelineProjection
@@ -125,6 +129,8 @@ class TimelineProjectionService:
         ):
             value: Any = event.payload.get(key)
             if value is not None:
+                if key == "tool_confirmation" and isinstance(value, dict):
+                    value = self._hydrate_tool_confirmation(value)
                 return TOP_LEVEL_FEED_ENTRY_ADAPTER.validate_python(value)
         return None
 
@@ -160,6 +166,34 @@ class TimelineProjectionService:
             else entry
             for entry in entries
         ]
+
+    def _hydrate_tool_confirmation(
+        self,
+        value: dict[str, Any],
+    ) -> dict[str, Any]:
+        tool_confirmation_id = value.get("tool_confirmation_id")
+        if not isinstance(tool_confirmation_id, str):
+            return value
+        decision = value.get("decision")
+        if decision != "denied":
+            return {
+                **value,
+                "deny_followup_action": None,
+                "deny_followup_summary": None,
+            }
+        request = self._runtime_session.get(
+            ToolConfirmationRequestModel,
+            tool_confirmation_id,
+        )
+        return {
+            **value,
+            "deny_followup_action": (
+                request.deny_followup_action if request is not None else None
+            ),
+            "deny_followup_summary": (
+                request.deny_followup_summary if request is not None else None
+            ),
+        }
 
     @staticmethod
     def _feed_identity(entry: TopLevelFeedEntry) -> str:

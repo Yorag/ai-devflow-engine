@@ -446,6 +446,16 @@ class ToolConfirmationService:
                 }
                 else None
             ),
+            deny_followup_action=(
+                request.deny_followup_action
+                if request.user_decision is ToolConfirmationStatus.DENIED
+                else None
+            ),
+            deny_followup_summary=(
+                request.deny_followup_summary
+                if request.user_decision is ToolConfirmationStatus.DENIED
+                else None
+            ),
             disabled_reason=disabled_reason,
         )
 

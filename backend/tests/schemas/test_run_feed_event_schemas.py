@@ -369,6 +369,8 @@ def test_tool_confirmation_feed_and_events_are_separate_from_approval() -> None:
 
     dumped_tool_confirmation = tool_confirmation.model_dump(mode="json")
     assert dumped_tool_confirmation["type"] == "tool_confirmation"
+    assert dumped_tool_confirmation["deny_followup_action"] is None
+    assert dumped_tool_confirmation["deny_followup_summary"] is None
     assert "approval_id" not in dumped_tool_confirmation
     assert "approval_type" not in dumped_tool_confirmation
     assert "approve_action" not in dumped_tool_confirmation
@@ -426,6 +428,68 @@ def test_tool_confirmation_feed_and_events_are_separate_from_approval() -> None:
             title="Invalid control item",
             summary="Tool confirmation must not be a control item.",
             payload_ref="payload-1",
+        )
+
+
+def test_tool_confirmation_feed_exposes_denied_followup_contract_only_for_denials() -> None:
+    from backend.app.schemas.feed import ToolConfirmationFeedEntry
+
+    base_payload = {
+        "entry_id": "entry-tool-confirmation",
+        "run_id": "run-1",
+        "occurred_at": NOW,
+        "stage_run_id": "stage-test-1",
+        "tool_confirmation_id": "tool-confirmation-1",
+        "status": common.ToolConfirmationStatus.DENIED,
+        "title": "Confirm dependency install",
+        "tool_name": "bash",
+        "command_preview": "npm install",
+        "target_summary": "frontend/package-lock.json",
+        "risk_level": common.ToolRiskLevel.HIGH_RISK,
+        "risk_categories": [common.ToolRiskCategory.DEPENDENCY_CHANGE],
+        "reason": "The command modifies dependencies.",
+        "expected_side_effects": ["May update lockfile."],
+        "allow_action": "allow:tool-confirmation-1",
+        "deny_action": "deny:tool-confirmation-1",
+        "is_actionable": False,
+        "requested_at": NOW,
+        "responded_at": NOW,
+        "decision": common.ToolConfirmationStatus.DENIED,
+        "deny_followup_action": "continue_current_stage",
+        "deny_followup_summary": (
+            "Code Generation will continue with a low-risk fallback."
+        ),
+        "disabled_reason": "Denied by user.",
+    }
+
+    denied = ToolConfirmationFeedEntry(**base_payload)
+
+    dumped = denied.model_dump(mode="json")
+    assert dumped["deny_followup_action"] == "continue_current_stage"
+    assert dumped["deny_followup_summary"] == (
+        "Code Generation will continue with a low-risk fallback."
+    )
+
+    for action in ("retry_current_stage", "continue"):
+        with pytest.raises(ValidationError):
+            ToolConfirmationFeedEntry(**{**base_payload, "deny_followup_action": action})
+
+    with pytest.raises(ValidationError):
+        ToolConfirmationFeedEntry(
+            **{
+                **base_payload,
+                "deny_followup_action": None,
+                "deny_followup_summary": None,
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        ToolConfirmationFeedEntry(
+            **{
+                **base_payload,
+                "status": common.ToolConfirmationStatus.ALLOWED,
+                "decision": common.ToolConfirmationStatus.ALLOWED,
+            }
         )
 
 

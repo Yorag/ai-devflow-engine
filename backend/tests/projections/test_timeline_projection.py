@@ -19,6 +19,8 @@ from backend.app.schemas.feed import (
 from backend.app.services.events import DomainEventType, EventStore
 from backend.tests.projections.test_workspace_projection import (
     NOW,
+    _append_denied_tool_confirmation_event_without_followup,
+    _mark_tool_confirmation_denied_with_followup,
     _manager,
     _seed_workspace,
     _trace,
@@ -166,6 +168,39 @@ def test_timeline_projection_matches_workspace_feed_for_target_run(tmp_path) -> 
     ]
     timeline_entries = [entry.model_dump(mode="json") for entry in timeline.entries]
     assert timeline_entries == workspace_entries
+
+
+def test_timeline_projection_hydrates_denied_tool_confirmation_deny_followup_from_runtime_model(
+    tmp_path,
+) -> None:
+    from backend.app.services.projections.timeline import TimelineProjectionService
+
+    manager = _manager(tmp_path)
+    _seed_workspace(manager)
+    _mark_tool_confirmation_denied_with_followup(manager)
+    _append_denied_tool_confirmation_event_without_followup(manager)
+
+    with (
+        manager.session(DatabaseRole.CONTROL) as control_session,
+        manager.session(DatabaseRole.RUNTIME) as runtime_session,
+        manager.session(DatabaseRole.EVENT) as event_session,
+    ):
+        timeline = TimelineProjectionService(
+            control_session,
+            runtime_session,
+            event_session,
+        ).get_run_timeline("run-active")
+
+    dumped = timeline.model_dump(mode="json")
+    tool_confirmation = next(
+        entry for entry in dumped["entries"] if entry["type"] == "tool_confirmation"
+    )
+    assert tool_confirmation["decision"] == "denied"
+    assert tool_confirmation["deny_followup_action"] == "continue_current_stage"
+    assert tool_confirmation["deny_followup_summary"] == (
+        "Code Generation will continue with a low-risk fallback."
+    )
+    assert "alternative_path_summary" not in tool_confirmation
 
 
 def test_timeline_projection_replays_approval_result_without_losing_result_entry(

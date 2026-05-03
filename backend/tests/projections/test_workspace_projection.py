@@ -15,6 +15,7 @@ from backend.app.db.models.control import (
     SessionModel,
 )
 from backend.app.db.models.event import EventBase
+from backend.app.db.models.event import DomainEventModel
 from backend.app.db.models.runtime import (
     ModelBindingSnapshotModel,
     PipelineRunModel,
@@ -37,6 +38,7 @@ from backend.app.domain.enums import (
     RunTriggerSource,
     ScmProviderType,
     SessionStatus,
+    SseEventType,
     StageItemType,
     StageStatus,
     StageType,
@@ -556,6 +558,76 @@ def test_workspace_projection_aggregates_visible_session_runtime_runs_feed_and_c
     assert "latest-config-not-a-run-snapshot" not in str(dumped)
 
 
+def test_workspace_projection_hydrates_denied_tool_confirmation_deny_followup_from_runtime_model(
+    tmp_path,
+) -> None:
+    from backend.app.services.projections.workspace import WorkspaceProjectionService
+
+    manager = _manager(tmp_path)
+    _seed_workspace(manager)
+    _mark_tool_confirmation_denied_with_followup(manager)
+    _append_denied_tool_confirmation_event_without_followup(manager)
+
+    with (
+        manager.session(DatabaseRole.CONTROL) as control_session,
+        manager.session(DatabaseRole.RUNTIME) as runtime_session,
+        manager.session(DatabaseRole.EVENT) as event_session,
+    ):
+        workspace = WorkspaceProjectionService(
+            control_session,
+            runtime_session,
+            event_session,
+        ).get_session_workspace("session-1")
+
+    dumped = workspace.model_dump(mode="json")
+    tool_confirmation = next(
+        entry for entry in dumped["narrative_feed"] if entry["type"] == "tool_confirmation"
+    )
+    assert tool_confirmation["decision"] == "denied"
+    assert tool_confirmation["deny_followup_action"] == "continue_current_stage"
+    assert tool_confirmation["deny_followup_summary"] == (
+        "Code Generation will continue with a low-risk fallback."
+    )
+    assert "alternative_path_summary" not in tool_confirmation
+
+
+def test_workspace_projection_keeps_non_denied_tool_confirmation_deny_followup_null(
+    tmp_path,
+) -> None:
+    from backend.app.services.projections.workspace import WorkspaceProjectionService
+
+    manager = _manager(tmp_path)
+    _seed_workspace(manager)
+    with manager.session(DatabaseRole.RUNTIME) as session:
+        request = session.get(ToolConfirmationRequestModel, "tool-confirmation-1")
+        assert request is not None
+        request.planned_deny_followup_action = "run_failed"
+        request.planned_deny_followup_summary = "The run will fail if denied."
+        request.deny_followup_action = "run_failed"
+        request.deny_followup_summary = "The run will fail if denied."
+        session.add(request)
+        session.commit()
+
+    with (
+        manager.session(DatabaseRole.CONTROL) as control_session,
+        manager.session(DatabaseRole.RUNTIME) as runtime_session,
+        manager.session(DatabaseRole.EVENT) as event_session,
+    ):
+        workspace = WorkspaceProjectionService(
+            control_session,
+            runtime_session,
+            event_session,
+        ).get_session_workspace("session-1")
+
+    dumped = workspace.model_dump(mode="json")
+    tool_confirmation = next(
+        entry for entry in dumped["narrative_feed"] if entry["type"] == "tool_confirmation"
+    )
+    assert tool_confirmation["decision"] is None
+    assert tool_confirmation["deny_followup_action"] is None
+    assert tool_confirmation["deny_followup_summary"] is None
+
+
 def test_workspace_projection_replays_approval_result_into_matching_request(
     tmp_path,
 ) -> None:
@@ -793,3 +865,76 @@ def test_workspace_projection_rejects_session_under_removed_project(tmp_path) ->
 
     assert exc_info.value.status_code == 404
     assert exc_info.value.message == "Session workspace was not found."
+
+
+def _mark_tool_confirmation_denied_with_followup(manager: DatabaseManager) -> None:
+    with manager.session(DatabaseRole.RUNTIME) as session:
+        request = session.get(ToolConfirmationRequestModel, "tool-confirmation-1")
+        assert request is not None
+        request.status = ToolConfirmationStatus.DENIED
+        request.user_decision = ToolConfirmationStatus.DENIED
+        request.alternative_path_summary = "Do not expose this inspector-only field."
+        request.deny_followup_action = "continue_current_stage"
+        request.deny_followup_summary = (
+            "Code Generation will continue with a low-risk fallback."
+        )
+        request.responded_at = NOW + timedelta(minutes=8)
+        request.updated_at = NOW + timedelta(minutes=8)
+        session.add(request)
+        session.commit()
+
+
+def _append_denied_tool_confirmation_event_without_followup(
+    manager: DatabaseManager,
+) -> None:
+    with manager.session(DatabaseRole.EVENT) as session:
+        session.add(
+            DomainEventModel(
+                event_id="event-tool-denied",
+                session_id="session-1",
+                run_id="run-active",
+                stage_run_id="stage-active",
+                event_type=SseEventType.TOOL_CONFIRMATION_RESULT,
+                sequence_index=4,
+                occurred_at=NOW + timedelta(minutes=8),
+                payload={
+                    "tool_confirmation": {
+                        "entry_id": "entry-tool-confirmation-denied",
+                        "run_id": "run-active",
+                        "type": "tool_confirmation",
+                        "occurred_at": (
+                            NOW + timedelta(minutes=8)
+                        ).isoformat(),
+                        "stage_run_id": "stage-active",
+                        "tool_confirmation_id": "tool-confirmation-1",
+                        "status": "denied",
+                        "title": "Allow dependency install",
+                        "tool_name": "bash",
+                        "command_preview": "npm install",
+                        "target_summary": "frontend/package-lock.json",
+                        "risk_level": "high_risk",
+                        "risk_categories": [
+                            "dependency_change",
+                            "network_download",
+                        ],
+                        "reason": "Installing dependencies changes lock files.",
+                        "expected_side_effects": ["package-lock update"],
+                        "allow_action": "allow_once",
+                        "deny_action": "deny_once",
+                        "is_actionable": False,
+                        "requested_at": (
+                            NOW + timedelta(minutes=7)
+                        ).isoformat(),
+                        "responded_at": (
+                            NOW + timedelta(minutes=8)
+                        ).isoformat(),
+                        "decision": "denied",
+                        "disabled_reason": "Denied by user.",
+                    }
+                },
+                correlation_id="correlation-1",
+                causation_event_id="event-tool",
+                created_at=NOW + timedelta(minutes=8),
+            )
+        )
+        session.commit()
