@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from backend.app.api.routes import (
+    approvals,
     health,
     projects,
     providers,
@@ -17,6 +18,7 @@ def build_api_router() -> APIRouter:
     router.include_router(health.router)
     router.include_router(projects.router)
     router.include_router(sessions.router)
+    router.include_router(approvals.router)
     router.include_router(templates.router)
     router.include_router(providers.router)
     router.include_router(runtime_settings.router)

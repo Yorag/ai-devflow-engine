@@ -63,6 +63,7 @@ class DeliverySnapshotService:
         audit_service: Any,
         log_writer: Any,
         redaction_policy: RedactionPolicy | None = None,
+        auto_commit: bool = True,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._control_session = control_session
@@ -71,6 +72,7 @@ class DeliverySnapshotService:
         self._audit_service = audit_service
         self._log_writer = log_writer
         self._redaction_policy = redaction_policy or RedactionPolicy()
+        self._auto_commit = auto_commit
         self._now = now or (lambda: datetime.now(UTC))
 
     def prepare_delivery_snapshot(
@@ -190,7 +192,8 @@ class DeliverySnapshotService:
                 or channel.credential_status is not CredentialStatus.READY
             )
         ):
-            self._runtime_session.rollback()
+            if self._auto_commit:
+                self._runtime_session.rollback()
             self._record_rejected(
                 target_id=run_id,
                 reason=DELIVERY_SNAPSHOT_NOT_READY_MESSAGE,
@@ -251,13 +254,14 @@ class DeliverySnapshotService:
                 rollback=self._runtime_session.rollback,
                 created_at=created_at,
             )
-            self._runtime_session.commit()
-            self._write_log(
-                message="Delivery snapshot prepared.",
-                level=LogLevel.INFO,
-                metadata=prepared_metadata,
-                trace_context=trace_context,
-            )
+            if self._auto_commit:
+                self._runtime_session.commit()
+                self._write_log(
+                    message="Delivery snapshot prepared.",
+                    level=LogLevel.INFO,
+                    metadata=prepared_metadata,
+                    trace_context=trace_context,
+                )
             return snapshot
         except Exception as exc:
             self._runtime_session.rollback()
