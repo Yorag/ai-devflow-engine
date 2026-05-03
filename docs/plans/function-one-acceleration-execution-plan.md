@@ -177,7 +177,8 @@ checkpoint 前必须确认待集成 lane 的 Coordination Base、Worker HEAD、d
 - 将已验证 claim 从 `implemented` 或 `mock_ready` 更新为 `integrated` 或 `done`。
 - 将满足验收标准的 platform plan 与 split plan 任务标记为 `[x]`。
 - 将只完成 mock-first 或部分接入的任务保持为 `[/]`，并记录 merge gate。
-- 为下一批 ready claim 生成 worker prompt。
+- 在同一次 checkpoint closeout 中执行 `uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py post-checkpoint --apply`，完成 ingest、空闲 branch 同步和下一批 claim 自动解封。
+- 输出 closeout 后的六路协调摘要，并为下一批 ready claim 生成 worker prompt。
 
 ## 10. Merge Gates
 
