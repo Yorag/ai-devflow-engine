@@ -517,6 +517,121 @@ describe("WorkspaceShell", () => {
     expect(screen.getByText("Draft execution plan")).toBeTruthy();
   });
 
+  it("opens settings from a delivery-readiness-blocked approval block", async () => {
+    const baseFetcher = createMockApiFetcher();
+    const blockedWorkspace = {
+      ...mockSessionWorkspaces["session-waiting-approval"],
+      narrative_feed: mockSessionWorkspaces[
+        "session-waiting-approval"
+      ].narrative_feed.map((entry) =>
+        entry.type === "approval_request"
+          ? {
+              ...entry,
+              approval_type: "code_review_approval",
+              delivery_readiness_status: "invalid",
+              delivery_readiness_message: "Credential reference cannot be resolved.",
+              open_settings_action: "open_general_settings",
+            }
+          : entry,
+      ),
+    };
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.endsWith("/api/sessions/session-waiting-approval/workspace")) {
+          return new Response(JSON.stringify(blockedWorkspace), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return baseFetcher(input, init);
+      },
+    };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Review delivery snapshot" }),
+    );
+    const approvalEntry = await screen.findByRole("article", {
+      name: "Approval request feed entry",
+    });
+    expect(
+      within(approvalEntry).getByText("Credential reference cannot be resolved."),
+    ).toBeTruthy();
+    fireEvent.click(
+      within(approvalEntry).getByRole("button", { name: "Open settings" }),
+    );
+
+    expect(await screen.findByRole("dialog", { name: "Settings" })).toBeTruthy();
+    expect(screen.getByRole("tabpanel", { name: "通用配置" })).toBeTruthy();
+  });
+
+  it("refetches workspace state after an inline reject and shows the returned approval result reason in the feed", async () => {
+    let workspace = {
+      ...mockSessionWorkspaces["session-waiting-approval"],
+    };
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const url = typeof input === "string" ? input : input.toString();
+
+        if (url.endsWith("/api/sessions/session-waiting-approval/workspace")) {
+          return new Response(JSON.stringify(workspace), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+
+        if (url.endsWith("/api/approvals/approval-solution-design/reject")) {
+          workspace = {
+            ...workspace,
+            narrative_feed: [
+              ...workspace.narrative_feed.map((entry) =>
+                entry.type === "approval_request"
+                  ? { ...entry, status: "rejected" as const, is_actionable: false }
+                  : entry,
+              ),
+              {
+                entry_id: "entry-approval-result-rejected",
+                run_id: "run-waiting-approval",
+                type: "approval_result",
+                occurred_at: "2026-05-01T09:56:00.000Z",
+                approval_id: "approval-solution-design",
+                approval_type: "solution_design_approval",
+                decision: "rejected",
+                reason: "Need a clearer rollback explanation.",
+                created_at: "2026-05-01T09:56:00.000Z",
+                next_stage_type: "code_generation",
+              },
+            ],
+          };
+          return new Response(
+            JSON.stringify(workspace.narrative_feed[workspace.narrative_feed.length - 1]),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        return createMockApiFetcher()(input, init);
+      },
+    };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Review delivery snapshot" }),
+    );
+    const approvalEntry = await screen.findByRole("article", {
+      name: "Approval request feed entry",
+    });
+    fireEvent.click(within(approvalEntry).getByRole("button", { name: "Reject" }));
+    fireEvent.change(screen.getByLabelText("Reject reason"), {
+      target: { value: "Need a clearer rollback explanation." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Submit reject reason" }));
+
+    expect(await screen.findByText("Need a clearer rollback explanation.")).toBeTruthy();
+  });
+
   it("renders Composer beneath the draft template workspace and allows first requirement input", async () => {
     renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 

@@ -202,7 +202,11 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
               entries={workspace.narrative_feed}
               runs={workspace.runs}
               currentRunId={workspace.current_run_id}
+              sessionId={workspace.session.session_id}
+              projectId={workspace.project.project_id}
+              request={request}
               onOpenInspectorTarget={inspector.openEntry}
+              onOpenSettings={() => setSettingsOpen(true)}
             />
           ) : (
             <div className="workspace-main__empty">

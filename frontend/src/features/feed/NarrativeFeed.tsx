@@ -1,3 +1,4 @@
+import type { ApiRequestOptions } from "../../api/client";
 import type { RunSummaryProjection, TopLevelFeedEntry } from "../../api/types";
 import { renderFeedEntryByType } from "./FeedEntryRenderer";
 import { groupEntriesByRun, RunBoundary } from "./RunBoundary";
@@ -7,14 +8,22 @@ export type NarrativeFeedProps = {
   entries: TopLevelFeedEntry[];
   runs?: RunSummaryProjection[];
   currentRunId?: string | null;
+  sessionId?: string;
+  projectId?: string;
+  request?: ApiRequestOptions;
   onOpenInspectorTarget?: (entry: TopLevelFeedEntry) => void;
+  onOpenSettings?: () => void;
 };
 
 export function NarrativeFeed({
   entries,
   runs = [],
   currentRunId = null,
+  sessionId,
+  projectId,
+  request,
   onOpenInspectorTarget,
+  onOpenSettings,
 }: NarrativeFeedProps): JSX.Element {
   const groups = runs.length > 0 ? groupEntriesByRun(entries, runs) : [];
 
@@ -35,7 +44,14 @@ export function NarrativeFeed({
               >
                 {group.entries.map((entry) => (
                   <li className="narrative-feed__item" key={entry.entry_id}>
-                    {renderFeedEntryByType(entry, { onOpenInspectorTarget })}
+                    {renderFeedEntryByType(entry, {
+                      currentRunId,
+                      sessionId,
+                      projectId,
+                      request,
+                      onOpenInspectorTarget,
+                      onOpenSettings,
+                    })}
                   </li>
                 ))}
               </ol>
@@ -62,7 +78,14 @@ export function NarrativeFeed({
     <ol className="narrative-feed__entries" aria-label="Narrative Feed entries">
       {entries.map((entry) => (
         <li className="narrative-feed__item" key={entry.entry_id}>
-          {renderFeedEntryByType(entry, { onOpenInspectorTarget })}
+          {renderFeedEntryByType(entry, {
+            currentRunId,
+            sessionId,
+            projectId,
+            request,
+            onOpenInspectorTarget,
+            onOpenSettings,
+          })}
         </li>
       ))}
     </ol>
