@@ -158,7 +158,7 @@
 ## H4.2 Composer 澄清输入语义
 
 **计划周期**：Week 6
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现 Composer 对 draft、waiting_clarification 和 running requirement_analysis 的输入语义。
 **实施计划**：`docs/plans/implementation/h4.2-composer-clarification-mode.md`
 
