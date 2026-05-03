@@ -444,9 +444,10 @@
 ## C1.6 control 模型与迁移边界
 
 **计划周期**：Week 2
-**状态**：`[x]`
+**状态**：`[~]`
 **目标**：建立 `control.db` 的首批规范模型和迁移边界，确保项目、会话、模板、Provider 与项目级交付配置只在控制面持久化。
 **验证摘要**：实施计划 `docs/plans/implementation/c1.6-control-model-boundary.md` 已完成。TDD RED 先观察到 `ModuleNotFoundError: No module named 'backend.app.db.models.control'`；实现 `backend/app/db/models/control.py` 并接入 Alembic metadata 后，`uv run --no-sync python -m pytest backend/tests/db/test_control_model_boundary.py -q` 通过 5 个 C1.6 tests；`uv run --no-sync alembic -c backend/alembic.ini current` 退出码 0，并对五个 SQLite role 打印 `SQLiteImpl` 上下文；经用户批准后，`uv run --no-sync alembic -c backend/alembic.ini upgrade head` 退出码 0，并对五个 SQLite role 打印 `SQLiteImpl` 上下文；`uv run --no-sync python -m pytest backend/tests/db/test_control_model_boundary.py -v` 通过 5 个 focused tests；`uv run --no-sync python -m pytest backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py -q` 通过 28 个 persistence regression tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_prompt_asset_schemas.py backend/tests/schemas/test_observability_schemas.py backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py -q` 通过 76 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 76 个 backend tests。
+**回补说明**：当前已验证实现只覆盖变更前的 `PlatformRuntimeSettingsModel` 边界；在 `internal_model_bindings` 被正式纳入 C1.10/C2.8 后，需补齐 control model 持久化字段、迁移与边界测试后，方可恢复为 `[x]`。
 **实施计划**：`docs/plans/implementation/c1.6-control-model-boundary.md`
 
 **修改文件列表**：
@@ -465,7 +466,7 @@
 **验收标准**：
 - `control.db` 承载 Project、Session、PipelineTemplate、Provider、DeliveryChannel 与项目级配置。
 - `control.db` 承载 `PlatformRuntimeSettingsModel`，用于保存当前平台运行设置、配置版本、schema 版本、平台硬上限版本、创建时间、更新时间和审计关联字段。
-- `PlatformRuntimeSettingsModel` 只保存 C1.10 定义的运行设置分组和版本元数据，不保存真实凭据、不保存 `compression_prompt`，也不保存逐库 SQLite 文件路径。
+- `PlatformRuntimeSettingsModel` 只保存 C1.10 定义的运行设置分组和版本元数据；当 C1.10 把 `internal_model_bindings` 纳入正式契约后，control 模型必须能持久化该分组，不保存真实凭据、不保存 `compression_prompt`，也不保存逐库 SQLite 文件路径。
 - `ProviderModel` 必须能按模型保存 `context_window_tokens`、`max_output_tokens`、`supports_tool_calling`、`supports_structured_output`、`supports_native_reasoning` 等运行时能力声明；缺省能力值在写入控制面模型前完成默认填充，不得在 run 启动或模型调用时临时推导。
 - `Session` 规范实体只存在于 control 模型。
 - control 模型必须能表达已加载 Project 的产品可见性、默认 Project 不可移除边界、Session 展示名和 Session 产品可见性。
@@ -598,10 +599,11 @@
 ## C1.10 PlatformRuntimeSettings 与运行快照 Schema 契约
 
 **计划周期**：Week 2
-**状态**：`[x]`
+**状态**：`[~]`
 **目标**：定义可热重载平台运行设置、运行上限快照、Provider 快照与模型绑定快照 Schema，使后续控制面、Run 启动和 runtime 消费共享同一配置边界。
 **实施计划**：`docs/plans/implementation/c1.10-platform-runtime-settings-snapshots.md`
 **验证摘要**：`uv run --no-sync python -m pytest backend/tests/schemas/test_runtime_settings_schemas.py -v` 通过 5 个 C1.10 runtime settings schema contract tests；`uv run --no-sync python -m pytest backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py -q` 通过 28 个 C1.1-C1.4 + C1.10 schema contract tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py -q` 通过 56 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 56 个 backend tests 且无收集错误。TDD RED 先观察到缺少 `backend.app.schemas.runtime_settings`、`RuntimeSettingsErrorCode` 和 `RunConfigurationSnapshotRead`，再按错误码适配、runtime settings schema、run configuration snapshot 聚合 schema 顺序转绿。内联评审未发现 Critical 或 Important 问题。
+**回补说明**：当前已验证 schema 只覆盖变更前的四分组 `PlatformRuntimeSettings` 契约；在 `internal_model_bindings` 被正式纳入运行设置真源后，需补齐 Schema、聚合读模型与 schema tests 后，方可恢复为 `[x]`。
 
 **修改文件列表**：
 - Modify: `backend/app/api/error_codes.py`
@@ -625,9 +627,10 @@
 - `ModelBindingSnapshotRead`
 
 **验收标准**：
-- `PlatformRuntimeSettingsRead` 至少包含 `agent_limits`、`provider_call_policy`、`context_limits`、`log_policy` 四个分组。
+- `PlatformRuntimeSettingsRead` 至少包含 `agent_limits`、`provider_call_policy`、`internal_model_bindings`、`context_limits`、`log_policy` 五个分组。
 - `agent_limits` 至少包含 `max_react_iterations_per_stage`、`max_tool_calls_per_stage`、`max_file_edit_count`、`max_patch_attempts_per_file`、`max_structured_output_repair_attempts`、`max_auto_regression_retries`、`max_clarification_rounds`、`max_no_progress_iterations`。
 - `provider_call_policy` 覆盖 Provider 请求超时、网络错误重试次数、限流重试次数、指数退避基准、指数退避上限、连续失败熔断阈值和熔断恢复条件。
+- `internal_model_bindings` 至少覆盖 `context_compression`、`structured_output_repair`、`validation_pass` 三类后端内部模型绑定选择；每类至少记录 `provider_id`、`model_id`、`model_parameters` 和来源版本信息。
 - `context_limits` 覆盖工具输出、`bash` stdout / stderr、`grep` 返回、文件读取、模型输出进入日志或过程记录的裁剪限制，以及 `compression_threshold_ratio`。
 - `compression_threshold_ratio` 默认值为 `0.8`，必须大于 `0` 且小于 `1`，用于与模型能力快照中的 `context_window_tokens` 共同计算上下文压缩触发阈值。
 - `log_policy` 覆盖普通运行日志保留周期、审计日志保留周期、日志轮转大小、日志查询默认 `limit` 与最大 `limit`。

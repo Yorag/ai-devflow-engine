@@ -193,6 +193,8 @@
   包含 `max_react_iterations_per_stage`、`max_tool_calls_per_stage`、`max_file_edit_count`、`max_patch_attempts_per_file`、`max_structured_output_repair_attempts`、`max_auto_regression_retries`、`max_clarification_rounds`、`max_no_progress_iterations`
 - `provider_call_policy`
   包含 Provider 请求超时、网络错误重试次数、限流重试次数、指数退避基线、退避上限、连续失败熔断阈值和熔断恢复条件
+- `internal_model_bindings`
+  包含 `context_compression`、`structured_output_repair`、`validation_pass` 三类后端内部模型绑定选择；每类选择至少记录 `provider_id`、`model_id`、`model_parameters` 与来源版本信息
 - `context_limits`
   包含单次工具输出进入 `ContextEnvelope` 的预览长度、`bash` stdout / stderr 预览长度、`grep` 最大返回条数、文件读取最大字符数或字节数、模型输出进入日志或过程记录的裁剪长度、上下文压缩触发阈值比例
 - `log_policy`
@@ -203,6 +205,9 @@
 - 影响执行语义的设置必须在 run 启动时固化为 `RuntimeLimitSnapshot`、`ProviderSnapshot`、`ModelBindingSnapshot`、`GraphDefinition`、`template_snapshot_ref` 或等价运行快照
 - 已启动 run 必须继续使用自身快照中的运行上限、Provider 与模型绑定、模板配置、交付通道快照和阶段契约；不得读取最新运行设置来改变当前 run
 - Provider 调用策略中会影响模型调用行为的超时、重试、指数退避和熔断参数必须在 run 启动时固化为 `ProviderCallPolicySnapshot` 或等价运行快照；已启动 run 不读取最新 Provider 调用策略改变当前调用语义
+- `internal_model_bindings` 只通过后端管理能力、初始化迁移或测试 settings override 更新，不进入普通前端设置界面、模板编辑字段、配置包或环境变量
+- `internal_model_bindings` 中的三类选择只影响后续新启动 run；run 启动时必须把实际使用的选择固化到 `ModelBindingSnapshot`
+- 当 `internal_model_bindings` 缺失、指向不存在的 Provider、缺失 `model_id` 或包含非法 `model_parameters` 时，run 启动必须失败并返回稳定错误码；不得回退到模板阶段 Provider、Provider 默认模型或运行期临时推导
 - 诊断类设置可以即时生效，包括日志查询分页上限、日志保留任务阈值和日志裁剪策略；即时生效不得改变领域事件、查询投影、审批状态、交付结果或 Narrative Feed 条目语义
 - 所有可写入的运行上限都必须受平台硬上限约束；超过硬上限时，后端必须拒绝保存或拒绝启动 run，并返回稳定错误码
 - `context_limits.compression_threshold_ratio` 默认值为 `0.8`，必须大于 `0` 且小于 `1`；该值只能通过后端管理能力、初始化迁移或测试 settings override 更新，进入 `PlatformRuntimeSettings` 后按运行设置版本管理
@@ -355,7 +360,7 @@ providers:
 负责把模板快照编译成 `GraphDefinition`，并生成六阶段主链、阶段契约、条件边、审批中断点与交付分流定义。
 
 3. `Run Lifecycle Service`
-负责创建 `PipelineRun`、启动 `GraphThread`、维护 run 状态、处理暂停恢复终止与重新尝试。
+负责创建 `PipelineRun`、启动 `GraphThread`、分配首个 `workspace_ref`、维护 run 状态、处理暂停恢复终止与重新尝试。
 
 4. `LangGraph Runtime Engine`
 负责执行六阶段主链、保存检查点、处理中断恢复、驱动阶段节点并维护 `GraphThread`。
@@ -760,6 +765,7 @@ V1 运行环境必须满足以下约束：
 - `runtime_limit_snapshot_ref`
 - `graph_definition_ref`
 - `graph_thread_id`
+- `workspace_ref`
 - `delivery_channel_snapshot_ref`
 - `status`
 - `current_stage_run_id`
@@ -2071,7 +2077,7 @@ Inspector 投影必须满足以下总规则：
 - 新需求输入
 - 澄清回复
 
-当消息语义为 `new_requirement` 时，只允许在 `Session.status = draft` 且 `current_run_id = null` 时调用；后端必须在同一服务事务中基于当前 `selected_template_id` 创建 `PipelineRun`、模板快照、`ProviderSnapshot`、`ModelBindingSnapshot`、`RuntimeLimitSnapshot`、`GraphDefinition`、首条消息事件与初始 `requirement_analysis` StageRun。
+当消息语义为 `new_requirement` 时，只允许在 `Session.status = draft` 且 `current_run_id = null` 时调用；后端必须在同一服务事务中基于当前 `selected_template_id` 创建 `PipelineRun`、模板快照、`ProviderSnapshot`、`ModelBindingSnapshot`、`RuntimeLimitSnapshot`、`GraphDefinition`、首个 `GraphThread`、首个 `workspace_ref`、首条消息事件与初始 `requirement_analysis` StageRun。
 
 当消息语义为 `clarification_reply` 时，只允许在当前会话处于 `waiting_clarification` 且当前阶段为 `requirement_analysis` 时调用；后端必须把补充信息回写到当前澄清中断并恢复同一个 `GraphThread`。
 

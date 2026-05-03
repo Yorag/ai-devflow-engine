@@ -32,7 +32,7 @@
 拆分原则如下：
 - 后端契约先行：前端先依赖状态枚举、Pydantic Schema、投影 Schema、事件载荷与 mock fixtures 并行开发；每个 API 切片在本地 API 测试中断言 OpenAPI path、method、请求 Schema、响应 Schema 与主要错误响应，V6.4 只做全局覆盖回归。
 - 平台骨架先行：Project、Session、Template、Provider、DeliveryChannel、PipelineRun、StageRun、Event、Projection 是后续能力的基础，不延后到业务阶段实现之后。
-- Walking skeleton 先行：先打通默认 Project、draft Session、首条需求创建正式 `PipelineRun`、模板快照、Provider 与模型绑定快照、运行上限快照、`GraphDefinition`、首条消息事件、初始 `StageRun`、workspace projection、前端读取与 SSE 增量，再逐步接入完整 runtime。
+- Walking skeleton 先行：先打通默认 Project、draft Session、首条需求创建正式 `PipelineRun`、模板快照、Provider 与模型绑定快照、运行上限快照、`GraphDefinition`、首个 `GraphThread`、首个 `workspace_ref`、首条消息事件、初始 `StageRun`、workspace projection、前端读取与 SSE 增量，再逐步接入完整 runtime。
 - Runtime boundary 先行：人工介入命令必须先依赖统一 runtime orchestration boundary，不允许先用 run 状态字段临时模拟中断、恢复或终止。
 - 工具确认独立于人工审批：高风险工具确认是运行时权限控制点，不属于两个正式人工审批检查点；`tool_confirmation` 是独立顶层 Narrative Feed 条目，`ApprovalRequest` 和 `ApprovalDecision` 不承载工具确认语义。
 - 配置边界先行：`EnvironmentSettings`、正式配置存储、`PlatformRuntimeSettings`、`ConfigurationPackage`、业务配置对象、系统内置提示词资产与运行快照必须在控制面、Run 启动和 runtime 消费前先固定；环境变量只服务启动路径、前后端连接、工作区与日志落点、凭据引用解析，不承载 Provider、DeliveryChannel、模板运行配置、Agent 运行上限、Provider 模型能力、上下文压缩阈值、日志策略、系统内置提示词正文或提示词资产版本切换。
@@ -97,7 +97,7 @@
 | Week 1 | 工程与骨架基线 | 工具链、FastAPI app、错误模型、EnvironmentSettings、运行数据目录预检 | Vite React 骨架、路由、测试工具 | 后端健康检查、启动配置边界、日志目录预检与前端控制台入口可运行 |
 | Week 2 | 契约与持久化 | 枚举、Schema、Project/Session 历史可见性、PlatformRuntimeSettings、运行快照 Schema、PromptAsset Schema、ToolConfirmation Schema、工具风险枚举、Provider 调用策略快照、多 SQLite、Alembic、log.db、TraceContext | API client、mock fixtures | Pydantic Schema、投影契约、配置契约、提示词资产契约、工具确认契约、Provider 调用策略契约与日志审计契约可作为前后端输入 |
 | Week 3 | 控制面可用 | Project、Session、Template、Provider、DeliveryChannel API、agent_role_seed 提示词资产种子、PlatformRuntimeSettings 管理服务、request context、RedactionPolicy、JSONL/log index、AuditService | Shell、项目/会话左栏、设置弹窗、模板空态 | 控制面 OpenAPI、字段、配置边界、历史可见性、提示词资产非用户配置边界、日志与审计记录对齐 |
-| Week 4 | Run 主链骨架 | Session 删除、Project 移除、Run 状态机、模板快照、Provider/模型绑定快照、运行上限快照、GraphDefinition、StageArtifact、run trace | Workspace 页面、Run 分段基础展示 | draft、running、运行快照、历史管理阻塞态与基础阶段回放可用，run 级 trace 可追踪 |
+| Week 4 | Run 主链骨架 | Session 删除、Project 移除、Run 状态机、模板快照、Provider/模型绑定快照、运行上限快照、GraphDefinition、首个 GraphThread、首个 workspace_ref、StageArtifact、run trace | Workspace 页面、Run 分段基础展示 | draft、running、运行快照、历史管理阻塞态与基础阶段回放可用，run 级 trace 可追踪 |
 | Week 5 | 投影与实时更新 | Workspace Projection、Timeline、Inspector、ToolConfirmationInspectorProjection、SSE、run/stage 日志查询 | Narrative Feed、Tool Confirmation 顶层块入口、Provider 调用状态、Inspector、SSE merge | 快照 + 增量一致，工具确认和 Provider 状态进入投影，诊断日志查询不进入前端主路径 |
 | Week 6 | 人工介入、工具确认与 runtime 边界 | Runtime orchestration boundary、命令审计失败语义、审计查询、澄清、审批、工具确认命令、暂停、恢复、终止、重新尝试、交付快照 gate | Approval Block、Tool Confirmation Block、Composer lifecycle、重新尝试 UI | 人工介入命令和工具确认命令只通过统一 runtime 边界推进，命令审计可追踪 |
 | Week 7 | deterministic test 与工具基座 | RuntimeEngine、`deterministic test runtime`、ToolProtocol、统一错误码、ToolRegistry execution gate、工具风险确认门禁、Workspace tools 基座、工具审计、demo_delivery | 前端完整流程联调 | 不依赖真实模型跑通 demo_delivery，终态回放可用，工具协议、风险分级、配置快照、错误码、Claude Code 风格工具口径和审计不临时分叉 |
@@ -163,7 +163,7 @@
 | [00 项目骨架与执行规则](function-one-platform/00-project-skeleton-and-execution.md) | 目标目录骨架与 B0.0 子任务细则 | B0.0 |
 | [01 工程基线与契约层](function-one-platform/01-foundation-and-contracts.md) | 工程基线、Schema 契约、数据库职责拆分、Project/Session 历史可见性、EnvironmentSettings、PlatformRuntimeSettings、Provider 调用策略快照、PromptAsset Schema、ToolConfirmation Schema、工具风险枚举、运行数据目录、log.db、TraceContext | B0.1-B0.3, F0.1, C1.1-C1.10, C1.10a, L0.1, L1.1-L1.2 |
 | [02 控制面与工作台外壳](function-one-platform/02-control-plane-and-workspace-shell.md) | Project、Session、历史管理、Template、Provider、DeliveryChannel、ConfigurationPackage、PlatformRuntimeSettings 管理服务、控制面日志审计、Shell、设置、模板空态 | C2.1-C2.8, C2.7a, C2.9a-C2.9b, L2.1-L2.4, F2.1-F2.6 |
-| [03 Run 主链、投影与叙事流](function-one-platform/03-run-projection-and-feed.md) | PipelineRun、模板快照、Provider/模型绑定快照、运行上限快照、GraphDefinition、StageArtifact、Workspace Projection、ToolConfirmationInspectorProjection、SSE、Run/Stage 日志轻查询、Feed、Provider 调用状态、Inspector | R3.1-R3.4, R3.4a-R3.4b, R3.5-R3.7, Q3.1-Q3.4a, E3.1-E3.2, L3.1, F3.1-F3.7 |
+| [03 Run 主链、投影与叙事流](function-one-platform/03-run-projection-and-feed.md) | PipelineRun、模板快照、Provider/模型绑定快照、运行上限快照、GraphDefinition、首个 GraphThread、首个 workspace_ref、StageArtifact、Workspace Projection、ToolConfirmationInspectorProjection、SSE、Run/Stage 日志轻查询、Feed、Provider 调用状态、Inspector | R3.1-R3.4, R3.4a-R3.4b, R3.5-R3.7, Q3.1-Q3.4a, E3.1-E3.2, L3.1, F3.1-F3.7 |
 | [04 人工介入、工具确认与运行控制](function-one-platform/04-human-loop-and-runtime.md) | Runtime orchestration boundary、澄清、审批、工具确认、暂停恢复终止、交付快照、命令审计失败语义、审计查询、Composer、Approval Block、Tool Confirmation Block、重新尝试 UI | A4.0, L4.1-L4.2, H4.1-H4.7, H4.4a, D4.0, F4.1-F4.4, F4.3a |
 | [05 deterministic runtime 与 demo_delivery](function-one-platform/05-deterministic-runtime-and-demo-delivery.md) | RuntimeEngine、`deterministic test runtime`、六阶段确定性推进、demo_delivery、DeliveryRecord、DeliveryResultDetailProjection | A4.1-A4.4, D4.1-D4.3 |
 | [06 LangGraph、Provider、Context 与 Stage Agent Runtime](function-one-platform/06-langgraph-provider-context-stage-agent.md) | LangGraph、Provider、Provider retry/circuit breaker、PromptValidation、PromptRegistry、PromptRenderer、ContextEnvelope / ContextManifest、AgentDecision、Stage Agent Runtime、自动回归 | A4.5-A4.11, A4.8a-A4.8d, A4.9a-A4.9e |
@@ -191,11 +191,11 @@
 | C1.3 | Run、Feed 与事件 Schema 契约 | Week 2 | [x] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c13) |
 | C1.4 | Inspector 与 Metrics Schema 契约 | Week 2 | [x] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c14) |
 | C1.5 | 多 SQLite 连接与 session 管理 | Week 2 | [x] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c15) |
-| C1.6 | control 模型与迁移边界 | Week 2 | [x] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c16) |
+| C1.6 | control 模型与迁移边界 | Week 2 | [~] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c16) |
 | C1.7 | runtime 模型与迁移边界 | Week 2 | [x] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c17) |
 | C1.8 | graph 模型与迁移边界 | Week 2 | [x] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c18) |
 | C1.9 | event 模型边界 | Week 2 | [x] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c19) |
-| C1.10 | PlatformRuntimeSettings 与运行快照 Schema 契约 | Week 2 | [x] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c110) |
+| C1.10 | PlatformRuntimeSettings 与运行快照 Schema 契约 | Week 2 | [~] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c110) |
 | C1.10a | PromptAsset Schema 契约 | Week 2 | [x] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c110a) |
 | L1.1 | 日志审计 Schema 与 TraceContext 契约 | Week 2 | [x] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#l11) |
 | L1.2 | log 模型与迁移边界 | Week 2 | [x] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#l12) |
@@ -211,7 +211,7 @@
 | C2.6 | DeliveryChannel 查询与保存 | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c26) |
 | C2.7 | DeliveryChannel readiness 校验 | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c27) |
 | C2.7a | 项目作用域配置包导入导出 | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c27a) |
-| C2.8 | PlatformRuntimeSettings 管理服务 | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c28) |
+| C2.8 | PlatformRuntimeSettings 管理服务 | Week 3 | [~] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c28) |
 | F2.1 | API Client 路径与类型入口 | Week 2-3 | [x] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f21) |
 | F2.2 | Mock Fixtures 与 Query Hooks | Week 2-3 | [x] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f22) |
 | F2.3 | Workspace Shell 与 Project Sidebar | Week 3 | [x] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f23) |

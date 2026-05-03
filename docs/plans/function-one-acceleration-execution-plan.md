@@ -93,7 +93,7 @@ Start gate 只允许开始实现或 mock-first；它不等于完成 gate。
 | Gate | Rule |
 | --- | --- |
 | Baseline gate | 运行快照、交付快照、Provider adapter 和配置回归从当前基线读取 Provider、DeliveryChannel、ConfigurationPackage、PlatformRuntimeSettings 契约；需要修改这些共享入口时必须停止并报告 owner conflict。 |
-| AL01 gate | AL01 可从当前基线开始 R3.1、E3.1、R3.5-R3.7 的纯领域和持久化实现；R3.4a、R3.4b 的最终完成必须接入真实运行状态和配置契约。 |
+| AL01 gate | AL01 可从当前基线开始 R3.1、E3.1、R3.5-R3.7 的纯领域和持久化实现；R3.4a、R3.4b 的最终完成必须接入真实运行状态和配置契约。R3.2 只有在 C2.8 已把 `PlatformRuntimeSettings.internal_model_bindings` 三类选择固定为正式配置真源，且 R3.2 已按 split plan 承接首个 `graph_thread_ref` 创建与最小 `workspace_ref` 分配规则后，才允许 claim 并继续实现。 |
 | AL02 gate | AL02 可基于 AL01 提供的事件 fixture 或冻结 projection contract 先行；最终完成必须读取真实 EventStore、StageArtifact 或 runtime model。 |
 | AL03 gate | AL03 可基于 AL01/AL02 的 stub 接口先行 A4.0、L4.1、H4.1、H4.3；审批命令、运行控制和 tool confirmation 的最终完成必须接入真实 run state 和 projection events。 |
 | AL04 gate | AL04 可立即开始 ToolProtocol、错误码、WorkspaceManager、纯工具和 fixture；deterministic runtime 与 delivery adapter 的最终完成必须接入 AL01 run truth、AL03 runtime boundary 和当前基线的 delivery settings。 |

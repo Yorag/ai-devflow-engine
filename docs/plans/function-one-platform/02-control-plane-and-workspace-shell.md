@@ -473,10 +473,11 @@
 ## C2.8 PlatformRuntimeSettings 管理服务
 
 **计划周期**：Week 3
-**状态**：`[x]`
-**目标**：实现后端统一平台运行设置管理服务，校验运行上限、Provider 调用策略、上下文裁剪限制、上下文压缩阈值比例、日志策略和诊断查询分页上限，并为后续 run 启动快照提供稳定配置版本。
+**状态**：`[~]`
+**目标**：实现后端统一平台运行设置管理服务，校验运行上限、Provider 调用策略、内部模型绑定选择、上下文裁剪限制、上下文压缩阈值比例、日志策略和诊断查询分页上限，并为后续 run 启动快照提供稳定配置版本。
 **实施计划**：`docs/plans/implementation/c2.8-platform-runtime-settings-service.md`
 **验证摘要**：实施计划 `docs/plans/implementation/c2.8-platform-runtime-settings-service.md` 已完成。TDD RED 先观察到缺少 `backend.app.services.runtime_settings`、缺少 `update_settings()`、`/api/runtime-settings` 未进入 OpenAPI、storage commit failure 未映射为 `config_storage_unavailable`、以及拒绝路径 observability failure 泄漏原始异常；GREEN 后实现 `PlatformRuntimeSettingsRepository`、`PlatformRuntimeSettingsService`、内部 `GET/PUT /api/runtime-settings`、默认持久化初始化、partial update merge、conditional `config_version` 更新、硬上限校验、`config_invalid_value` / `config_hard_limit_exceeded` / `config_version_conflict` / `config_storage_unavailable` 映射、runtime-settings 路由级请求校验映射、JSONL 与审计记录。控制库先提交再写成功观测事实，避免跨 SQLite 资源产生未提交控制写的 false success；post-commit observability failure 返回 `config_storage_unavailable`，已提交控制行仍是配置真源。Spec compliance 与 code quality reviewers 初审发现版本 CAS、事务顺序、API 非法字段映射、拒绝路径 observability failure 和 API 503 覆盖问题；修复后复审无 Critical 或 Important 发现。验证：`uv run --no-sync python -m pytest backend/tests/services/test_runtime_settings_service.py backend/tests/api/test_runtime_settings_admin_api.py -q` 通过 17 个 C2.8 focused tests；`uv run --no-sync python -m pytest backend/tests/services/test_runtime_settings_service.py backend/tests/api/test_runtime_settings_admin_api.py backend/tests/services/test_configuration_package_service.py backend/tests/api/test_configuration_package_api.py backend/tests/services/test_provider_service.py backend/tests/api/test_provider_api.py backend/tests/services/test_delivery_channel_service.py backend/tests/api/test_delivery_channel_api.py backend/tests/services/test_delivery_channel_readiness.py backend/tests/api/test_delivery_channel_validate_api.py backend/tests/services/test_user_template_service.py backend/tests/api/test_template_api.py -q` 通过 119 个 DB09 regression tests；`uv run --no-sync python -m pytest backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_control_plane_schemas.py -q` 通过 9 个 schema regression tests；`uv run --no-sync python -m pytest --collect-only -q` 收集 297 个 backend tests 且无收集错误；`uv run --no-sync python -m pytest -q` 通过 297 个 backend tests。
+**回补说明**：当前已验证实现只覆盖变更前的四分组 `PlatformRuntimeSettings` 契约；`internal_model_bindings` 的持久化、服务校验、内部管理 API 契约与回归测试回补完成前，不得恢复为 `[x]`。
 
 **修改文件列表**：
 - Create: `backend/app/services/runtime_settings.py`
@@ -499,14 +500,17 @@
 **验收标准**：
 - 服务通过 `PlatformRuntimeSettingsRepository` 读取和保存 C1.6 的 `PlatformRuntimeSettingsModel`，并维护单调递增配置版本。
 - 首次读取时若 control.db 中不存在记录，服务以 C1.10 默认值和当前平台硬上限版本初始化一条设置记录；初始化结果必须持久化，不能每次请求临时拼装。
-- `PlatformRuntimeSettingsModel` 保存 C1.10 定义的 `agent_limits`、`provider_call_policy`、`context_limits`、`log_policy`、schema 版本、配置版本、平台硬上限版本和更新时间。
-- 运行上限、Provider 调用策略、上下文裁剪限制、上下文压缩阈值比例、日志策略和诊断查询分页上限保存前必须校验。
+- `PlatformRuntimeSettingsModel` 保存 C1.10 定义的 `agent_limits`、`provider_call_policy`、`internal_model_bindings`、`context_limits`、`log_policy`、schema 版本、配置版本、平台硬上限版本和更新时间。
+- 运行上限、Provider 调用策略、三类内部模型绑定选择、上下文裁剪限制、上下文压缩阈值比例、日志策略和诊断查询分页上限保存前必须校验。
+- `internal_model_bindings` 至少覆盖 `context_compression`、`structured_output_repair`、`validation_pass` 三类后端内部模型绑定选择；每类至少记录 `provider_id`、`model_id`、`model_parameters` 和来源版本信息。
+- `internal_model_bindings` 只通过后端管理能力、初始化迁移或测试 settings override 更新，不进入普通前端设置弹窗、模板编辑或配置包导入导出。
+- 当 `internal_model_bindings` 缺失、指向不存在的 Provider、缺失 `model_id` 或包含非法 `model_parameters` 时，后续 run 启动必须失败；服务层不得在保存时接受无法被 R3.2/R3.4a 快照化的配置。
 - `context_limits.compression_threshold_ratio` 默认 `0.8`，必须大于 `0` 且小于 `1`；后端管理能力、初始化迁移或测试 settings override 更新走同一校验路径。
 - 超过平台硬上限时拒绝保存，并返回 `config_hard_limit_exceeded`。
 - 非法字段值、版本冲突和配置存储不可用分别返回 `config_invalid_value`、`config_version_conflict`、`config_storage_unavailable`。
 - 更新接口必须要求或支持 `expected_version`；当客户端基于旧版本提交时不得覆盖最新配置。
 - 平台隐性运行设置允许热重载，但服务层不得尝试修改已启动 run 的模板快照、Provider 与模型绑定快照、运行上限快照或交付通道快照。
-- `PlatformRuntimeSettings` 不属于普通前端设置或配置包导入导出范围；任何用户可见配置包不得写入 `compression_threshold_ratio`。
+- `PlatformRuntimeSettings` 不属于普通前端设置或配置包导入导出范围；任何用户可见配置包不得写入 `compression_threshold_ratio` 或 `internal_model_bindings`。
 - 配置设置变更必须继承 L2.1 上下文，使用 L2.2 裁剪载荷，经由 L2.3 写入运行日志，并通过 L2.4 写入审计记录；审计摘要记录变更字段、旧值摘要、新值摘要、生效范围和 `correlation_id`。
 - 本切片实现后端管理服务和内部管理 API 边界；内部管理 API 必须进入 OpenAPI 并复用统一错误响应，但不得被 F2.4 普通前端设置弹窗调用或展示为用户可编辑表单。
 - API 测试必须断言运行设置读取、更新、硬上限拒绝、版本冲突、非法字段和主要错误响应已进入 `/api/openapi.json`。
