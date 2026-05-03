@@ -10,9 +10,18 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from backend.app.api.error_codes import ErrorCode
-from backend.app.db.models.control import PipelineTemplateModel, ProviderModel, SessionModel
+from backend.app.db.models.control import (
+    PipelineTemplateModel,
+    PlatformRuntimeSettingsModel,
+    ProviderModel,
+    SessionModel,
+)
 from backend.app.domain.enums import SessionStatus, StageType, TemplateSource
 from backend.app.domain.trace_context import TraceContext
+from backend.app.runtime.prompt_validation import (
+    PromptValidationError,
+    PromptValidationService,
+)
 from backend.app.schemas.observability import AuditActorType, AuditResult
 from backend.app.schemas.prompts import (
     ModelCallType,
@@ -28,6 +37,9 @@ from backend.app.schemas.template import (
     PipelineTemplateWriteRequest,
 )
 from backend.app.services.providers import ProviderService
+from backend.app.services.runtime_settings import (
+    PlatformRuntimeSettingsService,
+)
 
 
 ROLE_ASSET_DIR = Path(__file__).resolve().parents[1] / "prompts" / "assets" / "roles"
@@ -649,13 +661,16 @@ class TemplateService:
         self,
         bindings: list[dict[str, str]],
     ) -> list[dict[str, str]]:
-        for binding in bindings:
-            if not binding["system_prompt"].strip():
-                raise TemplateServiceError(
-                    ErrorCode.VALIDATION_ERROR,
-                    INVALID_TEMPLATE_MESSAGE,
-                )
-        return bindings
+        try:
+            validator = PromptValidationService(
+                settings_read=self._prompt_validation_settings_read()
+            )
+            return validator.validate_template_prompts_before_save(bindings)
+        except PromptValidationError as exc:
+            raise TemplateServiceError(
+                ErrorCode.VALIDATION_ERROR,
+                exc.message,
+            ) from exc
 
     def _ordered_system_templates(self) -> list[PipelineTemplateModel]:
         templates = (
@@ -799,6 +814,29 @@ class TemplateService:
             trace_context=trace_context,
         )
 
+    def _prompt_validation_settings_read(self):
+        trace_context = TraceContext(
+            request_id="template-prompt-validation",
+            trace_id="template-prompt-validation",
+            correlation_id="template-prompt-validation",
+            span_id="template-prompt-validation",
+            parent_span_id=None,
+            created_at=self._now(),
+        )
+        service = PlatformRuntimeSettingsService(
+            self._session,
+            audit_service=self._audit_service,
+            log_writer=_NoopSettingsLogWriter(),
+            now=self._now,
+        )
+        model = self._session.get(
+            PlatformRuntimeSettingsModel,
+            "platform-runtime-settings",
+        )
+        if model is None:
+            model = service._default_model(trace_context=trace_context)
+        return service._to_read(model)
+
 
 def _stage_role_bindings(
     *,
@@ -828,6 +866,11 @@ def _unique_ordered(values: Iterable[str]) -> list[str]:
         seen.add(value)
         ordered.append(value)
     return ordered
+
+
+class _NoopSettingsLogWriter:
+    def write(self, record) -> object:  # noqa: ANN001
+        return object()
 
 
 __all__ = [
