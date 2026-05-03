@@ -228,13 +228,13 @@
 | R3.4a | Provider 与模型绑定快照固化 | Week 4 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#r34a) |
 | R3.4b | RuntimeLimitSnapshot 与 ProviderCallPolicySnapshot 固化 | Week 4 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#r34b) |
 | R3.5 | GraphDefinition 固定主链编译 | Week 4 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#r35) |
-| R3.6 | StageRun 持久化 | Week 4-5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#r36) |
+| R3.6 | StageRun 持久化 | Week 4-5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#r36) |
 | R3.7 | StageArtifact 存储 | Week 4-5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#r37) |
 | Q3.1 | SessionWorkspaceProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q31) |
 | Q3.2 | RunTimelineProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q32) |
 | Q3.3 | StageInspectorProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q33) |
 | Q3.4 | ControlItemInspectorProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q34) |
-| Q3.4a | ToolConfirmationInspectorProjection | Week 5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q34a) |
+| Q3.4a | ToolConfirmationInspectorProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q34a) |
 | E3.2 | SSE 流端点与断线恢复 | Week 5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#e32) |
 | L3.1 | Run 与 Stage 日志轻查询 API | Week 5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#l31) |
 | F3.1 | Workspace Store 快照初始化 | Week 5 | [x] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f31) |
@@ -248,7 +248,7 @@
 | L4.1 | 命令审计失败语义 | Week 6 | [x] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#l41) |
 | L4.2 | 审计日志查询 API | Week 6 | [ ] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#l42) |
 | H4.1 | 澄清记录与后端消息语义 | Week 6 | [x] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#h41) |
-| H4.2 | Composer 澄清输入语义 | Week 6 | [ ] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#h42) |
+| H4.2 | Composer 澄清输入语义 | Week 6 | [x] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#h42) |
 | H4.3 | 审批对象与投影语义 | Week 6 | [x] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#h43) |
 | D4.0 | Delivery snapshot gate | Week 6 | [x] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#d40) |
 | H4.4 | 审批命令与交付就绪阻塞 | Week 6 | [x] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#h44) |

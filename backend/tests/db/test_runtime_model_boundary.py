@@ -250,6 +250,8 @@ def test_pipeline_run_stage_and_snapshot_models_express_runtime_truth(tmp_path) 
             stage_type=StageType.REQUIREMENT_ANALYSIS,
             status=StageStatus.RUNNING,
             attempt_index=1,
+            graph_node_key="requirement_analysis.main",
+            stage_contract_ref="stage-contract-requirement-analysis",
             input_ref="artifact-input-1",
             output_ref=None,
             summary="Analyzing the first requirement.",
@@ -315,6 +317,9 @@ def test_pipeline_run_stage_and_snapshot_models_express_runtime_truth(tmp_path) 
         "audit_payload",
         "log_payload",
     }.isdisjoint(run_columns)
+
+    stage_columns = set(StageRunModel.__table__.columns.keys())
+    assert {"graph_node_key", "stage_contract_ref"}.issubset(stage_columns)
 
 
 def test_stage_and_control_enums_keep_product_semantics() -> None:
@@ -415,6 +420,8 @@ def test_approval_tool_confirmation_and_delivery_boundaries_are_separate(tmp_pat
             stage_type=StageType.SOLUTION_DESIGN,
             status=StageStatus.WAITING_APPROVAL,
             attempt_index=1,
+            graph_node_key="solution_design.main",
+            stage_contract_ref="stage-contract-solution-design",
             input_ref="artifact-solution-input-1",
             output_ref="solution-design-artifact-1",
             summary="Waiting for solution design approval.",
@@ -429,6 +436,8 @@ def test_approval_tool_confirmation_and_delivery_boundaries_are_separate(tmp_pat
             stage_type=StageType.CODE_GENERATION,
             status=StageStatus.WAITING_TOOL_CONFIRMATION,
             attempt_index=1,
+            graph_node_key="code_generation.main",
+            stage_contract_ref="stage-contract-code-generation",
             input_ref="artifact-code-input-1",
             output_ref=None,
             summary="Waiting for a high-risk bash confirmation.",
@@ -443,6 +452,8 @@ def test_approval_tool_confirmation_and_delivery_boundaries_are_separate(tmp_pat
             stage_type=StageType.DELIVERY_INTEGRATION,
             status=StageStatus.COMPLETED,
             attempt_index=1,
+            graph_node_key="delivery_integration.main",
+            stage_contract_ref="stage-contract-delivery-integration",
             input_ref="artifact-delivery-input-1",
             output_ref="delivery-result-1",
             summary="Delivered the result.",

@@ -429,6 +429,71 @@ a {
   min-width: 0;
 }
 
+.composer {
+  width: min(880px, 100%);
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 14px 16px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: oklch(98.8% 0.004 248);
+}
+
+.composer__body {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.composer__field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.composer__label {
+  color: oklch(31% 0.025 248);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.composer textarea {
+  width: 100%;
+  min-height: 88px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: inherit;
+  padding: 12px 14px;
+  font: inherit;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.composer textarea:disabled {
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.composer__helper,
+.composer__binding {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.composer__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .narrative-feed__entries {
   width: min(880px, 100%);
   display: grid;
@@ -2138,6 +2203,21 @@ a {
   }
 
   .template-editor__actions .workspace-button {
+    width: 100%;
+  }
+
+  .composer {
+    width: 100%;
+    margin-top: 14px;
+    padding: 12px;
+    border-radius: 12px;
+  }
+
+  .composer__actions {
+    align-items: stretch;
+  }
+
+  .composer__actions .workspace-button {
     width: 100%;
   }
 

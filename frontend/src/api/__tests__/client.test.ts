@@ -169,6 +169,11 @@ describe("resource clients", () => {
       { message_type: "new_requirement", content: "Build it." },
       { fetcher: fetchMock },
     );
+    await appendSessionMessage(
+      "session-1",
+      { message_type: "clarification_reply", content: "Need one more detail." },
+      { fetcher: fetchMock },
+    );
     await listPipelineTemplates({ fetcher: fetchMock });
     await getPipelineTemplate("template-1", { fetcher: fetchMock });
     await saveAsPipelineTemplate(
@@ -203,6 +208,7 @@ describe("resource clients", () => {
       ["PATCH", "/api/sessions/session-1"],
       ["DELETE", "/api/sessions/session-1"],
       ["PUT", "/api/sessions/session-1/template"],
+      ["POST", "/api/sessions/session-1/messages"],
       ["POST", "/api/sessions/session-1/messages"],
       ["GET", "/api/pipeline-templates"],
       ["GET", "/api/pipeline-templates/template-1"],

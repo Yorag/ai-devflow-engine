@@ -142,6 +142,14 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | AL03-D4.0 | D4.0 | AL03 | `feat/al-runtime-human-loop` | done | 7aeff59 | 4c58b8a | `docs/plans/acceleration/reports/AL03-D4.0.md` | - |
 | AL02-Q3.3 | Q3.3 | AL02 | `feat/al-projections-streams` | done | 7aeff59 | d9fb331 | `docs/plans/acceleration/reports/AL02-Q3.3.md` | - |
 | AL01-R3.4b | R3.4b | AL01 | `feat/al-run-core-events` | done | 7aeff59 | 6734a07 | `docs/plans/acceleration/reports/AL01-R3.4b.md` | - |
+| AL01-R3.5 | R3.5 | AL01 | `feat/al-run-core-events` | done | be201ab | 77a037c | `docs/plans/acceleration/reports/AL01-R3.5.md` | - |
+| AL03-H4.4 | H4.4 | AL03 | `feat/al-runtime-human-loop` | done | 7819aad | c86b54e | `docs/plans/acceleration/reports/AL03-H4.4.md` | - |
+| AL04-W5.0c | W5.0c | AL04 | `feat/al-tools-deterministic-delivery` | done | 7819aad | 72aa856 | `docs/plans/acceleration/reports/AL04-W5.0c.md` | - |
+| AL02-Q3.4 | Q3.4 | AL02 | `feat/al-projections-streams` | done | 7819aad | fb45ffb | `docs/plans/acceleration/reports/AL02-Q3.4.md` | - |
+| AL06-F3.7 | F3.7 | AL06 | `feat/al-frontend-runtime-ui` | done | 7819aad | 3213b09 | `docs/plans/acceleration/reports/AL06-F3.7.md` | - |
+| AL02-Q3.4a | Q3.4a | AL02 | `feat/al-projections-streams` | done | be201ab | 897a7c5 | `docs/plans/acceleration/reports/AL02-Q3.4a.md` | - |
+| AL06-H4.2 | H4.2 | AL06 | `feat/al-frontend-runtime-ui` | done | be201ab | bab7b42 | `docs/plans/acceleration/reports/AL06-H4.2.md` | - |
+| AL01-R3.6 | R3.6 | AL01 | `feat/al-run-core-events` | done | 969a43c | c5edc12 | `docs/plans/acceleration/reports/AL01-R3.6.md` | - |
 
 当前基线不预置 live claim。主协调会话在认领 ready task 时写入共享 coordination store，并记录当时的 Coordination Base。
 
