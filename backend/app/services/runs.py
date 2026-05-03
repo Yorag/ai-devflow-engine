@@ -37,7 +37,11 @@ from backend.app.domain.template_snapshot import TemplateSnapshot
 from backend.app.domain.trace_context import TraceContext
 from backend.app.observability.log_writer import LogPayloadSummary, LogRecordInput
 from backend.app.observability.redaction import RedactionPolicy
-from backend.app.schemas.feed import ApprovalRequestFeedEntry, ToolConfirmationFeedEntry
+from backend.app.schemas.feed import (
+    ApprovalRequestFeedEntry,
+    SystemStatusFeedEntry,
+    ToolConfirmationFeedEntry,
+)
 from backend.app.schemas.observability import (
     AuditActorType,
     AuditResult,
@@ -47,6 +51,7 @@ from backend.app.schemas.observability import (
 from backend.app.repositories.runtime import RuntimeSnapshotRepository
 from backend.app.services.events import DomainEventType, EventStore
 from backend.app.services.runtime_orchestration import RuntimeOrchestrationService
+from backend.app.services.tool_confirmations import ToolConfirmationService
 
 
 class RunLogWriter(Protocol):
@@ -74,6 +79,44 @@ class RunCommandResult:
     run: PipelineRunModel
     stage: StageRunModel
     checkpoint_ref: CheckpointRef | None = None
+
+
+@dataclass(frozen=True)
+class TerminalStatusProjector:
+    events: EventStore
+    now: Callable[[], datetime]
+
+    def append_terminal_system_status(
+        self,
+        *,
+        domain_event_type: DomainEventType,
+        run: PipelineRunModel,
+        title: str,
+        reason: str,
+        trace_context: TraceContext,
+        retry_action: str | None = None,
+        occurred_at: datetime | None = None,
+    ) -> None:
+        timestamp = occurred_at or self.now()
+        entry = SystemStatusFeedEntry(
+            entry_id=f"entry-system-status-{run.run_id}-{domain_event_type.value.lower()}",
+            run_id=run.run_id,
+            occurred_at=timestamp,
+            status=(
+                RunStatus.TERMINATED
+                if domain_event_type is DomainEventType.RUN_TERMINATED
+                else RunStatus.FAILED
+            ),
+            title=title,
+            reason=reason,
+            retry_action=retry_action,
+        )
+        self.events.append(
+            domain_event_type,
+            payload={"system_status": entry.model_dump(mode="json")},
+            trace_context=trace_context,
+            occurred_at=timestamp,
+        )
 
 
 class RunLifecycleService:
@@ -408,6 +451,154 @@ class RunLifecycleService:
                 detail_ref=run.run_id,
             ) from exc
 
+    def terminate_run(
+        self,
+        *,
+        run_id: str,
+        actor_id: str,
+        trace_context: TraceContext,
+    ) -> RunCommandResult:
+        started_at = self._now()
+        session, run, stage = self._load_active_run_context(run_id)
+        command_trace = self._command_trace(
+            trace_context,
+            span_id=f"runtime-terminate-{run.run_id}",
+            session=session,
+            run=run,
+            stage=stage,
+        )
+        try:
+            self._assert_can_terminate(session=session, run=run)
+        except RunLifecycleServiceError as exc:
+            self._record_rejected_command(
+                action="runtime.terminate.rejected",
+                message="Run terminate command rejected.",
+                actor_id=actor_id,
+                run=run,
+                stage=stage,
+                reason=str(exc),
+                trace_context=command_trace,
+                started_at=started_at,
+            )
+            raise
+
+        status_before = run.status
+        terminal_reason = "Run was terminated by user request."
+        try:
+            self._audit_service.require_audit_record(
+                actor_type=AuditActorType.USER,
+                actor_id=actor_id,
+                action="runtime.terminate",
+                target_type="run",
+                target_id=run.run_id,
+                result=AuditResult.ACCEPTED,
+                reason="Terminate accepted.",
+                metadata={
+                    "session_id": session.session_id,
+                    "run_id": run.run_id,
+                    "stage_run_id": stage.stage_run_id,
+                    "graph_thread_id": run.graph_thread_ref,
+                    "status_before": status_before.value,
+                    "result_status": "accepted",
+                    "terminal_reason": terminal_reason,
+                },
+                trace_context=command_trace,
+                rollback=self._rollback_all,
+                created_at=started_at,
+            )
+            self._record_run_log(
+                payload_type="runtime_terminate_accepted",
+                message="Run terminate command accepted.",
+                metadata={
+                    "session_id": session.session_id,
+                    "run_id": run.run_id,
+                    "stage_run_id": stage.stage_run_id,
+                    "graph_thread_id": run.graph_thread_ref,
+                    "status_before": status_before.value,
+                    "result_status": "accepted",
+                    "terminal_reason": terminal_reason,
+                },
+                trace_context=command_trace,
+                created_at=started_at,
+                level=LogLevel.INFO,
+            )
+            self._require_runtime_orchestration().terminate_thread(
+                thread=self._build_thread_ref(
+                    run=run,
+                    stage=stage,
+                    paused=status_before is RunStatus.PAUSED,
+                ),
+                trace_context=command_trace,
+            )
+            self._cancel_pending_tool_confirmations_for_terminal_run(
+                run=run,
+                trace_context=command_trace,
+                occurred_at=started_at,
+            )
+            self._mark_terminal(
+                session=session,
+                run=run,
+                stage=stage,
+                terminal_status=RunStatus.TERMINATED,
+                occurred_at=started_at,
+            )
+            self._refresh_pending_wait_entry_for_terminate(
+                run=run,
+                trace_context=command_trace,
+                occurred_at=started_at,
+            )
+            TerminalStatusProjector(
+                events=self._require_events(),
+                now=self._now,
+            ).append_terminal_system_status(
+                domain_event_type=DomainEventType.RUN_TERMINATED,
+                run=run,
+                title="Run terminated",
+                reason=terminal_reason,
+                trace_context=command_trace,
+                occurred_at=started_at,
+            )
+            self._commit_all()
+            self._record_run_log(
+                payload_type="runtime_terminate_completed",
+                message="Run terminate completed.",
+                metadata={
+                    "session_id": session.session_id,
+                    "run_id": run.run_id,
+                    "stage_run_id": stage.stage_run_id,
+                    "graph_thread_id": run.graph_thread_ref,
+                    "status_before": status_before.value,
+                    "status_after": run.status.value,
+                    "result_status": "accepted",
+                    "terminal_reason": terminal_reason,
+                },
+                trace_context=command_trace,
+                created_at=started_at,
+                level=LogLevel.INFO,
+                duration_ms=self._duration_ms(started_at, started_at),
+            )
+            return RunCommandResult(session=session, run=run, stage=stage)
+        except Exception as exc:
+            self._rollback_all()
+            self._record_failed_command(
+                action="runtime.terminate.failed",
+                message="Run terminate failed.",
+                actor_id=actor_id,
+                run=run,
+                stage=stage,
+                reason=str(exc),
+                trace_context=command_trace,
+                started_at=started_at,
+            )
+            if isinstance(exc, RunLifecycleServiceError):
+                raise
+            raise RunLifecycleServiceError(
+                "runtime terminate command failed.",
+                error_code=ErrorCode.INTERNAL_ERROR,
+                status_code=500,
+                detail_ref=run.run_id,
+            ) from exc
+
     def attach_template_snapshot(
         self,
         run: PipelineRunModel,
@@ -661,6 +852,43 @@ class RunLifecycleService:
         if run.status is not RunStatus.PAUSED or session.status is not SessionStatus.PAUSED:
             self._raise_validation("Run can be resumed only when it is paused.")
 
+    def _assert_can_terminate(
+        self,
+        *,
+        session: SessionModel,
+        run: PipelineRunModel,
+    ) -> None:
+        if run.status not in {
+            RunStatus.RUNNING,
+            RunStatus.WAITING_CLARIFICATION,
+            RunStatus.WAITING_APPROVAL,
+            RunStatus.WAITING_TOOL_CONFIRMATION,
+            RunStatus.PAUSED,
+        }:
+            self._raise_validation("Run cannot be terminated from its current status.")
+        if session.status is not RunStateMachine.project_session_status(run.status):
+            self._raise_validation("Session status must match run status before terminate.")
+
+    def _mark_terminal(
+        self,
+        *,
+        session: SessionModel,
+        run: PipelineRunModel,
+        stage: StageRunModel,
+        terminal_status: RunStatus,
+        occurred_at: datetime,
+    ) -> None:
+        run.status = terminal_status
+        run.ended_at = occurred_at
+        run.updated_at = occurred_at
+        stage.status = StageStatus.TERMINATED
+        stage.ended_at = occurred_at
+        stage.updated_at = occurred_at
+        session.status = RunStateMachine.project_session_status(terminal_status)
+        session.updated_at = occurred_at
+        self._runtime_session.add_all([run, stage])
+        self._require_control_session().add(session)
+
     def _persist_recovery_checkpoint(
         self,
         *,
@@ -886,6 +1114,77 @@ class RunLifecycleService:
                 trace_context=trace_context,
                 occurred_at=occurred_at,
             )
+
+    def _refresh_pending_wait_entry_for_terminate(
+        self,
+        *,
+        run: PipelineRunModel,
+        trace_context: TraceContext,
+        occurred_at: datetime,
+    ) -> None:
+        projection = self._latest_approval_request_projection(run_id=run.run_id)
+        if projection is None:
+            return
+        terminated = projection.model_copy(
+            update={
+                "occurred_at": occurred_at,
+                "is_actionable": False,
+                "disabled_reason": (
+                    "Current run is terminated; this approval remains as history only."
+                ),
+            }
+        )
+        self._require_events().append(
+            DomainEventType.APPROVAL_REQUESTED,
+            payload={"approval_request": terminated.model_dump(mode="json")},
+            trace_context=trace_context,
+            occurred_at=occurred_at,
+        )
+
+    def _cancel_pending_tool_confirmations_for_terminal_run(
+        self,
+        *,
+        run: PipelineRunModel,
+        trace_context: TraceContext,
+        occurred_at: datetime,
+    ) -> None:
+        result = self._tool_confirmation_service().cancel_for_terminal_run(
+            run_id=run.run_id,
+            trace_context=trace_context,
+            commit=False,
+        )
+        for projection in result.cancelled_confirmations:
+            self._append_cancelled_tool_confirmation_projection(
+                projection=projection,
+                trace_context=trace_context,
+                occurred_at=occurred_at,
+            )
+
+    def _append_cancelled_tool_confirmation_projection(
+        self,
+        *,
+        projection: ToolConfirmationFeedEntry,
+        trace_context: TraceContext,
+        occurred_at: datetime,
+    ) -> None:
+        self._require_events().append(
+            DomainEventType.TOOL_CONFIRMATION_REQUESTED,
+            payload={"tool_confirmation": projection.model_dump(mode="json")},
+            trace_context=trace_context,
+            occurred_at=occurred_at,
+        )
+
+    def _tool_confirmation_service(self) -> ToolConfirmationService:
+        return ToolConfirmationService(
+            control_session=self._require_control_session(),
+            runtime_session=self._runtime_session,
+            event_session=self._require_event_session(),
+            runtime_orchestration=self._require_runtime_orchestration(),
+            audit_service=self._audit_service,
+            log_writer=self._log_writer,
+            redaction_policy=self._redaction_policy,
+            now=self._now,
+        )
 
     def _latest_approval_request_projection(
         self,
@@ -1199,4 +1498,5 @@ __all__ = [
     "RunCommandResult",
     "RunLifecycleService",
     "RunLifecycleServiceError",
+    "TerminalStatusProjector",
 ]

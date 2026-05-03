@@ -27,6 +27,7 @@ from backend.app.schemas.run import (
     RunCommandResponse,
     RunPauseRequest,
     RunResumeRequest,
+    RunTerminateRequest,
     RunSummaryProjection,
 )
 from backend.app.schemas.session import SessionRead
@@ -214,6 +215,33 @@ def resume_run(
     del body
     try:
         result = service.resume_run(
+            run_id=runId,
+            actor_id="session-user",
+            trace_context=get_trace_context(),
+        )
+    except RunLifecycleServiceError as exc:
+        _raise_api_error(exc)
+    return _command_response(result)
+
+
+@router.post(
+    "/runs/{runId}/terminate",
+    response_model=RunCommandResponse,
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+def terminate_run(
+    runId: str,
+    body: RunTerminateRequest = Body(default_factory=RunTerminateRequest),
+    service: RunLifecycleService = Depends(get_run_lifecycle_service),
+) -> RunCommandResponse:
+    del body
+    try:
+        result = service.terminate_run(
             run_id=runId,
             actor_id="session-user",
             trace_context=get_trace_context(),

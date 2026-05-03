@@ -711,6 +711,48 @@ def test_cancel_for_terminal_run_marks_pending_request_cancelled_without_result_
     )
 
 
+def test_cancel_for_terminal_run_can_defer_commit_for_shared_terminal_transaction(
+    tmp_path: Path,
+) -> None:
+    manager = build_manager(tmp_path)
+    confirmation_id = seed_pending_confirmation(
+        manager,
+        run_status=RunStatus.FAILED,
+        session_status=SessionStatus.FAILED,
+        stage_status=StageStatus.FAILED,
+    )
+    service, _runtime_port, audit, log_writer = build_service(
+        manager,
+        runtime_session_wrapper=FailingCommitSession,
+    )
+
+    result = service.cancel_for_terminal_run(
+        run_id="run-1",
+        trace_context=build_trace(),
+        commit=False,
+    )
+
+    assert [entry.tool_confirmation_id for entry in result.cancelled_confirmations] == [
+        confirmation_id
+    ]
+    assert result.cancelled_confirmations[0].status is ToolConfirmationStatus.CANCELLED
+    assert result.cancelled_confirmations[0].decision is None
+    assert service._runtime_session.rollback_calls == 0
+    service._runtime_session.rollback()
+    with manager.session(DatabaseRole.RUNTIME) as session:
+        request = session.get(ToolConfirmationRequestModel, confirmation_id)
+        assert request is not None
+        assert request.status is ToolConfirmationStatus.PENDING
+        assert request.user_decision is None
+        assert request.responded_at is None
+    assert [record["action"] for record in audit.records] == [
+        "tool_confirmation.cancel",
+    ]
+    assert [record.message for record in log_writer.records] == [
+        "Tool confirmation cancelled for terminal run.",
+    ]
+
+
 def test_allow_rolls_back_status_and_events_when_runtime_resume_fails(
     tmp_path: Path,
 ) -> None:
