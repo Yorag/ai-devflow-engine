@@ -5,10 +5,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiRequestOptions } from "../../../api/client";
 import { terminateRun } from "../../../api/runs";
-import type { ExecutionNodeProjection, SessionStatus } from "../../../api/types";
+import type {
+  ExecutionNodeProjection,
+  SessionStatus,
+  SessionWorkspaceProjection,
+} from "../../../api/types";
 import { createQueryClient } from "../../../app/query-client";
 import { renderWithAppProviders } from "../../../app/test-utils";
 import {
+  mockFeedEntriesByType,
   mockSessionWorkspaces,
   mockStageInspectorProjection,
 } from "../../../mocks/fixtures";
@@ -630,6 +635,111 @@ describe("WorkspaceShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Submit reject reason" }));
 
     expect(await screen.findByText("Need a clearer rollback explanation.")).toBeTruthy();
+  });
+
+  it("refetches workspace state after a tool confirmation deny and renders denied follow-up summary in the feed", async () => {
+    let workspace: SessionWorkspaceProjection = {
+      ...mockSessionWorkspaces["session-running"],
+      narrative_feed: [
+        ...mockSessionWorkspaces["session-running"].narrative_feed,
+        mockFeedEntriesByType.tool_confirmation,
+      ],
+    };
+    const baseFetcher = createMockApiFetcher();
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const url = typeof input === "string" ? input : input.toString();
+
+        if (url.endsWith("/api/sessions/session-running/workspace")) {
+          return new Response(JSON.stringify(workspace), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+
+        const response = await baseFetcher(input, init);
+        if (url.endsWith("/api/tool-confirmations/tool-confirmation-1/deny")) {
+          workspace = {
+            ...workspace,
+            narrative_feed: workspace.narrative_feed.map((entry) =>
+              entry.type === "tool_confirmation"
+                ? {
+                    ...entry,
+                    status: "denied",
+                    decision: "denied",
+                    is_actionable: false,
+                    responded_at: "2026-05-01T09:21:00.000Z",
+                    deny_followup_action: "run_failed",
+                    deny_followup_summary:
+                      "The current run will fail because no low-risk alternative path exists.",
+                  }
+                : entry,
+            ),
+          };
+        }
+        return response;
+      },
+    };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Add workspace shell" }),
+    );
+    const toolEntry = await screen.findByRole("article", {
+      name: "Tool confirmation feed entry",
+    });
+    fireEvent.click(within(toolEntry).getByRole("button", { name: "拒绝本次执行" }));
+
+    expect(
+      await screen.findByText(
+        "The current run will fail because no low-risk alternative path exists.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("keeps historical tool confirmations disabled in the workspace surface", async () => {
+    const historicalWorkspace: SessionWorkspaceProjection = {
+      ...mockSessionWorkspaces["session-running"],
+      narrative_feed: [
+        ...mockSessionWorkspaces["session-running"].narrative_feed,
+        {
+          ...mockFeedEntriesByType.tool_confirmation,
+          run_id: "run-historical",
+        },
+      ],
+    };
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.endsWith("/api/sessions/session-running/workspace")) {
+          return new Response(JSON.stringify(historicalWorkspace), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+
+        return createMockApiFetcher()(input, init);
+      },
+    };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Add workspace shell" }),
+    );
+    const toolEntry = await screen.findByRole("article", {
+      name: "Tool confirmation feed entry",
+    });
+
+    expect(
+      within(toolEntry).getByRole("button", { name: "允许本次执行" }),
+    ).toHaveProperty("disabled", true);
+    expect(
+      within(toolEntry).getByText(
+        "This tool confirmation belongs to a historical run.",
+      ),
+    ).toBeTruthy();
   });
 
   it("renders Composer beneath the draft template workspace and allows first requirement input", async () => {

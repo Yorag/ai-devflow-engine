@@ -46,10 +46,10 @@ describe("FeedEntryRenderer", () => {
     expect(within(toolEntry).getByText("Allow dependency install")).toBeTruthy();
     expect(within(toolEntry).getByText("bash")).toBeTruthy();
     expect(
-      within(toolEntry).getByRole("button", { name: "Allow this execution" }),
+      within(toolEntry).getByRole("button", { name: "允许本次执行" }),
     ).toBeTruthy();
     expect(
-      within(toolEntry).getByRole("button", { name: "Deny this execution" }),
+      within(toolEntry).getByRole("button", { name: "拒绝本次执行" }),
     ).toBeTruthy();
     expect(within(toolEntry).queryByText("Approve")).toBeNull();
     expect(within(toolEntry).queryByText("Reject")).toBeNull();
@@ -183,6 +183,29 @@ describe("FeedEntryRenderer", () => {
 
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
+  });
+
+  it("renders denied follow-up semantics on top-level tool confirmation entries", () => {
+    const deniedToolConfirmation = {
+      ...mockFeedEntriesByType.tool_confirmation,
+      status: "denied",
+      decision: "denied",
+      is_actionable: false,
+      responded_at: "2026-05-01T09:21:00.000Z",
+      deny_followup_action: "run_failed",
+      deny_followup_summary:
+        "The current run will fail because no low-risk alternative path exists.",
+    } satisfies TopLevelFeedEntry;
+
+    renderWithAppProviders(renderFeedEntryByType(deniedToolConfirmation));
+
+    expect(
+      screen.getByText(
+        "The current run will fail because no low-risk alternative path exists.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("拒绝后当前运行将失败")).toBeTruthy();
+    expect(screen.queryByText("approval rollback")).toBeNull();
   });
 });
 

@@ -279,7 +279,7 @@ describe("StageNode", () => {
     expect(
       screen.getByRole("article", { name: "Tool confirmation feed entry" }),
     ).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Allow this execution" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "允许本次执行" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
   });
 

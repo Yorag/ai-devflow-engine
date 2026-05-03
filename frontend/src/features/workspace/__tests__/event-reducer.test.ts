@@ -113,6 +113,9 @@ describe("applySessionEvent", () => {
       is_actionable: false,
       responded_at: "2026-05-01T09:23:00.000Z",
       decision: "denied",
+      deny_followup_action: "run_failed",
+      deny_followup_summary:
+        "The current run will fail because no low-risk alternative path exists.",
       disabled_reason: "The tool action was denied.",
     };
 
@@ -141,6 +144,9 @@ describe("applySessionEvent", () => {
       status: "denied",
       decision: "denied",
       is_actionable: false,
+      deny_followup_action: "run_failed",
+      deny_followup_summary:
+        "The current run will fail because no low-risk alternative path exists.",
     });
   });
 

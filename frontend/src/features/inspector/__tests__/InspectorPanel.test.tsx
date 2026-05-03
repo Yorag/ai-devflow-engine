@@ -186,8 +186,15 @@ describe("Feed Inspector opening", () => {
     const toolEntry = screen.getByRole("article", {
       name: "Tool confirmation feed entry",
     });
-    expect(within(toolEntry).getByRole("button", { name: "Allow this execution" })).toBeTruthy();
-    expect(within(toolEntry).getByRole("button", { name: "Deny this execution" })).toBeTruthy();
+    expect(within(toolEntry).getByRole("button", { name: "允许本次执行" })).toBeTruthy();
+    expect(within(toolEntry).getByRole("button", { name: "拒绝本次执行" })).toBeTruthy();
+    const inspector = screen.getByRole("complementary", { name: "Inspector" });
+    expect(
+      within(inspector).queryByRole("button", { name: "允许本次执行" }),
+    ).toBeNull();
+    expect(
+      within(inspector).queryByRole("button", { name: "拒绝本次执行" }),
+    ).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Open demo_delivery details" }));
     expect(screen.getByRole("heading", { name: "Delivery result details" })).toBeTruthy();

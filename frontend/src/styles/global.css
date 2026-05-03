@@ -845,6 +845,56 @@ a {
   background: oklch(97.4% 0.016 26);
 }
 
+.tool-confirmation-block__allow {
+  border-color: oklch(73% 0.09 150);
+  background: oklch(94.5% 0.035 150);
+  color: oklch(34% 0.08 150);
+}
+
+.tool-confirmation-block__allow:hover:not(:disabled) {
+  background: oklch(91.5% 0.05 150);
+}
+
+.tool-confirmation-block__deny {
+  border-color: oklch(72% 0.09 26);
+  background: oklch(94.5% 0.035 26);
+  color: oklch(38% 0.08 26);
+}
+
+.tool-confirmation-block__deny:hover:not(:disabled) {
+  background: oklch(91.5% 0.05 26);
+}
+
+.tool-confirmation-block__follow-up,
+.tool-confirmation-block__error {
+  margin: 0;
+  border: 1px solid oklch(84% 0.035 26);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.tool-confirmation-block__follow-up {
+  background: oklch(96.3% 0.02 26);
+  color: oklch(37% 0.065 26);
+}
+
+.tool-confirmation-block__follow-up strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.82rem;
+}
+
+.tool-confirmation-block__follow-up p {
+  margin: 0;
+}
+
+.tool-confirmation-block__error {
+  background: oklch(96.5% 0.035 26);
+  color: oklch(36% 0.11 26);
+}
+
 .feed-entry--control-item {
   border-color: oklch(82% 0.04 252);
   background: oklch(97.2% 0.018 252);

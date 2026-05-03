@@ -57,6 +57,10 @@ export type ToolConfirmationStatus =
   | "allowed"
   | "denied"
   | "cancelled";
+export type ToolConfirmationDenyFollowupAction =
+  | "continue_current_stage"
+  | "run_failed"
+  | "awaiting_run_control";
 export type ToolRiskLevel =
   | "read_only"
   | "low_risk_write"
@@ -476,6 +480,8 @@ export type ToolConfirmationFeedEntry = FeedEntryBase & {
   requested_at: string;
   responded_at: string | null;
   decision: "allowed" | "denied" | null;
+  deny_followup_action: ToolConfirmationDenyFollowupAction | null;
+  deny_followup_summary: string | null;
   disabled_reason: string | null;
 };
 
