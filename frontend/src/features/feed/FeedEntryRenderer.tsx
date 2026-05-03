@@ -3,13 +3,13 @@ import type {
   ApprovalResultFeedEntry,
   ControlItemFeedEntry,
   DeliveryResultFeedEntry,
-  ExecutionNodeProjection,
   MessageFeedEntry,
   StageType,
   SystemStatusFeedEntry,
   ToolConfirmationFeedEntry,
   TopLevelFeedEntry,
 } from "../../api/types";
+import { StageNode } from "./StageNode";
 
 export type FeedEntryRendererProps = {
   entry: TopLevelFeedEntry;
@@ -33,7 +33,7 @@ export function FeedEntryRenderer({ entry }: FeedEntryRendererProps): JSX.Elemen
     case "user_message":
       return <UserMessageEntry entry={entry} />;
     case "stage_node":
-      return <StageNodeEntry entry={entry} />;
+      return <StageNode entry={entry} />;
     case "approval_request":
       return <ApprovalRequestEntry entry={entry} />;
     case "tool_confirmation":
@@ -57,37 +57,6 @@ function UserMessageEntry({ entry }: { entry: MessageFeedEntry }): JSX.Element {
     >
       <EntryHeader label={formatAuthor(entry.author)} timestamp={entry.occurred_at} />
       <p className="feed-entry__body">{entry.content}</p>
-    </article>
-  );
-}
-
-function StageNodeEntry({
-  entry,
-}: {
-  entry: ExecutionNodeProjection;
-}): JSX.Element {
-  return (
-    <article className="feed-entry feed-entry--stage-node" aria-label="Stage feed entry">
-      <EntryHeader
-        label="Stage"
-        timestamp={entry.occurred_at}
-      />
-      <div className="feed-entry__title-row">
-        <h2>{stageLabels[entry.stage_type]}</h2>
-        <span>{formatLabel(entry.status)}</span>
-      </div>
-      <p className="feed-entry__body">{entry.summary}</p>
-      <div className="feed-entry__meta-grid" aria-label="Stage metadata">
-        <Metadata label="Attempt" value={String(entry.attempt_index)} />
-        <Metadata label="Started" value={formatTimestamp(entry.started_at)} />
-        {entry.ended_at ? (
-          <Metadata label="Ended" value={formatTimestamp(entry.ended_at)} />
-        ) : null}
-        <Metadata
-          label="Items"
-          value={`${entry.items.length} ${entry.items.length === 1 ? "item" : "items"}`}
-        />
-      </div>
     </article>
   );
 }
