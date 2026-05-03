@@ -88,9 +88,10 @@
 ## L4.2 审计日志查询 API
 
 **计划周期**：Week 6
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现平台审计日志只读查询，使本地诊断与运维可以按主体、动作、目标、run 和结果过滤审计记录。
 **实施计划**：`docs/plans/implementation/l4.2-audit-log-query-api.md`
+**验证摘要**：实施计划 `docs/plans/implementation/l4.2-audit-log-query-api.md` 已完成并在 integration checkpoint 合入 `4c780ed`。`uv run python -m pytest backend/tests/observability/test_audit_query_service.py backend/tests/schemas/test_observability_schemas.py -v` 通过 12 个 focused service/schema tests；`uv run python -m pytest backend/tests/api/test_audit_log_api.py -v` 通过 4 个 focused API/OpenAPI tests；`uv run python -m pytest backend/tests/observability/test_audit_service.py backend/tests/observability/test_audit_query_service.py backend/tests/schemas/test_observability_schemas.py backend/tests/api/test_audit_log_api.py -v` 通过 23 个 impacted audit regressions。
 
 **修改文件列表**：
 - Modify: `backend/app/observability/audit.py`

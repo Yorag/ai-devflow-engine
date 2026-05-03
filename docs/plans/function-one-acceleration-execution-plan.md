@@ -64,7 +64,7 @@
 | Lane | Branch | Coverage | Status | Owner Scope | Review Boundary |
 | --- | --- | --- | --- | --- | --- |
 | AL01 | `feat/al-run-core-events` | R3.1, E3.1, R3.2, R3.3, R3.4, R3.4a, R3.4b, R3.5, R3.6, R3.7, C2.9a, C2.9b | claimed | Run 状态机、PipelineRun、EventStore、snapshot、GraphDefinition、StageRun、StageArtifact、历史可见性命令 | Run 和事件真源 |
-| AL02 | `feat/al-projections-streams` | Q3.1, Q3.2, Q3.3, Q3.4, Q3.4a, E3.2, L3.1, L4.2 | planned | Projection services、SSE、run/stage log query、audit query route | 查询投影、实时流和轻查询 API |
+| AL02 | `feat/al-projections-streams` | Q3.1, Q3.2, Q3.3, Q3.4, Q3.4a, E3.2, L3.1, L4.2 | complete | Projection services、SSE、run/stage log query、audit query route | 查询投影、实时流和轻查询 API |
 | AL03 | `feat/al-runtime-human-loop` | A4.0, L4.1, H4.1, H4.3, D4.0, H4.4, H4.4a, H4.5, H4.6, H4.7 | claimed | RuntimeOrchestrationService、clarification、approval、delivery snapshot gate、runtime control commands | 运行编排和人工介入后端 |
 | AL04 | `feat/al-tools-deterministic-delivery` | A4.1, W5.0, W5.0a, W5.0b, W5.0c, W5.0d, W5.1, W5.2, W5.3, W5.4, W5.5, W5.6, A4.2, A4.3, A4.4, D4.1, D4.2, D4.3, D5.1, D5.2, D5.3, D5.4 | planned | RuntimeEngine、ToolProtocol、ToolRegistry、Workspace tools、ChangeSet、PreviewTarget、deterministic runtime、DeliveryRecord、delivery adapters | 工具、deterministic runtime 和交付适配 |
 | AL05 | `feat/al-provider-langgraph-context` | A4.5, A4.6, A4.7, A4.8, A4.8a, A4.8b, A4.8c, A4.8d, A4.9, A4.9a, A4.9e, A4.9b, A4.9c, A4.9d, A4.10, A4.11 | claimed | LangGraph runtime、Provider registry、PromptValidation、PromptRegistry、PromptRenderer、ContextEnvelope、Provider adapter、AgentDecision、StageAgentRuntime | Provider、LangGraph、上下文和 Stage Agent |
