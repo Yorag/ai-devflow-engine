@@ -236,7 +236,7 @@
 | Q3.4 | ControlItemInspectorProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q34) |
 | Q3.4a | ToolConfirmationInspectorProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q34a) |
 | E3.2 | SSE 流端点与断线恢复 | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#e32) |
-| L3.1 | Run 与 Stage 日志轻查询 API | Week 5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#l31) |
+| L3.1 | Run 与 Stage 日志轻查询 API | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#l31) |
 | F3.1 | Workspace Store 快照初始化 | Week 5 | [x] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f31) |
 | F3.2 | SSE Client 与 Event Reducer | Week 5 | [x] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f32) |
 | F3.3 | Feed Entry Renderer | Week 5-6 | [x] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f33) |
