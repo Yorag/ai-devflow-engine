@@ -147,11 +147,11 @@ Worker prompt 必须包含：
 - lane owner scope。
 - forbidden shared entries。
 - 允许命令和验证命令。
-- 禁止更新最终进度表、禁止自行 claim 下一个任务、禁止写入 coordination store、禁止未经用户批准的 Git 写操作。未提交 evidence 只能报告 `reported`；claim commit 必须走 `git-delivery-workflow` commit gate。
+- 禁止更新最终进度表、禁止自行 claim 下一个任务、禁止写入 coordination store、禁止未经用户批准的非 commit Git 写操作。未提交 evidence 只能报告 `reported`；claim commit 必须走 `git-delivery-workflow` commit gate。
 
 ## Progress Ingest
 
-主协调会话默认使用自动扫描交接，不要求用户手工复制 worker checkpoint report。worker 分支完成并获得用户批准提交后，主协调会话或 integration 会话运行：
+主协调会话默认使用自动扫描交接，不要求用户手工复制 worker checkpoint report。worker 分支完成并通过 `git-delivery-workflow` commit gate 提交后，主协调会话或 integration 会话运行：
 
 ```powershell
 uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py scan-worker-commits

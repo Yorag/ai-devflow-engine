@@ -7,7 +7,7 @@ description: Use when starting a non-trivial change, deciding whether to create 
 
 ## Overview
 
-Standardize Git decisions for this repository from the first branch cut to the final release tag. Core principle: one verified delivery slice per branch boundary, one review purpose per PR boundary, integration checkpoints for acceleration lanes, and no Git write action without explicit user approval.
+Standardize Git decisions for this repository from the first branch cut to the final release tag. Core principle: one verified delivery slice per branch boundary, one review purpose per PR boundary, integration checkpoints for acceleration lanes, commit decisions governed by the commit gate, and non-commit Git write actions only with explicit user approval.
 
 **REQUIRED SUB-SKILL:** Use `superpowers:verification-before-completion` before recommending `commit`, `PR`, `merge`, or `release` actions.
 
