@@ -5,6 +5,7 @@ import type {
   ConfigurationPackageImportResult,
   ControlItemInspectorProjection,
   DeliveryResultDetailProjection,
+  ExecutionNodeProjection,
   PipelineTemplateRead,
   ProjectDeliveryChannelDetailProjection,
   ProjectRead,
@@ -508,6 +509,168 @@ export const mockStageInspectorProjection: StageInspectorProjection = {
   provider_retry_trace_refs: ["provider-retry-trace-1"],
   provider_circuit_breaker_trace_refs: ["provider-circuit-trace-1"],
   approval_result_refs: ["approval-result-ref-1"],
+};
+
+export const mockCodeGenerationStageNode: ExecutionNodeProjection = {
+  entry_id: "entry-stage-code-generation",
+  run_id: "run-running",
+  type: "stage_node",
+  occurred_at: "2026-05-04T09:16:00.000Z",
+  stage_run_id: "stage-code-generation-running",
+  stage_type: "code_generation",
+  status: "running",
+  attempt_index: 1,
+  started_at: "2026-05-04T09:16:00.000Z",
+  ended_at: null,
+  summary: "Applying feed-specific rendering for tool calls and diff previews.",
+  items: [
+    {
+      item_id: "tool-call-codegen-1",
+      type: "tool_call",
+      occurred_at: "2026-05-04T09:17:00.000Z",
+      title: "bash pytest frontend",
+      summary: "Validated the feed render path before landing the patch.",
+      content:
+        "bash pytest frontend\nTarget: frontend/src/features/feed\nStatus: succeeded\nOutput summary: stdout 4 lines, stderr 0 lines\n\n> collected 4 items\n> 4 passed",
+      artifact_refs: ["tool-trace-codegen-1"],
+      metrics: {
+        duration_ms: 2400,
+        status: "succeeded",
+        target_count: 1,
+      },
+    },
+    {
+      item_id: "diff-preview-codegen-1",
+      type: "diff_preview",
+      occurred_at: "2026-05-04T09:18:00.000Z",
+      title: "Diff preview",
+      summary: "2 files changed, 31 additions, 6 removals.",
+      content:
+        "Files:\nfrontend/src/features/feed/StageNodeItems.tsx\nfrontend/src/features/feed/ToolCallItem.tsx\n\n@@ renderStageItemByType\n+ return <ToolCallItem item={item} key={item.item_id} />\n+ return <DiffPreview item={item} key={item.item_id} />\n\nFull diff remains available in Inspector.",
+      artifact_refs: ["changeset-codegen-1"],
+      metrics: {
+        changed_file_count: 2,
+        added_line_count: 31,
+        removed_line_count: 6,
+      },
+    },
+    {
+      item_id: "result-codegen-1",
+      type: "result",
+      occurred_at: "2026-05-04T09:19:00.000Z",
+      title: "Code generation result",
+      summary: "Feed-specific renderers are ready for review.",
+      content: "Inspector still owns the full diff, tool trace, and test output.",
+      artifact_refs: ["codegen-result-1"],
+      metrics: {},
+    },
+  ],
+  metrics: {
+    duration_ms: 180000,
+    tool_call_count: 1,
+    changed_file_count: 2,
+    added_line_count: 31,
+    removed_line_count: 6,
+  },
+};
+
+export const mockTestGenerationExecutionStageNode: ExecutionNodeProjection = {
+  entry_id: "entry-stage-test-generation",
+  run_id: "run-failed",
+  type: "stage_node",
+  occurred_at: "2026-05-04T09:28:00.000Z",
+  stage_run_id: "stage-test-generation-running",
+  stage_type: "test_generation_execution",
+  status: "failed",
+  attempt_index: 1,
+  started_at: "2026-05-04T09:28:00.000Z",
+  ended_at: "2026-05-04T09:31:00.000Z",
+  summary: "Pytest surfaced one failing assertion and one remaining coverage gap.",
+  items: [
+    {
+      item_id: "tool-call-test-1",
+      type: "tool_call",
+      occurred_at: "2026-05-04T09:29:00.000Z",
+      title: "bash pytest frontend/src/features/feed",
+      summary: "Ran the focused feed regression suite.",
+      content:
+        "bash pytest frontend/src/features/feed\nTarget: frontend/src/features/feed\nStatus: failed\nOutput summary: stdout 22 lines, stderr 1 line\n\n> 7 passed\n> 1 failed",
+      artifact_refs: ["tool-trace-test-1"],
+      metrics: {
+        duration_ms: 3800,
+        status: "failed",
+      },
+    },
+    {
+      item_id: "result-test-1",
+      type: "result",
+      occurred_at: "2026-05-04T09:31:00.000Z",
+      title: "Test execution result",
+      summary: "Pytest finished with one failure and one uncovered branch.",
+      content:
+        "Failed: src/features/feed/__tests__/StageNode.test.tsx::renders diff preview\nGap: no regression yet covers long stderr folding.",
+      artifact_refs: ["test-result-1"],
+      metrics: {},
+    },
+  ],
+  metrics: {
+    duration_ms: 183000,
+    tool_call_count: 1,
+    generated_test_count: 2,
+    executed_test_count: 8,
+    passed_test_count: 7,
+    failed_test_count: 1,
+    skipped_test_count: 0,
+    test_gap_count: 1,
+  },
+};
+
+export const mockCodeGenerationInspectorProjection: StageInspectorProjection = {
+  ...mockStageInspectorProjection,
+  stage_run_id: "stage-code-generation-running",
+  stage_type: "code_generation",
+  identity: {
+    ...mockStageInspectorProjection.identity,
+    records: {
+      ...mockStageInspectorProjection.identity.records,
+      stage_run_id: "stage-code-generation-running",
+      stage_type: "code_generation",
+    },
+  },
+  input: {
+    ...mockStageInspectorProjection.input,
+    records: {
+      ...mockStageInspectorProjection.input.records,
+      structured_requirement: "Show tool calls, diff previews, and test summaries in the feed.",
+    },
+  },
+  process: {
+    ...mockStageInspectorProjection.process,
+    records: {
+      ...mockStageInspectorProjection.process.records,
+      full_diff_label: "Full diff for F5.1",
+      tool_execution_excerpt: [
+        "pytest stdout line 17",
+        "pytest stdout line 18",
+        "pytest stderr line 1",
+      ],
+    },
+  },
+  artifacts: {
+    ...mockStageInspectorProjection.artifacts,
+    records: {
+      ...mockStageInspectorProjection.artifacts.records,
+      diff_ref: "changeset-codegen-1",
+      test_result_ref: "test-result-1",
+    },
+  },
+  metrics: {
+    duration_ms: 180000,
+    tool_call_count: 1,
+    changed_file_count: 2,
+    added_line_count: 31,
+    removed_line_count: 6,
+  },
 };
 
 export const mockControlItemInspectorProjection: ControlItemInspectorProjection = {

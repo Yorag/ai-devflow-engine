@@ -2,7 +2,11 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { ExecutionNodeProjection, StageItemProjection } from "../../../api/types";
-import { mockFeedEntriesByType } from "../../../mocks/fixtures";
+import {
+  mockCodeGenerationStageNode,
+  mockFeedEntriesByType,
+  mockTestGenerationExecutionStageNode,
+} from "../../../mocks/fixtures";
 import { FeedEntryRenderer } from "../FeedEntryRenderer";
 import { StageNode } from "../StageNode";
 import { renderStageItemByType, StageNodeItems } from "../StageNodeItems";
@@ -247,7 +251,7 @@ describe("StageNode", () => {
     }
 
     const diffItem = screen.getByRole("listitem", { name: "Diff Preview stage item" });
-    expect(diffItem.querySelector("details")).toBeTruthy();
+    expect(diffItem.querySelector("details")).toBeNull();
   });
 
   it("renders provider calls with model binding, status, duration, retry, backoff, circuit, and details reference", () => {
@@ -297,5 +301,34 @@ describe("StageNode", () => {
 
     expect(screen.getByRole("listitem", { name: "Result stage item" })).toBeTruthy();
     expect(screen.getByText("Rendered without the list wrapper.")).toBeTruthy();
+  });
+
+  it("renders specialized tool-call and diff-preview content instead of the generic compact block", () => {
+    render(<StageNode entry={mockCodeGenerationStageNode} />);
+
+    const toolItem = screen.getByRole("listitem", { name: "Tool Call stage item" });
+    expect(within(toolItem).getByText("Target")).toBeTruthy();
+    expect(within(toolItem).getByText("Succeeded")).toBeTruthy();
+    expect(within(toolItem).getByText("stdout 4 lines, stderr 0 lines")).toBeTruthy();
+
+    const diffItem = screen.getByRole("listitem", { name: "Diff Preview stage item" });
+    expect(
+      within(diffItem).getByText("frontend/src/features/feed/ToolCallItem.tsx"),
+    ).toBeTruthy();
+    expect(within(diffItem).getByText("@@ renderStageItemByType")).toBeTruthy();
+  });
+
+  it("renders test-result summary above test_generation_execution internal items", () => {
+    render(<StageNode entry={mockTestGenerationExecutionStageNode} />);
+
+    const summary = screen.getByRole("region", { name: "Test result summary" });
+    expect(within(summary).getByText("Generated Tests")).toBeTruthy();
+    expect(within(summary).getByText("1")).toBeTruthy();
+    expect(within(summary).getByText("7")).toBeTruthy();
+    expect(
+      within(summary).getByText(
+        "Pytest finished with one failure and one uncovered branch.",
+      ),
+    ).toBeTruthy();
   });
 });

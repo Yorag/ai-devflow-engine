@@ -1068,14 +1068,17 @@ a {
 }
 
 .stage-node__meta-grid,
-.provider-call-grid {
+.provider-call-grid,
+.stage-node-item__tool-grid,
+.test-result-summary__grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
 .stage-node__datum,
-.provider-call-grid__datum {
+.provider-call-grid__datum,
+.stage-node-item__datum {
   min-width: 0;
   display: grid;
   gap: 3px;
@@ -1086,14 +1089,16 @@ a {
 }
 
 .stage-node__datum strong,
-.provider-call-grid__datum strong {
+.provider-call-grid__datum strong,
+.stage-node-item__datum strong {
   color: var(--text-muted);
   font-size: 0.66rem;
   font-weight: 800;
 }
 
 .stage-node__datum span,
-.provider-call-grid__datum span {
+.provider-call-grid__datum span,
+.stage-node-item__datum span {
   color: oklch(29% 0.024 248);
   font-size: 0.77rem;
   font-weight: 700;
@@ -1182,6 +1187,51 @@ a {
 
 .stage-node-item__summary {
   color: var(--text-muted);
+}
+
+.stage-node-item__command,
+.test-result-summary p {
+  margin: 0;
+  color: oklch(29% 0.024 248);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.stage-node-item__file-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  color: oklch(29% 0.024 248);
+  font-size: 0.82rem;
+}
+
+.stage-node-item__diff-snippet {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: oklch(98.1% 0.006 248);
+  padding: 10px 12px;
+  color: oklch(24% 0.02 248);
+  font: 0.8rem/1.45 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono",
+    monospace;
+}
+
+.stage-node-item__diff-snippet span {
+  min-width: max-content;
+}
+
+.test-result-summary {
+  display: grid;
+  gap: 10px;
+  border: 1px solid oklch(84% 0.02 248);
+  border-radius: 10px;
+  background: oklch(98.6% 0.006 248);
+  padding: 12px;
 }
 
 .stage-node-item__content--clamped {
@@ -2431,7 +2481,9 @@ a {
   }
 
   .stage-node__meta-grid,
-  .provider-call-grid {
+  .provider-call-grid,
+  .stage-node-item__tool-grid,
+  .test-result-summary__grid {
     grid-template-columns: 1fr;
   }
 

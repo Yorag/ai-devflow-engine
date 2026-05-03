@@ -2,12 +2,18 @@ import type {
   ProviderCallStageItem,
   StageItemProjection,
   StageItemType,
+  StageType,
 } from "../../api/types";
+import { DiffPreview } from "./DiffPreview";
+import { TestResultSummary } from "./TestResultSummary";
+import { ToolCallItem } from "./ToolCallItem";
 
 type StageNodeItem = StageItemProjection | ProviderCallStageItem;
 
 export type StageNodeItemsProps = {
   items: StageNodeItem[];
+  stageType?: StageType;
+  stageMetrics?: Record<string, unknown>;
 };
 
 const itemLabels: Record<StageItemType, string> = {
@@ -23,7 +29,11 @@ const itemLabels: Record<StageItemType, string> = {
   result: "Result",
 };
 
-export function StageNodeItems({ items }: StageNodeItemsProps): JSX.Element {
+export function StageNodeItems({
+  items,
+  stageType,
+  stageMetrics = {},
+}: StageNodeItemsProps): JSX.Element {
   if (items.length === 0) {
     return (
       <p className="stage-node__empty" aria-label="Stage has no internal items">
@@ -32,10 +42,20 @@ export function StageNodeItems({ items }: StageNodeItemsProps): JSX.Element {
     );
   }
 
+  const resultItem =
+    items.find(
+      (item): item is StageItemProjection => item.type === "result",
+    ) ?? null;
+
   return (
-    <ol className="stage-node-items" aria-label="Stage internal items">
-      {items.map((item) => renderStageItemByType(item))}
-    </ol>
+    <>
+      {stageType === "test_generation_execution" ? (
+        <TestResultSummary metrics={stageMetrics} resultItem={resultItem} />
+      ) : null}
+      <ol className="stage-node-items" aria-label="Stage internal items">
+        {items.map((item) => renderStageItemByType(item))}
+      </ol>
+    </>
   );
 }
 
@@ -53,10 +73,12 @@ export function renderStageItemByType(item: StageNodeItem): JSX.Element {
     case "context":
     case "reasoning":
     case "model_call":
-    case "tool_call":
     case "tool_confirmation":
-    case "diff_preview":
       return <CompactItem item={item} key={item.item_id} />;
+    case "tool_call":
+      return <ToolCallItem item={item} key={item.item_id} />;
+    case "diff_preview":
+      return <DiffPreview item={item} key={item.item_id} />;
   }
 }
 

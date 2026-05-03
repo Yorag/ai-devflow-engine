@@ -3,7 +3,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { ApiRequestOptions } from "../../../api/client";
 import { renderWithAppProviders } from "../../../app/test-utils";
-import { mockFeedEntriesByType } from "../../../mocks/fixtures";
+import {
+  mockCodeGenerationStageNode,
+  mockFeedEntriesByType,
+} from "../../../mocks/fixtures";
 import {
   createMockApiFetcher,
   mockApiRequestOptions,
@@ -94,6 +97,21 @@ describe("InspectorSections", () => {
     expect(within(inspector).getByText("dependency_change")).toBeTruthy();
     expect(within(inspector).getByText("package-lock update")).toBeTruthy();
     expect(within(inspector).queryByText("Draft execution plan")).toBeNull();
+  });
+
+  it("keeps the complete diff and test records in inspector detail while the feed stays preview-oriented", async () => {
+    renderWithAppProviders(
+      <InspectorHarness
+        entries={[mockCodeGenerationStageNode]}
+        request={mockApiRequestOptions}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Code Generation details" }));
+
+    const inspector = screen.getByRole("complementary", { name: "Inspector" });
+    expect(await within(inspector).findByText("Full diff for F5.1")).toBeTruthy();
+    expect(within(inspector).getByText("pytest stdout line 17")).toBeTruthy();
   });
 });
 
