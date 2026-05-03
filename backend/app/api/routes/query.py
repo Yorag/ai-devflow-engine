@@ -12,9 +12,14 @@ from sqlalchemy.orm import Session
 from backend.app.api.errors import ApiError, ErrorResponse
 from backend.app.db.base import DatabaseRole
 from backend.app.db.session import DatabaseManager
+from backend.app.schemas.inspector import StageInspectorProjection
 from backend.app.schemas.run import RunTimelineProjection
 from backend.app.schemas.workspace import SessionWorkspaceProjection
 from backend.app.services.events import EventStore
+from backend.app.services.projections.inspector import (
+    InspectorProjectionService,
+    InspectorProjectionServiceError,
+)
 from backend.app.services.projections.timeline import (
     TimelineProjectionService,
     TimelineProjectionServiceError,
@@ -82,8 +87,24 @@ def get_timeline_projection_service(
     )
 
 
+def get_inspector_projection_service(
+    control_session: Session = Depends(get_control_session),
+    runtime_session: Session = Depends(get_runtime_session),
+    event_session: Session = Depends(get_event_session),
+) -> Iterator[InspectorProjectionService]:
+    yield InspectorProjectionService(
+        control_session,
+        runtime_session,
+        event_session,
+    )
+
+
 def _raise_api_error(
-    exc: WorkspaceProjectionServiceError | TimelineProjectionServiceError,
+    exc: (
+        WorkspaceProjectionServiceError
+        | TimelineProjectionServiceError
+        | InspectorProjectionServiceError
+    ),
 ) -> None:
     raise ApiError(
         error_code=exc.error_code,
@@ -209,3 +230,22 @@ def _resolve_after_cursor(request: Request, after: int) -> int:
     except ValueError:
         replay_cursor = 0
     return max(after, replay_cursor, 0)
+
+
+@router.get(
+    "/stages/{stageRunId}/inspector",
+    response_model=StageInspectorProjection,
+    responses={
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+def get_stage_inspector(
+    stageRunId: str,
+    service: InspectorProjectionService = Depends(get_inspector_projection_service),
+) -> StageInspectorProjection:
+    try:
+        return service.get_stage_inspector(stageRunId)
+    except InspectorProjectionServiceError as exc:
+        _raise_api_error(exc)

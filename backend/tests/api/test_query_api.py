@@ -124,7 +124,6 @@ def test_get_run_timeline_returns_projection_and_unified_not_found(
         "correlation_id": "corr-timeline-missing",
     }
 
-
 def test_session_event_stream_returns_event_store_frames(tmp_path: Path) -> None:
     app = build_query_api_app(tmp_path)
 
@@ -181,6 +180,52 @@ def test_session_event_stream_resumes_after_last_event_id(tmp_path: Path) -> Non
     data_line = next(line for line in lines if line.startswith("data: "))
     payload = json.loads(data_line.removeprefix("data: "))
     assert payload["event_type"] == "stage_updated"
+
+
+def test_get_stage_inspector_returns_projection_and_unified_not_found(
+    tmp_path: Path,
+) -> None:
+    app = build_query_api_app(tmp_path)
+
+    with TestClient(app) as client:
+        ok_response = client.get(
+            "/api/stages/stage-active/inspector",
+            headers={
+                "X-Request-ID": "req-inspector",
+                "X-Correlation-ID": "corr-inspector",
+            },
+        )
+        missing_response = client.get(
+            "/api/stages/stage-missing/inspector",
+            headers={
+                "X-Request-ID": "req-inspector-missing",
+                "X-Correlation-ID": "corr-inspector-missing",
+            },
+        )
+
+    assert ok_response.status_code == 200
+    payload = ok_response.json()
+    assert payload["stage_run_id"] == "stage-active"
+    assert payload["run_id"] == "run-active"
+    assert payload["stage_type"] == "code_generation"
+    assert payload["status"] == "waiting_tool_confirmation"
+    assert {
+        "identity",
+        "input",
+        "process",
+        "output",
+        "artifacts",
+        "metrics",
+    }.issubset(payload)
+    assert "process-tool-confirmation-1" in payload["tool_confirmation_trace_refs"]
+
+    assert missing_response.status_code == 404
+    assert missing_response.json() == {
+        "error_code": "not_found",
+        "message": "Stage inspector was not found.",
+        "request_id": "req-inspector-missing",
+        "correlation_id": "corr-inspector-missing",
+    }
 
 
 def test_get_session_workspace_rejects_removed_session(
@@ -320,3 +365,31 @@ def test_query_workspace_route_is_documented_in_openapi(tmp_path: Path) -> None:
         ]
         == "#/components/schemas/ErrorResponse"
     )
+
+
+    inspector_route = paths["/api/stages/{stageRunId}/inspector"]["get"]
+    assert set(inspector_route["responses"]) == {"200", "404", "422", "500"}
+    assert (
+        inspector_route["responses"]["200"]["content"]["application/json"]["schema"][
+            "$ref"
+        ]
+        == "#/components/schemas/StageInspectorProjection"
+    )
+    stage_run_id_parameter = next(
+        parameter
+        for parameter in inspector_route["parameters"]
+        if parameter["name"] == "stageRunId"
+    )
+    assert stage_run_id_parameter["in"] == "path"
+    assert stage_run_id_parameter["required"] is True
+    assert stage_run_id_parameter["schema"]["type"] == "string"
+    for status_code in ("404", "422", "500"):
+        assert (
+            inspector_route["responses"][status_code]["content"]["application/json"][
+                "schema"
+            ]["$ref"]
+            == "#/components/schemas/ErrorResponse"
+        )
+
+    assert "StageInspectorProjection" in schemas
+    assert "ErrorResponse" in schemas
