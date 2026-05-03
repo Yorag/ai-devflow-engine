@@ -7,6 +7,7 @@ from backend.app.api.routes import (
     providers,
     query,
     runtime_settings,
+    runs,
     sessions,
     templates,
     tool_confirmations,
@@ -19,6 +20,7 @@ def build_api_router() -> APIRouter:
     router.include_router(health.router)
     router.include_router(projects.router)
     router.include_router(sessions.router)
+    router.include_router(runs.router)
     router.include_router(approvals.router)
     router.include_router(tool_confirmations.router)
     router.include_router(templates.router)

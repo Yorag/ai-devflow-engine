@@ -13,6 +13,7 @@ from backend.app.schemas.runtime_settings import (
     ProviderSnapshotRead,
     RuntimeLimitSnapshotRead,
 )
+from backend.app.schemas.session import SessionRead
 
 
 class _StrictBaseModel(BaseModel):
@@ -28,6 +29,19 @@ class RunSummaryProjection(_StrictBaseModel):
     ended_at: datetime | None = None
     current_stage_type: common.StageType | None = None
     is_active: bool
+
+
+class RunPauseRequest(_StrictBaseModel):
+    pass
+
+
+class RunResumeRequest(_StrictBaseModel):
+    pass
+
+
+class RunCommandResponse(_StrictBaseModel):
+    session: SessionRead
+    run: RunSummaryProjection
 
 
 class RunConfigurationSnapshotRead(_StrictBaseModel):
@@ -124,8 +138,11 @@ class RunTimelineProjection(_StrictBaseModel):
 __all__ = [
     "ComposerStateProjection",
     "ImplementationPlanReference",
+    "RunCommandResponse",
     "ImplementationPlanTaskRead",
     "RunConfigurationSnapshotRead",
+    "RunPauseRequest",
+    "RunResumeRequest",
     "RunSummaryProjection",
     "RunTimelineProjection",
     "SolutionDesignArtifactRead",
