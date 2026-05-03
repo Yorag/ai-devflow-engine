@@ -73,10 +73,13 @@ class FakeTool:
             boundary_type="workspace",
             requires_workspace=True,
             resource_scopes=("current_run_workspace",),
+            workspace_target_paths=("path",),
         )
     )
     side_effect_level: ToolSideEffectLevel = ToolSideEffectLevel.NONE
     audit_required: bool = False
+    schema_version: str = "tool-schema-v1"
+    default_timeout_seconds: float | None = None
 
     def __post_init__(self) -> None:
         if self.input_schema is None:
@@ -92,6 +95,19 @@ class FakeTool:
             result_schema=dict(self.result_schema or {}),
             risk_level=self.default_risk_level,
             risk_categories=list(self.risk_categories),
+            schema_version=self.schema_version,
+            default_timeout_seconds=self.default_timeout_seconds,
+        )
+
+    def execute(self, tool_input: ToolInput) -> ToolResult:
+        return ToolResult(
+            tool_name=self.name,
+            call_id=tool_input.call_id,
+            status=ToolResultStatus.SUCCEEDED,
+            output_payload={"content": "hello"},
+            output_preview="hello",
+            trace_context=tool_input.trace_context,
+            coordination_key=tool_input.coordination_key,
         )
 
 
@@ -166,6 +182,35 @@ def test_tool_models_preserve_trace_audit_and_side_effect_contract() -> None:
         )
 
 
+def test_tool_result_status_and_error_must_be_consistent() -> None:
+    trace = build_trace()
+    failure_error = ToolError(
+        error_code="tool_timeout",
+        safe_message="Tool execution timed out.",
+        safe_details={"timeout_seconds": 5},
+        trace_context=trace,
+    )
+
+    with pytest.raises(ValidationError):
+        ToolResult(
+            tool_name="read_file",
+            call_id="tool-call-1",
+            status=ToolResultStatus.FAILED,
+            trace_context=trace,
+            coordination_key="coordination-tool-call-1",
+        )
+
+    with pytest.raises(ValidationError):
+        ToolResult(
+            tool_name="read_file",
+            call_id="tool-call-1",
+            status=ToolResultStatus.SUCCEEDED,
+            error=failure_error,
+            trace_context=trace,
+            coordination_key="coordination-tool-call-1",
+        )
+
+
 def test_bindable_description_uses_langchain_compatible_schema() -> None:
     description = FakeTool().bindable_description()
 
@@ -173,6 +218,8 @@ def test_bindable_description_uses_langchain_compatible_schema() -> None:
     assert description.input_schema == READ_FILE_SCHEMA
     assert description.result_schema == READ_FILE_RESULT_SCHEMA
     assert description.risk_level is ToolRiskLevel.READ_ONLY
+    assert description.schema_version == "tool-schema-v1"
+    assert description.default_timeout_seconds is None
     assert description.to_langchain_tool_schema() == {
         "name": "read_file",
         "description": "Read one text file from the current run workspace.",
@@ -295,6 +342,23 @@ def test_registry_rejects_duplicate_unknown_and_case_drift() -> None:
 
     with pytest.raises(InvalidToolDefinitionError):
         registry.register(FakeTool(category="Workspace"))
+
+
+def test_registry_rejects_workspace_tool_without_declared_target_paths() -> None:
+    registry = ToolRegistry()
+
+    with pytest.raises(InvalidToolDefinitionError) as error:
+        registry.register(
+            FakeTool(
+                permission_boundary=ToolPermissionBoundary(
+                    boundary_type="workspace",
+                    requires_workspace=True,
+                    resource_scopes=("current_run_workspace",),
+                )
+            )
+        )
+
+    assert error.value.field_name == "permission_boundary.workspace_target_paths"
 
 
 def test_registry_invalid_contract_names_carry_structured_metadata() -> None:

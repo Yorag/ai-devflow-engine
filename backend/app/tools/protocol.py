@@ -5,7 +5,14 @@ from math import isfinite
 import re
 from typing import Annotated, Any, Mapping, Protocol, Self, Sequence, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PositiveFloat,
+    field_validator,
+    model_validator,
+)
 
 from backend.app.api.error_codes import (
     ErrorCode,
@@ -129,6 +136,7 @@ class ToolPermissionBoundary(_StrictBaseModel):
     boundary_type: ToolCategoryName
     requires_workspace: bool
     resource_scopes: tuple[NonEmptyRef, ...] = Field(default_factory=tuple)
+    workspace_target_paths: tuple[NonEmptyRef, ...] = Field(default_factory=tuple)
     external_access: bool = False
 
 
@@ -147,6 +155,8 @@ class ToolBindableDescription(_StrictBaseModel):
     result_schema: JsonObject
     risk_level: ToolRiskLevel
     risk_categories: list[ToolRiskCategory] = Field(default_factory=list)
+    schema_version: NonEmptyRef = "tool-schema-v1"
+    default_timeout_seconds: PositiveFloat | None = None
 
     _validate_schema_objects = field_validator("input_schema", "result_schema")(
         _validate_json_object
@@ -167,6 +177,7 @@ class ToolInput(_StrictBaseModel):
     trace_context: TraceContext
     coordination_key: NonEmptyRef
     side_effect_intent_ref: NonEmptyRef | None = None
+    timeout_seconds: PositiveFloat | None = None
 
     _validate_input_payload = field_validator("input_payload")(_validate_json_object)
 
@@ -261,6 +272,16 @@ class ToolResult(_StrictBaseModel):
 
     _validate_output_payload = field_validator("output_payload")(_validate_json_object)
 
+    @model_validator(mode="after")
+    def _validate_status_error_consistency(self) -> Self:
+        if self.status is ToolResultStatus.SUCCEEDED:
+            if self.error is not None:
+                raise ValueError("Succeeded tool results must not include an error.")
+            return self
+        if self.error is None:
+            raise ValueError("Non-succeeded tool results must include an error.")
+        return self
+
     @property
     def trace_id(self) -> str:
         return self.trace_context.trace_id
@@ -307,6 +328,14 @@ class ToolProtocol(Protocol):
     def audit_required(self) -> bool: ...
 
     def bindable_description(self) -> ToolBindableDescription: ...
+
+    @property
+    def schema_version(self) -> str: ...
+
+    @property
+    def default_timeout_seconds(self) -> float | None: ...
+
+    def execute(self, tool_input: ToolInput) -> ToolResult: ...
 
 
 __all__ = [

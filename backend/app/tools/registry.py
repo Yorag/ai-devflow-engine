@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from backend.app.tools.protocol import ToolBindableDescription, ToolProtocol
+from backend.app.tools.protocol import ToolBindableDescription, ToolProtocol, ToolResult
+
+if TYPE_CHECKING:
+    from backend.app.tools.execution_gate import (
+        ToolExecutionContext,
+        ToolExecutionRequest,
+    )
 
 
 _CONTRACT_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -101,6 +107,30 @@ class ToolRegistry:
                 category=category,
                 field_name="risk_categories",
             )
+        if bindable.schema_version != tool.schema_version:
+            raise InvalidToolDefinitionError(
+                "Bindable tool schema version must match tool.schema_version.",
+                tool_name=name,
+                category=category,
+                field_name="schema_version",
+            )
+        if bindable.default_timeout_seconds != tool.default_timeout_seconds:
+            raise InvalidToolDefinitionError(
+                "Bindable tool default timeout must match tool.default_timeout_seconds.",
+                tool_name=name,
+                category=category,
+                field_name="default_timeout_seconds",
+            )
+        if (
+            tool.permission_boundary.requires_workspace
+            and not tool.permission_boundary.workspace_target_paths
+        ):
+            raise InvalidToolDefinitionError(
+                "Workspace tools must declare permission_boundary.workspace_target_paths.",
+                tool_name=name,
+                category=category,
+                field_name="permission_boundary.workspace_target_paths",
+            )
         if name in self._tools_by_name:
             raise DuplicateToolRegistrationError(
                 "Tool names must be globally unique for model binding.",
@@ -172,6 +202,23 @@ class ToolRegistry:
             description.model_copy(deep=True)
             for description in sorted(descriptions, key=lambda candidate: candidate.name)
         )
+
+    def execute(
+        self,
+        request: "ToolExecutionRequest",
+        context: "ToolExecutionContext",
+    ) -> ToolResult:
+        from backend.app.tools.execution_gate import ToolExecutionGate
+
+        return ToolExecutionGate(self).execute(request, context)
+
+    def list_available_tools(
+        self,
+        context: "ToolExecutionContext",
+    ) -> tuple[ToolBindableDescription, ...]:
+        from backend.app.tools.execution_gate import ToolExecutionGate
+
+        return ToolExecutionGate(self).available_tools(context)
 
     @staticmethod
     def _validate_contract_name(
