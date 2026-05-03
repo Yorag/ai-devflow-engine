@@ -4,6 +4,7 @@ from backend.app.api.routes import (
     health,
     projects,
     providers,
+    query,
     runtime_settings,
     sessions,
     templates,
@@ -19,4 +20,5 @@ def build_api_router() -> APIRouter:
     router.include_router(templates.router)
     router.include_router(providers.router)
     router.include_router(runtime_settings.router)
+    router.include_router(query.router)
     return router
