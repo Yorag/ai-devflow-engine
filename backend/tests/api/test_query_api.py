@@ -27,7 +27,10 @@ from backend.app.repositories.runtime_settings import RUNTIME_SETTINGS_ID
 from backend.app.schemas.common import RunControlRecordType, StageType
 from backend.app.main import create_app
 from backend.app.schemas.observability import LogCategory, LogLevel, RedactionStatus
-from backend.tests.projections.test_workspace_projection import _seed_workspace
+from backend.tests.projections.test_workspace_projection import (
+    _default_internal_model_bindings,
+    _seed_workspace,
+)
 
 
 NOW = datetime(2026, 5, 1, 9, 0, tzinfo=UTC)
@@ -157,6 +160,9 @@ def _seed_log_query_rows(app) -> None:
                 hard_limits_version="platform-hard-limits-v1",
                 agent_limits={"max_react_iterations_per_stage": 30},
                 provider_call_policy={"network_error_max_retries": 3},
+                internal_model_bindings=_default_internal_model_bindings(
+                    "platform-runtime-settings-config-v1"
+                ),
                 context_limits={"grep_max_results": 100},
                 log_policy={
                     "run_log_retention_days": 30,

@@ -28,7 +28,12 @@ from backend.app.schemas.observability import (
     LogLevel,
     RedactionStatus,
 )
-from backend.tests.projections.test_workspace_projection import NOW, _manager, _seed_workspace
+from backend.tests.projections.test_workspace_projection import (
+    NOW,
+    _default_internal_model_bindings,
+    _manager,
+    _seed_workspace,
+)
 
 
 LOG_TIMES = [
@@ -49,6 +54,9 @@ def _seed_runtime_settings(manager, *, default_limit: int = 2, max_limit: int = 
                 hard_limits_version="platform-hard-limits-v1",
                 agent_limits={"max_react_iterations_per_stage": 30},
                 provider_call_policy={"network_error_max_retries": 3},
+                internal_model_bindings=_default_internal_model_bindings(
+                    "platform-runtime-settings-config-v1"
+                ),
                 context_limits={"grep_max_results": 100},
                 log_policy={
                     "run_log_retention_days": 30,
@@ -78,6 +86,9 @@ def _seed_runtime_settings_with_log_policy(manager, log_policy: dict[str, object
                 hard_limits_version="platform-hard-limits-v1",
                 agent_limits={"max_react_iterations_per_stage": 30},
                 provider_call_policy={"network_error_max_retries": 3},
+                internal_model_bindings=_default_internal_model_bindings(
+                    "platform-runtime-settings-config-v1"
+                ),
                 context_limits={"grep_max_results": 100},
                 log_policy=log_policy,
                 created_by_actor_id=None,

@@ -61,6 +61,31 @@ NOW = datetime(2026, 5, 1, 9, 0, tzinfo=UTC)
 SAFE_DELIVERY_CREDENTIAL_REF = "env:AI_DEVFLOW_CREDENTIAL_DELIVERY_TOKEN"
 
 
+def _default_internal_model_bindings(
+    source_config_version: str,
+) -> dict[str, dict[str, object]]:
+    return {
+        "context_compression": {
+            "provider_id": "provider-deepseek",
+            "model_id": "deepseek-chat",
+            "model_parameters": {"temperature": 0},
+            "source_config_version": source_config_version,
+        },
+        "structured_output_repair": {
+            "provider_id": "provider-deepseek",
+            "model_id": "deepseek-chat",
+            "model_parameters": {"temperature": 0},
+            "source_config_version": source_config_version,
+        },
+        "validation_pass": {
+            "provider_id": "provider-deepseek",
+            "model_id": "deepseek-reasoner",
+            "model_parameters": {"temperature": 0},
+            "source_config_version": source_config_version,
+        },
+    }
+
+
 def _manager(tmp_path) -> DatabaseManager:
     manager = DatabaseManager.from_environment_settings(
         EnvironmentSettings(platform_runtime_root=tmp_path / "runtime")
@@ -160,6 +185,9 @@ def _seed_workspace(manager: DatabaseManager) -> None:
                     hard_limits_version="platform-hard-limits-v9",
                     agent_limits={"max_react_iterations_per_stage": 99},
                     provider_call_policy={"network_error_max_retries": 9},
+                    internal_model_bindings=_default_internal_model_bindings(
+                        "latest-config-not-a-run-snapshot"
+                    ),
                     context_limits={"grep_max_results": 999},
                     log_policy={"log_query_default_limit": 50},
                     created_by_actor_id=None,

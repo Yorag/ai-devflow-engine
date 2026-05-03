@@ -402,7 +402,7 @@
 ## H4.6 Terminate 与 system_status
 
 **计划周期**：Week 6
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现终止命令和 run 尾部终态条目，使 terminated run 保留历史且不可继续提交。
 **实施计划**：`docs/plans/implementation/h4.6-terminate-system-status.md`
 
@@ -438,7 +438,7 @@
 ## H4.7 重新尝试命令与多 run 分界
 
 **计划周期**：Week 6
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：补齐重新尝试命令的事件、trigger metadata 和多 run 分界语义，使 failed / terminated 后的新 run 能被前端定位。
 **实施计划**：`docs/plans/implementation/h4.7-rerun-command-run-boundary.md`
 
