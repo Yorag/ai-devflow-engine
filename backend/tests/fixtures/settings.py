@@ -8,6 +8,8 @@ from backend.app.core.config import EnvironmentSettings
 from backend.app.schemas.runtime_settings import (
     AgentRuntimeLimits,
     ContextLimits,
+    InternalModelBindingSelection,
+    InternalModelBindings,
     LogPolicy,
     PlatformHardLimits,
     PlatformRuntimeSettingsRead,
@@ -62,6 +64,31 @@ def settings_override_fixture(
     return override_environment_settings(**values)
 
 
+def _default_internal_model_bindings(
+    source_config_version: str,
+) -> InternalModelBindings:
+    return InternalModelBindings(
+        context_compression=InternalModelBindingSelection(
+            provider_id="provider-deepseek",
+            model_id="deepseek-chat",
+            model_parameters={"temperature": 0},
+            source_config_version=source_config_version,
+        ),
+        structured_output_repair=InternalModelBindingSelection(
+            provider_id="provider-deepseek",
+            model_id="deepseek-chat",
+            model_parameters={"temperature": 0},
+            source_config_version=source_config_version,
+        ),
+        validation_pass=InternalModelBindingSelection(
+            provider_id="provider-deepseek",
+            model_id="deepseek-reasoner",
+            model_parameters={"temperature": 0},
+            source_config_version=source_config_version,
+        ),
+    )
+
+
 def runtime_settings_snapshot_fixture(
     *,
     settings_id: str = "platform-runtime-settings",
@@ -86,6 +113,7 @@ def runtime_settings_snapshot_fixture(
         ),
         agent_limits=agent_limits or AgentRuntimeLimits(),
         provider_call_policy=provider_call_policy or ProviderCallPolicy(),
+        internal_model_bindings=_default_internal_model_bindings(config_version),
         context_limits=context_limits or ContextLimits(),
         log_policy=log_policy or LogPolicy(),
         hard_limits=hard_limits or PlatformHardLimits(),

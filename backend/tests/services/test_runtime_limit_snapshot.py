@@ -86,6 +86,8 @@ def build_trace() -> TraceContext:
 
 
 def build_manager(tmp_path: Path) -> DatabaseManager:
+    from backend.app.services.providers import ProviderService
+
     manager = DatabaseManager(
         _database_paths={role: tmp_path / f"{role.value}.db" for role in DatabaseRole},
         _database_urls={
@@ -95,6 +97,12 @@ def build_manager(tmp_path: Path) -> DatabaseManager:
     )
     ControlBase.metadata.create_all(manager.engine(DatabaseRole.CONTROL))
     RuntimeBase.metadata.create_all(manager.engine(DatabaseRole.RUNTIME))
+    with manager.session(DatabaseRole.CONTROL) as session:
+        ProviderService(
+            session,
+            audit_service=RecordingAuditService(),
+            now=lambda: NOW,
+        ).seed_builtin_providers(trace_context=build_trace())
     return manager
 
 
