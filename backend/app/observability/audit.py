@@ -486,6 +486,86 @@ class AuditService:
             audit_file_error_message=copy_result.error_type,
         )
 
+    def record_tool_call(
+        self,
+        *,
+        tool_name: str,
+        command: str,
+        exit_code: int,
+        duration_ms: int,
+        changed_files: list[str],
+        stdout_excerpt: str,
+        stderr_excerpt: str,
+        trace_context: TraceContext,
+        created_at: datetime | None = None,
+        **metadata_overrides: Any,
+    ) -> AuditRecordResult:
+        metadata = {
+            "command": command,
+            "exit_code": exit_code,
+            "duration_ms": duration_ms,
+            "changed_files": changed_files,
+            "stdout_excerpt": stdout_excerpt,
+            "stderr_excerpt": stderr_excerpt,
+            **metadata_overrides,
+        }
+        return self.record_command_result(
+            actor_type=AuditActorType.SYSTEM,
+            actor_id=tool_name,
+            action=f"tool.{tool_name}.succeeded",
+            target_type="tool_action",
+            target_id=self._tool_target_id(tool_name, trace_context),
+            result=AuditResult.SUCCEEDED,
+            reason="Tool call completed.",
+            metadata=metadata,
+            trace_context=trace_context,
+            created_at=created_at,
+        )
+
+    def record_tool_error(
+        self,
+        *,
+        tool_name: str,
+        command: str,
+        error_code: ErrorCode | str,
+        result: AuditResult,
+        reason: str,
+        metadata: dict[str, Any] | None,
+        trace_context: TraceContext,
+        created_at: datetime | None = None,
+        **metadata_overrides: Any,
+    ) -> AuditRecordResult:
+        action_suffix = "blocked" if result is AuditResult.BLOCKED else "failed"
+        audit_metadata = {
+            "command": command,
+            "error_code": str(error_code),
+            **(metadata or {}),
+            **metadata_overrides,
+        }
+        if result is AuditResult.BLOCKED:
+            return self.record_blocked_action(
+                actor_type=AuditActorType.SYSTEM,
+                actor_id=tool_name,
+                action=f"tool.{tool_name}.{action_suffix}",
+                target_type="tool_action",
+                target_id=self._tool_target_id(tool_name, trace_context),
+                reason=reason,
+                metadata=audit_metadata,
+                trace_context=trace_context,
+                created_at=created_at,
+            )
+        return self.record_failed_command(
+            actor_type=AuditActorType.SYSTEM,
+            actor_id=tool_name,
+            action=f"tool.{tool_name}.{action_suffix}",
+            target_type="tool_action",
+            target_id=self._tool_target_id(tool_name, trace_context),
+            reason=reason,
+            metadata=audit_metadata,
+            trace_context=trace_context,
+            created_at=created_at,
+        )
+
     def record_rejected_command(
         self,
         *,
@@ -563,6 +643,10 @@ class AuditService:
             trace_context=trace_context,
             created_at=created_at,
         )
+
+    @staticmethod
+    def _tool_target_id(tool_name: str, trace_context: TraceContext) -> str:
+        return f"{tool_name}:{trace_context.run_id or 'unknown'}:{trace_context.span_id}"
 
     def _summarize_reason(self, reason: str | None) -> str | None:
         if reason is None:
