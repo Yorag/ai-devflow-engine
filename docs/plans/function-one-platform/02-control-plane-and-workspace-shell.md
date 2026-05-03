@@ -525,7 +525,7 @@
 ## C2.9a Session 删除命令与历史可见性
 
 **计划周期**：Week 4
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现无活动 run 的 Session 删除语义，使左栏历史管理只改变产品历史可见性，不替代运行终止、暂停、回退或重新尝试。
 **实施计划**：`docs/plans/implementation/c2.9a-session-delete-history.md`
 
