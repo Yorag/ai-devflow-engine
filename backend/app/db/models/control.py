@@ -119,6 +119,36 @@ class SessionModel(ControlBase, TimestampMixin):
     )
 
 
+class StartupPublicationModel(ControlBase, TimestampMixin):
+    __tablename__ = "startup_publications"
+
+    publication_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        String(80),
+        ForeignKey("sessions.session_id"),
+        nullable=False,
+        index=True,
+    )
+    run_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    stage_run_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    publication_state: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    pending_session_id: Mapped[str | None] = mapped_column(
+        String(80),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    aborted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    abort_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class ProviderModel(ControlBase, TimestampMixin):
     __tablename__ = "providers"
 
@@ -207,4 +237,5 @@ __all__ = [
     "ProjectModel",
     "ProviderModel",
     "SessionModel",
+    "StartupPublicationModel",
 ]

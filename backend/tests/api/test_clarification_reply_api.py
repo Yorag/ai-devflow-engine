@@ -8,6 +8,7 @@ from backend.app.core.config import EnvironmentSettings
 from backend.app.db.base import DatabaseRole
 from backend.app.db.models.control import ControlBase
 from backend.app.db.models.event import DomainEventModel, EventBase
+from backend.app.db.models.graph import GraphBase
 from backend.app.db.models.log import AuditLogEntryModel, LogBase
 from backend.app.db.models.runtime import (
     ClarificationRecordModel,
@@ -35,6 +36,7 @@ def build_app(tmp_path: Path):
     )
     ControlBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.CONTROL))
     RuntimeBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.RUNTIME))
+    GraphBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.GRAPH))
     EventBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.EVENT))
     LogBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.LOG))
     app.state.h41_runtime_port = FakeRuntimePort()
@@ -203,8 +205,8 @@ def test_clarification_reply_route_is_documented_in_openapi(tmp_path: Path) -> N
         path["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
         == "#/components/schemas/SessionMessageAppendResponse"
     )
-    assert set(path["responses"]) == {"200", "404", "409", "422", "500"}
-    for code in ("404", "409", "422", "500"):
+    assert set(path["responses"]) == {"200", "404", "409", "422", "500", "503"}
+    for code in ("404", "409", "422", "500", "503"):
         assert (
             path["responses"][code]["content"]["application/json"]["schema"]["$ref"]
             == "#/components/schemas/ErrorResponse"
@@ -213,6 +215,9 @@ def test_clarification_reply_route_is_documented_in_openapi(tmp_path: Path) -> N
         "message_type",
         "content",
     }
+    assert set(
+        schemas["SessionMessageAppendRequest"]["properties"]["message_type"]["enum"]
+    ) == {"clarification_reply", "new_requirement"}
     assert set(schemas["SessionMessageAppendResponse"]["required"]) == {
         "session",
         "message_item",

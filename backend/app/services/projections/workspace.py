@@ -23,6 +23,7 @@ from backend.app.schemas.session import SessionRead
 from backend.app.schemas.workspace import SessionWorkspaceProjection
 from backend.app.services.delivery_channels import DeliveryChannelService
 from backend.app.services.events import DomainEvent, EventStore
+from backend.app.services.publication_boundary import PublicationBoundaryService
 
 
 TOP_LEVEL_FEED_ENTRY_ADAPTER = TypeAdapter(TopLevelFeedEntry)
@@ -54,6 +55,11 @@ class WorkspaceProjectionService:
         self._control_session = control_session
         self._runtime_session = runtime_session
         self._event_store = EventStore(event_session)
+        self._publication_boundary = PublicationBoundaryService(
+            control_session=control_session,
+            runtime_session=runtime_session,
+            event_session=event_session,
+        )
         self._delivery_channel_service = DeliveryChannelService(
             control_session,
             credential_env_prefixes=credential_env_prefixes,
@@ -136,9 +142,13 @@ class WorkspaceProjectionService:
                 PipelineRunModel.run_id.asc(),
             )
         )
+        hidden_run_ids = self._publication_boundary.hidden_run_ids_for_session(
+            session_id=session.session_id
+        )
         return [
             self._run_summary(run, session=session)
             for run in self._runtime_session.execute(statement).scalars().all()
+            if run.run_id not in hidden_run_ids
         ]
 
     def _get_visible_session(self, session_id: str) -> SessionModel:
@@ -199,7 +209,12 @@ class WorkspaceProjectionService:
 
     def _build_narrative_feed(self, session_id: str) -> list[TopLevelFeedEntry]:
         entries: list[TopLevelFeedEntry] = []
+        hidden_run_ids = self._publication_boundary.hidden_run_ids_for_session(
+            session_id=session_id
+        )
         for event in self._event_store.list_for_session(session_id):
+            if event.run_id is not None and event.run_id in hidden_run_ids:
+                continue
             entry = self._entry_from_event(event)
             if entry is not None:
                 entries = self._upsert_feed_entry(entries, entry)

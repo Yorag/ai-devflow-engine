@@ -126,10 +126,16 @@ def build_runtime_run(
 
 
 def current_settings(tmp_path: Path):
+    from backend.app.services.providers import ProviderService
     from backend.app.services.runtime_settings import PlatformRuntimeSettingsService
 
     manager = build_manager(tmp_path)
     with manager.session(DatabaseRole.CONTROL) as session:
+        ProviderService(
+            session,
+            audit_service=RecordingAuditService(),
+            now=lambda: NOW,
+        ).seed_builtin_providers(trace_context=build_trace())
         return PlatformRuntimeSettingsService(
             session,
             audit_service=RecordingAuditService(),
@@ -144,10 +150,16 @@ def test_provider_call_policy_snapshot_freezes_current_settings_version(
     from backend.app.domain.provider_call_policy_snapshot import (
         ProviderCallPolicySnapshotBuilder,
     )
+    from backend.app.services.providers import ProviderService
     from backend.app.services.runtime_settings import PlatformRuntimeSettingsService
 
     manager = build_manager(tmp_path)
     with manager.session(DatabaseRole.CONTROL) as session:
+        ProviderService(
+            session,
+            audit_service=RecordingAuditService(),
+            now=lambda: NOW,
+        ).seed_builtin_providers(trace_context=build_trace())
         service = PlatformRuntimeSettingsService(
             session,
             audit_service=RecordingAuditService(),

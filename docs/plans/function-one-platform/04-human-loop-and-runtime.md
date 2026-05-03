@@ -260,7 +260,7 @@
 
 **计划周期**：Week 6
 **状态**：`[x]`
-**目标**：实现 Approve、Reject、拒绝理由、回退控制记录、回退目标和 code review 交付就绪 gate，使审批结果、交付快照固化和 runtime 恢复保持单一公开入口。
+**目标**：实现 Approve、Reject、拒绝理由、回退控制记录、回退目标和 code review 交付就绪 gate，使审批结果、交付快照固化和 runtime 恢复保持单一公开入口，并复用 R3.2a 的多库公开语义边界。
 **实施计划**：`docs/plans/implementation/h4.4-approval-commands-readiness-gate.md`
 
 **四个 red-green 实施步骤**：
@@ -286,6 +286,7 @@
 - `RuntimeOrchestrationService.resume_interrupt()`
 
 **验收标准**：
+- `H4.4` 的最终完成必须复用 R3.2a 已建立的 publication boundary 或同一共享 primitive；不得并行发明第二套 approve 发布机制。
 - `Approve` 可直接提交。
 - `Approve` 与 `Reject` 都必须创建顶层 `approval_result` 并进入事件流和 Narrative Feed 投影。
 - `Reject` 必须记录用户理由并进入后续上下文。

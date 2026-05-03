@@ -110,17 +110,41 @@ def get_event_session(request: Request) -> Iterator[Session]:
         session.close()
 
 
+def get_graph_session(request: Request) -> Iterator[Session]:
+    manager: DatabaseManager = request.app.state.database_manager
+    session = manager.session(DatabaseRole.GRAPH)
+    try:
+        yield session
+    finally:
+        session.close()
+
+
 def get_session_service(
     request: Request,
     session: Session = Depends(get_control_session),
+    runtime_session: Session = Depends(get_runtime_session),
+    event_session: Session = Depends(get_event_session),
+    graph_session: Session = Depends(get_graph_session),
 ) -> Iterator[SessionService]:
     manager: DatabaseManager = request.app.state.database_manager
     settings = request.app.state.environment_settings
     log_session = manager.session(DatabaseRole.LOG)
-    audit_writer = JsonlLogWriter(RuntimeDataSettings.from_environment_settings(settings))
-    audit_service = AuditService(log_session, audit_writer=audit_writer)
+    log_writer = JsonlLogWriter(RuntimeDataSettings.from_environment_settings(settings))
+    audit_service = getattr(
+        request.app.state,
+        "h43_audit_service",
+        AuditService(log_session, audit_writer=log_writer),
+    )
     try:
-        yield SessionService(session, audit_service=audit_service)
+        yield SessionService(
+            session,
+            runtime_session=runtime_session,
+            event_session=event_session,
+            graph_session=graph_session,
+            audit_service=audit_service,
+            log_writer=log_writer,
+            environment_settings=settings,
+        )
     finally:
         log_session.close()
 
@@ -526,6 +550,7 @@ def update_session_template(
         409: {"model": ErrorResponse},
         422: {"model": ErrorResponse},
         500: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
     },
 )
 def append_session_message(
@@ -536,10 +561,23 @@ def append_session_message(
 ) -> SessionMessageAppendResponse:
     trace_context = get_trace_context()
     try:
-        answer = service.append_clarification_reply(
+        if body.message_type == "clarification_reply":
+            answer = service.append_clarification_reply(
+                session_id=sessionId,
+                content=body.content,
+                clarification_service=clarification_service,
+                trace_context=trace_context,
+            )
+            session = service.get_session(sessionId, trace_context=trace_context)
+            if session is None:
+                raise ApiError(ErrorCode.NOT_FOUND, "Session was not found.", 404)
+            return SessionMessageAppendResponse(
+                session=_session_read(session),
+                message_item=answer.message_item,
+            )
+        started = service.start_run_from_new_requirement(
             session_id=sessionId,
             content=body.content,
-            clarification_service=clarification_service,
             trace_context=trace_context,
         )
     except ClarificationServiceError as exc:
@@ -548,13 +586,11 @@ def append_session_message(
             message=exc.message,
             status_code=exc.status_code,
         ) from exc
-
-    session = service.get_session(sessionId, trace_context=trace_context)
-    if session is None:
-        raise ApiError(ErrorCode.NOT_FOUND, "Session was not found.", 404)
+    except SessionServiceError as exc:
+        _raise_api_error(exc)
     return SessionMessageAppendResponse(
-        session=_session_read(session),
-        message_item=answer.message_item,
+        session=_session_read(started.session),
+        message_item=started.message_item,
     )
 
 

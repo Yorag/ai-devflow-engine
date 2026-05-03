@@ -32,7 +32,7 @@ class SessionTemplateUpdateRequest(_StrictBaseModel):
 
 
 class SessionMessageAppendRequest(_StrictBaseModel):
-    message_type: Literal["clarification_reply"]
+    message_type: Literal["clarification_reply", "new_requirement"]
     content: str = Field(min_length=1)
 
 

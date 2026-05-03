@@ -1,17 +1,20 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
+from types import SimpleNamespace
 from typing import Any, Protocol
 from uuid import uuid4
 
-from sqlalchemy import select
+from pydantic import ValidationError
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from backend.app.api.error_codes import ErrorCode
 from backend.app.db.models.event import DomainEventModel
-from backend.app.db.models.control import SessionModel
+from backend.app.db.models.control import ProviderModel, SessionModel
 from backend.app.db.models.runtime import (
     ApprovalRequestModel,
     PipelineRunModel,
@@ -21,6 +24,7 @@ from backend.app.db.models.runtime import (
 )
 from backend.app.domain.enums import (
     ApprovalStatus,
+    FeedEntryType,
     RunStatus,
     RunTriggerSource,
     SessionStatus,
@@ -29,35 +33,83 @@ from backend.app.domain.enums import (
     StageType,
     ToolConfirmationStatus,
 )
-from backend.app.domain.provider_call_policy_snapshot import ProviderCallPolicySnapshot
-from backend.app.domain.provider_snapshot import ModelBindingSnapshot, ProviderSnapshot
-from backend.app.domain.runtime_limit_snapshot import RuntimeLimitSnapshot
+from backend.app.domain.provider_call_policy_snapshot import (
+    ProviderCallPolicySnapshot,
+    ProviderCallPolicySnapshotBuilder,
+    ProviderCallPolicySnapshotBuilderError,
+)
+from backend.app.domain.provider_snapshot import (
+    InternalModelBindingSelection,
+    ModelBindingSnapshot,
+    ModelBindingSnapshotBuilder,
+    ModelBindingSnapshotBuilderError,
+    ProviderSnapshot,
+    ProviderSnapshotBuilder,
+    ProviderSnapshotBuilderError,
+)
+from backend.app.domain.runtime_limit_snapshot import (
+    RuntimeLimitSnapshot,
+    RuntimeLimitSnapshotBuilder,
+    RuntimeLimitSnapshotBuilderError,
+)
 from backend.app.domain.runtime_refs import CheckpointRef, GraphThreadRef, GraphThreadStatus
-from backend.app.domain.state_machine import InvalidRunStateTransition, RunStateMachine
-from backend.app.domain.template_snapshot import TemplateSnapshot
+from backend.app.domain.state_machine import (
+    InvalidRunStateTransition,
+    RunStateMachine,
+)
+from backend.app.domain.template_snapshot import TemplateSnapshot, TemplateSnapshotBuilder
 from backend.app.domain.trace_context import TraceContext
+from backend.app.domain.publication_boundary import PublishedStartupVisibility
 from backend.app.observability.log_writer import LogPayloadSummary, LogRecordInput
 from backend.app.observability.redaction import RedactionPolicy
 from backend.app.schemas.feed import (
     ApprovalRequestFeedEntry,
     SystemStatusFeedEntry,
+    ExecutionNodeProjection,
+    MessageFeedEntry,
     ToolConfirmationFeedEntry,
 )
-from backend.app.schemas.run import RunSummaryProjection
 from backend.app.schemas.observability import (
     AuditActorType,
     AuditResult,
     LogCategory,
     LogLevel,
 )
-from backend.app.repositories.runtime import RuntimeSnapshotRepository
+from backend.app.repositories.graph import GraphRepository, GraphRepositoryError
+from backend.app.repositories.runtime import (
+    PipelineRunRepository,
+    PipelineRunRepositoryError,
+    RuntimeSnapshotRepository,
+    RuntimeSnapshotRepositoryError,
+    StageRunRepositoryError,
+)
+from backend.app.schemas.run import RunSummaryProjection
 from backend.app.services.events import DomainEventType, EventStore
+from backend.app.services.graph_compiler import GraphCompiler, GraphCompilerError
+from backend.app.services.publication_boundary import (
+    PublicationBoundaryService,
+    PublicationBoundaryServiceError,
+)
 from backend.app.services.runtime_orchestration import RuntimeOrchestrationService
 from backend.app.services.tool_confirmations import ToolConfirmationService
+from backend.app.services.runtime_settings import (
+    PlatformRuntimeSettingsService,
+    RuntimeSettingsServiceError,
+)
+from backend.app.services.stages import StageRunService
 
 
 class RunLogWriter(Protocol):
     def write_run_log(self, record: LogRecordInput) -> object: ...
+
+
+class RunPromptValidationService(Protocol):
+    def validate_run_prompt_snapshots(
+        self,
+        *,
+        template_snapshot: TemplateSnapshot,
+        trace_context: TraceContext,
+    ) -> None: ...
 
 
 class RunLifecycleServiceError(ValueError):
@@ -72,6 +124,18 @@ class RunLifecycleServiceError(ValueError):
         self.error_code = error_code
         self.status_code = status_code
         self.detail_ref = detail_ref
+        super().__init__(message)
+
+
+class RunPromptValidationError(ValueError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: ErrorCode = ErrorCode.VALIDATION_ERROR,
+    ) -> None:
+        self.error_code = error_code
+        self.message = message
         super().__init__(message)
 
 
@@ -140,6 +204,14 @@ class TerminalStatusProjector:
         )
 
 
+@dataclass(frozen=True)
+class StartFirstRunResult:
+    session: SessionModel
+    run: PipelineRunModel
+    stage: StageRunModel
+    message_item: MessageFeedEntry
+
+
 class RunLifecycleService:
     def __init__(
         self,
@@ -148,9 +220,12 @@ class RunLifecycleService:
         *,
         control_session: Session | None = None,
         event_session: Session | None = None,
+        graph_session: Session | None = None,
         runtime_orchestration: RuntimeOrchestrationService | None = None,
         audit_service: Any | None = None,
         log_writer: RunLogWriter | None = None,
+        prompt_validation_service: RunPromptValidationService | None = None,
+        credential_env_prefixes: Iterable[str] | None = None,
         redaction_policy: RedactionPolicy | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
@@ -163,9 +238,18 @@ class RunLifecycleService:
         self._control_session = control_session
         self._runtime_session = runtime_session
         self._event_session = event_session
+        self._graph_session = graph_session
         self._runtime_orchestration = runtime_orchestration
         self._audit_service = audit_service or _NoopAuditService()
         self._log_writer = log_writer or _NoopRunLogWriter()
+        self._prompt_validation_service = (
+            prompt_validation_service or _NoopRunPromptValidationService()
+        )
+        self._credential_env_prefixes = (
+            tuple(credential_env_prefixes)
+            if credential_env_prefixes is not None
+            else None
+        )
         self._redaction_policy = redaction_policy or RedactionPolicy()
         self._now = now or (lambda: datetime.now(UTC))
         self._events = (
@@ -173,6 +257,429 @@ class RunLifecycleService:
             if event_session is not None
             else None
         )
+        self._publication_boundary: PublicationBoundaryService | None = None
+
+    def start_first_run(
+        self,
+        *,
+        session: SessionModel,
+        template: Any,
+        content: str,
+        trace_context: TraceContext,
+        runtime_settings_service: PlatformRuntimeSettingsService,
+    ) -> StartFirstRunResult:
+        started_at = self._now()
+        session = self._load_visible_session_for_start(session.session_id)
+        command_trace = trace_context.child_span(
+            span_id=f"session-message-new-requirement-{session.session_id}",
+            created_at=started_at,
+            session_id=session.session_id,
+        )
+        try:
+            RunStateMachine.assert_can_start_first_run(
+                session_status=session.status,
+                current_run_id=session.current_run_id,
+            )
+        except InvalidRunStateTransition as exc:
+            self._record_start_rejected(
+                session=session,
+                reason=str(exc),
+                trace_context=command_trace,
+                started_at=started_at,
+            )
+            raise RunLifecycleServiceError(
+                str(exc),
+                error_code=ErrorCode.VALIDATION_ERROR,
+                status_code=409,
+                detail_ref=session.session_id,
+            ) from exc
+
+        try:
+            graph_session = self._require_graph_session()
+            run_id = _bounded_id("run", uuid4().hex)
+            stage_run_id = _bounded_id("stage-run", uuid4().hex)
+            graph_thread_id = _graph_thread_id(run_id)
+            workspace_ref = _workspace_ref(run_id)
+            publication = None
+            run_trace = _fork_trace(
+                command_trace,
+                trace_id=_trace_id(),
+                span_id=f"run-start-{run_id}",
+                created_at=started_at,
+                run_id=run_id,
+                stage_run_id=stage_run_id,
+                graph_thread_id=graph_thread_id,
+            )
+            try:
+                publication = self._begin_startup_publication(
+                    session_id=session.session_id,
+                    run_id=run_id,
+                    stage_run_id=stage_run_id,
+                    started_at=started_at,
+                    trace_context=command_trace,
+                )
+            except RunLifecycleServiceError as exc:
+                self._rollback_all()
+                try:
+                    graph_session.rollback()
+                except Exception:
+                    pass
+                self._record_start_rejected(
+                    session=session,
+                    reason=str(exc),
+                    trace_context=command_trace,
+                    started_at=started_at,
+                )
+                raise
+            settings_read = runtime_settings_service.get_current_settings(
+                trace_context=run_trace
+            )
+
+            self._audit_service.require_audit_record(
+                actor_type=AuditActorType.USER,
+                actor_id="api-user",
+                action="session.message.new_requirement.accepted",
+                target_type="session",
+                target_id=session.session_id,
+                result=AuditResult.ACCEPTED,
+                reason="First run startup accepted.",
+                metadata={
+                    "session_id": session.session_id,
+                    "project_id": session.project_id,
+                    "selected_template_id": template.template_id,
+                    "run_id": run_id,
+                    "stage_run_id": stage_run_id,
+                    "graph_thread_ref": graph_thread_id,
+                    "result_status": "accepted",
+                },
+                trace_context=run_trace,
+                rollback=self._rollback_all,
+                created_at=started_at,
+            )
+            self._record_run_log(
+                payload_type="run_start_accepted",
+                message="First run startup accepted.",
+                metadata={
+                    "session_id": session.session_id,
+                    "project_id": session.project_id,
+                    "selected_template_id": template.template_id,
+                    "run_id": run_id,
+                    "stage_run_id": stage_run_id,
+                    "graph_thread_ref": graph_thread_id,
+                    "result_status": "accepted",
+                },
+                trace_context=run_trace,
+                created_at=started_at,
+                level=LogLevel.INFO,
+            )
+
+            try:
+                template_snapshot = TemplateSnapshotBuilder.build_for_run(
+                    template,
+                    run_id=run_id,
+                    created_at=started_at,
+                )
+            except (ValidationError, ValueError) as exc:
+                raise RunPromptValidationError(str(exc)) from exc
+            self._prompt_validation_service.validate_run_prompt_snapshots(
+                template_snapshot=template_snapshot,
+                trace_context=run_trace,
+            )
+            runtime_limit_snapshot = RuntimeLimitSnapshotBuilder.build_for_run(
+                settings_read,
+                template_snapshot=template_snapshot,
+                run_id=run_id,
+                created_at=started_at,
+            )
+            provider_call_policy_snapshot = ProviderCallPolicySnapshotBuilder.build_for_run(
+                settings_read,
+                run_id=run_id,
+                created_at=started_at,
+            )
+            required_providers = self._load_required_providers(
+                template_snapshot=template_snapshot,
+                settings_read=settings_read,
+            )
+            provider_snapshots = ProviderSnapshotBuilder.build_for_run(
+                required_providers,
+                run_id=run_id,
+                required_provider_ids=self._required_provider_ids(
+                    template_snapshot,
+                    settings_read,
+                ),
+                required_model_ids_by_provider=self._required_model_ids_by_provider(
+                    settings_read
+                ),
+                created_at=started_at,
+                credential_env_prefixes=self._credential_env_prefixes,
+            )
+            model_binding_snapshots = ModelBindingSnapshotBuilder.build_for_run(
+                template_snapshot,
+                provider_snapshots=provider_snapshots,
+                internal_bindings=self._internal_bindings_from_settings(settings_read),
+                run_id=run_id,
+                created_at=started_at,
+            )
+            graph_definition = GraphCompiler(now=lambda: started_at).compile(
+                template_snapshot=template_snapshot,
+                runtime_limit_snapshot=runtime_limit_snapshot,
+            )
+
+            RuntimeSnapshotRepository(self._runtime_session).save_runtime_limit_snapshot(
+                runtime_limit_snapshot
+            )
+            RuntimeSnapshotRepository(
+                self._runtime_session
+            ).save_provider_call_policy_snapshot(provider_call_policy_snapshot)
+            GraphRepository(graph_session).save_definition(graph_definition)
+
+            run = PipelineRunRepository(self._runtime_session).create_run(
+                run_id=run_id,
+                session_id=session.session_id,
+                project_id=session.project_id,
+                attempt_index=1,
+                status=RunStatus.RUNNING,
+                trigger_source=RunTriggerSource.INITIAL_REQUIREMENT,
+                template_snapshot_ref=template_snapshot.snapshot_ref,
+                graph_definition_ref=graph_definition.graph_definition_id,
+                graph_thread_ref=graph_thread_id,
+                workspace_ref=workspace_ref,
+                runtime_limit_snapshot_ref=runtime_limit_snapshot.snapshot_id,
+                provider_call_policy_snapshot_ref=provider_call_policy_snapshot.snapshot_id,
+                delivery_channel_snapshot_ref=None,
+                current_stage_run_id=stage_run_id,
+                trace_id=run_trace.trace_id,
+                started_at=started_at,
+                ended_at=None,
+                created_at=started_at,
+                updated_at=started_at,
+            )
+            self.attach_provider_snapshots(
+                run,
+                provider_snapshots=provider_snapshots,
+                model_binding_snapshots=model_binding_snapshots,
+            )
+            GraphRepository(graph_session).save_thread(
+                thread_id=graph_thread_id,
+                run_id=run_id,
+                graph_definition_id=graph_definition.graph_definition_id,
+                current_node_key="requirement_analysis",
+                created_at=started_at,
+            )
+            stage_trace = run_trace.child_span(
+                span_id=f"stage-start-{stage_run_id}",
+                created_at=started_at,
+                run_id=run_id,
+                stage_run_id=stage_run_id,
+                graph_thread_id=graph_thread_id,
+            )
+            stage = StageRunService(
+                runtime_session=self._runtime_session,
+                log_writer=self._log_writer,
+                redaction_policy=self._redaction_policy,
+                now=self._now,
+            ).start_stage(
+                run_id=run_id,
+                stage_run_id=stage_run_id,
+                stage_type=StageType.REQUIREMENT_ANALYSIS,
+                attempt_index=1,
+                graph_node_key="requirement_analysis",
+                stage_contract_ref="requirement_analysis",
+                input_ref=None,
+                summary="Requirement Analysis started from the first user requirement.",
+                trace_context=stage_trace,
+            )
+            event_trace = run_trace.child_span(
+                span_id=f"event-run-created-{run_id}",
+                created_at=started_at,
+                run_id=run_id,
+                stage_run_id=stage_run_id,
+                graph_thread_id=graph_thread_id,
+            )
+            run_summary = RunSummaryProjection(
+                run_id=run.run_id,
+                attempt_index=run.attempt_index,
+                status=run.status,
+                trigger_source=run.trigger_source,
+                started_at=run.started_at,
+                ended_at=run.ended_at,
+                current_stage_type=StageType.REQUIREMENT_ANALYSIS,
+                is_active=True,
+            )
+            self._require_events().append(
+                DomainEventType.PIPELINE_RUN_CREATED,
+                payload={"run": run_summary.model_dump(mode="json")},
+                trace_context=event_trace,
+                session_id=session.session_id,
+                run_id=run_id,
+                stage_run_id=stage_run_id,
+                occurred_at=started_at,
+            )
+            self._append_run_status_event(
+                DomainEventType.RUN_RESUMED,
+                session=self._published_session_view(
+                    session=session,
+                    run_id=run_id,
+                    occurred_at=started_at,
+                ),
+                run=run,
+                trace_context=event_trace,
+                occurred_at=started_at,
+            )
+            stage_node = self._build_stage_started_projection(
+                run_id=run_id,
+                stage=stage,
+                occurred_at=started_at,
+            )
+            self._require_events().append(
+                DomainEventType.STAGE_STARTED,
+                payload={"stage_node": stage_node.model_dump(mode="json")},
+                trace_context=event_trace,
+                session_id=session.session_id,
+                run_id=run_id,
+                stage_run_id=stage_run_id,
+                occurred_at=started_at,
+            )
+            message_item = MessageFeedEntry(
+                entry_id=_bounded_id("entry", uuid4().hex),
+                run_id=run_id,
+                type=FeedEntryType.USER_MESSAGE,
+                occurred_at=started_at,
+                message_id=_bounded_id("message", uuid4().hex),
+                author="user",
+                content=content,
+                stage_run_id=stage_run_id,
+            )
+            self._require_events().append(
+                DomainEventType.SESSION_MESSAGE_APPENDED,
+                payload={"message_item": message_item.model_dump(mode="json")},
+                trace_context=event_trace,
+                session_id=session.session_id,
+                run_id=run_id,
+                stage_run_id=stage_run_id,
+                occurred_at=started_at,
+            )
+
+            self._audit_service.require_audit_record(
+                actor_type=AuditActorType.USER,
+                actor_id="api-user",
+                action="session.message.new_requirement",
+                target_type="session",
+                target_id=session.session_id,
+                result=AuditResult.SUCCEEDED,
+                reason=None,
+                metadata={
+                    "session_id": session.session_id,
+                    "run_id": run.run_id,
+                    "stage_run_id": stage.stage_run_id,
+                    "graph_definition_ref": run.graph_definition_ref,
+                    "graph_thread_ref": run.graph_thread_ref,
+                    "workspace_ref": run.workspace_ref,
+                    "result_status": "succeeded",
+                },
+                trace_context=run_trace,
+                rollback=self._rollback_all,
+                created_at=started_at,
+            )
+            self._commit_first_run_startup(
+                session_id=session.session_id,
+                run_id=run.run_id,
+                stage_run_id=stage.stage_run_id,
+                publication_id=publication.publication_id if publication else None,
+                trace_context=run_trace,
+                occurred_at=started_at,
+            )
+            session = self._load_visible_session_for_start(session.session_id)
+            self._record_run_log(
+                payload_type="run_start_completed",
+                message="First run startup completed.",
+                metadata={
+                    "session_id": session.session_id,
+                    "run_id": run.run_id,
+                    "stage_run_id": stage.stage_run_id,
+                    "graph_definition_ref": run.graph_definition_ref,
+                    "graph_thread_ref": run.graph_thread_ref,
+                    "workspace_ref": run.workspace_ref,
+                    "result_status": "succeeded",
+                },
+                trace_context=run_trace,
+                created_at=started_at,
+                level=LogLevel.INFO,
+            )
+            return StartFirstRunResult(
+                session=session,
+                run=run,
+                stage=stage,
+                message_item=message_item,
+            )
+        except (
+            RuntimeSettingsServiceError,
+            RuntimeLimitSnapshotBuilderError,
+            ProviderCallPolicySnapshotBuilderError,
+            ProviderSnapshotBuilderError,
+            ModelBindingSnapshotBuilderError,
+            RunPromptValidationError,
+            GraphCompilerError,
+            GraphRepositoryError,
+            PipelineRunRepositoryError,
+            RuntimeSnapshotRepositoryError,
+            StageRunRepositoryError,
+            PublicationBoundaryServiceError,
+        ) as exc:
+            self._abort_startup_if_needed(
+                publication_id=publication.publication_id if publication else None,
+                session_id=session.session_id,
+                run_id=run_id,
+                reason=getattr(exc, "message", str(exc)),
+                trace_context=run_trace,
+                occurred_at=started_at,
+            )
+            self._record_start_failed(
+                session=session,
+                reason=getattr(exc, "message", str(exc)),
+                trace_context=run_trace,
+                started_at=started_at,
+                error_code=getattr(exc, "error_code", ErrorCode.CONFIG_STORAGE_UNAVAILABLE),
+            )
+            error_code = getattr(exc, "error_code", ErrorCode.CONFIG_STORAGE_UNAVAILABLE)
+            status_code = 503
+            if error_code in {
+                ErrorCode.VALIDATION_ERROR,
+                ErrorCode.CONFIG_INVALID_VALUE,
+                ErrorCode.CONFIG_HARD_LIMIT_EXCEEDED,
+                ErrorCode.CONFIG_CREDENTIAL_ENV_NOT_ALLOWED,
+            }:
+                status_code = 422
+            raise RunLifecycleServiceError(
+                getattr(exc, "message", str(exc)),
+                error_code=error_code,
+                status_code=status_code,
+                detail_ref=session.session_id,
+            ) from exc
+        except RunLifecycleServiceError:
+            raise
+        except Exception as exc:
+            self._abort_startup_if_needed(
+                publication_id=publication.publication_id if publication else None,
+                session_id=session.session_id,
+                run_id=run_id,
+                reason=str(exc),
+                trace_context=run_trace,
+                occurred_at=started_at,
+            )
+            self._record_start_failed(
+                session=session,
+                reason=str(exc),
+                trace_context=run_trace,
+                started_at=started_at,
+                error_code=ErrorCode.INTERNAL_ERROR,
+            )
+            raise RunLifecycleServiceError(
+                "first run startup failed.",
+                error_code=ErrorCode.INTERNAL_ERROR,
+                status_code=500,
+                detail_ref=session.session_id,
+            ) from exc
 
     def pause_run(
         self,
@@ -1881,22 +2388,26 @@ class RunLifecycleService:
             payload_type=payload_type,
         )
         try:
-            self._log_writer.write_run_log(
-                LogRecordInput(
-                    source="services.runs",
-                    category=LogCategory.RUNTIME,
-                    level=level,
-                    message=message,
-                    trace_context=trace_context,
-                    payload=LogPayloadSummary.from_redacted_payload(
-                        payload_type,
-                        redacted_payload,
-                    ),
-                    created_at=created_at,
-                    duration_ms=duration_ms,
-                    error_code=error_code,
-                )
+            record = LogRecordInput(
+                source="services.runs",
+                category=LogCategory.RUNTIME,
+                level=level,
+                message=message,
+                trace_context=trace_context,
+                payload=LogPayloadSummary.from_redacted_payload(
+                    payload_type,
+                    redacted_payload,
+                ),
+                created_at=created_at,
+                duration_ms=duration_ms,
+                error_code=error_code,
             )
+            if trace_context.run_id is not None:
+                self._log_writer.write_run_log(record)
+            elif hasattr(self._log_writer, "write"):
+                self._log_writer.write(record)
+            else:
+                self._log_writer.write_run_log(record)
         except Exception:
             pass
 
@@ -1910,6 +2421,38 @@ class RunLifecycleService:
         self._runtime_session.commit()
         self._require_control_session().commit()
         self._require_event_session().commit()
+        if self._graph_session is not None:
+            self._graph_session.commit()
+
+    def _commit_first_run_startup(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        stage_run_id: str,
+        publication_id: str | None,
+        trace_context: TraceContext,
+        occurred_at: datetime,
+    ) -> PublishedStartupVisibility:
+        if publication_id is None:
+            raise RunLifecycleServiceError(
+                "startup publication is required for first run startup.",
+                error_code=ErrorCode.INTERNAL_ERROR,
+                status_code=500,
+            )
+
+        self._runtime_session.commit()
+        self._require_event_session().commit()
+        if self._graph_session is not None:
+            self._graph_session.commit()
+        return self._publication_boundary_service().publish_startup_visibility(
+            publication_id=publication_id,
+            session_id=session_id,
+            run_id=run_id,
+            stage_run_id=stage_run_id,
+            trace_context=trace_context,
+            published_at=occurred_at,
+        )
 
     def _commit_rerun_all(
         self,
@@ -1990,6 +2533,8 @@ class RunLifecycleService:
             self._control_session.rollback()
         if self._event_session is not None:
             self._event_session.rollback()
+        if self._graph_session is not None:
+            self._graph_session.rollback()
 
     def _require_event_session(self) -> Session:
         if self._event_session is None:
@@ -1999,6 +2544,15 @@ class RunLifecycleService:
                 status_code=500,
             )
         return self._event_session
+
+    def _require_graph_session(self) -> Session:
+        if self._graph_session is None:
+            raise RunLifecycleServiceError(
+                "graph_session is required for first run startup.",
+                error_code=ErrorCode.INTERNAL_ERROR,
+                status_code=500,
+            )
+        return self._graph_session
 
     def _require_events(self) -> EventStore:
         if self._events is None:
@@ -2026,9 +2580,272 @@ class RunLifecycleService:
             status_code=409,
         )
 
+    def _load_visible_session_for_start(self, session_id: str) -> SessionModel:
+        session = (
+            self._require_control_session()
+            .query(SessionModel)
+            .filter(
+                SessionModel.session_id == session_id,
+                SessionModel.is_visible.is_(True),
+            )
+            .populate_existing()
+            .one_or_none()
+        )
+        if session is None:
+            raise RunLifecycleServiceError(
+                "Session was not found.",
+                error_code=ErrorCode.NOT_FOUND,
+                status_code=404,
+                detail_ref=session_id,
+            )
+        return session
+
+    def _begin_startup_publication(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        stage_run_id: str,
+        started_at: datetime,
+        trace_context: TraceContext,
+    ):
+        del started_at
+        try:
+            return self._publication_boundary_service().begin_startup_publication(
+                session_id=session_id,
+                run_id=run_id,
+                stage_run_id=stage_run_id,
+                trace_context=trace_context,
+            )
+        except PublicationBoundaryServiceError as exc:
+            raise RunLifecycleServiceError(
+                exc.message,
+                error_code=exc.error_code,
+                status_code=exc.status_code,
+                detail_ref=session_id,
+            ) from exc
+
+    def _abort_startup_if_needed(
+        self,
+        *,
+        publication_id: str | None,
+        session_id: str,
+        run_id: str,
+        reason: str,
+        trace_context: TraceContext,
+        occurred_at: datetime,
+    ) -> None:
+        if publication_id is None:
+            self._rollback_all()
+            return
+        try:
+            self._publication_boundary_service().abort_startup_publication(
+                publication_id=publication_id,
+                session_id=session_id,
+                run_id=run_id,
+                reason=reason,
+                trace_context=trace_context,
+                aborted_at=occurred_at,
+            )
+        except PublicationBoundaryServiceError:
+            self._rollback_all()
+
+    def _published_session_view(
+        self,
+        *,
+        session: SessionModel,
+        run_id: str,
+        occurred_at: datetime,
+    ):
+        return SimpleNamespace(
+            session_id=session.session_id,
+            status=SessionStatus.RUNNING,
+            current_run_id=run_id,
+            latest_stage_type=StageType.REQUIREMENT_ANALYSIS,
+            updated_at=occurred_at,
+        )
+
+    def _publication_boundary_service(self) -> PublicationBoundaryService:
+        if self._publication_boundary is None:
+            self._publication_boundary = PublicationBoundaryService(
+                control_session=self._require_control_session(),
+                runtime_session=self._runtime_session,
+                graph_session=self._graph_session,
+                event_session=self._event_session,
+                audit_service=self._audit_service,
+                log_writer=self._log_writer,
+                now=self._now,
+            )
+        return self._publication_boundary
+
+    def _build_stage_started_projection(
+        self,
+        *,
+        run_id: str,
+        stage: StageRunModel,
+        occurred_at: datetime,
+    ) -> ExecutionNodeProjection:
+        return ExecutionNodeProjection(
+            entry_id=_bounded_id("entry", stage.stage_run_id),
+            run_id=run_id,
+            occurred_at=occurred_at,
+            stage_run_id=stage.stage_run_id,
+            stage_type=stage.stage_type,
+            status=stage.status,
+            attempt_index=stage.attempt_index,
+            started_at=stage.started_at,
+            ended_at=stage.ended_at,
+            summary=stage.summary or f"{stage.stage_type.value} started.",
+            items=[],
+            metrics={},
+        )
+
+    def _load_required_providers(
+        self,
+        *,
+        template_snapshot: TemplateSnapshot,
+        settings_read,
+    ) -> list[ProviderModel]:
+        provider_ids = self._required_provider_ids(template_snapshot, settings_read)
+        control_session = self._require_control_session()
+        providers: list[ProviderModel] = []
+        missing: list[str] = []
+        for provider_id in provider_ids:
+            provider = control_session.get(ProviderModel, provider_id)
+            if provider is None:
+                missing.append(provider_id)
+                continue
+            providers.append(provider)
+        if missing:
+            raise ProviderSnapshotBuilderError(
+                ErrorCode.CONFIG_SNAPSHOT_UNAVAILABLE,
+                "Required Provider configuration is unavailable: "
+                + ", ".join(missing)
+                + ".",
+            )
+        return providers
+
+    @staticmethod
+    def _required_provider_ids(template_snapshot: TemplateSnapshot, settings_read) -> tuple[str, ...]:
+        provider_ids = {
+            binding.provider_id for binding in template_snapshot.stage_role_bindings
+        }
+        bindings = settings_read.internal_model_bindings.model_dump(mode="python")
+        for binding in bindings.values():
+            provider_ids.add(binding["provider_id"])
+        return tuple(sorted(provider_ids))
+
+    @staticmethod
+    def _required_model_ids_by_provider(settings_read) -> dict[str, tuple[str, ...]]:
+        by_provider: dict[str, list[str]] = {}
+        bindings = settings_read.internal_model_bindings.model_dump(mode="python")
+        for binding in bindings.values():
+            by_provider.setdefault(binding["provider_id"], []).append(binding["model_id"])
+        return {
+            provider_id: tuple(dict.fromkeys(model_ids))
+            for provider_id, model_ids in by_provider.items()
+        }
+
+    @staticmethod
+    def _internal_bindings_from_settings(settings_read) -> tuple[InternalModelBindingSelection, ...]:
+        bindings = settings_read.internal_model_bindings.model_dump(mode="python")
+        return tuple(
+            InternalModelBindingSelection(
+                binding_type=binding_type,
+                provider_id=binding["provider_id"],
+                model_id=binding["model_id"],
+                model_parameters=dict(binding["model_parameters"]),
+            )
+            for binding_type, binding in bindings.items()
+        )
+
+    def _record_start_rejected(
+        self,
+        *,
+        session: SessionModel,
+        reason: str,
+        trace_context: TraceContext,
+        started_at: datetime,
+    ) -> None:
+        try:
+            self._audit_service.record_rejected_command(
+                actor_type=AuditActorType.USER,
+                actor_id="api-user",
+                action="session.message.new_requirement.rejected",
+                target_type="session",
+                target_id=session.session_id,
+                reason=reason,
+                metadata={
+                    "session_id": session.session_id,
+                    "status": session.status.value,
+                    "current_run_id": session.current_run_id,
+                    "result_status": "rejected",
+                },
+                trace_context=trace_context,
+                created_at=started_at,
+            )
+        except Exception:
+            pass
+        self._record_run_log(
+            payload_type="run_start_rejected",
+            message="First run startup rejected.",
+            metadata={
+                "session_id": session.session_id,
+                "reason": reason,
+                "result_status": "rejected",
+            },
+            trace_context=trace_context,
+            created_at=started_at,
+            level=LogLevel.WARNING,
+            error_code=ErrorCode.VALIDATION_ERROR.value,
+        )
+
+    def _record_start_failed(
+        self,
+        *,
+        session: SessionModel,
+        reason: str,
+        trace_context: TraceContext,
+        started_at: datetime,
+        error_code: ErrorCode,
+    ) -> None:
+        try:
+            self._audit_service.record_failed_command(
+                actor_type=AuditActorType.USER,
+                actor_id="api-user",
+                action="session.message.new_requirement.failed",
+                target_type="session",
+                target_id=session.session_id,
+                reason=reason,
+                metadata={
+                    "session_id": session.session_id,
+                    "result_status": "failed",
+                },
+                trace_context=trace_context,
+                created_at=started_at,
+            )
+        except Exception:
+            pass
+        self._record_run_log(
+            payload_type="run_start_failed",
+            message="First run startup failed.",
+            metadata={
+                "session_id": session.session_id,
+                "reason": reason,
+                "result_status": "failed",
+            },
+            trace_context=trace_context,
+            created_at=started_at,
+            level=LogLevel.ERROR,
+            error_code=error_code.value,
+        )
+
 
 class _NoopAuditService:
     def require_audit_record(self, **kwargs: Any) -> object:
+        return object()
+
+    def record_command_result(self, **kwargs: Any) -> object:
         return object()
 
     def record_rejected_command(self, **kwargs: Any) -> object:
@@ -2047,9 +2864,59 @@ class _RejectedRunLifecycleServiceError(RunLifecycleServiceError):
     pass
 
 
+class _NoopRunPromptValidationService:
+    def validate_run_prompt_snapshots(
+        self,
+        *,
+        template_snapshot: TemplateSnapshot,
+        trace_context: TraceContext,
+    ) -> None:
+        return None
+
+
 __all__ = [
     "RunCommandResult",
     "RunLifecycleService",
     "RunLifecycleServiceError",
     "TerminalStatusProjector",
+    "RunPromptValidationError",
+    "StartFirstRunResult",
 ]
+
+
+def _bounded_id(prefix: str, suffix: str) -> str:
+    candidate = f"{prefix}-{suffix}"
+    if len(candidate) <= 80:
+        return candidate
+    digest = sha256(candidate.encode("utf-8")).hexdigest()[:24]
+    return f"{prefix}-{digest}"
+
+
+def _graph_thread_id(run_id: str) -> str:
+    return _bounded_id("graph-thread", run_id)
+
+
+def _workspace_ref(run_id: str) -> str:
+    return f"workspace-{run_id}"
+
+
+def _trace_id() -> str:
+    return _bounded_id("trace", uuid4().hex)
+
+
+def _fork_trace(
+    parent: TraceContext,
+    *,
+    trace_id: str | None = None,
+    span_id: str,
+    created_at: datetime,
+    **object_updates: Any,
+) -> TraceContext:
+    data = parent.model_dump()
+    data.update(object_updates)
+    if trace_id is not None:
+        data["trace_id"] = trace_id
+    data["parent_span_id"] = parent.span_id
+    data["span_id"] = span_id
+    data["created_at"] = created_at
+    return TraceContext.model_validate(data)
