@@ -667,9 +667,14 @@ class TemplateService:
             )
             return validator.validate_template_prompts_before_save(bindings)
         except PromptValidationError as exc:
+            message = (
+                INVALID_TEMPLATE_MESSAGE
+                if "blank_prompt" in exc.rule_ids
+                else exc.message
+            )
             raise TemplateServiceError(
                 ErrorCode.VALIDATION_ERROR,
-                exc.message,
+                message,
             ) from exc
 
     def _ordered_system_templates(self) -> list[PipelineTemplateModel]:

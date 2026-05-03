@@ -123,7 +123,7 @@ class PromptValidationService:
             rule_ids.append("prompt_length_exceeded")
         if len(normalized) > self._context_prompt_budget_chars():
             rule_ids.append("context_budget_exceeded")
-        if _contains_any(
+        if _contains_non_negated_any(
             lowered,
             (
                 r"\bignore\b.*\bplatform instructions?\b",
@@ -217,7 +217,7 @@ class PromptValidationService:
             ),
         ):
             rule_ids.append("stage_contract_override")
-        if _contains_any(
+        if _contains_non_negated_any(
             lowered,
             (
                 r"\bchange the delivery mode\b",
@@ -322,6 +322,19 @@ def _normalize_for_matching(prompt: str) -> str:
 
 def _contains_any(text: str, patterns: Iterable[str]) -> bool:
     return any(re.search(pattern, text) for pattern in patterns)
+
+
+def _contains_non_negated_any(text: str, patterns: Iterable[str]) -> bool:
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            prefix = text[max(0, match.start() - 32) : match.start()]
+            if re.search(
+                r"\b(do not|don't|never|avoid|must not|should not|cannot|can't)\b\s*$",
+                prefix,
+            ):
+                continue
+            return True
+    return False
 
 
 def _mentions_tool(text: str, tool_name: str) -> bool:

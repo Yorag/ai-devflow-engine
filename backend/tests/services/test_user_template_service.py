@@ -497,6 +497,38 @@ def test_editable_field_validation_rejects_role_order_and_blank_prompts(
     assert len(_action_records(audit, "template.save_as.rejected")) == 2
 
 
+def test_blank_prompt_keeps_invalid_editable_fields_error_message(
+    tmp_path: Path,
+) -> None:
+    from backend.app.services.templates import TemplateService, TemplateServiceError
+
+    audit = RecordingAuditService()
+    manager = build_manager(tmp_path)
+
+    with manager.session(DatabaseRole.CONTROL) as session:
+        seed_templates_and_custom_provider(session, audit)
+        blank_prompt_bindings = deepcopy(write_request().stage_role_bindings)
+        blank_prompt_bindings[0] = blank_prompt_bindings[0].model_copy(
+            update={"system_prompt": "   "}
+        )
+        body = write_request().model_copy(update={"stage_role_bindings": blank_prompt_bindings})
+
+        with pytest.raises(TemplateServiceError) as error:
+            TemplateService(
+                session,
+                audit_service=audit,
+                now=lambda: LATER,
+            ).save_as_user_template(
+                source_template_id="template-feature",
+                body=body,
+                trace_context=build_trace(),
+            )
+
+    assert error.value.error_code is ErrorCode.VALIDATION_ERROR
+    assert error.value.status_code == 422
+    assert error.value.message == "Pipeline template contains invalid editable fields."
+
+
 def test_editable_field_validation_accepts_role_applicable_to_stage(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
