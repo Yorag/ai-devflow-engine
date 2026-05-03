@@ -362,7 +362,7 @@
 
 **计划周期**：Week 6-7
 **状态**：`[ ]`
-**目标**：为工具确认拒绝结果固化稳定的后续处理语义来源，使 query / SSE 顶层 `tool_confirmation` 能直接读取 deny 后运行结果，而不依赖 Inspector 或 run 终态推断。
+**目标**：为工具确认拒绝结果固化稳定的 runtime-side 后续处理语义来源，供 `Q3.4b` 读取并暴露到顶层 `tool_confirmation` payload；本切片不直接扩展 query / SSE 顶层契约。
 **实施计划**：`docs/plans/implementation/h4.4b-tool-confirmation-deny-followup-source.md`
 
 **修改文件列表**：
@@ -375,7 +375,7 @@
 **实现类/函数**：
 - `ToolConfirmationRequestModel`
 - `ToolConfirmationService.deny()`
-- `ToolConfirmationService.build_tool_confirmation_projection()`
+- `ControlRecordService.append_tool_confirmation_record()`
 
 **验收标准**：
 - deny 路径必须稳定写入 `deny_followup_action` 与 `deny_followup_summary`，不得只依赖 `alternative_path_summary` 或事后读取 run 终态推断。
@@ -383,7 +383,8 @@
 - 当存在低风险替代路径并继续当前阶段时，必须写入 `continue_current_stage` 和稳定摘要。
 - 当无替代路径并直接进入失败路径时，必须写入 `run_failed` 和稳定摘要。
 - 当拒绝后等待用户显式 `pause` / `terminate` 一类运行控制决定时，必须写入 `awaiting_run_control` 和稳定摘要。
-- 这些字段必须进入 `ToolConfirmationService.build_tool_confirmation_projection()` 的稳定来源，供后续 Q3.4b 暴露到 query / workspace / timeline / SSE。
+- 这些字段必须持久化在 `ToolConfirmationRequestModel` 或等价稳定过程记录中，供后续 `Q3.4b` 暴露到 query / workspace / timeline / SSE。
+- 本切片只允许修改 AL03 owner scope 的 runtime model、runtime service、control record 与相关测试；不得直接扩展 `ToolConfirmationFeedEntry`、workspace/timeline projection payload、SSE payload 或 query schema。
 - 审计写入失败或 deny 处理失败时，不得留下已拒绝但无后续处理语义的半成品记录。
 - 服务与 API 测试必须覆盖三种 deny 后续结果分支，以及 paused / terminal run 的稳定错误语义。
 

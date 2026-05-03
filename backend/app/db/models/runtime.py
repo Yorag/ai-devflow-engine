@@ -349,6 +349,16 @@ class ToolConfirmationRequestModel(RuntimeBase, TimestampMixin):
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     expected_side_effects: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     alternative_path_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    planned_deny_followup_action: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+    planned_deny_followup_summary: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    deny_followup_action: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    deny_followup_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     user_decision: Mapped[ToolConfirmationStatus | None] = mapped_column(
         _contract_enum(ToolConfirmationStatus, "tool_confirmation_user_decision"),
         nullable=True,
