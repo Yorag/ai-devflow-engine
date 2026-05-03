@@ -284,7 +284,7 @@
 | A4.6 | LangGraph interrupt resume | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a46) |
 | A4.7 | LangGraph 事件到领域产物转换 | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a47) |
 | A4.8 | Provider Registry | Week 8 | [x] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48) |
-| A4.8a | PromptValidation 边界校验 | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48a) |
+| A4.8a | PromptValidation 边界校验 | Week 8 | [x] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48a) |
 | A4.8b | ContextEnvelope 与 ContextManifest Schema | Week 8 | [ ] | 后端契约 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48b) |
 | A4.8c | PromptRegistry 与系统提示词资产加载 | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48c) |
 | A4.8d | PromptRenderer 与消息序列渲染 | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48d) |

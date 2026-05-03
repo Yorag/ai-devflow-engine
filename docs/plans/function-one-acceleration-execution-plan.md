@@ -142,7 +142,7 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | AL04-W5.0b | W5.0b | AL04 | `feat/al-tools-deterministic-delivery` | done | 7aeff59 | 41f80c8 | `docs/plans/acceleration/reports/AL04-W5.0b.md` | - |
 | AL04-W5.1 | W5.1 | AL04 | `feat/al-tools-deterministic-delivery` | done | 5376b2e | fdaf066 | `docs/plans/acceleration/reports/AL04-W5.1.md` | - |
 | AL05-A4.8 | A4.8 | AL05 | `feat/al-provider-langgraph-context` | done | 5d44d4a | aee52fb | `docs/plans/acceleration/reports/AL05-A4.8.md` | - |
-| AL05-A4.8a | A4.8a | AL05 | `feat/al-provider-langgraph-context` | blocked | 4ea6251 | - | `docs/plans/acceleration/reports/AL05-A4.8a.md` | Source Trace Conflict Gate: run-start validation hook requires AL01 run-start surface or explicit owner reassignment. |
+| AL05-A4.8a | A4.8a | AL05 | `feat/al-provider-langgraph-context` | done | 874161e | 8d7a5e8 | `docs/plans/acceleration/reports/AL05-A4.8a.md` | - |
 | AL06-F3.1 | F3.1 | AL06 | `feat/al-frontend-runtime-ui` | done | 5d44d4a | 564624a | `docs/plans/acceleration/reports/AL06-F3.1.md` | - |
 | AL06-F3.2 | F3.2 | AL06 | `feat/al-frontend-runtime-ui` | done | 4ea6251 | c5f11d1 | `docs/plans/acceleration/reports/AL06-F3.2.md` | - |
 | AL06-F3.3 | F3.3 | AL06 | `feat/al-frontend-runtime-ui` | done | ab9e0d3 | 47946f8 | `docs/plans/acceleration/reports/AL06-F3.3.md` | - |
