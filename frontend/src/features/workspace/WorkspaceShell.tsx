@@ -202,6 +202,7 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
               entries={workspace.narrative_feed}
               runs={workspace.runs}
               currentRunId={workspace.current_run_id}
+              currentSessionStatus={workspace.session.status}
               sessionId={workspace.session.session_id}
               projectId={workspace.project.project_id}
               request={request}

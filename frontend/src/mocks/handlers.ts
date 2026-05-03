@@ -132,6 +132,68 @@ function createMockRoutes(
         ? jsonResponse(workspace)
         : jsonResponse(mockApiError("not_found"), 404);
     }),
+    route("POST", /^\/api\/sessions\/([^/]+)\/runs$/u, ([, sessionId]) => {
+      const workspace = workspaces[sessionId];
+      if (!workspace || !workspace.current_run_id) {
+        return jsonResponse(mockApiError("not_found"), 404);
+      }
+      const currentRun = workspace.runs.find(
+        (run) => run.run_id === workspace.current_run_id,
+      );
+      const isTerminalRerunSource =
+        (workspace.session.status === "failed" ||
+          workspace.session.status === "terminated") &&
+        (currentRun?.status === "failed" || currentRun?.status === "terminated");
+      if (!isTerminalRerunSource) {
+        return jsonResponse(
+          mockApiError("validation_error", {
+            message: "Rerun is available only for failed or terminated runs.",
+          }),
+          409,
+        );
+      }
+
+      const nextAttemptIndex =
+        Math.max(0, ...workspace.runs.map((run) => run.attempt_index)) + 1;
+      const newRunId = `${workspace.current_run_id}-retry-${nextAttemptIndex}`;
+      const startedAt = "2026-05-04T09:00:00.000Z";
+      const nextRun: SessionWorkspaceProjection["runs"][number] = {
+        run_id: newRunId,
+        attempt_index: nextAttemptIndex,
+        status: "running",
+        trigger_source: "retry",
+        started_at: startedAt,
+        ended_at: null,
+        current_stage_type: "requirement_analysis",
+        is_active: true,
+      };
+
+      workspaces[sessionId] = {
+        ...workspace,
+        session: {
+          ...workspace.session,
+          status: "running",
+          current_run_id: newRunId,
+          latest_stage_type: "requirement_analysis",
+          updated_at: startedAt,
+        },
+        runs: [
+          ...workspace.runs.map((run) => ({ ...run, is_active: false })),
+          nextRun,
+        ],
+        current_run_id: newRunId,
+        current_stage_type: "requirement_analysis",
+        composer_state: {
+          mode: "running",
+          is_input_enabled: false,
+          primary_action: "pause",
+          secondary_actions: ["terminate"],
+          bound_run_id: newRunId,
+        },
+      };
+
+      return jsonResponse(nextRun);
+    }),
     route("POST", /^\/api\/sessions\/([^/]+)\/messages$/u, ([, sessionId], init) => {
       const workspace = workspaces[sessionId];
       if (!workspace) {

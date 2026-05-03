@@ -4,7 +4,7 @@ import { useState } from "react";
 import { approveApproval, rejectApproval } from "../../api/approvals";
 import type { ApiRequestError, ApiRequestOptions } from "../../api/client";
 import { apiQueryKeys } from "../../api/hooks";
-import type { ApprovalRequestFeedEntry } from "../../api/types";
+import type { ApprovalRequestFeedEntry, SessionStatus } from "../../api/types";
 import { DeliveryReadinessNotice } from "./DeliveryReadinessNotice";
 import { RejectReasonForm } from "./RejectReasonForm";
 
@@ -13,16 +13,23 @@ type ApprovalBlockProps = {
   sessionId?: string;
   projectId?: string;
   currentRunId?: string | null;
+  currentSessionStatus?: SessionStatus | null;
   request?: ApiRequestOptions;
   onOpenSettings?: () => void;
 };
 
 type ApprovalActionState = {
   isHistory: boolean;
+  isCurrentRunTerminal: boolean;
   showPrimaryActions: boolean;
   canApprove: boolean;
   canReject: boolean;
   isApproveBlockedByReadiness: boolean;
+};
+
+type HistoricalApprovalState = {
+  isHistory: boolean;
+  isCurrentRunTerminal: boolean;
 };
 
 export function ApprovalBlock({
@@ -30,6 +37,7 @@ export function ApprovalBlock({
   sessionId = "",
   projectId = "",
   currentRunId = null,
+  currentSessionStatus = null,
   request,
   onOpenSettings,
 }: ApprovalBlockProps): JSX.Element {
@@ -37,7 +45,16 @@ export function ApprovalBlock({
   const [isBusy, setBusy] = useState(false);
   const [isRejectOpen, setRejectOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const actionState = resolveApprovalActionState(entry, currentRunId);
+  const actionState = resolveApprovalActionState(
+    entry,
+    currentRunId,
+    currentSessionStatus,
+  );
+  const disabledReason =
+    entry.disabled_reason ??
+    (actionState.isCurrentRunTerminal
+      ? "Current run has terminated. Retry starts a new run."
+      : null);
 
   async function invalidateWorkspaceQueries() {
     await queryClient.invalidateQueries({
@@ -102,8 +119,8 @@ export function ApprovalBlock({
         <p className="feed-entry__supporting">{entry.risk_excerpt}</p>
       ) : null}
       <DeliveryReadinessNotice entry={entry} onOpenSettings={onOpenSettings} />
-      {entry.disabled_reason ? (
-        <p className="feed-entry__supporting">{entry.disabled_reason}</p>
+      {disabledReason ? (
+        <p className="feed-entry__supporting">{disabledReason}</p>
       ) : null}
       {errorMessage ? <p className="approval-block__error">{errorMessage}</p> : null}
       {actionState.showPrimaryActions ? (
@@ -124,7 +141,7 @@ export function ApprovalBlock({
           </button>
         </div>
       ) : null}
-      {isRejectOpen ? (
+      {isRejectOpen && actionState.canReject ? (
         <RejectReasonForm
           isBusy={isBusy}
           errorMessage={errorMessage}
@@ -142,8 +159,13 @@ export function ApprovalBlock({
 export function resolveApprovalActionState(
   entry: ApprovalRequestFeedEntry,
   currentRunId: string | null,
+  currentSessionStatus: SessionStatus | null = null,
 ): ApprovalActionState {
-  const isHistory = Boolean(currentRunId) && entry.run_id !== currentRunId;
+  const historyState = resolveHistoricalApprovalState(
+    entry,
+    currentRunId,
+    currentSessionStatus,
+  );
   const isPending = entry.status === "pending";
   const isApproveBlockedByReadiness =
     entry.approval_type === "code_review_approval" &&
@@ -151,12 +173,39 @@ export function resolveApprovalActionState(
     entry.delivery_readiness_status !== "ready";
 
   return {
-    isHistory,
-    showPrimaryActions: !isHistory && isPending,
+    ...historyState,
+    showPrimaryActions: !historyState.isHistory && isPending,
     canApprove:
-      !isHistory && isPending && entry.is_actionable && !isApproveBlockedByReadiness,
-    canReject: !isHistory && isPending && entry.is_actionable,
+      !historyState.isHistory &&
+      !historyState.isCurrentRunTerminal &&
+      isPending &&
+      entry.is_actionable &&
+      !isApproveBlockedByReadiness,
+    canReject:
+      !historyState.isHistory &&
+      !historyState.isCurrentRunTerminal &&
+      isPending &&
+      entry.is_actionable,
     isApproveBlockedByReadiness,
+  };
+}
+
+export function resolveHistoricalApprovalState(
+  entry: ApprovalRequestFeedEntry,
+  currentRunId: string | null,
+  currentSessionStatus: SessionStatus | null,
+): HistoricalApprovalState {
+  const isHistory = Boolean(currentRunId) && entry.run_id !== currentRunId;
+  const isCurrentRunTerminal =
+    !isHistory &&
+    currentRunId === entry.run_id &&
+    entry.status === "pending" &&
+    currentSessionStatus !== null &&
+    ["failed", "terminated", "completed"].includes(currentSessionStatus);
+
+  return {
+    isHistory,
+    isCurrentRunTerminal,
   };
 }
 

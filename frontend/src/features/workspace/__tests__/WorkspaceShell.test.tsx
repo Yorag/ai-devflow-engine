@@ -963,6 +963,64 @@ describe("WorkspaceShell", () => {
 
     expect(screen.queryByRole("button", { name: "终止当前运行" })).toBeNull();
   });
+
+  it("reruns a failed session into a new current run and keeps the previous run historical", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const fetcher = createMockApiFetcher();
+    const request: ApiRequestOptions = { fetcher };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Investigate failing run" }),
+    );
+
+    const firstBoundary = await screen.findByRole("region", {
+      name: "Run 1 boundary",
+    });
+    fireEvent.click(within(firstBoundary).getByRole("button", { name: "Retry run" }));
+
+    const secondBoundary = await screen.findByRole("region", {
+      name: "Run 2 boundary",
+    });
+
+    expect(within(secondBoundary).getByText("Current run")).toBeTruthy();
+    expect(within(secondBoundary).getByText("0 entries")).toBeTruthy();
+    expect(
+      within(screen.getByRole("region", { name: "Run 1 boundary" })).getByText(
+        "Historical run",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(screen.getByRole("region", { name: "Run 1 boundary" })).queryByRole(
+        "button",
+        { name: "Retry run" },
+      ),
+    ).toBeNull();
+    await waitFor(() => {
+      expect(document.activeElement?.id).toBe("run-boundary-run-failed-retry-2");
+    });
+  });
+
+  it("rejects mock rerun requests for non-terminal sessions", async () => {
+    const fetcher = createMockApiFetcher();
+
+    const response = await fetcher("/api/sessions/session-running/runs", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(409);
+    const workspaceResponse = await fetcher(
+      "/api/sessions/session-running/workspace",
+    );
+    const workspace = (await workspaceResponse.json()) as SessionWorkspaceProjection;
+    expect(workspace.current_run_id).toBe("run-running");
+    expect(workspace.runs).toHaveLength(1);
+  });
 });
 
 describe("TerminateRunAction", () => {

@@ -21,6 +21,7 @@ export function RunBoundary({ group, children }: RunBoundaryProps): JSX.Element 
         className="run-boundary run-boundary--missing-metadata"
         id={getRunBoundaryId(group.runId)}
         aria-label="Run metadata unavailable boundary"
+        tabIndex={-1}
       >
         <header className="run-boundary__header">
           <div className="run-boundary__identity">
@@ -56,6 +57,7 @@ export function RunBoundary({ group, children }: RunBoundaryProps): JSX.Element 
       className={`run-boundary run-boundary--${group.run.status}`}
       id={getRunBoundaryId(group.runId)}
       aria-label={`${runLabel} boundary`}
+      tabIndex={-1}
     >
       <header className="run-boundary__header">
         <div className="run-boundary__identity">

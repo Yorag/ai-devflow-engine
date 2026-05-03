@@ -3,18 +3,21 @@ import type {
   ControlItemFeedEntry,
   DeliveryResultFeedEntry,
   MessageFeedEntry,
+  SessionStatus,
   StageType,
   SystemStatusFeedEntry,
   TopLevelFeedEntry,
 } from "../../api/types";
 import type { ApiRequestOptions } from "../../api/client";
 import { ApprovalBlock } from "../approvals/ApprovalBlock";
+import { RerunAction } from "../runs/RerunAction";
 import { StageNode } from "./StageNode";
 import { ToolConfirmationBlock } from "./ToolConfirmationBlock";
 
 export type FeedEntryRendererProps = {
   entry: TopLevelFeedEntry;
   currentRunId?: string | null;
+  currentSessionStatus?: SessionStatus | null;
   sessionId?: string;
   projectId?: string;
   request?: ApiRequestOptions;
@@ -33,6 +36,7 @@ const stageLabels: Record<StageType, string> = {
 
 export type FeedEntryRendererOptions = {
   currentRunId?: string | null;
+  currentSessionStatus?: SessionStatus | null;
   sessionId?: string;
   projectId?: string;
   request?: ApiRequestOptions;
@@ -48,6 +52,7 @@ export function renderFeedEntryByType(
     <FeedEntryRenderer
       entry={entry}
       currentRunId={options.currentRunId}
+      currentSessionStatus={options.currentSessionStatus}
       sessionId={options.sessionId}
       projectId={options.projectId}
       request={options.request}
@@ -60,6 +65,7 @@ export function renderFeedEntryByType(
 export function FeedEntryRenderer({
   entry,
   currentRunId,
+  currentSessionStatus,
   sessionId,
   projectId,
   request,
@@ -83,6 +89,7 @@ export function FeedEntryRenderer({
           sessionId={sessionId}
           projectId={projectId}
           currentRunId={currentRunId}
+          currentSessionStatus={currentSessionStatus}
           request={request}
           onOpenSettings={onOpenSettings}
         />
@@ -115,7 +122,15 @@ export function FeedEntryRenderer({
         />
       );
     case "system_status":
-      return <SystemStatusEntry entry={entry} />;
+      return (
+        <SystemStatusEntry
+          entry={entry}
+          currentRunId={currentRunId}
+          sessionId={sessionId}
+          projectId={projectId}
+          request={request}
+        />
+      );
   }
 }
 
@@ -235,8 +250,16 @@ function DeliveryResultEntry({
 
 function SystemStatusEntry({
   entry,
+  currentRunId,
+  sessionId,
+  projectId,
+  request,
 }: {
   entry: SystemStatusFeedEntry;
+  currentRunId?: string | null;
+  sessionId?: string;
+  projectId?: string;
+  request?: ApiRequestOptions;
 }): JSX.Element {
   return (
     <article
@@ -250,11 +273,13 @@ function SystemStatusEntry({
       />
       <h2>{entry.title}</h2>
       <p className="feed-entry__body">{entry.reason}</p>
-      {entry.retry_action ? (
-        <div className="feed-entry__actions" aria-label="System status actions">
-          <button type="button">Retry run</button>
-        </div>
-      ) : null}
+      <RerunAction
+        entry={entry}
+        currentRunId={currentRunId}
+        sessionId={sessionId}
+        projectId={projectId}
+        request={request}
+      />
     </article>
   );
 }
