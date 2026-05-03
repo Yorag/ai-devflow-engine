@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -54,8 +55,26 @@ def _run_git(repo_path: Path, *args: str) -> str:
         check=True,
         capture_output=True,
         text=True,
+        env=_fixture_git_env(),
     )
     return completed.stdout.strip()
+
+
+def _fixture_git_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env.pop("GIT_CONFIG_GLOBAL", None)
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_COUNT"] = "4"
+    env["GIT_CONFIG_KEY_0"] = "core.hooksPath"
+    env["GIT_CONFIG_VALUE_0"] = os.devnull
+    env["GIT_CONFIG_KEY_1"] = "commit.gpgsign"
+    env["GIT_CONFIG_VALUE_1"] = "false"
+    env["GIT_CONFIG_KEY_2"] = "tag.gpgsign"
+    env["GIT_CONFIG_VALUE_2"] = "false"
+    env["GIT_CONFIG_KEY_3"] = "init.templateDir"
+    env["GIT_CONFIG_VALUE_3"] = os.devnull
+    return env
 
 
 def _create_workspace_tree(
@@ -125,24 +144,42 @@ def fixture_git_repository(
     remote_client = mock_remote_delivery_client()
     (root / ".gitignore").write_text(".runtime/\n", encoding="ascii")
 
-    subprocess.run(["git", "init", "--bare", str(remote_path)], check=True)
-    subprocess.run(["git", "init", "--initial-branch=main"], cwd=root, check=True)
+    git_env = _fixture_git_env()
+    subprocess.run(
+        ["git", "init", "--bare", str(remote_path)],
+        check=True,
+        env=git_env,
+    )
+    subprocess.run(
+        ["git", "init", "--initial-branch=main"],
+        cwd=root,
+        check=True,
+        env=git_env,
+    )
     subprocess.run(
         ["git", "config", "user.name", "Fixture User"],
         cwd=root,
         check=True,
+        env=git_env,
     )
     subprocess.run(
         ["git", "config", "user.email", "fixture@example.test"],
         cwd=root,
         check=True,
+        env=git_env,
     )
-    subprocess.run(["git", "add", "."], cwd=root, check=True)
-    subprocess.run(["git", "commit", "-m", "fixture baseline"], cwd=root, check=True)
+    subprocess.run(["git", "add", "."], cwd=root, check=True, env=git_env)
+    subprocess.run(
+        ["git", "commit", "-m", "fixture baseline"],
+        cwd=root,
+        check=True,
+        env=git_env,
+    )
     subprocess.run(
         ["git", "remote", "add", "origin", str(remote_path)],
         cwd=root,
         check=True,
+        env=git_env,
     )
 
     workspace.workspace_change_file.write_text(

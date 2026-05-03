@@ -76,6 +76,25 @@ def test_settings_override_fixture_allows_workspace_and_credential_overrides(
     assert not settings.is_allowed_credential_env_name("OTHER_TOKEN")
 
 
+def test_settings_override_fixture_rejects_root_overrides_outside_tmp_path(
+    tmp_path: Path,
+) -> None:
+    from backend.tests.fixtures import settings_override_fixture
+
+    outside_root = tmp_path.parent / "outside-runtime"
+    with pytest.raises(ValueError, match="tmp_path"):
+        settings_override_fixture(
+            tmp_path,
+            platform_runtime_root=outside_root,
+        )
+
+    with pytest.raises(ValueError, match="tmp_path"):
+        settings_override_fixture(
+            tmp_path,
+            workspace_root=outside_root / "workspaces",
+        )
+
+
 def test_runtime_settings_snapshot_fixture_returns_formal_schema() -> None:
     from backend.tests.fixtures import runtime_settings_snapshot_fixture
 
@@ -156,6 +175,63 @@ def test_fake_provider_structured_failure_can_carry_catalog_error_code() -> None
 
     assert error.value.error_code is ErrorCode.PROVIDER_RETRY_EXHAUSTED
     assert error.value.failure_kind == "structured_failure"
+
+
+def test_fake_provider_failure_modes_use_formal_error_codes() -> None:
+    from backend.tests.fixtures import fake_provider_fixture
+    from backend.tests.fixtures.providers import FakeProviderError
+
+    fake = fake_provider_fixture()
+    fake.enqueue_timeout()
+    fake.enqueue_rate_limit()
+    fake.enqueue_network_error()
+
+    with pytest.raises(FakeProviderError) as timeout_error:
+        fake.chat_model.invoke_structured()
+    assert timeout_error.value.error_code is ErrorCode.PROVIDER_RETRY_EXHAUSTED
+    assert timeout_error.value.failure_kind == "timeout"
+
+    with pytest.raises(FakeProviderError) as rate_limit_error:
+        fake.chat_model.invoke_structured()
+    assert rate_limit_error.value.error_code is ErrorCode.PROVIDER_RETRY_EXHAUSTED
+    assert rate_limit_error.value.failure_kind == "rate_limit"
+
+    with pytest.raises(FakeProviderError) as network_error:
+        fake.chat_model.invoke_structured()
+    assert network_error.value.error_code is ErrorCode.PROVIDER_RETRY_EXHAUSTED
+    assert network_error.value.failure_kind == "network_error"
+
+
+def test_fake_provider_fixture_realigns_custom_binding_to_provider_snapshot() -> None:
+    from backend.tests.fixtures import (
+        fake_provider_fixture,
+        model_binding_snapshot_fixture,
+        provider_capabilities_fixture,
+        provider_snapshot_fixture,
+    )
+
+    provider_snapshot = provider_snapshot_fixture(
+        snapshot_id="provider-snapshot-fixture-2",
+        provider_id="provider-custom-fixture",
+        model_id="custom-fixture-model",
+        capabilities=provider_capabilities_fixture(model_id="custom-fixture-model"),
+    )
+    mismatched_binding = model_binding_snapshot_fixture(
+        provider_snapshot_id="provider-snapshot-old",
+        provider_id="provider-old",
+        model_id="old-model",
+        capabilities=provider_capabilities_fixture(model_id="old-model"),
+    )
+
+    fake = fake_provider_fixture(
+        provider_snapshot=provider_snapshot,
+        model_binding_snapshot=mismatched_binding,
+    )
+
+    assert fake.model_binding_snapshot.provider_snapshot_id == provider_snapshot.snapshot_id
+    assert fake.model_binding_snapshot.provider_id == provider_snapshot.provider_id
+    assert fake.model_binding_snapshot.model_id == provider_snapshot.model_id
+    assert fake.model_binding_snapshot.capabilities.model_id == provider_snapshot.model_id
 
 
 def test_fake_tool_executes_through_tool_registry_and_workspace_gate() -> None:
@@ -313,6 +389,20 @@ def test_workspace_boundary_fixture_normalizes_equivalent_relative_paths() -> No
     assert boundary.checked_targets == ["../outside.py"]
 
 
+def test_workspace_boundary_fixture_rejects_escape_and_absolute_like_targets() -> None:
+    from backend.tests.fixtures import tool_trace_fixture, workspace_boundary_fixture
+
+    for target in ("../outside.py", "/outside.py", "C:/outside.py"):
+        boundary = workspace_boundary_fixture()
+        with pytest.raises(ToolWorkspaceBoundaryError) as blocked:
+            boundary.assert_inside_workspace(
+                target,
+                trace_context=tool_trace_fixture(),
+            )
+
+        assert blocked.value.target == target
+
+
 def test_fixture_workspace_repo_stays_under_tmp_and_contains_runtime_log_exclusion_sample(
     tmp_path: Path,
 ) -> None:
@@ -355,6 +445,45 @@ def test_fixture_git_repository_creates_committed_baseline_and_mock_remote(
     assert repo.workspace_change_file.exists()
     assert repo.runtime_log_sample.exists()
     assert repo.remote_client.requests == []
+
+
+def test_fixture_git_repository_ignores_hostile_global_git_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from backend.tests.fixtures import fixture_git_repository
+
+    hook_dir = tmp_path / "hostile-hooks"
+    hook_dir.mkdir()
+    marker = tmp_path / "hostile-hook-ran.txt"
+    hook_script = hook_dir / "pre-commit"
+    hook_script.write_text(
+        f"#!/bin/sh\nprintf hostile > '{marker.as_posix()}'\nexit 1\n",
+        encoding="ascii",
+    )
+    hook_script.chmod(0o755)
+    global_config = tmp_path / "hostile.gitconfig"
+    global_config.write_text(
+        "\n".join(
+            [
+                "[core]",
+                f"\thooksPath = {hook_dir.as_posix()}",
+                "[commit]",
+                "\tgpgsign = true",
+                "[gpg]",
+                "\tprogram = does-not-exist",
+            ]
+        )
+        + "\n",
+        encoding="ascii",
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
+    monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
+
+    repo = fixture_git_repository(tmp_path, repo_name="isolated-fixture-git")
+
+    assert repo.head
+    assert not marker.exists()
 
 
 def test_mock_remote_delivery_client_records_success_and_failure_without_network() -> None:
@@ -420,6 +549,12 @@ def test_delivery_channel_snapshot_fixture_can_model_not_ready_state() -> None:
     assert snapshot.readiness_message == "DeliveryChannel readiness has not been validated."
 
 
+def test_missing_delivery_snapshot_fixture_models_absent_snapshot_state() -> None:
+    from backend.tests.fixtures import missing_delivery_snapshot_fixture
+
+    assert missing_delivery_snapshot_fixture() is None
+
+
 def test_fake_tool_defaults_align_with_tool_execution_gate_suite() -> None:
     from backend.tests.fixtures import fake_tool_fixture
 
@@ -435,6 +570,59 @@ def test_fake_tool_defaults_align_with_tool_execution_gate_suite() -> None:
         resource_scopes=("current_run_workspace",),
         workspace_target_paths=("path",),
     )
+
+
+def test_fake_tool_can_return_custom_success_payload_for_overridden_contract() -> None:
+    from backend.tests.fixtures import fake_tool_fixture, tool_trace_fixture
+
+    tool = fake_tool_fixture(
+        name="write_file",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "minLength": 1},
+                "content": {"type": "string", "minLength": 1},
+            },
+            "required": ["path", "content"],
+            "additionalProperties": False,
+        },
+        result_schema={
+            "type": "object",
+            "properties": {
+                "ok": {"type": "boolean"},
+                "written_path": {"type": "string"},
+            },
+            "required": ["ok", "written_path"],
+            "additionalProperties": False,
+        },
+        success_payload={"ok": True, "written_path": "src/app.py"},
+        success_preview="write_file fixture ok",
+    )
+    registry = ToolRegistry([tool])
+    trace = tool_trace_fixture()
+    context = ToolExecutionContext(
+        stage_type=StageType.CODE_GENERATION,
+        stage_contracts={StageType.CODE_GENERATION.value: {"allowed_tools": [tool.name]}},
+        trace_context=trace,
+        workspace_boundary=tool.workspace_boundary,
+        runtime_tool_timeout_seconds=5,
+        platform_tool_timeout_hard_limit_seconds=30,
+    )
+
+    result = registry.execute(
+        ToolExecutionRequest(
+            tool_name=tool.name,
+            call_id="fixture-write-file",
+            input_payload={"path": "src/app.py", "content": "print('ok')"},
+            trace_context=trace,
+            coordination_key="fixture-write-file",
+        ),
+        context,
+    )
+
+    assert result.status is ToolResultStatus.SUCCEEDED
+    assert result.output_payload == {"ok": True, "written_path": "src/app.py"}
+    assert result.output_preview == "write_file fixture ok"
 
 
 def test_provider_fixture_defaults_align_with_provider_registry_suite() -> None:

@@ -21,6 +21,10 @@ _EXPORTS = {
         "backend.tests.fixtures.delivery",
         "delivery_channel_snapshot_fixture",
     ),
+    "missing_delivery_snapshot_fixture": (
+        "backend.tests.fixtures.delivery",
+        "missing_delivery_snapshot_fixture",
+    ),
     "fake_chat_model_fixture": (
         "backend.tests.fixtures.providers",
         "fake_chat_model_fixture",
@@ -82,6 +86,7 @@ if TYPE_CHECKING:
     from backend.tests.fixtures.delivery import (
         MockRemoteDeliveryClient,
         delivery_channel_snapshot_fixture,
+        missing_delivery_snapshot_fixture,
         mock_remote_delivery_client,
     )
     from backend.tests.fixtures.providers import (

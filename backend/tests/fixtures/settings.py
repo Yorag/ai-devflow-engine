@@ -40,11 +40,23 @@ def settings_override_fixture(
             f"got {names}."
         )
 
+    base = tmp_path.resolve()
+    platform_runtime_root = Path(
+        overrides.pop("platform_runtime_root", tmp_path / ".runtime")
+    ).resolve()
+    workspace_root = overrides.pop("workspace_root", None)
+    if not platform_runtime_root.is_relative_to(base):
+        raise ValueError("settings_override_fixture roots must stay under tmp_path")
+    if workspace_root is not None:
+        resolved_workspace_root = Path(workspace_root).resolve()
+        if not resolved_workspace_root.is_relative_to(base):
+            raise ValueError("settings_override_fixture roots must stay under tmp_path")
+    else:
+        resolved_workspace_root = None
+
     values = {
-        "platform_runtime_root": overrides.pop(
-            "platform_runtime_root",
-            tmp_path / ".runtime",
-        ),
+        "platform_runtime_root": platform_runtime_root,
+        "workspace_root": resolved_workspace_root,
     }
     values.update(overrides)
     return override_environment_settings(**values)

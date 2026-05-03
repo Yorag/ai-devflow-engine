@@ -36,7 +36,7 @@ def delivery_channel_snapshot_fixture(
     last_validated_at: datetime | None = None,
     schema_version: str = "delivery-channel-snapshot-v1",
     created_at: datetime | None = None,
-) -> DeliveryChannelSnapshotModel:
+    ) -> DeliveryChannelSnapshotModel:
     return DeliveryChannelSnapshotModel(
         delivery_channel_snapshot_id=delivery_channel_snapshot_id,
         run_id=run_id,
@@ -54,6 +54,10 @@ def delivery_channel_snapshot_fixture(
         schema_version=schema_version,
         created_at=created_at or FIXTURE_NOW,
     )
+
+
+def missing_delivery_snapshot_fixture() -> None:
+    return None
 
 
 @dataclass

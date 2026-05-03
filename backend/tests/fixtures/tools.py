@@ -70,7 +70,13 @@ class WorkspaceBoundary:
         del trace_context
         normalized_target = _normalize_workspace_target(target)
         self.checked_targets.append(normalized_target)
-        if normalized_target == self.blocked_target:
+        if (
+            normalized_target == self.blocked_target
+            or normalized_target.startswith("../")
+            or normalized_target == ".."
+            or normalized_target.startswith("/")
+            or _looks_like_windows_absolute(normalized_target)
+        ):
             raise ToolWorkspaceBoundaryError(
                 "Tool target is outside the run workspace.",
                 target=target,
@@ -79,6 +85,10 @@ class WorkspaceBoundary:
 
 def _normalize_workspace_target(target: str) -> str:
     return posixpath.normpath(target.replace("\\", "/"))
+
+
+def _looks_like_windows_absolute(target: str) -> bool:
+    return len(target) >= 3 and target[1] == ":" and target[2] == "/"
 
 
 @dataclass
@@ -106,6 +116,10 @@ class FakeTool:
     default_timeout_seconds: float | None = 5.0
     workspace_boundary: WorkspaceBoundary = field(default_factory=WorkspaceBoundary)
     calls: list[ToolInput] = field(default_factory=list)
+    success_payload: Mapping[str, object] = field(
+        default_factory=lambda: {"content": "hello"}
+    )
+    success_preview: str = "hello"
     timeout_error: bool = False
     return_error: bool = False
     returned_audit_ref: ToolAuditRef | None = None
@@ -152,8 +166,8 @@ class FakeTool:
             tool_name=self.name,
             call_id=tool_input.call_id,
             status=ToolResultStatus.SUCCEEDED,
-            output_payload={"content": "hello"},
-            output_preview="hello",
+            output_payload=dict(self.success_payload),
+            output_preview=self.success_preview,
             trace_context=tool_input.trace_context,
             coordination_key=tool_input.coordination_key,
         )

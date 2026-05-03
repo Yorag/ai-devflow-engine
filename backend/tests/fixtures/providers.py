@@ -203,16 +203,19 @@ class FakeChatModel:
             raise FakeProviderError(
                 failure_kind="timeout",
                 message="provider timed out",
+                error_code=ErrorCode.PROVIDER_RETRY_EXHAUSTED,
             )
         if kind == "rate_limit":
             raise FakeProviderError(
                 failure_kind="rate_limit",
                 message="provider rate limited",
+                error_code=ErrorCode.PROVIDER_RETRY_EXHAUSTED,
             )
         if kind == "network_error":
             raise FakeProviderError(
                 failure_kind="network_error",
                 message="provider network error",
+                error_code=ErrorCode.PROVIDER_RETRY_EXHAUSTED,
             )
         raise AssertionError(f"Unsupported scripted response kind: {kind!r}")
 
@@ -277,12 +280,24 @@ def fake_provider_fixture(
     scripted_responses: Iterable[Mapping[str, Any]] | None = None,
 ) -> FakeProvider:
     resolved_provider_snapshot = provider_snapshot or provider_snapshot_fixture()
-    resolved_model_binding_snapshot = model_binding_snapshot or model_binding_snapshot_fixture(
-        provider_snapshot_id=resolved_provider_snapshot.snapshot_id,
-        provider_id=resolved_provider_snapshot.provider_id,
-        model_id=resolved_provider_snapshot.model_id,
-        run_id=resolved_provider_snapshot.run_id,
-    )
+    if model_binding_snapshot is None:
+        resolved_model_binding_snapshot = model_binding_snapshot_fixture(
+            provider_snapshot_id=resolved_provider_snapshot.snapshot_id,
+            provider_id=resolved_provider_snapshot.provider_id,
+            model_id=resolved_provider_snapshot.model_id,
+            run_id=resolved_provider_snapshot.run_id,
+            capabilities=resolved_provider_snapshot.capabilities,
+        )
+    else:
+        resolved_model_binding_snapshot = model_binding_snapshot.model_copy(
+            update={
+                "run_id": resolved_provider_snapshot.run_id,
+                "provider_snapshot_id": resolved_provider_snapshot.snapshot_id,
+                "provider_id": resolved_provider_snapshot.provider_id,
+                "model_id": resolved_provider_snapshot.model_id,
+                "capabilities": resolved_provider_snapshot.capabilities,
+            }
+        )
     config = ProviderRegistry(
         provider_snapshots=[resolved_provider_snapshot],
         model_binding_snapshots=[resolved_model_binding_snapshot],
