@@ -327,6 +327,8 @@ const toolConfirmation: TopLevelFeedEntry = {
   requested_at: "2026-05-01T09:20:00.000Z",
   responded_at: null,
   decision: null,
+  deny_followup_action: null,
+  deny_followup_summary: null,
   disabled_reason: null,
 };
 

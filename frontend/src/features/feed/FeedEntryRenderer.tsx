@@ -5,12 +5,12 @@ import type {
   MessageFeedEntry,
   StageType,
   SystemStatusFeedEntry,
-  ToolConfirmationFeedEntry,
   TopLevelFeedEntry,
 } from "../../api/types";
 import type { ApiRequestOptions } from "../../api/client";
 import { ApprovalBlock } from "../approvals/ApprovalBlock";
 import { StageNode } from "./StageNode";
+import { ToolConfirmationBlock } from "./ToolConfirmationBlock";
 
 export type FeedEntryRendererProps = {
   entry: TopLevelFeedEntry;
@@ -89,8 +89,12 @@ export function FeedEntryRenderer({
       );
     case "tool_confirmation":
       return (
-        <ToolConfirmationEntry
+        <ToolConfirmationBlock
           entry={entry}
+          currentRunId={currentRunId}
+          sessionId={sessionId}
+          projectId={projectId}
+          request={request}
           onOpenInspectorTarget={onOpenInspectorTarget}
         />
       );
@@ -123,64 +127,6 @@ function UserMessageEntry({ entry }: { entry: MessageFeedEntry }): JSX.Element {
     >
       <EntryHeader label={formatAuthor(entry.author)} timestamp={entry.occurred_at} />
       <p className="feed-entry__body">{entry.content}</p>
-    </article>
-  );
-}
-
-function ToolConfirmationEntry({
-  entry,
-  onOpenInspectorTarget,
-}: {
-  entry: ToolConfirmationFeedEntry;
-  onOpenInspectorTarget?: (entry: TopLevelFeedEntry) => void;
-}): JSX.Element {
-  return (
-    <article
-      className="feed-entry feed-entry--tool-confirmation"
-      aria-label="Tool confirmation feed entry"
-    >
-      <EntryHeader
-        label="High-risk tool confirmation"
-        timestamp={entry.requested_at}
-        badge={formatLabel(entry.status)}
-      />
-      <h2>{entry.title}</h2>
-      <div className="feed-entry__meta-grid" aria-label="Tool confirmation metadata">
-        <Metadata label="Tool" value={entry.tool_name} />
-        {entry.command_preview ? (
-          <Metadata label="Command" value={entry.command_preview} />
-        ) : null}
-        <Metadata label="Target" value={entry.target_summary} />
-        <Metadata label="Risk" value={formatLabel(entry.risk_level)} />
-      </div>
-      <p className="feed-entry__body">{entry.reason}</p>
-      {entry.risk_categories.length > 0 ? (
-        <ChipList
-          label="Risk categories"
-          values={entry.risk_categories.map(formatLabel)}
-        />
-      ) : null}
-      {entry.expected_side_effects.length > 0 ? (
-        <ChipList label="Expected side effects" values={entry.expected_side_effects} />
-      ) : null}
-      {entry.disabled_reason ? (
-        <p className="feed-entry__supporting">{entry.disabled_reason}</p>
-      ) : null}
-      <div className="feed-entry__actions" aria-label="Tool confirmation actions">
-        <button type="button" disabled={!entry.is_actionable}>
-          Allow this execution
-        </button>
-        <button type="button" disabled={!entry.is_actionable}>
-          Deny this execution
-        </button>
-        {onOpenInspectorTarget ? (
-          <InspectorTrigger
-            label={entry.title}
-            className="inspector-trigger--quiet"
-            onClick={() => onOpenInspectorTarget(entry)}
-          />
-        ) : null}
-      </div>
     </article>
   );
 }

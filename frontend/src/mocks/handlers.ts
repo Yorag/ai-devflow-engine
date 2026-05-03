@@ -77,6 +77,31 @@ function createMockRoutes(
     route("GET", /^\/api\/tool-confirmations\/tool-confirmation-1$/u, () =>
       jsonResponse(mockToolConfirmationInspectorProjection),
     ),
+    route("POST", /^\/api\/tool-confirmations\/tool-confirmation-1\/allow$/u, () =>
+      jsonResponse({
+        tool_confirmation: {
+          ...mockToolConfirmationFeedEntry(),
+          status: "allowed",
+          decision: "allowed",
+          responded_at: "2026-05-01T09:21:00.000Z",
+          is_actionable: false,
+        },
+      }),
+    ),
+    route("POST", /^\/api\/tool-confirmations\/tool-confirmation-1\/deny$/u, () =>
+      jsonResponse({
+        tool_confirmation: {
+          ...mockToolConfirmationFeedEntry(),
+          status: "denied",
+          decision: "denied",
+          responded_at: "2026-05-01T09:21:00.000Z",
+          is_actionable: false,
+          deny_followup_action: "run_failed",
+          deny_followup_summary:
+            "The current run will fail because no low-risk alternative path exists.",
+        },
+      }),
+    ),
     route("GET", /^\/api\/delivery-records\/delivery-record-1$/u, () =>
       jsonResponse(mockDeliveryResultDetailProjection),
     ),
@@ -163,6 +188,37 @@ function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: { "content-type": "application/json" },
   });
+}
+
+function mockToolConfirmationFeedEntry() {
+  return mockSessionWorkspaces["session-running"].narrative_feed.find(
+    (entry) => entry.type === "tool_confirmation",
+  ) ?? {
+    entry_id: "entry-tool-confirmation",
+    run_id: "run-running",
+    type: "tool_confirmation",
+    occurred_at: "2026-05-01T09:20:00.000Z",
+    stage_run_id: "stage-code-generation-running",
+    tool_confirmation_id: "tool-confirmation-1",
+    status: "pending",
+    title: "Allow dependency install",
+    tool_name: "bash",
+    command_preview: "npm install",
+    target_summary: "frontend/package-lock.json",
+    risk_level: "high_risk",
+    risk_categories: ["dependency_change", "network_download"],
+    reason: "Installing dependencies changes lock files and downloads packages.",
+    expected_side_effects: ["package-lock update"],
+    allow_action: "allow_once",
+    deny_action: "deny_once",
+    is_actionable: true,
+    requested_at: "2026-05-01T09:20:00.000Z",
+    responded_at: null,
+    decision: null,
+    deny_followup_action: null,
+    deny_followup_summary: null,
+    disabled_reason: null,
+  };
 }
 
 function cloneMockSessionWorkspaces(): Record<string, SessionWorkspaceProjection> {
