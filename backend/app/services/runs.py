@@ -22,6 +22,7 @@ from backend.app.db.models.runtime import (
 from backend.app.domain.enums import (
     ApprovalStatus,
     RunStatus,
+    RunTriggerSource,
     SessionStatus,
     SseEventType,
     StageStatus,
@@ -32,7 +33,7 @@ from backend.app.domain.provider_call_policy_snapshot import ProviderCallPolicyS
 from backend.app.domain.provider_snapshot import ModelBindingSnapshot, ProviderSnapshot
 from backend.app.domain.runtime_limit_snapshot import RuntimeLimitSnapshot
 from backend.app.domain.runtime_refs import CheckpointRef, GraphThreadRef, GraphThreadStatus
-from backend.app.domain.state_machine import RunStateMachine
+from backend.app.domain.state_machine import InvalidRunStateTransition, RunStateMachine
 from backend.app.domain.template_snapshot import TemplateSnapshot
 from backend.app.domain.trace_context import TraceContext
 from backend.app.observability.log_writer import LogPayloadSummary, LogRecordInput
@@ -42,6 +43,7 @@ from backend.app.schemas.feed import (
     SystemStatusFeedEntry,
     ToolConfirmationFeedEntry,
 )
+from backend.app.schemas.run import RunSummaryProjection
 from backend.app.schemas.observability import (
     AuditActorType,
     AuditResult,
@@ -77,14 +79,23 @@ class RunLifecycleServiceError(ValueError):
 class RunCommandResult:
     session: SessionModel
     run: PipelineRunModel
-    stage: StageRunModel
+    stage: StageRunModel | None
     checkpoint_ref: CheckpointRef | None = None
+
+
+@dataclass(frozen=True)
+class RerunSessionState:
+    current_run_id: str | None
+    status: SessionStatus
+    latest_stage_type: StageType | None
+    updated_at: datetime
 
 
 @dataclass(frozen=True)
 class TerminalStatusProjector:
     events: EventStore
     now: Callable[[], datetime]
+    _USE_DEFAULT_RETRY_ACTION = object()
 
     def append_terminal_system_status(
         self,
@@ -94,10 +105,20 @@ class TerminalStatusProjector:
         title: str,
         reason: str,
         trace_context: TraceContext,
-        retry_action: str | None = None,
+        retry_action: str | None | object = _USE_DEFAULT_RETRY_ACTION,
+        is_current_tail: bool = False,
         occurred_at: datetime | None = None,
     ) -> None:
         timestamp = occurred_at or self.now()
+        resolved_retry_action = (
+            (
+                f"retry:{run.run_id}"
+                if is_current_tail
+                else None
+            )
+            if retry_action is self._USE_DEFAULT_RETRY_ACTION
+            else retry_action
+        )
         entry = SystemStatusFeedEntry(
             entry_id=f"entry-system-status-{run.run_id}-{domain_event_type.value.lower()}",
             run_id=run.run_id,
@@ -109,7 +130,7 @@ class TerminalStatusProjector:
             ),
             title=title,
             reason=reason,
-            retry_action=retry_action,
+            retry_action=resolved_retry_action,
         )
         self.events.append(
             domain_event_type,
@@ -555,6 +576,7 @@ class RunLifecycleService:
                 run=run,
                 title="Run terminated",
                 reason=terminal_reason,
+                is_current_tail=session.current_run_id == run.run_id,
                 trace_context=command_trace,
                 occurred_at=started_at,
             )
@@ -598,6 +620,223 @@ class RunLifecycleService:
                 status_code=500,
                 detail_ref=run.run_id,
             ) from exc
+
+    def create_rerun(
+        self,
+        *,
+        session_id: str,
+        actor_id: str,
+        trace_context: TraceContext,
+    ) -> RunCommandResult:
+        started_at = self._now()
+        try:
+            session, run, stage = self._load_current_session_run_tail(session_id)
+        except RunLifecycleServiceError as exc:
+            if exc.error_code is ErrorCode.VALIDATION_ERROR:
+                self._record_rejected_session_command(
+                    action="runtime.rerun.rejected",
+                    message="Run rerun command rejected.",
+                    actor_id=actor_id,
+                    session_id=session_id,
+                    reason=str(exc),
+                    trace_context=trace_context,
+                    started_at=started_at,
+                )
+            raise
+        command_trace = self._command_trace(
+            trace_context,
+            span_id=f"runtime-rerun-{run.run_id}",
+            session=session,
+            run=run,
+            stage=stage,
+        )
+        try:
+            self._assert_can_create_rerun(session=session, run=run)
+        except RunLifecycleServiceError as exc:
+            self._record_rejected_command(
+                action="runtime.rerun.rejected",
+                message="Run rerun command rejected.",
+                actor_id=actor_id,
+                run=run,
+                stage=stage,
+                reason=str(exc),
+                trace_context=command_trace,
+                started_at=started_at,
+            )
+            raise
+
+        old_trace_id = run.trace_id
+        session_snapshot = RerunSessionState(
+            current_run_id=session.current_run_id,
+            status=session.status,
+            latest_stage_type=session.latest_stage_type,
+            updated_at=session.updated_at,
+        )
+        try:
+            terminal_thread = (
+                self._require_runtime_orchestration().assert_thread_terminal_for_rerun(
+                    thread=self._build_thread_ref(run=run, stage=stage),
+                    trace_context=command_trace,
+                )
+            )
+            if terminal_thread.status not in {
+                GraphThreadStatus.COMPLETED,
+                GraphThreadStatus.FAILED,
+                GraphThreadStatus.TERMINATED,
+            }:
+                raise _RejectedRunLifecycleServiceError(
+                    "The current run thread must be terminal before rerun."
+                )
+
+            accepted_metadata = self._rerun_log_metadata(
+                session=session,
+                old_run=run,
+                old_stage=stage,
+                new_run=None,
+                old_trace_id=old_trace_id,
+                result_status="accepted",
+            )
+            self._audit_service.require_audit_record(
+                actor_type=AuditActorType.USER,
+                actor_id=actor_id,
+                action="runtime.rerun",
+                target_type="run",
+                target_id=run.run_id,
+                result=AuditResult.ACCEPTED,
+                reason="Rerun accepted.",
+                metadata=accepted_metadata,
+                trace_context=command_trace,
+                rollback=self._rollback_all,
+                created_at=started_at,
+            )
+            self._record_run_log(
+                payload_type="runtime_rerun_accepted",
+                message="Run rerun command accepted.",
+                metadata=accepted_metadata,
+                trace_context=command_trace,
+                created_at=started_at,
+                level=LogLevel.INFO,
+            )
+            new_run = self._build_rerun(
+                session=session,
+                source_run=run,
+                started_at=started_at,
+            )
+            session.current_run_id = new_run.run_id
+            session.status = SessionStatus.RUNNING
+            session.latest_stage_type = StageType.REQUIREMENT_ANALYSIS
+            session.updated_at = started_at
+            self._runtime_session.add(new_run)
+            self._require_control_session().add(session)
+            self._append_latest_terminal_system_status_retry_action(
+                run=run,
+                trace_context=command_trace,
+                occurred_at=started_at,
+            )
+
+            event_trace = command_trace.child_span(
+                span_id=f"runtime-rerun-created-{new_run.run_id}",
+                created_at=started_at,
+                run_id=new_run.run_id,
+                stage_run_id=None,
+                graph_thread_id=new_run.graph_thread_ref,
+            )
+            self._require_events().append(
+                DomainEventType.PIPELINE_RUN_CREATED,
+                payload={
+                    "run": self._run_summary_projection(
+                        new_run,
+                        current_stage_type=StageType.REQUIREMENT_ANALYSIS,
+                        is_active=True,
+                    ).model_dump(mode="json")
+                },
+                trace_context=event_trace,
+                occurred_at=started_at,
+            )
+            self._append_run_status_event(
+                DomainEventType.RUN_RESUMED,
+                session=session,
+                run=new_run,
+                trace_context=event_trace,
+                occurred_at=started_at,
+            )
+            self._commit_rerun_all(
+                session_id=session.session_id,
+                session_snapshot=session_snapshot,
+                new_run_id=new_run.run_id,
+            )
+            self._record_run_log(
+                payload_type="runtime_rerun_completed",
+                message="Run rerun command completed.",
+                metadata=self._rerun_log_metadata(
+                    session=session,
+                    old_run=run,
+                    old_stage=stage,
+                    new_run=new_run,
+                    old_trace_id=old_trace_id,
+                    result_status="accepted",
+                ),
+                trace_context=event_trace,
+                created_at=started_at,
+                level=LogLevel.INFO,
+                duration_ms=self._duration_ms(started_at, started_at),
+            )
+            return RunCommandResult(session=session, run=new_run, stage=None)
+        except _RejectedRunLifecycleServiceError as exc:
+            self._rollback_all()
+            self._record_rejected_command(
+                action="runtime.rerun.rejected",
+                message="Run rerun command rejected.",
+                actor_id=actor_id,
+                run=run,
+                stage=stage,
+                reason=str(exc),
+                trace_context=command_trace,
+                started_at=started_at,
+            )
+            raise RunLifecycleServiceError(
+                str(exc),
+                error_code=ErrorCode.VALIDATION_ERROR,
+                status_code=409,
+                detail_ref=run.run_id,
+            ) from exc
+        except Exception as exc:
+            self._rollback_all()
+            self._record_failed_command(
+                action="runtime.rerun.failed",
+                message="Run rerun command failed.",
+                actor_id=actor_id,
+                run=run,
+                stage=stage,
+                reason=str(exc),
+                trace_context=command_trace,
+                started_at=started_at,
+            )
+            if isinstance(exc, RunLifecycleServiceError):
+                raise
+            raise RunLifecycleServiceError(
+                "runtime rerun command failed.",
+                error_code=ErrorCode.INTERNAL_ERROR,
+                status_code=500,
+                detail_ref=run.run_id,
+            ) from exc
+
+    def build_rerun_trigger_metadata(
+        self,
+        *,
+        old_run: PipelineRunModel,
+        new_run: PipelineRunModel,
+        old_trace_id: str,
+    ) -> dict[str, Any]:
+        return {
+            "trigger_source": RunTriggerSource.RETRY.value,
+            "source_run_id": old_run.run_id,
+            "new_run_id": new_run.run_id,
+            "source_attempt_index": old_run.attempt_index,
+            "attempt_index": new_run.attempt_index,
+            "source_trace_id": old_trace_id,
+            "trace_id": new_run.trace_id,
+        }
 
     def attach_template_snapshot(
         self,
@@ -827,6 +1066,46 @@ class RunLifecycleService:
             self._raise_validation("StageRun does not belong to the run.")
         return control_session, run, stage
 
+    def _load_current_session_run_tail(
+        self,
+        session_id: str,
+    ) -> tuple[SessionModel, PipelineRunModel, StageRunModel | None]:
+        control_session = self._require_control_session().get(SessionModel, session_id)
+        if control_session is None or not control_session.is_visible:
+            raise RunLifecycleServiceError(
+                "Session was not found.",
+                error_code=ErrorCode.NOT_FOUND,
+                status_code=404,
+                detail_ref=session_id,
+            )
+        if control_session.current_run_id is None:
+            self._raise_validation("A rerun requires an existing current run tail.")
+        run = self._runtime_session.get(PipelineRunModel, control_session.current_run_id)
+        stage = (
+            self._runtime_session.get(StageRunModel, run.current_stage_run_id)
+            if run is not None and run.current_stage_run_id is not None
+            else None
+        )
+        if run is None:
+            raise RunLifecycleServiceError(
+                "Active run context was not found.",
+                error_code=ErrorCode.NOT_FOUND,
+                status_code=404,
+                detail_ref=session_id,
+            )
+        if run.session_id != control_session.session_id:
+            self._raise_validation("Run does not belong to the Session.")
+        if run.current_stage_run_id is not None and stage is None:
+            raise RunLifecycleServiceError(
+                "Active run context was not found.",
+                error_code=ErrorCode.NOT_FOUND,
+                status_code=404,
+                detail_ref=session_id,
+            )
+        if stage is not None and stage.run_id != run.run_id:
+            self._raise_validation("StageRun does not belong to the run.")
+        return control_session, run, stage
+
     def _assert_can_pause(
         self,
         *,
@@ -868,6 +1147,203 @@ class RunLifecycleService:
             self._raise_validation("Run cannot be terminated from its current status.")
         if session.status is not RunStateMachine.project_session_status(run.status):
             self._raise_validation("Session status must match run status before terminate.")
+
+    def _assert_can_create_rerun(
+        self,
+        *,
+        session: SessionModel,
+        run: PipelineRunModel,
+    ) -> None:
+        try:
+            RunStateMachine.assert_can_create_rerun(
+                session_status=session.status,
+                current_run_id=session.current_run_id,
+                current_run_status=run.status,
+            )
+        except InvalidRunStateTransition as exc:
+            self._raise_validation(str(exc))
+
+    def _build_rerun(
+        self,
+        *,
+        session: SessionModel,
+        source_run: PipelineRunModel,
+        started_at: datetime,
+    ) -> PipelineRunModel:
+        return PipelineRunModel(
+            run_id=f"run-{uuid4().hex}",
+            session_id=session.session_id,
+            project_id=source_run.project_id,
+            attempt_index=source_run.attempt_index + 1,
+            status=RunStatus.RUNNING,
+            trigger_source=RunTriggerSource.RETRY,
+            template_snapshot_ref=source_run.template_snapshot_ref,
+            graph_definition_ref=source_run.graph_definition_ref,
+            graph_thread_ref=f"thread-{uuid4().hex}",
+            workspace_ref=source_run.workspace_ref,
+            runtime_limit_snapshot_ref=source_run.runtime_limit_snapshot_ref,
+            provider_call_policy_snapshot_ref=(
+                source_run.provider_call_policy_snapshot_ref
+            ),
+            delivery_channel_snapshot_ref=source_run.delivery_channel_snapshot_ref,
+            current_stage_run_id=None,
+            trace_id=f"trace-{uuid4().hex}",
+            started_at=started_at,
+            ended_at=None,
+            created_at=started_at,
+            updated_at=started_at,
+        )
+
+    def _run_summary_projection(
+        self,
+        run: PipelineRunModel,
+        *,
+        current_stage_type: StageType | None,
+        is_active: bool,
+    ) -> RunSummaryProjection:
+        return RunSummaryProjection(
+            run_id=run.run_id,
+            attempt_index=run.attempt_index,
+            status=run.status,
+            trigger_source=run.trigger_source,
+            started_at=run.started_at,
+            ended_at=run.ended_at,
+            current_stage_type=current_stage_type,
+            is_active=is_active,
+        )
+
+    def _append_latest_terminal_system_status_retry_action(
+        self,
+        *,
+        run: PipelineRunModel,
+        trace_context: TraceContext,
+        occurred_at: datetime,
+    ) -> None:
+        event = (
+            self._require_event_session()
+            .query(DomainEventModel)
+            .filter(
+                DomainEventModel.run_id == run.run_id,
+                DomainEventModel.event_type == SseEventType.SYSTEM_STATUS,
+            )
+            .order_by(
+                DomainEventModel.sequence_index.desc(),
+                DomainEventModel.event_id.desc(),
+            )
+            .first()
+        )
+        if event is None:
+            return
+        system_status = event.payload.get("system_status")
+        if not isinstance(system_status, dict):
+            return
+        if system_status.get("retry_action") is not None:
+            return
+        status = RunStatus(system_status["status"])
+        domain_event_type = (
+            DomainEventType.RUN_TERMINATED
+            if status is RunStatus.TERMINATED
+            else DomainEventType.RUN_FAILED
+        )
+        terminal_trace = trace_context.child_span(
+            span_id=f"runtime-rerun-retry-action-{run.run_id}",
+            created_at=occurred_at,
+            run_id=run.run_id,
+            stage_run_id=trace_context.stage_run_id,
+            graph_thread_id=run.graph_thread_ref,
+        )
+        TerminalStatusProjector(
+            events=self._require_events(),
+            now=self._now,
+        ).append_terminal_system_status(
+            domain_event_type=domain_event_type,
+            run=run,
+            title=system_status["title"],
+            reason=system_status["reason"],
+            retry_action=f"retry:{run.run_id}",
+            trace_context=terminal_trace,
+            occurred_at=occurred_at,
+        )
+
+    def _record_rejected_session_command(
+        self,
+        *,
+        action: str,
+        message: str,
+        actor_id: str,
+        session_id: str,
+        reason: str,
+        trace_context: TraceContext,
+        started_at: datetime | None = None,
+    ) -> None:
+        recorded_at = self._now()
+        self._audit_service.record_rejected_command(
+            actor_type=AuditActorType.USER,
+            actor_id=actor_id,
+            action=action,
+            target_type="session",
+            target_id=session_id,
+            reason=reason,
+            metadata={
+                "session_id": session_id,
+                "result_status": "rejected",
+                "rejected_reason": reason,
+            },
+            trace_context=trace_context,
+            created_at=recorded_at,
+        )
+        self._record_run_log(
+            payload_type="runtime_command_rejected",
+            message=message,
+            metadata={
+                "session_id": session_id,
+                "reason": reason,
+                "result_status": "rejected",
+            },
+            trace_context=trace_context,
+            created_at=recorded_at,
+            level=LogLevel.WARNING,
+            error_code=ErrorCode.VALIDATION_ERROR.value,
+            duration_ms=self._duration_ms(started_at, recorded_at),
+        )
+
+    def _rerun_log_metadata(
+        self,
+        *,
+        session: SessionModel,
+        old_run: PipelineRunModel,
+        old_stage: StageRunModel | None,
+        new_run: PipelineRunModel | None,
+        old_trace_id: str,
+        result_status: str,
+    ) -> dict[str, Any]:
+        metadata = {
+            "session_id": session.session_id,
+            "old_run_id": old_run.run_id,
+            "new_run_id": new_run.run_id if new_run is not None else None,
+            "stage_run_id": old_stage.stage_run_id if old_stage is not None else None,
+            "old_graph_thread_id": old_run.graph_thread_ref,
+            "new_graph_thread_id": (
+                new_run.graph_thread_ref if new_run is not None else None
+            ),
+            "old_trace_id": old_trace_id,
+            "new_trace_id": new_run.trace_id if new_run is not None else None,
+            "trigger_source": RunTriggerSource.RETRY.value,
+            "old_attempt_index": old_run.attempt_index,
+            "new_attempt_index": (
+                new_run.attempt_index if new_run is not None else old_run.attempt_index + 1
+            ),
+            "result_status": result_status,
+        }
+        if new_run is not None:
+            metadata.update(
+                self.build_rerun_trigger_metadata(
+                    old_run=old_run,
+                    new_run=new_run,
+                    old_trace_id=old_trace_id,
+                )
+            )
+        return metadata
 
     def _mark_terminal(
         self,
@@ -1267,15 +1743,15 @@ class RunLifecycleService:
         self,
         *,
         run: PipelineRunModel,
-        stage: StageRunModel,
+        stage: StageRunModel | None,
         paused: bool = False,
     ) -> GraphThreadRef:
         return GraphThreadRef(
             thread_id=run.graph_thread_ref,
             run_id=run.run_id,
             status=GraphThreadStatus.PAUSED if paused else GraphThreadStatus(run.status.value),
-            current_stage_run_id=stage.stage_run_id,
-            current_stage_type=stage.stage_type,
+            current_stage_run_id=stage.stage_run_id if stage is not None else None,
+            current_stage_type=stage.stage_type if stage is not None else None,
         )
 
     def _command_trace(
@@ -1285,14 +1761,14 @@ class RunLifecycleService:
         span_id: str,
         session: SessionModel,
         run: PipelineRunModel,
-        stage: StageRunModel,
+        stage: StageRunModel | None,
     ) -> TraceContext:
         return trace_context.child_span(
             span_id=span_id,
             created_at=self._now(),
             session_id=session.session_id,
             run_id=run.run_id,
-            stage_run_id=stage.stage_run_id,
+            stage_run_id=stage.stage_run_id if stage is not None else None,
             graph_thread_id=run.graph_thread_ref,
         )
 
@@ -1303,7 +1779,7 @@ class RunLifecycleService:
         message: str,
         actor_id: str,
         run: PipelineRunModel,
-        stage: StageRunModel,
+        stage: StageRunModel | None,
         reason: str,
         trace_context: TraceContext,
         started_at: datetime | None = None,
@@ -1318,7 +1794,7 @@ class RunLifecycleService:
             reason=reason,
             metadata={
                 "run_id": run.run_id,
-                "stage_run_id": stage.stage_run_id,
+                "stage_run_id": stage.stage_run_id if stage is not None else None,
                 "result_status": "rejected",
                 "rejected_reason": reason,
             },
@@ -1330,7 +1806,7 @@ class RunLifecycleService:
             message=message,
             metadata={
                 "run_id": run.run_id,
-                "stage_run_id": stage.stage_run_id,
+                "stage_run_id": stage.stage_run_id if stage is not None else None,
                 "reason": reason,
                 "result_status": "rejected",
             },
@@ -1348,7 +1824,7 @@ class RunLifecycleService:
         message: str,
         actor_id: str,
         run: PipelineRunModel,
-        stage: StageRunModel,
+        stage: StageRunModel | None,
         reason: str,
         trace_context: TraceContext,
         started_at: datetime | None = None,
@@ -1364,7 +1840,7 @@ class RunLifecycleService:
                 reason=reason,
                 metadata={
                     "run_id": run.run_id,
-                    "stage_run_id": stage.stage_run_id,
+                    "stage_run_id": stage.stage_run_id if stage is not None else None,
                     "result_status": "failed",
                 },
                 trace_context=trace_context,
@@ -1377,7 +1853,7 @@ class RunLifecycleService:
             message=message,
             metadata={
                 "run_id": run.run_id,
-                "stage_run_id": stage.stage_run_id,
+                "stage_run_id": stage.stage_run_id if stage is not None else None,
                 "reason": reason,
                 "result_status": "failed",
             },
@@ -1434,6 +1910,79 @@ class RunLifecycleService:
         self._runtime_session.commit()
         self._require_control_session().commit()
         self._require_event_session().commit()
+
+    def _commit_rerun_all(
+        self,
+        *,
+        session_id: str,
+        session_snapshot: RerunSessionState,
+        new_run_id: str,
+    ) -> None:
+        runtime_committed = False
+        control_committed = False
+        try:
+            self._runtime_session.commit()
+            runtime_committed = True
+            self._require_control_session().commit()
+            control_committed = True
+            self._require_event_session().commit()
+        except Exception:
+            self._rollback_all()
+            self._compensate_rerun_partial_commit(
+                session_id=session_id,
+                session_snapshot=session_snapshot,
+                new_run_id=new_run_id,
+                runtime_committed=runtime_committed,
+                control_committed=control_committed,
+            )
+            raise
+
+    def _compensate_rerun_partial_commit(
+        self,
+        *,
+        session_id: str,
+        session_snapshot: RerunSessionState,
+        new_run_id: str,
+        runtime_committed: bool,
+        control_committed: bool,
+    ) -> None:
+        control_restored = not control_committed
+        control_error: Exception | None = None
+        runtime_error: Exception | None = None
+
+        if control_committed:
+            try:
+                control_session = self._require_control_session()
+                control_session.rollback()
+                session = control_session.get(SessionModel, session_id)
+                if session is None:
+                    raise RuntimeError("rerun compensation could not reload the session.")
+                session.current_run_id = session_snapshot.current_run_id
+                session.status = session_snapshot.status
+                session.latest_stage_type = session_snapshot.latest_stage_type
+                session.updated_at = session_snapshot.updated_at
+                control_session.add(session)
+                control_session.commit()
+                control_restored = True
+            except Exception as exc:
+                control_error = exc
+
+        if runtime_committed and control_restored:
+            try:
+                self._runtime_session.rollback()
+                run = self._runtime_session.get(PipelineRunModel, new_run_id)
+                if run is not None:
+                    self._runtime_session.delete(run)
+                    self._runtime_session.commit()
+            except Exception as exc:
+                runtime_error = exc
+
+        if control_error is not None or runtime_error is not None:
+            self._rollback_all()
+            detail = str(control_error or runtime_error)
+            raise RuntimeError(
+                f"rerun compensation failed after partial commit: {detail}"
+            ) from (control_error or runtime_error)
 
     def _rollback_all(self) -> None:
         self._runtime_session.rollback()
@@ -1492,6 +2041,10 @@ class _NoopAuditService:
 class _NoopRunLogWriter:
     def write_run_log(self, record: LogRecordInput) -> object:
         return object()
+
+
+class _RejectedRunLifecycleServiceError(RunLifecycleServiceError):
+    pass
 
 
 __all__ = [

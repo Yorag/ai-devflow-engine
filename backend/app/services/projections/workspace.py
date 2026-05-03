@@ -290,7 +290,10 @@ class WorkspaceProjectionService:
             trigger_source=run.trigger_source,
             started_at=self._projection_datetime(run.started_at),
             ended_at=self._projection_datetime(run.ended_at),
-            current_stage_type=self._stage_type_for_run(run),
+            current_stage_type=self._stage_type_for_run_summary(
+                run,
+                session=session,
+            ),
             is_active=run.run_id == session.current_run_id and not terminal,
         )
 
@@ -309,6 +312,28 @@ class WorkspaceProjectionService:
         if stage is None:
             return None
         return stage.stage_type
+
+    def _stage_type_for_run_summary(
+        self,
+        run: PipelineRunModel,
+        *,
+        session: SessionModel,
+    ):
+        stage_type = self._stage_type_for_run(run)
+        if stage_type is not None:
+            return stage_type
+        terminal = run.status in {
+            RunStatus.COMPLETED,
+            RunStatus.FAILED,
+            RunStatus.TERMINATED,
+        }
+        if (
+            run.run_id == session.current_run_id
+            and run.current_stage_run_id is None
+            and not terminal
+        ):
+            return session.latest_stage_type
+        return None
 
     @staticmethod
     def _session_read(session: SessionModel) -> SessionRead:

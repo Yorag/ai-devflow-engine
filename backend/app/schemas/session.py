@@ -36,6 +36,10 @@ class SessionMessageAppendRequest(_StrictBaseModel):
     content: str = Field(min_length=1)
 
 
+class SessionRerunRequest(_StrictBaseModel):
+    pass
+
+
 class SessionMessageAppendResponse(_StrictBaseModel):
     session: SessionRead
     message_item: MessageFeedEntry
@@ -63,5 +67,6 @@ __all__ = [
     "SessionMessageAppendResponse",
     "SessionRead",
     "SessionRenameRequest",
+    "SessionRerunRequest",
     "SessionTemplateUpdateRequest",
 ]

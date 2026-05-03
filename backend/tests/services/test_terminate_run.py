@@ -480,7 +480,7 @@ def test_terminate_running_run_marks_run_stage_and_session_terminated_and_append
         )
         assert event is not None
         assert event.payload["system_status"]["status"] == "terminated"
-        assert event.payload["system_status"]["retry_action"] is None
+        assert event.payload["system_status"]["retry_action"] == "retry:run-1"
     assert [record["action"] for record in audit.records] == ["runtime.terminate"]
     assert [record.message for record in log_writer.records] == [
         "Run terminate command accepted.",
@@ -699,7 +699,41 @@ def test_terminate_rolls_back_tool_confirmation_and_terminal_state_when_cancel_a
     assert log_writer.records[-1].message == "Run terminate failed."
 
 
-def test_terminal_status_projector_appends_failed_system_status_payload(
+def test_terminal_status_projector_appends_failed_system_status_payload_for_current_tail(
+    tmp_path: Path,
+) -> None:
+    manager = build_manager(tmp_path)
+    seed_active_run(
+        manager,
+        run_status=RunStatus.FAILED,
+        session_status=SessionStatus.FAILED,
+        stage_status=StageStatus.FAILED,
+    )
+    with manager.session(DatabaseRole.RUNTIME) as session:
+        run = session.get(PipelineRunModel, "run-1")
+        assert run is not None
+        with manager.session(DatabaseRole.EVENT) as event_session:
+            TerminalStatusProjector(
+                events=EventStore(event_session, now=lambda: NOW),
+                now=lambda: NOW,
+            ).append_terminal_system_status(
+                domain_event_type=DomainEventType.RUN_FAILED,
+                run=run,
+                title="Run failed",
+                reason="Runtime failed.",
+                is_current_tail=True,
+                trace_context=build_trace(),
+                occurred_at=NOW,
+            )
+
+    with manager.session(DatabaseRole.EVENT) as session:
+        event = session.query(DomainEventModel).one()
+        assert event.event_type is SseEventType.SYSTEM_STATUS
+        assert event.payload["system_status"]["status"] == "failed"
+        assert event.payload["system_status"]["retry_action"] == "retry:run-1"
+
+
+def test_terminal_status_projector_leaves_retry_action_unset_without_current_tail_flag(
     tmp_path: Path,
 ) -> None:
     manager = build_manager(tmp_path)
