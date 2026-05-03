@@ -13,6 +13,10 @@ from backend.app.domain.enums import RunStatus
 from backend.app.schemas.feed import ApprovalResultFeedEntry, TopLevelFeedEntry
 from backend.app.schemas.run import RunTimelineProjection
 from backend.app.services.events import DomainEvent, EventStore
+from backend.app.services.publication_boundary import (
+    PublicationBoundaryService,
+    PublicationBoundaryServiceError,
+)
 
 
 TOP_LEVEL_FEED_ENTRY_ADAPTER = TypeAdapter(TopLevelFeedEntry)
@@ -42,8 +46,17 @@ class TimelineProjectionService:
         self._control_session = control_session
         self._runtime_session = runtime_session
         self._event_store = EventStore(event_session)
+        self._publication_boundary = PublicationBoundaryService(
+            control_session=control_session,
+            runtime_session=runtime_session,
+            event_session=event_session,
+        )
 
     def get_run_timeline(self, run_id: str) -> RunTimelineProjection:
+        try:
+            self._publication_boundary.assert_run_visible(run_id=run_id)
+        except PublicationBoundaryServiceError:
+            self._raise_not_found()
         run = self._get_visible_run(run_id)
         session = self._get_visible_session_for_run(run)
         return RunTimelineProjection(
@@ -67,7 +80,12 @@ class TimelineProjectionService:
         session_id: str,
     ) -> list[TopLevelFeedEntry]:
         entries: list[TopLevelFeedEntry] = []
+        hidden_run_ids = self._publication_boundary.hidden_run_ids_for_session(
+            session_id=session_id
+        )
         for event in self._event_store.list_for_session(session_id):
+            if event.run_id is not None and event.run_id in hidden_run_ids:
+                continue
             if event.run_id != run_id:
                 continue
             entry = self._entry_from_event(event)

@@ -5,13 +5,14 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.error_codes import ErrorCode
 from backend.app.db.models.runtime import (
+    PipelineRunModel,
     ModelBindingSnapshotModel,
     StageRunModel,
     ProviderCallPolicySnapshotModel,
     ProviderSnapshotModel,
     RuntimeLimitSnapshotModel,
 )
-from backend.app.domain.enums import StageStatus, StageType
+from backend.app.domain.enums import RunStatus, RunTriggerSource, StageStatus, StageType
 from backend.app.domain.provider_call_policy_snapshot import (
     ProviderCallPolicySnapshot,
 )
@@ -134,6 +135,74 @@ class RuntimeSnapshotRepository:
             raise RuntimeSnapshotRepositoryError() from exc
 
 
+class PipelineRunRepositoryError(RuntimeError):
+    def __init__(
+        self,
+        message: str = "Pipeline run storage is unavailable.",
+        *,
+        error_code: ErrorCode = ErrorCode.CONFIG_STORAGE_UNAVAILABLE,
+    ) -> None:
+        self.error_code = error_code
+        self.message = message
+        super().__init__(message)
+
+
+class PipelineRunRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def create_run(
+        self,
+        *,
+        run_id: str,
+        session_id: str,
+        project_id: str,
+        attempt_index: int,
+        status: RunStatus,
+        trigger_source: RunTriggerSource,
+        template_snapshot_ref: str,
+        graph_definition_ref: str,
+        graph_thread_ref: str,
+        workspace_ref: str,
+        runtime_limit_snapshot_ref: str,
+        provider_call_policy_snapshot_ref: str,
+        delivery_channel_snapshot_ref: str | None,
+        current_stage_run_id: str | None,
+        trace_id: str,
+        started_at,
+        ended_at,
+        created_at,
+        updated_at,
+    ) -> PipelineRunModel:
+        try:
+            model = PipelineRunModel(
+                run_id=run_id,
+                session_id=session_id,
+                project_id=project_id,
+                attempt_index=attempt_index,
+                status=status,
+                trigger_source=trigger_source,
+                template_snapshot_ref=template_snapshot_ref,
+                graph_definition_ref=graph_definition_ref,
+                graph_thread_ref=graph_thread_ref,
+                workspace_ref=workspace_ref,
+                runtime_limit_snapshot_ref=runtime_limit_snapshot_ref,
+                provider_call_policy_snapshot_ref=provider_call_policy_snapshot_ref,
+                delivery_channel_snapshot_ref=delivery_channel_snapshot_ref,
+                current_stage_run_id=current_stage_run_id,
+                trace_id=trace_id,
+                started_at=started_at,
+                ended_at=ended_at,
+                created_at=created_at,
+                updated_at=updated_at,
+            )
+            self._session.add(model)
+            self._session.flush()
+            return model
+        except SQLAlchemyError as exc:
+            raise PipelineRunRepositoryError() from exc
+
+
 class StageRunRepositoryError(RuntimeError):
     def __init__(
         self,
@@ -207,6 +276,8 @@ class StageRunRepository:
 
 
 __all__ = [
+    "PipelineRunRepository",
+    "PipelineRunRepositoryError",
     "RuntimeSnapshotRepository",
     "RuntimeSnapshotRepositoryError",
     "StageRunRepository",

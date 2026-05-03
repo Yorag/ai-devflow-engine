@@ -171,10 +171,16 @@ def build_runtime_run(
 
 
 def current_settings(tmp_path: Path):
+    from backend.app.services.providers import ProviderService
     from backend.app.services.runtime_settings import PlatformRuntimeSettingsService
 
     manager = build_manager(tmp_path)
     with manager.session(DatabaseRole.CONTROL) as session:
+        ProviderService(
+            session,
+            audit_service=RecordingAuditService(),
+            now=lambda: NOW,
+        ).seed_builtin_providers(trace_context=build_trace())
         return PlatformRuntimeSettingsService(
             session,
             audit_service=RecordingAuditService(),
@@ -187,10 +193,16 @@ def test_runtime_limit_snapshot_freezes_current_settings_version_and_template_li
     tmp_path: Path,
 ) -> None:
     from backend.app.domain.runtime_limit_snapshot import RuntimeLimitSnapshotBuilder
+    from backend.app.services.providers import ProviderService
     from backend.app.services.runtime_settings import PlatformRuntimeSettingsService
 
     manager = build_manager(tmp_path)
     with manager.session(DatabaseRole.CONTROL) as session:
+        ProviderService(
+            session,
+            audit_service=RecordingAuditService(),
+            now=lambda: NOW,
+        ).seed_builtin_providers(trace_context=build_trace())
         service = PlatformRuntimeSettingsService(
             session,
             audit_service=RecordingAuditService(),
@@ -278,10 +290,16 @@ def test_runtime_limit_snapshot_rejects_template_limit_above_hard_limit(
         RuntimeLimitSnapshotBuilder,
         RuntimeLimitSnapshotBuilderError,
     )
+    from backend.app.services.providers import ProviderService
     from backend.app.services.runtime_settings import PlatformRuntimeSettingsService
 
     manager = build_manager(tmp_path)
     with manager.session(DatabaseRole.CONTROL) as session:
+        ProviderService(
+            session,
+            audit_service=RecordingAuditService(),
+            now=lambda: NOW,
+        ).seed_builtin_providers(trace_context=build_trace())
         service = PlatformRuntimeSettingsService(
             session,
             audit_service=RecordingAuditService(),

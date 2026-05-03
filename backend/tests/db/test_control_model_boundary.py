@@ -23,6 +23,7 @@ NOW = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 CONTROL_TABLES = {
     "projects",
     "sessions",
+    "startup_publications",
     "pipeline_templates",
     "providers",
     "delivery_channels",
