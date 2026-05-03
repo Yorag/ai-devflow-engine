@@ -52,6 +52,13 @@ TOOL_CONFIRMATION_PAUSED_MESSAGE = (
     "Current run is paused; resume it to continue tool confirmation."
 )
 TOOL_CONFIRMATION_COMMAND_FAILED_MESSAGE = "tool confirmation command failed."
+TOOL_CONFIRMATION_DENY_SOURCE_VALUES = frozenset(
+    {
+        "continue_current_stage",
+        "run_failed",
+        "awaiting_run_control",
+    }
+)
 
 
 class RunLogWriter(Protocol):
@@ -135,6 +142,8 @@ class ToolConfirmationService:
         reason: str,
         expected_side_effects: list[str],
         alternative_path_summary: str | None,
+        planned_deny_followup_action: str | None = None,
+        planned_deny_followup_summary: str | None = None,
         trace_context: TraceContext,
     ) -> ToolConfirmationCreationResult:
         timestamp = self._now()
@@ -187,6 +196,10 @@ class ToolConfirmationService:
                 reason=reason,
                 expected_side_effects=expected_side_effects,
                 alternative_path_summary=alternative_path_summary,
+                planned_deny_followup_action=planned_deny_followup_action,
+                planned_deny_followup_summary=planned_deny_followup_summary,
+                deny_followup_action=None,
+                deny_followup_summary=None,
                 user_decision=None,
                 status=ToolConfirmationStatus.PENDING,
                 graph_interrupt_ref=interrupt.interrupt_id,
@@ -505,10 +518,18 @@ class ToolConfirmationService:
 
         timestamp = started_at
         try:
+            deny_followup_action, deny_followup_summary = (
+                self._resolve_deny_followup_source(
+                    request=request,
+                    decision=decision,
+                )
+            )
             request.status = decision
             request.user_decision = decision
             request.responded_at = timestamp
             request.updated_at = timestamp
+            request.deny_followup_action = deny_followup_action
+            request.deny_followup_summary = deny_followup_summary
             self._mark_running_after_command(
                 control_session=control_session,
                 run=run,
@@ -544,6 +565,8 @@ class ToolConfirmationService:
                     "tool_name": request.tool_name,
                     "decision": decision.value,
                     "reason": reason,
+                    "deny_followup_action": deny_followup_action,
+                    "deny_followup_summary": deny_followup_summary,
                     "result_status": "accepted",
                 },
                 trace_context=command_trace,
@@ -559,6 +582,8 @@ class ToolConfirmationService:
                     "stage_run_id": stage.stage_run_id,
                     "decision": decision.value,
                     "reason": reason,
+                    "deny_followup_action": deny_followup_action,
+                    "deny_followup_summary": deny_followup_summary,
                     "result_status": "accepted",
                 },
                 trace_context=command_trace,
@@ -575,6 +600,14 @@ class ToolConfirmationService:
                         "decision": decision.value,
                         "tool_confirmation_id": tool_confirmation_id,
                         "confirmation_object_ref": request.confirmation_object_ref,
+                        **(
+                            {
+                                "deny_followup_action": deny_followup_action,
+                                "deny_followup_summary": deny_followup_summary,
+                            }
+                            if decision is ToolConfirmationStatus.DENIED
+                            else {}
+                        ),
                         **({"reason": reason} if reason is not None else {}),
                     },
                 ),
@@ -798,6 +831,26 @@ class ToolConfirmationService:
         if run.status is RunStatus.PAUSED:
             return False, TOOL_CONFIRMATION_PAUSED_MESSAGE
         return False, "Current run is not waiting for tool confirmation."
+
+    @staticmethod
+    def _resolve_deny_followup_source(
+        *,
+        request: ToolConfirmationRequestModel,
+        decision: ToolConfirmationStatus,
+    ) -> tuple[str | None, str | None]:
+        if decision is not ToolConfirmationStatus.DENIED:
+            return None, None
+        action = request.planned_deny_followup_action
+        summary = request.planned_deny_followup_summary
+        if action is None or summary is None:
+            raise RuntimeError("deny follow-up source is missing")
+        normalized_action = action.strip()
+        normalized_summary = summary.strip()
+        if not normalized_action or not normalized_summary:
+            raise RuntimeError("deny follow-up source is missing")
+        if normalized_action not in TOOL_CONFIRMATION_DENY_SOURCE_VALUES:
+            raise RuntimeError("deny follow-up action is invalid")
+        return normalized_action, normalized_summary
 
     def _record_failed_command(
         self,

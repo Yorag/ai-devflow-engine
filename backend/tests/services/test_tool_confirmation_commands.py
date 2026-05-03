@@ -368,6 +368,10 @@ def create_request(service: ToolConfirmationService):
         reason="The command deletes files and requires explicit confirmation.",
         expected_side_effects=["Deletes build outputs."],
         alternative_path_summary="Keep generated files and stop the run.",
+        planned_deny_followup_action="continue_current_stage",
+        planned_deny_followup_summary=(
+            "Code Generation will continue with a low-risk fallback."
+        ),
         trace_context=build_trace(),
     )
 
@@ -377,6 +381,10 @@ def seed_pending_confirmation(
     *,
     request_status: ToolConfirmationStatus = ToolConfirmationStatus.PENDING,
     user_decision: ToolConfirmationStatus | None = None,
+    planned_deny_followup_action: str | None = "continue_current_stage",
+    planned_deny_followup_summary: str | None = (
+        "Code Generation will continue with a low-risk fallback."
+    ),
     run_status: RunStatus = RunStatus.WAITING_TOOL_CONFIRMATION,
     session_status: SessionStatus = SessionStatus.WAITING_TOOL_CONFIRMATION,
     stage_status: StageStatus = StageStatus.WAITING_TOOL_CONFIRMATION,
@@ -410,6 +418,10 @@ def seed_pending_confirmation(
                 reason="The command deletes files and requires explicit confirmation.",
                 expected_side_effects=["Deletes build outputs."],
                 alternative_path_summary="Keep generated files and stop the run.",
+                planned_deny_followup_action=planned_deny_followup_action,
+                planned_deny_followup_summary=planned_deny_followup_summary,
+                deny_followup_action=None,
+                deny_followup_summary=None,
                 user_decision=user_decision,
                 status=request_status,
                 graph_interrupt_ref="interrupt-tool-confirmation-1",
@@ -488,6 +500,12 @@ def test_create_request_persists_confirmation_control_record_event_and_waiting_s
         assert request.graph_interrupt_ref == "interrupt-tool-confirmation-1"
         assert request.status is ToolConfirmationStatus.PENDING
         assert request.user_decision is None
+        assert request.planned_deny_followup_action == "continue_current_stage"
+        assert request.planned_deny_followup_summary == (
+            "Code Generation will continue with a low-risk fallback."
+        )
+        assert request.deny_followup_action is None
+        assert request.deny_followup_summary is None
         assert run is not None and run.status is RunStatus.WAITING_TOOL_CONFIRMATION
         assert stage is not None and stage.status is StageStatus.WAITING_TOOL_CONFIRMATION
         assert control_record.control_type is RunControlRecordType.TOOL_CONFIRMATION
@@ -561,6 +579,8 @@ def test_deny_updates_request_result_projection_and_resumes_runtime(tmp_path: Pa
         "decision": "denied",
         "tool_confirmation_id": confirmation_id,
         "confirmation_object_ref": "tool-action-1",
+        "deny_followup_action": "continue_current_stage",
+        "deny_followup_summary": "Code Generation will continue with a low-risk fallback.",
         "reason": "The command deletes too much state.",
     }
     with manager.session(DatabaseRole.RUNTIME) as session:
@@ -568,10 +588,97 @@ def test_deny_updates_request_result_projection_and_resumes_runtime(tmp_path: Pa
         assert request is not None
         assert request.status is ToolConfirmationStatus.DENIED
         assert request.user_decision is ToolConfirmationStatus.DENIED
+        assert request.planned_deny_followup_action == "continue_current_stage"
+        assert request.planned_deny_followup_summary == (
+            "Code Generation will continue with a low-risk fallback."
+        )
+        assert request.deny_followup_action == "continue_current_stage"
+        assert request.deny_followup_summary == (
+            "Code Generation will continue with a low-risk fallback."
+        )
     assert audit.records[0]["action"] == "tool_confirmation.deny"
     assert audit.records[0]["reason"] == "The command deletes too much state."
     assert log_writer.records[-1].payload.excerpt is not None
     assert '"reason":"The command deletes too much state."' in log_writer.records[-1].payload.excerpt
+
+
+@pytest.mark.parametrize(
+    ("planned_action", "planned_summary"),
+    [
+        (
+            "run_failed",
+            "The run will fail because no low-risk fallback is available.",
+        ),
+        (
+            "awaiting_run_control",
+            "The run is waiting for an explicit pause or terminate decision.",
+        ),
+    ],
+)
+def test_deny_persists_non_continue_followup_fields(
+    tmp_path: Path,
+    planned_action: str,
+    planned_summary: str,
+) -> None:
+    manager = build_manager(tmp_path)
+    confirmation_id = seed_pending_confirmation(
+        manager,
+        planned_deny_followup_action=planned_action,
+        planned_deny_followup_summary=planned_summary,
+    )
+    service, runtime_port, _audit, _log_writer = build_service(manager)
+
+    result = service.deny(
+        tool_confirmation_id=confirmation_id,
+        reason="Do not run this tool action.",
+        actor_id="session-user",
+        trace_context=build_trace(),
+    )
+
+    assert result.tool_confirmation.status is ToolConfirmationStatus.DENIED
+    assert runtime_port.calls[-1][1]["resume_payload"].values["deny_followup_action"] == (
+        planned_action
+    )
+    assert runtime_port.calls[-1][1]["resume_payload"].values["deny_followup_summary"] == (
+        planned_summary
+    )
+    with manager.session(DatabaseRole.RUNTIME) as session:
+        request = session.get(ToolConfirmationRequestModel, confirmation_id)
+        assert request is not None
+        assert request.deny_followup_action == planned_action
+        assert request.deny_followup_summary == planned_summary
+
+
+def test_deny_requires_persisted_followup_source(tmp_path: Path) -> None:
+    manager = build_manager(tmp_path)
+    confirmation_id = seed_pending_confirmation(
+        manager,
+        planned_deny_followup_action=None,
+        planned_deny_followup_summary=None,
+    )
+    service, runtime_port, audit, log_writer = build_service(manager)
+
+    with pytest.raises(ToolConfirmationServiceError) as exc_info:
+        service.deny(
+            tool_confirmation_id=confirmation_id,
+            reason="Do not run this tool action.",
+            actor_id="session-user",
+            trace_context=build_trace(),
+        )
+
+    assert exc_info.value.error_code is ErrorCode.INTERNAL_ERROR
+    with manager.session(DatabaseRole.RUNTIME) as session:
+        request = session.get(ToolConfirmationRequestModel, confirmation_id)
+        assert request is not None
+        assert request.status is ToolConfirmationStatus.PENDING
+        assert request.user_decision is None
+        assert request.planned_deny_followup_action is None
+        assert request.planned_deny_followup_summary is None
+        assert request.deny_followup_action is None
+        assert request.deny_followup_summary is None
+    assert runtime_port.calls == []
+    assert audit.records[-1]["action"] == "tool_confirmation.deny.failed"
+    assert log_writer.records[-1].message == "Tool confirmation command failed."
 
 
 def test_paused_run_rejects_without_mutation(tmp_path: Path) -> None:
@@ -604,6 +711,43 @@ def test_paused_run_rejects_without_mutation(tmp_path: Path) -> None:
     assert runtime_port.calls == []
     assert audit.records[0]["method"] == "record_rejected_command"
     assert audit.records[0]["action"] == "tool_confirmation.allow.rejected"
+    assert log_writer.records[-1].payload.excerpt is not None
+    assert '"result_status":"rejected"' in log_writer.records[-1].payload.excerpt
+
+
+def test_deny_paused_run_rejects_without_mutation(tmp_path: Path) -> None:
+    manager = build_manager(tmp_path)
+    confirmation_id = seed_pending_confirmation(
+        manager,
+        run_status=RunStatus.PAUSED,
+        session_status=SessionStatus.PAUSED,
+        stage_status=StageStatus.WAITING_TOOL_CONFIRMATION,
+    )
+    service, runtime_port, audit, log_writer = build_service(manager)
+
+    with pytest.raises(ToolConfirmationServiceError) as exc_info:
+        service.deny(
+            tool_confirmation_id=confirmation_id,
+            reason="Need a later operator decision.",
+            actor_id="session-user",
+            trace_context=build_trace(),
+        )
+
+    assert exc_info.value.error_code is ErrorCode.TOOL_CONFIRMATION_NOT_ACTIONABLE
+    assert exc_info.value.status_code == 409
+    assert "paused" in exc_info.value.message
+    with manager.session(DatabaseRole.RUNTIME) as session:
+        request = session.get(ToolConfirmationRequestModel, confirmation_id)
+        assert request is not None
+        assert request.status is ToolConfirmationStatus.PENDING
+        assert request.user_decision is None
+        assert request.deny_followup_action is None
+        assert request.deny_followup_summary is None
+    with manager.session(DatabaseRole.EVENT) as session:
+        assert session.query(DomainEventModel).count() == 0
+    assert runtime_port.calls == []
+    assert audit.records[0]["method"] == "record_rejected_command"
+    assert audit.records[0]["action"] == "tool_confirmation.deny.rejected"
     assert log_writer.records[-1].payload.excerpt is not None
     assert '"result_status":"rejected"' in log_writer.records[-1].payload.excerpt
 
@@ -656,6 +800,42 @@ def test_terminal_or_already_resolved_request_rejects_without_mutation(
     assert runtime_port.calls == []
     assert audit.records[0]["method"] == "record_rejected_command"
     assert audit.records[0]["action"] == "tool_confirmation.allow.rejected"
+    assert log_writer.records[-1].payload.excerpt is not None
+    assert '"result_status":"rejected"' in log_writer.records[-1].payload.excerpt
+
+
+def test_deny_terminal_request_rejects_without_mutation(tmp_path: Path) -> None:
+    manager = build_manager(tmp_path)
+    confirmation_id = seed_pending_confirmation(
+        manager,
+        run_status=RunStatus.COMPLETED,
+        session_status=SessionStatus.COMPLETED,
+        stage_status=StageStatus.COMPLETED,
+    )
+    service, runtime_port, audit, log_writer = build_service(manager)
+
+    with pytest.raises(ToolConfirmationServiceError) as exc_info:
+        service.deny(
+            tool_confirmation_id=confirmation_id,
+            reason="The run is already terminal.",
+            actor_id="session-user",
+            trace_context=build_trace(),
+        )
+
+    assert exc_info.value.error_code is ErrorCode.TOOL_CONFIRMATION_NOT_ACTIONABLE
+    assert "terminal" in exc_info.value.message
+    with manager.session(DatabaseRole.RUNTIME) as session:
+        request = session.get(ToolConfirmationRequestModel, confirmation_id)
+        assert request is not None
+        assert request.status is ToolConfirmationStatus.PENDING
+        assert request.user_decision is None
+        assert request.deny_followup_action is None
+        assert request.deny_followup_summary is None
+    with manager.session(DatabaseRole.EVENT) as session:
+        assert session.query(DomainEventModel).count() == 0
+    assert runtime_port.calls == []
+    assert audit.records[0]["method"] == "record_rejected_command"
+    assert audit.records[0]["action"] == "tool_confirmation.deny.rejected"
     assert log_writer.records[-1].payload.excerpt is not None
     assert '"result_status":"rejected"' in log_writer.records[-1].payload.excerpt
 

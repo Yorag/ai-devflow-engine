@@ -73,6 +73,14 @@ def seed_tool_confirmation(app, **kwargs) -> str:
         "stage_status",
         StageStatus.WAITING_TOOL_CONFIRMATION,
     )
+    planned_deny_followup_action = kwargs.get(
+        "planned_deny_followup_action",
+        "continue_current_stage",
+    )
+    planned_deny_followup_summary = kwargs.get(
+        "planned_deny_followup_summary",
+        "Code Generation will continue with a low-risk fallback.",
+    )
 
     session = manager.session(DatabaseRole.CONTROL)
     try:
@@ -221,6 +229,10 @@ def seed_tool_confirmation(app, **kwargs) -> str:
                 reason="The command deletes files and requires explicit confirmation.",
                 expected_side_effects=["Deletes build outputs."],
                 alternative_path_summary="Keep generated files and stop the run.",
+                planned_deny_followup_action=planned_deny_followup_action,
+                planned_deny_followup_summary=planned_deny_followup_summary,
+                deny_followup_action=None,
+                deny_followup_summary=None,
                 user_decision=None,
                 status=ToolConfirmationStatus.PENDING,
                 graph_interrupt_ref="interrupt-tool-confirmation-1",
@@ -277,9 +289,119 @@ def test_post_tool_confirmation_deny_returns_tool_confirmation_projection(
     assert body["tool_confirmation"]["tool_confirmation_id"] == confirmation_id
     assert body["tool_confirmation"]["status"] == "denied"
     assert body["tool_confirmation"]["decision"] == "denied"
-    assert app.state.h41_runtime_port.calls[-1][1]["resume_payload"].values["reason"] == (
-        "Risk is not acceptable."
+    assert app.state.h41_runtime_port.calls[-1][1]["resume_payload"].values == {
+        "decision": "denied",
+        "tool_confirmation_id": confirmation_id,
+        "confirmation_object_ref": "tool-action-1",
+        "deny_followup_action": "continue_current_stage",
+        "deny_followup_summary": "Code Generation will continue with a low-risk fallback.",
+        "reason": "Risk is not acceptable.",
+    }
+    with app.state.database_manager.session(DatabaseRole.RUNTIME) as session:
+        request = session.get(ToolConfirmationRequestModel, confirmation_id)
+        assert request is not None
+        assert request.deny_followup_action == "continue_current_stage"
+        assert request.deny_followup_summary == (
+            "Code Generation will continue with a low-risk fallback."
+        )
+
+
+def test_post_tool_confirmation_deny_persists_run_failed_followup_fields(
+    tmp_path: Path,
+) -> None:
+    app = build_app(tmp_path)
+    confirmation_id = seed_tool_confirmation(
+        app,
+        planned_deny_followup_action="run_failed",
+        planned_deny_followup_summary=(
+            "The run will fail because no low-risk fallback is available."
+        ),
     )
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/tool-confirmations/{confirmation_id}/deny",
+            json={"reason": "Risk is not acceptable."},
+        )
+
+    assert response.status_code == 200
+    assert app.state.h41_runtime_port.calls[-1][1]["resume_payload"].values[
+        "deny_followup_action"
+    ] == "run_failed"
+    assert app.state.h41_runtime_port.calls[-1][1]["resume_payload"].values[
+        "deny_followup_summary"
+    ] == "The run will fail because no low-risk fallback is available."
+    with app.state.database_manager.session(DatabaseRole.RUNTIME) as session:
+        request = session.get(ToolConfirmationRequestModel, confirmation_id)
+        assert request is not None
+        assert request.deny_followup_action == "run_failed"
+        assert request.deny_followup_summary == (
+            "The run will fail because no low-risk fallback is available."
+        )
+
+
+def test_post_tool_confirmation_deny_persists_awaiting_run_control_followup_fields(
+    tmp_path: Path,
+) -> None:
+    app = build_app(tmp_path)
+    confirmation_id = seed_tool_confirmation(
+        app,
+        planned_deny_followup_action="awaiting_run_control",
+        planned_deny_followup_summary=(
+            "The run is waiting for an explicit pause or terminate decision."
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/tool-confirmations/{confirmation_id}/deny",
+            json={"reason": "Need an explicit operator decision."},
+        )
+
+    assert response.status_code == 200
+    assert app.state.h41_runtime_port.calls[-1][1]["resume_payload"].values[
+        "deny_followup_action"
+    ] == "awaiting_run_control"
+    assert app.state.h41_runtime_port.calls[-1][1]["resume_payload"].values[
+        "deny_followup_summary"
+    ] == "The run is waiting for an explicit pause or terminate decision."
+    with app.state.database_manager.session(DatabaseRole.RUNTIME) as session:
+        request = session.get(ToolConfirmationRequestModel, confirmation_id)
+        assert request is not None
+        assert request.deny_followup_action == "awaiting_run_control"
+        assert request.deny_followup_summary == (
+            "The run is waiting for an explicit pause or terminate decision."
+        )
+
+
+def test_post_tool_confirmation_deny_returns_internal_error_when_followup_source_is_missing(
+    tmp_path: Path,
+) -> None:
+    app = build_app(tmp_path)
+    confirmation_id = seed_tool_confirmation(
+        app,
+        planned_deny_followup_action=None,
+        planned_deny_followup_summary=None,
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            f"/api/tool-confirmations/{confirmation_id}/deny",
+            json={"reason": "Do not run this tool action."},
+        )
+
+    assert response.status_code == 500
+    assert response.json()["error_code"] == "internal_error"
+    with app.state.database_manager.session(DatabaseRole.RUNTIME) as session:
+        request = session.get(ToolConfirmationRequestModel, confirmation_id)
+        assert request is not None
+        assert request.status is ToolConfirmationStatus.PENDING
+        assert request.user_decision is None
+        assert request.deny_followup_action is None
+        assert request.deny_followup_summary is None
+        assert request.planned_deny_followup_action is None
+        assert request.planned_deny_followup_summary is None
+    assert app.state.h41_runtime_port.calls == []
 
 
 def test_post_tool_confirmation_deny_rejects_blank_reason(tmp_path: Path) -> None:
@@ -347,6 +469,63 @@ def test_post_tool_confirmation_allow_returns_terminal_conflict_without_mutation
         assert request is not None
         assert request.status is ToolConfirmationStatus.PENDING
         assert request.user_decision is None
+
+
+def test_post_tool_confirmation_deny_returns_paused_conflict_without_mutation(
+    tmp_path: Path,
+) -> None:
+    app = build_app(tmp_path)
+    confirmation_id = seed_tool_confirmation(
+        app,
+        run_status=RunStatus.PAUSED,
+        session_status=SessionStatus.PAUSED,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/tool-confirmations/{confirmation_id}/deny",
+            json={"reason": "Need a later operator decision."},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "tool_confirmation_not_actionable"
+    assert "paused" in response.json()["message"]
+    with app.state.database_manager.session(DatabaseRole.RUNTIME) as session:
+        request = session.get(ToolConfirmationRequestModel, confirmation_id)
+        assert request is not None
+        assert request.status is ToolConfirmationStatus.PENDING
+        assert request.user_decision is None
+        assert request.deny_followup_action is None
+        assert request.deny_followup_summary is None
+
+
+def test_post_tool_confirmation_deny_returns_terminal_conflict_without_mutation(
+    tmp_path: Path,
+) -> None:
+    app = build_app(tmp_path)
+    confirmation_id = seed_tool_confirmation(
+        app,
+        run_status=RunStatus.COMPLETED,
+        session_status=SessionStatus.COMPLETED,
+        stage_status=StageStatus.COMPLETED,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/tool-confirmations/{confirmation_id}/deny",
+            json={"reason": "The run is already terminal."},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "tool_confirmation_not_actionable"
+    assert "terminal" in response.json()["message"]
+    with app.state.database_manager.session(DatabaseRole.RUNTIME) as session:
+        request = session.get(ToolConfirmationRequestModel, confirmation_id)
+        assert request is not None
+        assert request.status is ToolConfirmationStatus.PENDING
+        assert request.user_decision is None
+        assert request.deny_followup_action is None
+        assert request.deny_followup_summary is None
 
 
 def test_post_tool_confirmation_deny_missing_request_returns_not_found(
