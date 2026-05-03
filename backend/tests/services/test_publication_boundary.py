@@ -298,6 +298,88 @@ def test_visible_run_ids_for_session_excludes_pending_publication(
         assert service.visible_run_ids_for_session(session_id=session_id) == set()
 
 
+def test_begin_startup_publication_fails_if_session_hidden_between_check_and_insert(
+    tmp_path: Path,
+) -> None:
+    manager, session_id = _build_seeded_manager_with_draft_session(tmp_path)
+
+    class RaceControlSession:
+        injected = False
+
+        def __init__(self, wrapped_session) -> None:  # noqa: ANN001
+            self._wrapped_session = wrapped_session
+
+        def _hide_session_once(self) -> None:
+            if not self.injected:
+                self.injected = True
+                with manager.session(DatabaseRole.CONTROL) as concurrent_session:
+                    row = concurrent_session.get(SessionModel, session_id)
+                    assert row is not None
+                    row.is_visible = False
+                    row.visibility_removed_at = NOW
+                    row.updated_at = NOW
+                    concurrent_session.add(row)
+                    concurrent_session.commit()
+
+        def get(self, *args, **kwargs):  # noqa: ANN002, ANN003, ANN201
+            return self._wrapped_session.get(*args, **kwargs)
+
+        def add(self, value) -> None:  # noqa: ANN001
+            if isinstance(value, StartupPublicationModel):
+                self._hide_session_once()
+            self._wrapped_session.add(value)
+
+        def execute(self, *args, **kwargs):  # noqa: ANN002, ANN003, ANN201
+            self._hide_session_once()
+            return self._wrapped_session.execute(*args, **kwargs)
+
+        def commit(self) -> None:
+            self._wrapped_session.commit()
+
+        def rollback(self) -> None:
+            self._wrapped_session.rollback()
+
+        def query(self, *args, **kwargs):  # noqa: ANN002, ANN003, ANN201
+            return self._wrapped_session.query(*args, **kwargs)
+
+        def __getattr__(self, name: str):  # noqa: ANN204
+            return getattr(self._wrapped_session, name)
+
+    with (
+        manager.session(DatabaseRole.CONTROL) as control_session,
+        manager.session(DatabaseRole.RUNTIME) as runtime_session,
+        manager.session(DatabaseRole.GRAPH) as graph_session,
+        manager.session(DatabaseRole.EVENT) as event_session,
+    ):
+        service = PublicationBoundaryService(
+            control_session=RaceControlSession(control_session),
+            runtime_session=runtime_session,
+            graph_session=graph_session,
+            event_session=event_session,
+            now=lambda: NOW,
+        )
+        with pytest.raises(PublicationBoundaryServiceError) as exc_info:
+            service.begin_startup_publication(
+                session_id=session_id,
+                run_id="run-startup-raced-delete",
+                stage_run_id="stage-run-startup-raced-delete",
+                trace_context=build_trace(),
+            )
+        publications = (
+            control_session.query(StartupPublicationModel)
+            .filter_by(session_id=session_id)
+            .all()
+        )
+        saved_session = control_session.get(SessionModel, session_id)
+
+    assert exc_info.value.error_code is ErrorCode.NOT_FOUND
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.message == "Session was not found."
+    assert publications == []
+    assert saved_session is not None
+    assert saved_session.is_visible is False
+
+
 def test_publish_startup_visibility_marks_session_running_and_exposes_run(
     tmp_path: Path,
 ) -> None:

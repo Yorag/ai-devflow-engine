@@ -4,7 +4,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, insert, literal, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -85,21 +85,48 @@ class PublicationBoundaryService:
                 409,
             )
 
-        publication = StartupPublicationModel(
-            publication_id=f"startup-publication-{uuid4().hex}",
-            session_id=session_id,
-            run_id=run_id,
-            stage_run_id=stage_run_id,
-            publication_state=PUBLICATION_STATE_PENDING,
-            pending_session_id=session_id,
-            published_at=None,
-            aborted_at=None,
-            abort_reason=None,
-            created_at=self._now(),
-            updated_at=self._now(),
+        timestamp = self._now()
+        publication_id = f"startup-publication-{uuid4().hex}"
+        statement = insert(StartupPublicationModel).from_select(
+            [
+                "publication_id",
+                "session_id",
+                "run_id",
+                "stage_run_id",
+                "publication_state",
+                "pending_session_id",
+                "published_at",
+                "aborted_at",
+                "abort_reason",
+                "created_at",
+                "updated_at",
+            ],
+            select(
+                literal(publication_id),
+                SessionModel.session_id,
+                literal(run_id),
+                literal(stage_run_id),
+                literal(PUBLICATION_STATE_PENDING),
+                SessionModel.session_id,
+                literal(None),
+                literal(None),
+                literal(None),
+                literal(timestamp),
+                literal(timestamp),
+            ).where(
+                SessionModel.session_id == session_id,
+                SessionModel.is_visible.is_(True),
+                SessionModel.status == SessionStatus.DRAFT,
+                SessionModel.current_run_id.is_(None),
+            ),
         )
-        self._control_session.add(publication)
         try:
+            result = self._control_session.execute(statement)
+            if result.rowcount != 1:
+                self._control_session.rollback()
+                raise self._startup_claim_error_after_guard_loss(
+                    session_id=session_id,
+                )
             self._control_session.commit()
         except IntegrityError as exc:
             self._control_session.rollback()
@@ -115,6 +142,13 @@ class PublicationBoundaryService:
                 "Startup publication state is unavailable.",
                 500,
             ) from exc
+        publication = self._control_session.get(StartupPublicationModel, publication_id)
+        if publication is None:
+            raise PublicationBoundaryServiceError(
+                ErrorCode.INTERNAL_ERROR,
+                "Startup publication state is unavailable.",
+                500,
+            )
         return publication
 
     def publish_startup_visibility(
@@ -284,6 +318,24 @@ class PublicationBoundaryService:
                 404,
             )
         return run.session_id
+
+    def _startup_claim_error_after_guard_loss(
+        self,
+        *,
+        session_id: str,
+    ) -> PublicationBoundaryServiceError:
+        session = self._control_session.get(SessionModel, session_id)
+        if session is None or not session.is_visible:
+            return PublicationBoundaryServiceError(
+                ErrorCode.NOT_FOUND,
+                "Session was not found.",
+                404,
+            )
+        return PublicationBoundaryServiceError(
+            ErrorCode.VALIDATION_ERROR,
+            "First run startup claim could not be acquired.",
+            409,
+        )
 
     def _require_publication(
         self,
