@@ -4,29 +4,34 @@ from uuid import uuid4
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from backend.app.api.error_codes import ErrorCode
+from backend.app.api.error_codes import ErrorCode, assert_error_code_registered
 from backend.app.observability.context import (
     CORRELATION_ID_HEADER,
     REQUEST_ID_HEADER,
     TRACE_ID_HEADER,
 )
+from backend.app.schemas.errors import ApiErrorResponse
 
 
-class ErrorResponse(BaseModel):
-    error_code: ErrorCode = Field(..., description="Stable machine-readable error code.")
-    message: str = Field(..., description="Human-readable error summary.")
-    request_id: str = Field(..., description="Request correlation identifier.")
-    correlation_id: str = Field(..., description="User action or command correlation identifier.")
+class ErrorResponse(ApiErrorResponse):
+    pass
 
 
 class ApiError(Exception):
-    def __init__(self, error_code: ErrorCode, message: str, status_code: int = 400) -> None:
-        self.error_code = error_code
+    def __init__(
+        self,
+        error_code: ErrorCode | str,
+        message: str,
+        status_code: int = 400,
+        *,
+        detail_ref: str | None = None,
+    ) -> None:
+        self.error_code = assert_error_code_registered(error_code)
         self.message = message
         self.status_code = status_code
+        self.detail_ref = detail_ref
         super().__init__(message)
 
 
@@ -54,17 +59,20 @@ def get_trace_id(request: Request) -> str | None:
 
 def build_error_response(
     status_code: int,
-    error_code: ErrorCode,
+    error_code: ErrorCode | str,
     message: str,
     request: Request,
+    *,
+    detail_ref: str | None = None,
 ) -> JSONResponse:
     request_id = get_request_id(request)
     correlation_id = get_correlation_id(request)
     payload = ErrorResponse(
-        error_code=error_code,
+        error_code=assert_error_code_registered(error_code),
         message=message,
         request_id=request_id,
         correlation_id=correlation_id,
+        detail_ref=detail_ref,
     )
     headers = {
         REQUEST_ID_HEADER: request_id,
@@ -74,7 +82,7 @@ def build_error_response(
         headers[TRACE_ID_HEADER] = trace_id
     return JSONResponse(
         status_code=status_code,
-        content=payload.model_dump(mode="json"),
+        content=payload.model_dump(mode="json", exclude_none=True),
         headers=headers,
     )
 
@@ -97,7 +105,13 @@ def _http_error_message(status_code: int, detail: object) -> str:
 def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def handle_api_error(request: Request, exc: ApiError) -> JSONResponse:
-        return build_error_response(exc.status_code, exc.error_code, exc.message, request)
+        return build_error_response(
+            exc.status_code,
+            exc.error_code,
+            exc.message,
+            request,
+            detail_ref=exc.detail_ref,
+        )
 
     @app.exception_handler(RequestValidationError)
     async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
