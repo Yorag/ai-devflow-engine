@@ -188,25 +188,26 @@ describe("Composer component", () => {
     const input = screen.getByLabelText("当前输入");
     const button = screen.getByRole("button", { name: "暂停" });
     expect(input).toHaveProperty("disabled", true);
-    expect(button).toHaveProperty("disabled", true);
+    expect(button).toHaveProperty("disabled", false);
+    expect(button.getAttribute("type")).toBe("button");
     expect(screen.getByText(/当前输入框不承担发送动作/u)).toBeTruthy();
   });
 
-  it("keeps the lifecycle button bound to the current active run during waiting approval", () => {
+  it("keeps the lifecycle button bound to the current active run during waiting approval while remaining executable", () => {
     renderComposerForWorkspace(mockSessionWorkspaces["session-waiting-approval"]);
 
     const button = screen.getByRole("button", { name: "暂停" });
     expect(screen.getByText("绑定 run run-waiting-approval")).toBeTruthy();
-    expect(button).toHaveProperty("disabled", true);
+    expect(button).toHaveProperty("disabled", false);
     expect(button.getAttribute("type")).toBe("button");
     expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", true);
   });
 
-  it("shows resume presentation for paused runs without turning the button into send", () => {
+  it("shows resume presentation for paused runs without turning the button into send and keeps it executable", () => {
     renderComposerForWorkspace(buildPausedWorkspace());
 
     const button = screen.getByRole("button", { name: "恢复" });
-    expect(button).toHaveProperty("disabled", true);
+    expect(button).toHaveProperty("disabled", false);
     expect(button.getAttribute("type")).toBe("button");
     expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", true);
   });
