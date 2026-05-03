@@ -439,9 +439,10 @@
 ## H4.7 重新尝试命令与多 run 分界
 
 **计划周期**：Week 6
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：补齐重新尝试命令的事件、trigger metadata 和多 run 分界语义，使 failed / terminated 后的新 run 能被前端定位。
 **实施计划**：`docs/plans/implementation/h4.7-rerun-command-run-boundary.md`
+**验证摘要**：实施计划 `docs/plans/implementation/h4.7-rerun-command-run-boundary.md` 已完成并在 integration checkpoint 合入 `58a020b`。`uv run python -m pytest backend/tests/services/test_rerun_command_projection.py -v` 通过 11 个 focused service tests；`uv run python -m pytest backend/tests/api/test_rerun_command_api.py -v` 通过 7 个 focused API/OpenAPI tests；`uv run python -m pytest backend/tests/services/test_rerun_command_projection.py backend/tests/api/test_rerun_command_api.py backend/tests/domain/test_run_state_machine.py backend/tests/services/test_terminate_run.py backend/tests/services/test_pause_resume.py backend/tests/api/test_session_api.py backend/tests/api/test_query_api.py backend/tests/projections/test_workspace_projection.py backend/tests/projections/test_timeline_projection.py backend/tests/events/test_event_store.py backend/tests/schemas/test_run_feed_event_schemas.py -q` 通过 114 个 impacted regressions。
 
 **修改文件列表**：
 - Modify: `backend/app/services/runs.py`
