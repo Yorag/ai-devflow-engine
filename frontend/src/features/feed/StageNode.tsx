@@ -3,6 +3,7 @@ import { StageNodeItems } from "./StageNodeItems";
 
 export type StageNodeProps = {
   entry: ExecutionNodeProjection;
+  onOpenInspectorTarget?: (entry: ExecutionNodeProjection) => void;
 };
 
 const stageLabels: Record<StageType, string> = {
@@ -24,7 +25,10 @@ const metricPriority = [
   "failed_test_count",
 ];
 
-export function StageNode({ entry }: StageNodeProps): JSX.Element {
+export function StageNode({
+  entry,
+  onOpenInspectorTarget,
+}: StageNodeProps): JSX.Element {
   const metrics = selectStageMetrics(entry.metrics);
 
   return (
@@ -37,7 +41,19 @@ export function StageNode({ entry }: StageNodeProps): JSX.Element {
           <span className="stage-node__eyebrow">Stage</span>
           <h2>{stageLabels[entry.stage_type]}</h2>
         </div>
-        <span className="stage-node__status">{formatLabel(entry.status)}</span>
+        <div className="stage-node__header-actions">
+          <span className="stage-node__status">{formatLabel(entry.status)}</span>
+          {onOpenInspectorTarget ? (
+            <button
+              type="button"
+              className="inspector-trigger"
+              onClick={() => onOpenInspectorTarget(entry)}
+              aria-label={`Open ${stageLabels[entry.stage_type]} details`}
+            >
+              Details
+            </button>
+          ) : null}
+        </div>
       </header>
 
       <p className="stage-node__summary">{entry.summary}</p>
