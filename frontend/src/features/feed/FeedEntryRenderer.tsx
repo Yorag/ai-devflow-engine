@@ -13,6 +13,7 @@ import { StageNode } from "./StageNode";
 
 export type FeedEntryRendererProps = {
   entry: TopLevelFeedEntry;
+  onOpenInspectorTarget?: (entry: TopLevelFeedEntry) => void;
 };
 
 const stageLabels: Record<StageType, string> = {
@@ -24,26 +25,61 @@ const stageLabels: Record<StageType, string> = {
   delivery_integration: "Delivery Integration",
 };
 
-export function renderFeedEntryByType(entry: TopLevelFeedEntry): JSX.Element {
-  return <FeedEntryRenderer entry={entry} />;
+export type FeedEntryRendererOptions = {
+  onOpenInspectorTarget?: (entry: TopLevelFeedEntry) => void;
+};
+
+export function renderFeedEntryByType(
+  entry: TopLevelFeedEntry,
+  options: FeedEntryRendererOptions = {},
+): JSX.Element {
+  return (
+    <FeedEntryRenderer
+      entry={entry}
+      onOpenInspectorTarget={options.onOpenInspectorTarget}
+    />
+  );
 }
 
-export function FeedEntryRenderer({ entry }: FeedEntryRendererProps): JSX.Element {
+export function FeedEntryRenderer({
+  entry,
+  onOpenInspectorTarget,
+}: FeedEntryRendererProps): JSX.Element {
   switch (entry.type) {
     case "user_message":
       return <UserMessageEntry entry={entry} />;
     case "stage_node":
-      return <StageNode entry={entry} />;
+      return (
+        <StageNode
+          entry={entry}
+          onOpenInspectorTarget={onOpenInspectorTarget}
+        />
+      );
     case "approval_request":
       return <ApprovalRequestEntry entry={entry} />;
     case "tool_confirmation":
-      return <ToolConfirmationEntry entry={entry} />;
+      return (
+        <ToolConfirmationEntry
+          entry={entry}
+          onOpenInspectorTarget={onOpenInspectorTarget}
+        />
+      );
     case "control_item":
-      return <ControlItemEntry entry={entry} />;
+      return (
+        <ControlItemEntry
+          entry={entry}
+          onOpenInspectorTarget={onOpenInspectorTarget}
+        />
+      );
     case "approval_result":
       return <ApprovalResultEntry entry={entry} />;
     case "delivery_result":
-      return <DeliveryResultEntry entry={entry} />;
+      return (
+        <DeliveryResultEntry
+          entry={entry}
+          onOpenInspectorTarget={onOpenInspectorTarget}
+        />
+      );
     case "system_status":
       return <SystemStatusEntry entry={entry} />;
   }
@@ -109,8 +145,10 @@ function ApprovalRequestEntry({
 
 function ToolConfirmationEntry({
   entry,
+  onOpenInspectorTarget,
 }: {
   entry: ToolConfirmationFeedEntry;
+  onOpenInspectorTarget?: (entry: TopLevelFeedEntry) => void;
 }): JSX.Element {
   return (
     <article
@@ -151,12 +189,25 @@ function ToolConfirmationEntry({
         <button type="button" disabled={!entry.is_actionable}>
           Deny this execution
         </button>
+        {onOpenInspectorTarget ? (
+          <InspectorTrigger
+            label={entry.title}
+            className="inspector-trigger--quiet"
+            onClick={() => onOpenInspectorTarget(entry)}
+          />
+        ) : null}
       </div>
     </article>
   );
 }
 
-function ControlItemEntry({ entry }: { entry: ControlItemFeedEntry }): JSX.Element {
+function ControlItemEntry({
+  entry,
+  onOpenInspectorTarget,
+}: {
+  entry: ControlItemFeedEntry;
+  onOpenInspectorTarget?: (entry: TopLevelFeedEntry) => void;
+}): JSX.Element {
   return (
     <article
       className="feed-entry feed-entry--control-item"
@@ -175,6 +226,14 @@ function ControlItemEntry({ entry }: { entry: ControlItemFeedEntry }): JSX.Eleme
           <Metadata label="Target" value={stageLabels[entry.target_stage_type]} />
         ) : null}
       </div>
+      {onOpenInspectorTarget ? (
+        <div className="feed-entry__actions" aria-label="Control item actions">
+          <InspectorTrigger
+            label={entry.title}
+            onClick={() => onOpenInspectorTarget(entry)}
+          />
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -204,8 +263,10 @@ function ApprovalResultEntry({
 
 function DeliveryResultEntry({
   entry,
+  onOpenInspectorTarget,
 }: {
   entry: DeliveryResultFeedEntry;
+  onOpenInspectorTarget?: (entry: TopLevelFeedEntry) => void;
 }): JSX.Element {
   return (
     <article
@@ -230,6 +291,14 @@ function DeliveryResultEntry({
           <Metadata label="Tests" value={entry.test_summary} />
         ) : null}
       </div>
+      {onOpenInspectorTarget ? (
+        <div className="feed-entry__actions" aria-label="Delivery result actions">
+          <InspectorTrigger
+            label={entry.delivery_mode}
+            onClick={() => onOpenInspectorTarget(entry)}
+          />
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -300,6 +369,27 @@ function ChipList({
         <span key={value}>{value}</span>
       ))}
     </div>
+  );
+}
+
+function InspectorTrigger({
+  label,
+  className,
+  onClick,
+}: {
+  label: string;
+  className?: string;
+  onClick: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className={["inspector-trigger", className].filter(Boolean).join(" ")}
+      onClick={onClick}
+      aria-label={`Open ${label} details`}
+    >
+      Details
+    </button>
   );
 }
 

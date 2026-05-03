@@ -7,12 +7,14 @@ export type NarrativeFeedProps = {
   entries: TopLevelFeedEntry[];
   runs?: RunSummaryProjection[];
   currentRunId?: string | null;
+  onOpenInspectorTarget?: (entry: TopLevelFeedEntry) => void;
 };
 
 export function NarrativeFeed({
   entries,
   runs = [],
   currentRunId = null,
+  onOpenInspectorTarget,
 }: NarrativeFeedProps): JSX.Element {
   const groups = runs.length > 0 ? groupEntriesByRun(entries, runs) : [];
 
@@ -33,7 +35,7 @@ export function NarrativeFeed({
               >
                 {group.entries.map((entry) => (
                   <li className="narrative-feed__item" key={entry.entry_id}>
-                    {renderFeedEntryByType(entry)}
+                    {renderFeedEntryByType(entry, { onOpenInspectorTarget })}
                   </li>
                 ))}
               </ol>
@@ -60,7 +62,7 @@ export function NarrativeFeed({
     <ol className="narrative-feed__entries" aria-label="Narrative Feed entries">
       {entries.map((entry) => (
         <li className="narrative-feed__item" key={entry.entry_id}>
-          {renderFeedEntryByType(entry)}
+          {renderFeedEntryByType(entry, { onOpenInspectorTarget })}
         </li>
       ))}
     </ol>

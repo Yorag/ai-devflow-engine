@@ -9,6 +9,8 @@ import {
 import type { ApiRequestOptions } from "../../api/client";
 import type { ProjectRead, SessionEvent, SseEventType } from "../../api/types";
 import { NarrativeFeed } from "../feed/NarrativeFeed";
+import { InspectorPanel } from "../inspector/InspectorPanel";
+import { useInspector } from "../inspector/useInspector";
 import { SettingsModal } from "../settings/SettingsModal";
 import { TemplateEmptyState } from "../templates/TemplateEmptyState";
 import { ProjectSidebar } from "./ProjectSidebar";
@@ -27,6 +29,7 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
     {},
   );
   const [isSettingsOpen, setSettingsOpen] = useState(false);
+  const inspector = useInspector();
   const projectId = currentProject?.project_id ?? currentProjectId;
   const sessionsQuery = useProjectSessionsQuery(projectId, {
     request,
@@ -119,6 +122,12 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
   function handleProjectChange(projectId: string) {
     setCurrentProjectId(projectId);
     setCurrentSessionId("");
+    inspector.close();
+  }
+
+  function handleSessionChange(sessionId: string) {
+    setCurrentSessionId(sessionId);
+    inspector.close();
   }
 
   function handleTemplateChange(templateId: string) {
@@ -133,13 +142,18 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
   }
 
   return (
-    <section className="workspace-shell" aria-label="Workspace shell">
+    <section
+      className={`workspace-shell${
+        inspector.isOpen ? " workspace-shell--inspector-open" : ""
+      }`}
+      aria-label="Workspace shell"
+    >
       <ProjectSidebar
         request={request}
         currentProjectId={currentProjectId}
         currentSessionId={selectedSession?.session_id ?? ""}
         onProjectChange={handleProjectChange}
-        onSessionChange={setCurrentSessionId}
+        onSessionChange={handleSessionChange}
         onCurrentProjectChange={setCurrentProject}
       />
       <section className="workspace-main" aria-label="Narrative workspace">
@@ -167,6 +181,7 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
               entries={workspace.narrative_feed}
               runs={workspace.runs}
               currentRunId={workspace.current_run_id}
+              onOpenInspectorTarget={inspector.openEntry}
             />
           ) : (
             <div className="workspace-main__empty">
@@ -181,9 +196,11 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
           )}
         </div>
       </section>
-      <aside className="workspace-inspector" aria-label="Inspector">
-        <p>Inspector closed</p>
-      </aside>
+      <InspectorPanel
+        isOpen={inspector.isOpen}
+        target={inspector.target}
+        onClose={inspector.close}
+      />
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setSettingsOpen(false)}

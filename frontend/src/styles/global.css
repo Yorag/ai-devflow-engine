@@ -141,6 +141,10 @@ a {
   overflow: hidden;
 }
 
+.workspace-shell--inspector-open {
+  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr) minmax(360px, 420px);
+}
+
 .workspace-sidebar,
 .workspace-main,
 .workspace-inspector {
@@ -714,6 +718,7 @@ a {
 
 .feed-entry__actions {
   display: flex;
+  align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
@@ -800,6 +805,14 @@ a {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+}
+
+.stage-node__header-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .stage-node__identity {
@@ -1373,18 +1386,134 @@ a {
 }
 
 .workspace-inspector {
+  min-width: 0;
   border-left: 1px solid var(--border);
   background: var(--surface);
+  color: var(--text-muted);
+}
+
+.workspace-inspector--closed {
   writing-mode: vertical-rl;
   display: grid;
   place-items: center;
-  color: var(--text-muted);
   font-size: 0.82rem;
   font-weight: 650;
 }
 
 .workspace-inspector p {
   margin: 0;
+}
+
+.workspace-inspector--open {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  writing-mode: horizontal-tb;
+  overflow: hidden;
+}
+
+.inspector-panel__header {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding: 16px;
+}
+
+.inspector-panel__header h2 {
+  margin: 4px 0 0;
+  color: oklch(27% 0.022 248);
+  font-size: 1rem;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.inspector-panel__close,
+.inspector-trigger {
+  min-width: 0;
+  min-height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: oklch(31% 0.025 248);
+  padding: 0 10px;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.inspector-panel__close:hover,
+.inspector-trigger:hover {
+  background: var(--surface-muted);
+}
+
+.inspector-trigger--quiet {
+  margin-left: auto;
+  border-color: oklch(87% 0.015 248);
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 650;
+}
+
+.inspector-trigger--quiet:hover {
+  background: oklch(96.8% 0.006 248);
+  color: oklch(31% 0.025 248);
+}
+
+.inspector-panel__close:focus-visible,
+.inspector-trigger:focus-visible {
+  outline: 2px solid oklch(64% 0.14 252);
+  outline-offset: 2px;
+}
+
+.inspector-panel__body {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  overflow: auto;
+  padding: 16px;
+}
+
+.inspector-panel__section {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: oklch(98.4% 0.005 248);
+  padding: 12px;
+}
+
+.inspector-panel__section h3 {
+  margin: 0;
+  color: oklch(29% 0.024 248);
+  font-size: 0.82rem;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.inspector-panel__datum {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.inspector-panel__datum strong {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.inspector-panel__datum span {
+  color: oklch(29% 0.024 248);
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .settings-backdrop {
@@ -1950,6 +2079,10 @@ a {
     gap: 8px;
   }
 
+  .stage-node__header-actions {
+    justify-content: flex-start;
+  }
+
   .stage-node__meta-grid,
   .provider-call-grid {
     grid-template-columns: 1fr;
@@ -1961,7 +2094,8 @@ a {
 }
 
 @media (max-width: 900px) {
-  .workspace-shell {
+  .workspace-shell,
+  .workspace-shell--inspector-open {
     height: auto;
     min-height: calc(100vh - 73px);
     grid-template-columns: minmax(0, 1fr);
@@ -1984,7 +2118,18 @@ a {
     padding: 20px 18px;
   }
 
-  .workspace-inspector {
+  .workspace-inspector--open {
+    position: fixed;
+    inset: 73px 0 0 auto;
+    z-index: 15;
+    width: min(420px, 100vw);
+    max-height: calc(100vh - 73px);
+    border-top: 0;
+    border-left: 1px solid var(--border);
+    box-shadow: 0 20px 70px oklch(23% 0.018 248 / 18%);
+  }
+
+  .workspace-inspector--closed {
     min-height: 44px;
     border-top: 1px solid var(--border);
     writing-mode: horizontal-tb;
