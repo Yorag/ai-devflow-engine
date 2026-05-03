@@ -1,8 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+import asyncio
+import json
+from collections.abc import AsyncIterator, Iterator
+from time import monotonic
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from backend.app.api.errors import ApiError, ErrorResponse
@@ -10,6 +14,7 @@ from backend.app.db.base import DatabaseRole
 from backend.app.db.session import DatabaseManager
 from backend.app.schemas.run import RunTimelineProjection
 from backend.app.schemas.workspace import SessionWorkspaceProjection
+from backend.app.services.events import EventStore
 from backend.app.services.projections.timeline import (
     TimelineProjectionService,
     TimelineProjectionServiceError,
@@ -123,3 +128,84 @@ def get_run_timeline(
         return service.get_run_timeline(runId)
     except TimelineProjectionServiceError as exc:
         _raise_api_error(exc)
+
+
+@router.get(
+    "/sessions/{sessionId}/events/stream",
+    responses={
+        200: {
+            "content": {"text/event-stream": {"schema": {"type": "string"}}},
+            "description": "Session event stream.",
+        },
+        422: {"model": ErrorResponse},
+    },
+)
+def stream_session_events(
+    request: Request,
+    sessionId: str,
+    after: int = 0,
+    limit: int | None = None,
+    event_session: Session = Depends(get_event_session),
+) -> StreamingResponse:
+    bounded_limit = min(max(limit if limit is not None else 100, 1), 500)
+    event_store = EventStore(event_session)
+    cursor = _resolve_after_cursor(request, after)
+    close_after_batch = limit is not None
+
+    async def event_frames() -> AsyncIterator[str]:
+        nonlocal cursor
+        last_keepalive_at = monotonic()
+        while True:
+            event_session.rollback()
+            events = event_store.list_after(
+                sessionId,
+                after_sequence_index=cursor,
+                limit=bounded_limit,
+            )
+            if events:
+                for event in events:
+                    cursor = event.sequence_index
+                    last_keepalive_at = monotonic()
+                    payload = {
+                        "event_id": event.event_id,
+                        "session_id": event.session_id,
+                        "run_id": event.run_id,
+                        "event_type": event.event_type.value,
+                        "occurred_at": event.occurred_at.isoformat(),
+                        "payload": event.payload,
+                    }
+                    yield (
+                        f"id: {event.sequence_index}\n"
+                        f"event: {event.event_type.value}\n"
+                        f"data: {json.dumps(payload, separators=(',', ':'))}\n\n"
+                    )
+                if close_after_batch:
+                    break
+                continue
+
+            if close_after_batch:
+                break
+
+            if await request.is_disconnected():
+                break
+
+            if monotonic() - last_keepalive_at >= 15:
+                last_keepalive_at = monotonic()
+                yield ": keep-alive\n\n"
+
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        event_frames(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+def _resolve_after_cursor(request: Request, after: int) -> int:
+    last_event_id = request.headers.get("last-event-id")
+    try:
+        replay_cursor = int(last_event_id) if last_event_id is not None else 0
+    except ValueError:
+        replay_cursor = 0
+    return max(after, replay_cursor, 0)

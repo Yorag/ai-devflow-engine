@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { renderWithAppProviders } from "../../../app/test-utils";
 import type { TopLevelFeedEntry } from "../../../api/types";
 import { mockFeedEntriesByType, mockSessionWorkspaces } from "../../../mocks/fixtures";
+import { mockApiRequestOptions } from "../../../mocks/handlers";
 import { ConsolePage } from "../../../pages/ConsolePage";
 import { FeedEntryRenderer, renderFeedEntryByType } from "../FeedEntryRenderer";
 import { NarrativeFeed } from "../NarrativeFeed";
@@ -120,7 +121,7 @@ describe("FeedEntryRenderer", () => {
   });
 
   it("renders the selected non-draft workspace feed instead of placeholder copy", async () => {
-    renderWithAppProviders(<ConsolePage />);
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
     fireEvent.click(
       await screen.findByRole("button", { name: "Open Add workspace shell" }),

@@ -6,6 +6,7 @@ import {
   type RouteObject,
 } from "react-router-dom";
 
+import type { ApiRequestOptions } from "../api/client";
 import { ConsolePage } from "../pages/ConsolePage";
 import { HomePage } from "../pages/HomePage";
 
@@ -33,7 +34,12 @@ function AppShell(): JSX.Element {
   );
 }
 
-export const appRoutes: RouteObject[] = [
+type AppRoutesOptions = {
+  request?: ApiRequestOptions;
+};
+
+export function createAppRoutes(options: AppRoutesOptions = {}): RouteObject[] {
+  return [
   {
     path: "/",
     element: <AppShell />,
@@ -44,16 +50,22 @@ export const appRoutes: RouteObject[] = [
       },
       {
         path: "console",
-        element: <ConsolePage />,
+        element: <ConsolePage request={options.request} />,
       },
     ],
   },
-];
+  ];
+}
+
+export const appRoutes: RouteObject[] = createAppRoutes();
 
 export function createAppRouter() {
   return createBrowserRouter(appRoutes);
 }
 
-export function createTestRouter(initialEntries: string[] = ["/"]) {
-  return createMemoryRouter(appRoutes, { initialEntries });
+export function createTestRouter(
+  initialEntries: string[] = ["/"],
+  options: AppRoutesOptions = {},
+) {
+  return createMemoryRouter(createAppRoutes(options), { initialEntries });
 }

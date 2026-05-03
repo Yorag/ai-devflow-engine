@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -124,6 +125,64 @@ def test_get_run_timeline_returns_projection_and_unified_not_found(
     }
 
 
+def test_session_event_stream_returns_event_store_frames(tmp_path: Path) -> None:
+    app = build_query_api_app(tmp_path)
+
+    with TestClient(app) as client:
+        with client.stream(
+            "GET",
+            "/api/sessions/session-1/events/stream",
+            params={"after": 0, "limit": 1},
+            headers={
+                "X-Request-ID": "req-event-stream",
+                "X-Correlation-ID": "corr-event-stream",
+            },
+        ) as response:
+            assert response.status_code == 200
+            assert response.headers["content-type"].startswith("text/event-stream")
+            lines = []
+            for line in response.iter_lines():
+                lines.append(line)
+                if line == "":
+                    break
+
+    assert "event: session_message_appended" in lines
+    data_line = next(line for line in lines if line.startswith("data: "))
+    payload = json.loads(data_line.removeprefix("data: "))
+    assert payload["session_id"] == "session-1"
+    assert payload["run_id"] == "run-active"
+    assert payload["event_type"] == "session_message_appended"
+    assert payload["payload"]["message_item"]["content"] == "Add workspace projection."
+
+
+def test_session_event_stream_resumes_after_last_event_id(tmp_path: Path) -> None:
+    app = build_query_api_app(tmp_path)
+
+    with TestClient(app) as client:
+        with client.stream(
+            "GET",
+            "/api/sessions/session-1/events/stream",
+            headers={
+                "Last-Event-ID": "1",
+                "X-Request-ID": "req-event-stream-replay",
+                "X-Correlation-ID": "corr-event-stream-replay",
+            },
+            params={"limit": 1},
+        ) as response:
+            assert response.status_code == 200
+            lines = []
+            for line in response.iter_lines():
+                lines.append(line)
+                if line == "":
+                    break
+
+    assert "id: 1" not in lines
+    assert "id: 2" in lines
+    data_line = next(line for line in lines if line.startswith("data: "))
+    payload = json.loads(data_line.removeprefix("data: "))
+    assert payload["event_type"] == "stage_updated"
+
+
 def test_get_session_workspace_rejects_removed_session(
     tmp_path: Path,
 ) -> None:
@@ -238,3 +297,26 @@ def test_query_workspace_route_is_documented_in_openapi(tmp_path: Path) -> None:
         )
 
     assert "RunTimelineProjection" in schemas
+
+    stream_route = paths["/api/sessions/{sessionId}/events/stream"]["get"]
+    assert set(stream_route["responses"]) == {"200", "422"}
+    assert (
+        stream_route["responses"]["200"]["content"]["text/event-stream"]["schema"][
+            "type"
+        ]
+        == "string"
+    )
+    session_id_parameter = next(
+        parameter
+        for parameter in stream_route["parameters"]
+        if parameter["name"] == "sessionId"
+    )
+    assert session_id_parameter["in"] == "path"
+    assert session_id_parameter["required"] is True
+    assert session_id_parameter["schema"]["type"] == "string"
+    assert (
+        stream_route["responses"]["422"]["content"]["application/json"]["schema"][
+            "$ref"
+        ]
+        == "#/components/schemas/ErrorResponse"
+    )

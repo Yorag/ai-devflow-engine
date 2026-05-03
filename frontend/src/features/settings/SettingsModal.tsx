@@ -12,7 +12,7 @@ type SettingsModalProps = {
   isOpen: boolean;
   onClose: () => void;
   project: ProjectRead | null;
-  request: ApiRequestOptions;
+  request?: ApiRequestOptions;
 };
 
 const tabs: Array<{ id: SettingsTab; label: string }> = [

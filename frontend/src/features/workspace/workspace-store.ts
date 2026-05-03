@@ -5,11 +5,13 @@ import type {
   ProjectDeliveryChannelDetailProjection,
   ProjectRead,
   RunSummaryProjection,
+  SessionEvent,
   SessionRead,
   SessionWorkspaceProjection,
   StageType,
   TopLevelFeedEntry,
 } from "../../api/types";
+import { applySessionEvent as reduceSessionEvent } from "./event-reducer";
 
 export type WorkspaceInspectorTarget =
   | {
@@ -54,6 +56,7 @@ type WorkspaceStoreData = {
 
 type WorkspaceStoreActions = {
   initializeFromSnapshot: (snapshot: SessionWorkspaceProjection) => void;
+  applySessionEvent: (event: SessionEvent) => void;
   focusRun: (runId: string) => void;
   openInspector: (target: WorkspaceInspectorTarget) => void;
   closeInspector: () => void;
@@ -66,6 +69,9 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
   ...createEmptyWorkspaceData(),
   initializeFromSnapshot: (snapshot) => {
     set(createWorkspaceDataFromSnapshot(snapshot));
+  },
+  applySessionEvent: (event) => {
+    set((state) => reduceSessionEvent(state, event));
   },
   focusRun: (runId) => {
     if (get().runs.some((run) => run.run_id === runId)) {

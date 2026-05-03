@@ -20,6 +20,7 @@ import type {
 } from "../../../api/types";
 import { createQueryClient } from "../../../app/query-client";
 import { renderWithAppProviders } from "../../../app/test-utils";
+import { mockApiRequestOptions } from "../../../mocks/handlers";
 import { ConsolePage } from "../../../pages/ConsolePage";
 import { ConfigurationPackageSettings } from "../ConfigurationPackageSettings";
 import { SettingsModal } from "../SettingsModal";
@@ -30,7 +31,7 @@ afterEach(() => {
 
 describe("SettingsModal", () => {
   it("opens from the global tools area with the required settings sections", async () => {
-    renderWithAppProviders(<ConsolePage />);
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Open settings" }));
 
@@ -105,7 +106,7 @@ describe("SettingsModal", () => {
   });
 
   it("shows project delivery channel fields without exposing platform runtime settings", async () => {
-    renderWithAppProviders(<ConsolePage />);
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Open settings" }));
 
@@ -128,7 +129,7 @@ describe("SettingsModal", () => {
   });
 
   it("shows git delivery fields and credential references for git_auto_delivery projects", async () => {
-    renderWithAppProviders(<ConsolePage />);
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
     fireEvent.change(await screen.findByLabelText("Switch project"), {
       target: { value: "project-loaded" },
@@ -228,7 +229,7 @@ describe("SettingsModal", () => {
   });
 
   it("shows provider configuration with builtin identity fields locked and capabilities collapsed", async () => {
-    renderWithAppProviders(<ConsolePage />);
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Open settings" }));
     const dialog = screen.getByRole("dialog", { name: "Settings" });
@@ -402,7 +403,7 @@ describe("SettingsModal", () => {
   });
 
   it("shows project-scoped configuration package export and import results", async () => {
-    renderWithAppProviders(<ConsolePage />);
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Open settings" }));
     const dialog = screen.getByRole("dialog", { name: "Settings" });
@@ -569,7 +570,7 @@ describe("SettingsModal", () => {
   });
 
   it("closes settings and keeps settings outside template editing and workspace placeholders", async () => {
-    renderWithAppProviders(<ConsolePage />);
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Open settings" }));
     const dialog = screen.getByRole("dialog", { name: "Settings" });
@@ -583,7 +584,7 @@ describe("SettingsModal", () => {
   });
 
   it("closes settings with Escape", async () => {
-    renderWithAppProviders(<ConsolePage />);
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Open settings" }));
     expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();

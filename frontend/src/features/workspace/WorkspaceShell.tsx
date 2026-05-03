@@ -6,14 +6,20 @@ import {
   useProvidersQuery,
   useSessionWorkspaceQuery,
 } from "../../api/hooks";
-import type { ProjectRead } from "../../api/types";
-import { mockApiRequestOptions } from "../../mocks/handlers";
+import type { ApiRequestOptions } from "../../api/client";
+import type { ProjectRead, SessionEvent, SseEventType } from "../../api/types";
 import { NarrativeFeed } from "../feed/NarrativeFeed";
 import { SettingsModal } from "../settings/SettingsModal";
 import { TemplateEmptyState } from "../templates/TemplateEmptyState";
 import { ProjectSidebar } from "./ProjectSidebar";
+import { createSessionEventSource } from "./sse-client";
+import { useWorkspaceStore } from "./workspace-store";
 
-export function WorkspaceShell(): JSX.Element {
+type WorkspaceShellProps = {
+  request?: ApiRequestOptions;
+};
+
+export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Element {
   const [currentProjectId, setCurrentProjectId] = useState("");
   const [currentProject, setCurrentProject] = useState<ProjectRead | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState("");
@@ -23,10 +29,10 @@ export function WorkspaceShell(): JSX.Element {
   const [isSettingsOpen, setSettingsOpen] = useState(false);
   const projectId = currentProject?.project_id ?? currentProjectId;
   const sessionsQuery = useProjectSessionsQuery(projectId, {
-    request: mockApiRequestOptions,
+    request,
   });
-  const templatesQuery = usePipelineTemplatesQuery({ request: mockApiRequestOptions });
-  const providersQuery = useProvidersQuery({ request: mockApiRequestOptions });
+  const templatesQuery = usePipelineTemplatesQuery({ request });
+  const providersQuery = useProvidersQuery({ request });
   const sessions = useMemo(() => sessionsQuery.data ?? [], [sessionsQuery.data]);
   const selectedSession =
     sessions.find((session) => session.session_id === currentSessionId) ??
@@ -34,9 +40,32 @@ export function WorkspaceShell(): JSX.Element {
     null;
   const sessionWorkspaceQuery = useSessionWorkspaceQuery(
     selectedSession?.session_id ?? "",
-    { request: mockApiRequestOptions },
+    { request },
   );
-  const workspace = sessionWorkspaceQuery.data;
+  const snapshot = sessionWorkspaceQuery.data;
+  const workspaceSessionId = useWorkspaceStore((state) => state.session?.session_id);
+  const workspaceSessionStatus = useWorkspaceStore((state) => state.session?.status);
+  const workspaceRuns = useWorkspaceStore((state) => state.runs);
+  const workspaceNarrativeFeed = useWorkspaceStore((state) => state.narrativeFeed);
+  const workspaceCurrentRunId = useWorkspaceStore((state) => state.currentRunId);
+  const initializeFromSnapshot = useWorkspaceStore(
+    (state) => state.initializeFromSnapshot,
+  );
+  const applySessionEvent = useWorkspaceStore((state) => state.applySessionEvent);
+  const resetWorkspace = useWorkspaceStore((state) => state.resetWorkspace);
+  const workspace =
+    snapshot && workspaceSessionId === snapshot.session.session_id
+      ? {
+          ...snapshot,
+          session: {
+            ...snapshot.session,
+            status: workspaceSessionStatus ?? snapshot.session.status,
+          },
+          runs: workspaceRuns,
+          narrative_feed: workspaceNarrativeFeed,
+          current_run_id: workspaceCurrentRunId,
+        }
+      : snapshot;
   const selectedTemplateId =
     selectedSession && templateSelections[selectedSession.session_id]
       ? templateSelections[selectedSession.session_id]
@@ -47,11 +76,45 @@ export function WorkspaceShell(): JSX.Element {
   useEffect(() => {
     if (!selectedSession) {
       setCurrentSessionId("");
+      resetWorkspace();
       return;
     }
 
     setCurrentSessionId(selectedSession.session_id);
-  }, [selectedSession]);
+  }, [resetWorkspace, selectedSession]);
+
+  useEffect(() => {
+    if (!snapshot) {
+      return;
+    }
+
+    initializeFromSnapshot(snapshot);
+  }, [initializeFromSnapshot, snapshot]);
+
+  useEffect(() => {
+    const sessionId = snapshot?.session.session_id;
+    if (!sessionId || typeof EventSource === "undefined") {
+      return;
+    }
+
+    const source = createSessionEventSource(sessionId, { baseUrl: request?.baseUrl });
+    const handleSessionEvent = (message: MessageEvent<string>) => {
+      try {
+        applySessionEvent(JSON.parse(message.data) as SessionEvent);
+      } catch {
+        // Ignore malformed stream frames; the snapshot query remains the recovery path.
+      }
+    };
+    for (const eventType of SSE_EVENT_TYPES) {
+      source.addEventListener(eventType, handleSessionEvent as EventListener);
+    }
+    return () => {
+      for (const eventType of SSE_EVENT_TYPES) {
+        source.removeEventListener(eventType, handleSessionEvent as EventListener);
+      }
+      source.close();
+    };
+  }, [applySessionEvent, request?.baseUrl, snapshot?.session.session_id]);
 
   function handleProjectChange(projectId: string) {
     setCurrentProjectId(projectId);
@@ -72,7 +135,7 @@ export function WorkspaceShell(): JSX.Element {
   return (
     <section className="workspace-shell" aria-label="Workspace shell">
       <ProjectSidebar
-        request={mockApiRequestOptions}
+        request={request}
         currentProjectId={currentProjectId}
         currentSessionId={selectedSession?.session_id ?? ""}
         onProjectChange={handleProjectChange}
@@ -125,8 +188,26 @@ export function WorkspaceShell(): JSX.Element {
         isOpen={isSettingsOpen}
         onClose={() => setSettingsOpen(false)}
         project={currentProject}
-        request={mockApiRequestOptions}
+        request={request}
       />
     </section>
   );
 }
+
+const SSE_EVENT_TYPES: readonly SseEventType[] = [
+  "session_created",
+  "session_message_appended",
+  "pipeline_run_created",
+  "stage_started",
+  "stage_updated",
+  "clarification_requested",
+  "clarification_answered",
+  "approval_requested",
+  "approval_result",
+  "tool_confirmation_requested",
+  "tool_confirmation_result",
+  "control_item_created",
+  "delivery_result",
+  "system_status",
+  "session_status_changed",
+];

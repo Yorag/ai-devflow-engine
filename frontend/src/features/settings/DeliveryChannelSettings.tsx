@@ -11,7 +11,7 @@ import type {
 
 type DeliveryChannelSettingsProps = {
   project: ProjectRead | null;
-  request: ApiRequestOptions;
+  request?: ApiRequestOptions;
 };
 
 type DirtyFields = {

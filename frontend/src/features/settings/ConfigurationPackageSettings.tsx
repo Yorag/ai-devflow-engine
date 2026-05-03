@@ -15,7 +15,7 @@ import type {
 
 type ConfigurationPackageSettingsProps = {
   project: ProjectRead | null;
-  request: ApiRequestOptions;
+  request?: ApiRequestOptions;
 };
 
 export function ConfigurationPackageSettings({

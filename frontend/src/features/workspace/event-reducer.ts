@@ -157,7 +157,11 @@ export function applySessionEvent(
         event,
         "system_status",
       );
-      return systemStatus ? updateFeed(state, systemStatus) : state;
+      if (!systemStatus) {
+        return state;
+      }
+
+      return applyTerminalSystemStatus(updateFeed(state, systemStatus), systemStatus);
     }
 
     case "session_status_changed":
@@ -181,7 +185,11 @@ export function updateComposerStateFromSessionStatus(
 ): ComposerStateProjection {
   const terminal = isTerminalSessionStatus(status);
   const secondaryActions: ComposerStateProjection["secondary_actions"] =
-    status === "draft" || terminal ? [] : ["terminate"];
+    status === "draft" || terminal
+      ? []
+      : status === "waiting_clarification"
+        ? ["pause", "terminate"]
+        : ["terminate"];
 
   return {
     mode: terminal ? "readonly" : status,
@@ -197,6 +205,40 @@ export function updateComposerStateFromSessionStatus(
     secondary_actions: secondaryActions,
     bound_run_id: currentRunId,
   };
+}
+
+function applyTerminalSystemStatus(
+  state: WorkspaceStoreState,
+  systemStatus: SystemStatusFeedEntry,
+): WorkspaceStoreState {
+  const runs = updateCurrentRunFromSessionStatus(
+    state.runs,
+    systemStatus.status,
+    systemStatus.run_id,
+    state.currentStageType,
+    systemStatus.occurred_at,
+  );
+  const session =
+    state.session?.current_run_id === systemStatus.run_id
+      ? {
+          ...state.session,
+          status: systemStatus.status,
+          updated_at: systemStatus.occurred_at,
+        }
+      : state.session;
+
+  return refreshSnapshot({
+    ...state,
+    session,
+    runs,
+    composerState:
+      state.session?.current_run_id === systemStatus.run_id
+        ? updateComposerStateFromSessionStatus(
+            systemStatus.status,
+            systemStatus.run_id,
+          )
+        : state.composerState,
+  });
 }
 
 function applySessionStatusChanged(

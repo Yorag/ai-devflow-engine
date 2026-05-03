@@ -1,16 +1,20 @@
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { renderWithAppProviders } from "../../../app/test-utils";
+import { mockApiRequestOptions } from "../../../mocks/handlers";
 import { ConsolePage } from "../../../pages/ConsolePage";
+import { useWorkspaceStore } from "../workspace-store";
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
+  useWorkspaceStore.getState().resetWorkspace();
 });
 
 describe("WorkspaceShell", () => {
   it("renders the three workspace regions with inspector closed by default", async () => {
-    renderWithAppProviders(<ConsolePage />);
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
     expect(
       await screen.findByRole("complementary", {
@@ -24,7 +28,7 @@ describe("WorkspaceShell", () => {
   });
 
   it("shows project navigation, delivery summary, and session management affordances", async () => {
-    renderWithAppProviders(<ConsolePage />);
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
     expect(
       await screen.findByRole("heading", {
@@ -55,7 +59,7 @@ describe("WorkspaceShell", () => {
   });
 
   it("switches the current project and keeps shell-only destructive actions disabled", async () => {
-    renderWithAppProviders(<ConsolePage />);
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
     expect(
       await screen.findByRole("heading", {
@@ -87,7 +91,7 @@ describe("WorkspaceShell", () => {
   });
 
   it("opens a selected session from the sidebar and shows session metadata", async () => {
-    renderWithAppProviders(<ConsolePage />);
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
     expect(
       await screen.findByRole("region", { name: "Template empty state" }),
@@ -126,7 +130,7 @@ describe("WorkspaceShell", () => {
   });
 
   it("uses product workspace copy and avoids implementation placeholder text", async () => {
-    renderWithAppProviders(<ConsolePage />);
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
     expect(await screen.findByText("Narrative Workspace")).toBeTruthy();
     expect(screen.getByText("Inspector closed")).toBeTruthy();
@@ -137,7 +141,7 @@ describe("WorkspaceShell", () => {
   });
 
   it("renders the draft session template selector as narrative feed empty content", async () => {
-    renderWithAppProviders(<ConsolePage />);
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
     expect(
       await screen.findByRole("region", { name: "Template empty state" }),
@@ -157,7 +161,7 @@ describe("WorkspaceShell", () => {
   });
 
   it("renders template editing inside the draft narrative empty state", async () => {
-    renderWithAppProviders(<ConsolePage />);
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
     const editor = await screen.findByRole("region", { name: "Template editor" });
     expect(within(editor).getByText("Run configuration")).toBeTruthy();
@@ -177,4 +181,103 @@ describe("WorkspaceShell", () => {
     expect(document.body.textContent ?? "").not.toContain("DeliveryChannel");
     expect(document.body.textContent ?? "").not.toContain("deterministic test runtime");
   });
+
+  it("initializes the workspace store from the loaded session snapshot", async () => {
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Add workspace shell" }),
+    );
+
+    await screen.findByRole("heading", {
+      level: 1,
+      name: "Add workspace shell",
+    });
+    await waitFor(() => {
+      expect(useWorkspaceStore.getState().session?.session_id).toBe(
+        "session-running",
+      );
+    });
+    expect(useWorkspaceStore.getState().narrativeFeed).toContainEqual(
+      expect.objectContaining({ type: "stage_node" }),
+    );
+  });
+
+  it("applies session stream events through the workspace store reducer", async () => {
+    const eventSources: MockEventSource[] = [];
+    vi.stubGlobal(
+      "EventSource",
+      vi.fn(function EventSourceMock(this: MockEventSource, url: string) {
+        this.url = url;
+        this.close = vi.fn();
+        this.listeners = new Map();
+        this.addEventListener = vi.fn(
+          (type: string, listener: (event: MessageEvent<string>) => void) => {
+            this.listeners.set(type, listener);
+          },
+        );
+        this.removeEventListener = vi.fn((type: string) => {
+          this.listeners.delete(type);
+        });
+        eventSources.push(this);
+      }),
+    );
+
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Add workspace shell" }),
+    );
+    await screen.findByRole("heading", {
+      level: 1,
+      name: "Add workspace shell",
+    });
+    await waitFor(() => {
+      expect(eventSources.some((source) => source.url.includes("session-running"))).toBe(
+        true,
+      );
+    });
+    const runningSource = eventSources.find((source) =>
+      source.url.includes("session-running"),
+    );
+    expect(runningSource).toBeTruthy();
+
+    runningSource?.listeners.get("session_message_appended")?.({
+      data: JSON.stringify({
+        event_id: "event-stream-message",
+        session_id: "session-running",
+        run_id: "run-running",
+        event_type: "session_message_appended",
+        occurred_at: "2026-05-01T10:10:00.000Z",
+        payload: {
+          message_item: {
+            entry_id: "entry-stream-message",
+            run_id: "run-running",
+            type: "user_message",
+            occurred_at: "2026-05-01T10:10:00.000Z",
+            message_id: "message-stream",
+            author: "user",
+            content: "Streamed update from backend.",
+            stage_run_id: null,
+          },
+        },
+      }),
+    } as MessageEvent<string>);
+
+    expect(await screen.findByText("Streamed update from backend.")).toBeTruthy();
+    expect(useWorkspaceStore.getState().narrativeFeed).toContainEqual(
+      expect.objectContaining({
+        entry_id: "entry-stream-message",
+        type: "user_message",
+      }),
+    );
+  });
 });
+
+type MockEventSource = {
+  url: string;
+  close: ReturnType<typeof vi.fn>;
+  addEventListener: ReturnType<typeof vi.fn>;
+  removeEventListener: ReturnType<typeof vi.fn>;
+  listeners: Map<string, (event: MessageEvent<string>) => void>;
+};

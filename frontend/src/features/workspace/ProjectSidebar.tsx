@@ -10,7 +10,7 @@ import type { ProjectRead } from "../../api/types";
 import { SessionList } from "./SessionList";
 
 type ProjectSidebarProps = {
-  request: ApiRequestOptions;
+  request?: ApiRequestOptions;
   currentProjectId: string;
   currentSessionId: string;
   onProjectChange: (projectId: string) => void;

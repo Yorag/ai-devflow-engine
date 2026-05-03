@@ -244,6 +244,53 @@ describe("applySessionEvent", () => {
     });
   });
 
+  it("keeps waiting clarification composer actions aligned with backend projection", () => {
+    expect(updateComposerStateFromSessionStatus("waiting_clarification", "run-1")).toEqual({
+      mode: "waiting_clarification",
+      is_input_enabled: true,
+      primary_action: "send",
+      secondary_actions: ["pause", "terminate"],
+      bound_run_id: "run-1",
+    });
+  });
+
+  it("updates terminal run and composer state from system_status events", () => {
+    initializeWorkspaceFromSnapshot(mockSessionWorkspaces["session-running"]);
+    const systemStatus = {
+      ...mockFeedEntriesByType.system_status,
+      run_id: "run-running",
+      status: "failed",
+      occurred_at: "2026-05-01T10:00:00.000Z",
+      title: "Run failed",
+      reason: "Tests failed after retry limit.",
+    } satisfies Extract<TopLevelFeedEntry, { type: "system_status" }>;
+
+    const state = reduce(
+      useWorkspaceStore.getState(),
+      sessionEvent("system_status", { system_status: systemStatus }),
+    );
+
+    expect(state.session).toMatchObject({
+      status: "failed",
+      current_run_id: "run-running",
+      updated_at: "2026-05-01T10:00:00.000Z",
+    });
+    expect(state.runs[0]).toMatchObject({
+      run_id: "run-running",
+      status: "failed",
+      is_active: false,
+      ended_at: "2026-05-01T10:00:00.000Z",
+    });
+    expect(state.composerState).toEqual({
+      mode: "readonly",
+      is_input_enabled: false,
+      primary_action: "disabled",
+      secondary_actions: [],
+      bound_run_id: "run-running",
+    });
+    expect(state.narrativeFeed).toContainEqual(systemStatus);
+  });
+
   it("promotes an active pipeline_run_created event over a terminal current run", () => {
     initializeWorkspaceFromSnapshot(mockSessionWorkspaces["session-failed"]);
     const retryRun = {

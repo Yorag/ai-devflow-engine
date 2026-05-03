@@ -186,6 +186,11 @@ export type SessionMessageAppendRequest = {
   content: string;
 };
 
+export type SessionMessageAppendResponse = {
+  session: SessionRead;
+  message_item: MessageFeedEntry;
+};
+
 export type SessionDeleteResult = ProjectRemoveResult & {
   session_id: string;
   project_id: string;

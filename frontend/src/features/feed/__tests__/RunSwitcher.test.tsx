@@ -7,6 +7,7 @@ import type {
   TopLevelFeedEntry,
 } from "../../../api/types";
 import { renderWithAppProviders } from "../../../app/test-utils";
+import { mockApiRequestOptions } from "../../../mocks/handlers";
 import { mockFeedEntriesByType, mockSessionWorkspaces } from "../../../mocks/fixtures";
 import { ConsolePage } from "../../../pages/ConsolePage";
 import { NarrativeFeed } from "../NarrativeFeed";
@@ -282,7 +283,7 @@ describe("NarrativeFeed run boundaries", () => {
     };
     mockSessionWorkspaces["session-running"] = multiRunWorkspace;
 
-    renderWithAppProviders(<ConsolePage />);
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
     fireEvent.click(
       await screen.findByRole("button", { name: "Open Add workspace shell" }),

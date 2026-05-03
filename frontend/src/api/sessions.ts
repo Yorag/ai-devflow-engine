@@ -2,6 +2,7 @@ import { apiRequest, type ApiRequestOptions } from "./client";
 import type {
   SessionDeleteResult,
   SessionMessageAppendRequest,
+  SessionMessageAppendResponse,
   SessionRead,
   SessionRenameRequest,
   SessionTemplateUpdateRequest,
@@ -69,7 +70,7 @@ export function appendSessionMessage(
   sessionId: string,
   body: SessionMessageAppendRequest,
   options?: ApiRequestOptions,
-): Promise<SessionRead> {
+): Promise<SessionMessageAppendResponse> {
   return apiRequest(`/api/sessions/${sessionId}/messages`, {
     ...options,
     method: "POST",

@@ -1,9 +1,14 @@
+import type { ApiRequestOptions } from "../api/client";
 import { WorkspaceShell } from "../features/workspace/WorkspaceShell";
 
-export function ConsolePage(): JSX.Element {
+type ConsolePageProps = {
+  request?: ApiRequestOptions;
+};
+
+export function ConsolePage({ request }: ConsolePageProps = {}): JSX.Element {
   return (
     <div className="console-page">
-      <WorkspaceShell />
+      <WorkspaceShell request={request} />
     </div>
   );
 }

@@ -5,7 +5,7 @@ import { useProvidersQuery } from "../../api/hooks";
 import type { ProviderRead } from "../../api/types";
 
 type ProviderSettingsProps = {
-  request: ApiRequestOptions;
+  request?: ApiRequestOptions;
 };
 
 export function ProviderSettings({ request }: ProviderSettingsProps): JSX.Element {
