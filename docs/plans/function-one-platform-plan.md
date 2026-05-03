@@ -235,7 +235,7 @@
 | Q3.3 | StageInspectorProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q33) |
 | Q3.4 | ControlItemInspectorProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q34) |
 | Q3.4a | ToolConfirmationInspectorProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q34a) |
-| E3.2 | SSE 流端点与断线恢复 | Week 5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#e32) |
+| E3.2 | SSE 流端点与断线恢复 | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#e32) |
 | L3.1 | Run 与 Stage 日志轻查询 API | Week 5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#l31) |
 | F3.1 | Workspace Store 快照初始化 | Week 5 | [x] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f31) |
 | F3.2 | SSE Client 与 Event Reducer | Week 5 | [x] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f32) |
@@ -256,7 +256,7 @@
 | H4.5 | Pause/Resume checkpoint 语义 | Week 6 | [ ] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#h45) |
 | H4.6 | Terminate 与 system_status | Week 6 | [ ] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#h46) |
 | H4.7 | 重新尝试命令与多 run 分界 | Week 6 | [ ] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#h47) |
-| F4.1 | Composer 生命周期按钮状态 | Week 6 | [ ] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f41) |
+| F4.1 | Composer 生命周期按钮状态 | Week 6 | [x] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f41) |
 | F4.2 | Run 控制按钮与终止入口 | Week 6 | [ ] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f42) |
 | F4.3 | Approval Block 与 Reject 输入 | Week 6 | [ ] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f43) |
 | F4.3a | Tool Confirmation Block 与确认交互 | Week 6-7 | [ ] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f43a) |

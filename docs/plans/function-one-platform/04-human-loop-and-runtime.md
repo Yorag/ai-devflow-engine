@@ -314,7 +314,7 @@
 ## H4.4a ToolConfirmationRequest 与工具确认命令
 
 **计划周期**：Week 6-7
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现高风险工具确认的领域对象、命令入口和 runtime 恢复语义，使工具确认作为运行时权限控制点独立于人工审批检查点。
 **实施计划**：`docs/plans/implementation/h4.4a-tool-confirmation-commands.md`
 
@@ -473,7 +473,7 @@
 ## F4.1 Composer 生命周期按钮状态
 
 **计划周期**：Week 6
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现 Composer 右端发送、暂停、恢复、禁用按钮状态，使按钮严格绑定当前活动 run。
 **实施计划**：`docs/plans/implementation/f4.1-composer-lifecycle-state.md`
 

@@ -151,6 +151,8 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | AL06-H4.2 | H4.2 | AL06 | `feat/al-frontend-runtime-ui` | done | be201ab | bab7b42 | `docs/plans/acceleration/reports/AL06-H4.2.md` | - |
 | AL01-R3.6 | R3.6 | AL01 | `feat/al-run-core-events` | done | 969a43c | c5edc12 | `docs/plans/acceleration/reports/AL01-R3.6.md` | - |
 | AL03-H4.4a | H4.4a | AL03 | `feat/al-runtime-human-loop` | done | 969a43c | 96ceb48 | `docs/plans/acceleration/reports/AL03-H4.4a.md` | - |
+| AL02-E3.2 | E3.2 | AL02 | `feat/al-projections-streams` | done | 017ae5d | 6611958 | `docs/plans/acceleration/reports/AL02-E3.2.md` | - |
+| AL06-F4.1 | F4.1 | AL06 | `feat/al-frontend-runtime-ui` | done | 017ae5d | e5f3e86 | `docs/plans/acceleration/reports/AL06-F4.1.md` | - |
 
 当前基线不预置 live claim。主协调会话在认领 ready task 时写入共享 coordination store，并记录当时的 Coordination Base。
 
