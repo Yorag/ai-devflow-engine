@@ -472,6 +472,25 @@ class DomainEvent:
         )
 
 
+class SseEventEncoder:
+    def encode(self, event: DomainEvent) -> str:
+        envelope: JsonObject = {
+            "event_id": event.event_id,
+            "session_id": event.session_id,
+            "run_id": event.run_id,
+            "event_type": event.event_type.value,
+            "occurred_at": event.occurred_at.isoformat(),
+            "payload": event.payload,
+        }
+        if event.correlation_id is not None:
+            envelope["correlation_id"] = event.correlation_id
+        return (
+            f"id: {event.sequence_index}\n"
+            f"event: {event.event_type.value}\n"
+            f"data: {json.dumps(envelope, separators=(',', ':'))}\n\n"
+        )
+
+
 class EventStore:
     def __init__(
         self,
@@ -628,6 +647,7 @@ __all__ = [
     "EventProjectionRule",
     "EventProjectionTarget",
     "EventStore",
+    "SseEventEncoder",
     "event_projection_rule",
     "resolve_feed_entry_type",
     "resolve_projection_targets",
