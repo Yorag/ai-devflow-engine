@@ -444,10 +444,10 @@
 ## C1.6 control 模型与迁移边界
 
 **计划周期**：Week 2
-**状态**：`[~]`
+**状态**：`[x]`
 **目标**：建立 `control.db` 的首批规范模型和迁移边界，确保项目、会话、模板、Provider 与项目级交付配置只在控制面持久化。
 **验证摘要**：实施计划 `docs/plans/implementation/c1.6-control-model-boundary.md` 已完成。TDD RED 先观察到 `ModuleNotFoundError: No module named 'backend.app.db.models.control'`；实现 `backend/app/db/models/control.py` 并接入 Alembic metadata 后，`uv run --no-sync python -m pytest backend/tests/db/test_control_model_boundary.py -q` 通过 5 个 C1.6 tests；`uv run --no-sync alembic -c backend/alembic.ini current` 退出码 0，并对五个 SQLite role 打印 `SQLiteImpl` 上下文；经用户批准后，`uv run --no-sync alembic -c backend/alembic.ini upgrade head` 退出码 0，并对五个 SQLite role 打印 `SQLiteImpl` 上下文；`uv run --no-sync python -m pytest backend/tests/db/test_control_model_boundary.py -v` 通过 5 个 focused tests；`uv run --no-sync python -m pytest backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py -q` 通过 28 个 persistence regression tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py backend/tests/schemas/test_prompt_asset_schemas.py backend/tests/schemas/test_observability_schemas.py backend/tests/db/test_database_sessions.py backend/tests/db/test_control_model_boundary.py -q` 通过 76 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 76 个 backend tests。
-**回补说明**：当前已验证实现只覆盖变更前的 `PlatformRuntimeSettingsModel` 边界；在 `internal_model_bindings` 被正式纳入 C1.10/C2.8 后，需补齐 control model 持久化字段、迁移与边界测试后，方可恢复为 `[x]`。
+**回补说明**：`PlatformRuntimeSettingsModel.internal_model_bindings` 已完成持久化字段与边界测试回补，C1.10/C2.8 当前正式契约所需的 control model 边界已闭合。仓库级 Alembic 基线修复仍是独立后续项，不改变本切片已完成状态。
 **实施计划**：`docs/plans/implementation/c1.6-control-model-boundary.md`
 
 **修改文件列表**：
@@ -599,11 +599,11 @@
 ## C1.10 PlatformRuntimeSettings 与运行快照 Schema 契约
 
 **计划周期**：Week 2
-**状态**：`[~]`
+**状态**：`[x]`
 **目标**：定义可热重载平台运行设置、运行上限快照、Provider 快照与模型绑定快照 Schema，使后续控制面、Run 启动和 runtime 消费共享同一配置边界。
 **实施计划**：`docs/plans/implementation/c1.10-platform-runtime-settings-snapshots.md`
 **验证摘要**：`uv run --no-sync python -m pytest backend/tests/schemas/test_runtime_settings_schemas.py -v` 通过 5 个 C1.10 runtime settings schema contract tests；`uv run --no-sync python -m pytest backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py -q` 通过 28 个 C1.1-C1.4 + C1.10 schema contract tests；`uv run --no-sync python -m pytest backend/tests/test_engineering_baseline.py backend/tests/api/test_health.py backend/tests/api/test_error_contract.py backend/tests/core/test_environment_settings.py backend/tests/observability/test_runtime_data_preflight.py backend/tests/schemas/test_enum_contracts.py backend/tests/schemas/test_control_plane_schemas.py backend/tests/schemas/test_run_feed_event_schemas.py backend/tests/schemas/test_inspector_metrics_schemas.py backend/tests/schemas/test_runtime_settings_schemas.py -q` 通过 56 个 foundation regression tests；`uv run --no-sync python -m pytest --collect-only` 收集 56 个 backend tests 且无收集错误。TDD RED 先观察到缺少 `backend.app.schemas.runtime_settings`、`RuntimeSettingsErrorCode` 和 `RunConfigurationSnapshotRead`，再按错误码适配、runtime settings schema、run configuration snapshot 聚合 schema 顺序转绿。内联评审未发现 Critical 或 Important 问题。
-**回补说明**：当前已验证 schema 只覆盖变更前的四分组 `PlatformRuntimeSettings` 契约；在 `internal_model_bindings` 被正式纳入运行设置真源后，需补齐 Schema、聚合读模型与 schema tests 后，方可恢复为 `[x]`。
+**回补说明**：`PlatformRuntimeSettings` 已回补为包含 `internal_model_bindings` 的五分组正式契约，聚合读模型与 schema tests 已同步覆盖。运行设置真源与 R3.2/R3.4a 所需的内部模型绑定来源现已一致。
 
 **修改文件列表**：
 - Modify: `backend/app/api/error_codes.py`

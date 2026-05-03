@@ -191,11 +191,11 @@
 | C1.3 | Run、Feed 与事件 Schema 契约 | Week 2 | [x] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c13) |
 | C1.4 | Inspector 与 Metrics Schema 契约 | Week 2 | [x] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c14) |
 | C1.5 | 多 SQLite 连接与 session 管理 | Week 2 | [x] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c15) |
-| C1.6 | control 模型与迁移边界 | Week 2 | [~] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c16) |
+| C1.6 | control 模型与迁移边界 | Week 2 | [x] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c16) |
 | C1.7 | runtime 模型与迁移边界 | Week 2 | [x] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c17) |
 | C1.8 | graph 模型与迁移边界 | Week 2 | [x] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c18) |
 | C1.9 | event 模型边界 | Week 2 | [x] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#c19) |
-| C1.10 | PlatformRuntimeSettings 与运行快照 Schema 契约 | Week 2 | [~] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c110) |
+| C1.10 | PlatformRuntimeSettings 与运行快照 Schema 契约 | Week 2 | [x] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c110) |
 | C1.10a | PromptAsset Schema 契约 | Week 2 | [x] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#c110a) |
 | L1.1 | 日志审计 Schema 与 TraceContext 契约 | Week 2 | [x] | 后端契约 | [01](function-one-platform/01-foundation-and-contracts.md#l11) |
 | L1.2 | log 模型与迁移边界 | Week 2 | [x] | 后端 | [01](function-one-platform/01-foundation-and-contracts.md#l12) |
@@ -211,7 +211,7 @@
 | C2.6 | DeliveryChannel 查询与保存 | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c26) |
 | C2.7 | DeliveryChannel readiness 校验 | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c27) |
 | C2.7a | 项目作用域配置包导入导出 | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c27a) |
-| C2.8 | PlatformRuntimeSettings 管理服务 | Week 3 | [~] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c28) |
+| C2.8 | PlatformRuntimeSettings 管理服务 | Week 3 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c28) |
 | F2.1 | API Client 路径与类型入口 | Week 2-3 | [x] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f21) |
 | F2.2 | Mock Fixtures 与 Query Hooks | Week 2-3 | [x] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f22) |
 | F2.3 | Workspace Shell 与 Project Sidebar | Week 3 | [x] | 前端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#f23) |
