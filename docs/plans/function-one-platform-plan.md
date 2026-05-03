@@ -233,7 +233,7 @@
 | Q3.1 | SessionWorkspaceProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q31) |
 | Q3.2 | RunTimelineProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q32) |
 | Q3.3 | StageInspectorProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q33) |
-| Q3.4 | ControlItemInspectorProjection | Week 5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q34) |
+| Q3.4 | ControlItemInspectorProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q34) |
 | Q3.4a | ToolConfirmationInspectorProjection | Week 5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q34a) |
 | E3.2 | SSE 流端点与断线恢复 | Week 5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#e32) |
 | L3.1 | Run 与 Stage 日志轻查询 API | Week 5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#l31) |
@@ -242,8 +242,8 @@
 | F3.3 | Feed Entry Renderer | Week 5-6 | [x] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f33) |
 | F3.4 | StageNode 与阶段内部条目 | Week 5-6 | [x] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f34) |
 | F3.5 | Run Boundary 与 Run Switcher | Week 5-6 | [x] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f35) |
-| F3.6 | Inspector Shell 与打开状态 | Week 5-6 | [ ] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f36) |
-| F3.7 | Inspector 分组与 Metrics 展示 | Week 5-6 | [ ] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f37) |
+| F3.6 | Inspector Shell 与打开状态 | Week 5-6 | [x] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f36) |
+| F3.7 | Inspector 分组与 Metrics 展示 | Week 5-6 | [x] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f37) |
 | A4.0 | Runtime orchestration boundary | Week 6 | [x] | 后端核心 | [04](function-one-platform/04-human-loop-and-runtime.md#a40) |
 | L4.1 | 命令审计失败语义 | Week 6 | [x] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#l41) |
 | L4.2 | 审计日志查询 API | Week 6 | [ ] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#l42) |
