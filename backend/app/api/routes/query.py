@@ -8,7 +8,12 @@ from sqlalchemy.orm import Session
 from backend.app.api.errors import ApiError, ErrorResponse
 from backend.app.db.base import DatabaseRole
 from backend.app.db.session import DatabaseManager
+from backend.app.schemas.run import RunTimelineProjection
 from backend.app.schemas.workspace import SessionWorkspaceProjection
+from backend.app.services.projections.timeline import (
+    TimelineProjectionService,
+    TimelineProjectionServiceError,
+)
 from backend.app.services.projections.workspace import (
     WorkspaceProjectionService,
     WorkspaceProjectionServiceError,
@@ -60,7 +65,21 @@ def get_workspace_projection_service(
     )
 
 
-def _raise_api_error(exc: WorkspaceProjectionServiceError) -> None:
+def get_timeline_projection_service(
+    control_session: Session = Depends(get_control_session),
+    runtime_session: Session = Depends(get_runtime_session),
+    event_session: Session = Depends(get_event_session),
+) -> Iterator[TimelineProjectionService]:
+    yield TimelineProjectionService(
+        control_session,
+        runtime_session,
+        event_session,
+    )
+
+
+def _raise_api_error(
+    exc: WorkspaceProjectionServiceError | TimelineProjectionServiceError,
+) -> None:
     raise ApiError(
         error_code=exc.error_code,
         message=exc.message,
@@ -84,4 +103,23 @@ def get_session_workspace(
     try:
         return service.get_session_workspace(sessionId)
     except WorkspaceProjectionServiceError as exc:
+        _raise_api_error(exc)
+
+
+@router.get(
+    "/runs/{runId}/timeline",
+    response_model=RunTimelineProjection,
+    responses={
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+def get_run_timeline(
+    runId: str,
+    service: TimelineProjectionService = Depends(get_timeline_projection_service),
+) -> RunTimelineProjection:
+    try:
+        return service.get_run_timeline(runId)
+    except TimelineProjectionServiceError as exc:
         _raise_api_error(exc)
