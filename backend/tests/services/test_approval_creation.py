@@ -271,6 +271,8 @@ def seed_running_stage(
                     stage_type=stage_type,
                     status=StageStatus.RUNNING,
                     attempt_index=1,
+                    graph_node_key=f"{stage_type.value}.main",
+                    stage_contract_ref=f"stage-contract-{stage_type.value}",
                     input_ref=None,
                     output_ref=None,
                     summary=None,

@@ -366,6 +366,8 @@ def seed_waiting_requirement_analysis(manager: DatabaseManager) -> None:
                 stage_type=StageType.REQUIREMENT_ANALYSIS,
                 status=StageStatus.RUNNING,
                 attempt_index=1,
+                graph_node_key="requirement_analysis.main",
+                stage_contract_ref="stage-contract-requirement-analysis",
                 input_ref="requirement-input-1",
                 output_ref=None,
                 summary="Analyzing requirement.",
