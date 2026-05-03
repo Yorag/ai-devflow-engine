@@ -286,7 +286,7 @@
 | A4.8 | Provider Registry | Week 8 | [x] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48) |
 | A4.8a | PromptValidation 边界校验 | Week 8 | [x] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48a) |
 | A4.8b | ContextEnvelope 与 ContextManifest Schema | Week 8 | [ ] | 后端契约 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48b) |
-| A4.8c | PromptRegistry 与系统提示词资产加载 | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48c) |
+| A4.8c | PromptRegistry 与系统提示词资产加载 | Week 8 | [x] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48c) |
 | A4.8d | PromptRenderer 与消息序列渲染 | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48d) |
 | A4.9 | LangChain Provider Adapter | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a49) |
 | A4.9a | ContextEnvelope Builder 与 ContextManifest 记录 | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a49a) |
