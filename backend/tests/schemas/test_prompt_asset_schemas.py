@@ -294,3 +294,36 @@ def test_compression_prompt_is_only_a_system_asset_reference() -> None:
                 "compression_prompt": "Summarize this run.",
             }
         )
+
+
+def test_prompt_section_ref_keeps_prompt_version_metadata_out_of_model_visible_content() -> None:
+    from backend.app.context.schemas import PromptSectionRef
+    from backend.app.schemas.prompts import (
+        PromptAuthorityLevel,
+        PromptCacheScope,
+        PromptType,
+        PromptVersionRef,
+    )
+
+    prompt_ref = PromptVersionRef(
+        prompt_id="runtime_instructions",
+        prompt_version="2026-05-04.1",
+        prompt_type=PromptType.RUNTIME_INSTRUCTIONS,
+        authority_level=PromptAuthorityLevel.SYSTEM_TRUSTED,
+        cache_scope=PromptCacheScope.GLOBAL_STATIC,
+        source_ref="backend://prompts/runtime/runtime_instructions.md",
+        content_hash="e" * 64,
+    )
+    section = PromptSectionRef(
+        section_id="runtime-boundaries",
+        title="Runtime Boundaries",
+        prompt_ref=prompt_ref,
+        rendered_content_ref="artifact://prompt-sections/runtime-boundaries",
+        rendered_content_hash="f" * 64,
+        cache_scope=PromptCacheScope.GLOBAL_STATIC,
+    )
+
+    dumped = section.model_dump(mode="json")
+    assert dumped["prompt_ref"]["prompt_id"] == "runtime_instructions"
+    assert dumped["rendered_content_ref"] == "artifact://prompt-sections/runtime-boundaries"
+    assert "body" not in dumped
