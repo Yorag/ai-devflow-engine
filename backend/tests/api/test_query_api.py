@@ -11,7 +11,13 @@ from backend.app.db.base import DatabaseRole
 from backend.app.db.models.control import ControlBase, ProjectModel, SessionModel
 from backend.app.db.models.event import EventBase
 from backend.app.db.models.log import LogBase
-from backend.app.db.models.runtime import RuntimeBase
+from backend.app.db.models.runtime import (
+    ClarificationRecordModel,
+    RunControlRecordModel,
+    RuntimeBase,
+    StageArtifactModel,
+)
+from backend.app.schemas.common import RunControlRecordType, StageType
 from backend.app.main import create_app
 from backend.tests.projections.test_workspace_projection import _seed_workspace
 
@@ -33,6 +39,58 @@ def build_query_api_app(tmp_path: Path):
     LogBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.LOG))
     _seed_workspace(app.state.database_manager)
     return app
+
+
+def _seed_control_item_projection(app) -> None:
+    with app.state.database_manager.session(DatabaseRole.RUNTIME) as session:
+        session.add_all(
+            [
+                ClarificationRecordModel(
+                    clarification_id="clarification-1",
+                    run_id="run-active",
+                    stage_run_id="stage-active",
+                    question="Should the change affect backend only?",
+                    answer=None,
+                    payload_ref="clarification-payload-1",
+                    graph_interrupt_ref="interrupt-clarification-1",
+                    requested_at=NOW.replace(minute=8),
+                    answered_at=None,
+                    created_at=NOW.replace(minute=8),
+                    updated_at=NOW.replace(minute=8),
+                ),
+                RunControlRecordModel(
+                    control_record_id="control-clarification-1",
+                    run_id="run-active",
+                    stage_run_id="stage-active",
+                    control_type=RunControlRecordType.CLARIFICATION_WAIT,
+                    source_stage_type=StageType.CODE_GENERATION,
+                    target_stage_type=StageType.CODE_GENERATION,
+                    payload_ref="clarification-1",
+                    graph_interrupt_ref="interrupt-clarification-1",
+                    occurred_at=NOW.replace(minute=8),
+                    created_at=NOW.replace(minute=8),
+                ),
+                StageArtifactModel(
+                    artifact_id="artifact-control-clarification-1",
+                    run_id="run-active",
+                    stage_run_id="stage-active",
+                    artifact_type="control_item_trace",
+                    payload_ref="payload-control-clarification-1",
+                    process={
+                        "control_record_id": "control-clarification-1",
+                        "trigger_reason": "Need the user to clarify file scope.",
+                        "context_refs": ["requirement-clarification-1"],
+                        "control_process_trace_ref": "control-trace-clarification-1",
+                        "history_attempt_refs": ["run-active:attempt-2"],
+                        "output_snapshot": {"result_status": "waiting_clarification"},
+                        "log_refs": ["log-control-clarification-1"],
+                    },
+                    metrics={"retry_index": 0, "source_attempt_index": 1},
+                    created_at=NOW.replace(minute=8, second=5),
+                ),
+            ]
+        )
+        session.commit()
 
 
 def test_get_session_workspace_returns_projection_and_unified_not_found(
@@ -228,6 +286,51 @@ def test_get_stage_inspector_returns_projection_and_unified_not_found(
     }
 
 
+def test_get_control_item_detail_returns_projection_and_unified_not_found(
+    tmp_path: Path,
+) -> None:
+    app = build_query_api_app(tmp_path)
+    _seed_control_item_projection(app)
+
+    with TestClient(app) as client:
+        ok_response = client.get(
+            "/api/control-records/control-clarification-1",
+            headers={
+                "X-Request-ID": "req-control-clarification",
+                "X-Correlation-ID": "corr-control-clarification",
+            },
+        )
+        missing_response = client.get(
+            "/api/control-records/control-missing",
+            headers={
+                "X-Request-ID": "req-control-missing",
+                "X-Correlation-ID": "corr-control-missing",
+            },
+        )
+
+    assert ok_response.status_code == 200
+    payload = ok_response.json()
+    assert payload["control_record_id"] == "control-clarification-1"
+    assert payload["run_id"] == "run-active"
+    assert payload["control_type"] == "clarification_wait"
+    assert payload["source_stage_type"] == "code_generation"
+    assert (
+        payload["input"]["records"]["clarification_question"]
+        == "Should the change affect backend only?"
+    )
+    assert payload["output"]["records"]["result_status"] == "waiting_clarification"
+    assert payload["artifacts"]["records"]["clarification_id"] == "clarification-1"
+    assert payload["artifacts"]["log_refs"] == ["log-control-clarification-1"]
+
+    assert missing_response.status_code == 404
+    assert missing_response.json() == {
+        "error_code": "not_found",
+        "message": "Control item inspector was not found.",
+        "request_id": "req-control-missing",
+        "correlation_id": "corr-control-missing",
+    }
+
+
 def test_get_session_workspace_rejects_removed_session(
     tmp_path: Path,
 ) -> None:
@@ -391,5 +494,30 @@ def test_query_workspace_route_is_documented_in_openapi(tmp_path: Path) -> None:
             == "#/components/schemas/ErrorResponse"
         )
 
+    control_record_route = paths["/api/control-records/{controlRecordId}"]["get"]
+    assert set(control_record_route["responses"]) == {"200", "404", "422", "500"}
+    assert (
+        control_record_route["responses"]["200"]["content"]["application/json"][
+            "schema"
+        ]["$ref"]
+        == "#/components/schemas/ControlItemInspectorProjection"
+    )
+    control_record_id_parameter = next(
+        parameter
+        for parameter in control_record_route["parameters"]
+        if parameter["name"] == "controlRecordId"
+    )
+    assert control_record_id_parameter["in"] == "path"
+    assert control_record_id_parameter["required"] is True
+    assert control_record_id_parameter["schema"]["type"] == "string"
+    for status_code in ("404", "422", "500"):
+        assert (
+            control_record_route["responses"][status_code]["content"][
+                "application/json"
+            ]["schema"]["$ref"]
+            == "#/components/schemas/ErrorResponse"
+        )
+
     assert "StageInspectorProjection" in schemas
+    assert "ControlItemInspectorProjection" in schemas
     assert "ErrorResponse" in schemas

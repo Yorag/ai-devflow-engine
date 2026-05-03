@@ -12,7 +12,10 @@ from sqlalchemy.orm import Session
 from backend.app.api.errors import ApiError, ErrorResponse
 from backend.app.db.base import DatabaseRole
 from backend.app.db.session import DatabaseManager
-from backend.app.schemas.inspector import StageInspectorProjection
+from backend.app.schemas.inspector import (
+    ControlItemInspectorProjection,
+    StageInspectorProjection,
+)
 from backend.app.schemas.run import RunTimelineProjection
 from backend.app.schemas.workspace import SessionWorkspaceProjection
 from backend.app.services.events import EventStore
@@ -247,5 +250,24 @@ def get_stage_inspector(
 ) -> StageInspectorProjection:
     try:
         return service.get_stage_inspector(stageRunId)
+    except InspectorProjectionServiceError as exc:
+        _raise_api_error(exc)
+
+
+@router.get(
+    "/control-records/{controlRecordId}",
+    response_model=ControlItemInspectorProjection,
+    responses={
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+def get_control_item_detail(
+    controlRecordId: str,
+    service: InspectorProjectionService = Depends(get_inspector_projection_service),
+) -> ControlItemInspectorProjection:
+    try:
+        return service.get_control_item_detail(controlRecordId)
     except InspectorProjectionServiceError as exc:
         _raise_api_error(exc)
