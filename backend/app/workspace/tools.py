@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+import fnmatch
+import json
 import posixpath
 from pathlib import Path
 from pathlib import PureWindowsPath
+import shutil
+import subprocess
 from typing import Any
 
 from backend.app.api.error_codes import ErrorCode
@@ -99,6 +103,37 @@ _EDIT_FILE_RESULT_SCHEMA: dict[str, Any] = {
         "bytes_written": {"type": "integer"},
     },
     "required": ["path", "replacements", "bytes_written"],
+    "additionalProperties": False,
+}
+_GREP_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "pattern": {"type": "string", "minLength": 1},
+        "path": {"type": "string", "minLength": 1},
+    },
+    "required": ["pattern", "path"],
+    "additionalProperties": False,
+}
+_GREP_RESULT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "matches": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "line_number": {"type": "integer"},
+                    "snippet": {"type": "string"},
+                    "snippet_truncated": {"type": "boolean"},
+                },
+                "required": ["path", "line_number", "snippet", "snippet_truncated"],
+                "additionalProperties": False,
+            },
+        },
+        "truncated": {"type": "boolean"},
+    },
+    "required": ["matches", "truncated"],
     "additionalProperties": False,
 }
 _PREVIEW_LIMIT = 4096
@@ -431,6 +466,121 @@ class FileEditTool:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class WorkspaceGrepOptions:
+    executable: str = "rg"
+    max_results: int = 100
+    snippet_char_limit: int = 240
+    excluded_globs: tuple[str, ...] = (
+        ".runtime/logs/**",
+        "node_modules/**",
+        ".venv/**",
+        "venv/**",
+        "dist/**",
+        "build/**",
+        "coverage/**",
+        "__pycache__/**",
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class GrepResultItem:
+    path: str
+    line_number: int
+    snippet: str
+    snippet_truncated: bool
+
+    def as_payload(self) -> dict[str, object]:
+        return {
+            "path": self.path,
+            "line_number": self.line_number,
+            "snippet": self.snippet,
+            "snippet_truncated": self.snippet_truncated,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class GrepTool:
+    manager: WorkspaceManager
+    workspace: RunWorkspace
+    options: WorkspaceGrepOptions = WorkspaceGrepOptions()
+
+    @property
+    def name(self) -> str:
+        return "grep"
+
+    @property
+    def category(self) -> str:
+        return "workspace"
+
+    @property
+    def description(self) -> str:
+        return "Search workspace text content with local ripgrep."
+
+    @property
+    def input_schema(self) -> Mapping[str, object]:
+        return _GREP_INPUT_SCHEMA
+
+    @property
+    def result_schema(self) -> Mapping[str, object]:
+        return _GREP_RESULT_SCHEMA
+
+    @property
+    def default_risk_level(self) -> ToolRiskLevel:
+        return ToolRiskLevel.READ_ONLY
+
+    @property
+    def risk_categories(self) -> Sequence[ToolRiskCategory]:
+        return ()
+
+    @property
+    def permission_boundary(self) -> ToolPermissionBoundary:
+        return ToolPermissionBoundary(
+            boundary_type="workspace",
+            requires_workspace=True,
+            resource_scopes=("current_run_workspace",),
+            workspace_target_paths=("path",),
+        )
+
+    @property
+    def side_effect_level(self) -> ToolSideEffectLevel:
+        return ToolSideEffectLevel.WORKSPACE_READ
+
+    @property
+    def audit_required(self) -> bool:
+        return False
+
+    @property
+    def schema_version(self) -> str:
+        return "tool-schema-v1"
+
+    @property
+    def default_timeout_seconds(self) -> float | None:
+        return 5.0
+
+    def bindable_description(self) -> ToolBindableDescription:
+        return ToolBindableDescription(
+            name=self.name,
+            description=self.description,
+            input_schema=dict(self.input_schema),
+            result_schema=dict(self.result_schema),
+            risk_level=self.default_risk_level,
+            risk_categories=list(self.risk_categories),
+            schema_version=self.schema_version,
+            default_timeout_seconds=self.default_timeout_seconds,
+        )
+
+    def execute(self, tool_input: ToolInput) -> ToolResult:
+        return grep(
+            self.manager,
+            self.workspace,
+            str(tool_input.input_payload["pattern"]),
+            str(tool_input.input_payload["path"]),
+            options=self.options,
+            tool_input=tool_input,
+        )
+
+
 def read_file(
     manager: WorkspaceManager,
     workspace: RunWorkspace,
@@ -718,6 +868,145 @@ def edit_file(
     )
 
 
+def grep(
+    manager: WorkspaceManager,
+    workspace: RunWorkspace,
+    pattern: str,
+    path: str,
+    *,
+    options: WorkspaceGrepOptions,
+    tool_input: ToolInput,
+) -> ToolResult:
+    try:
+        resolved = manager.assert_inside_workspace(
+            path,
+            workspace=workspace,
+            trace_context=tool_input.trace_context,
+        )
+    except ToolWorkspaceBoundaryError as exc:
+        return _workspace_boundary_failed_result(
+            tool_input,
+            tool_name="grep",
+            target=exc.target,
+        )
+
+    normalized_path = _relative_path(workspace, resolved) or "."
+    executable = shutil.which(options.executable)
+    if executable is None:
+        return _tool_error_result(
+            tool_input,
+            tool_name="grep",
+            error_code=ErrorCode.INTERNAL_ERROR,
+            safe_details={"path": normalized_path, "reason": "rg_unavailable"},
+        )
+
+    command = [
+        executable,
+        "--json",
+        "--line-number",
+        "--color",
+        "never",
+        "--hidden",
+        "--no-messages",
+    ]
+    for glob_pattern in options.excluded_globs:
+        command.extend(["-g", f"!{glob_pattern}"])
+    # Use -e/-- so user-controlled pattern/path cannot be parsed as rg options.
+    command.extend(["-e", pattern, "--", normalized_path])
+
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=workspace.root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=tool_input.timeout_seconds,
+            check=False,
+            shell=False,
+        )
+    except subprocess.TimeoutExpired:
+        return _tool_error_result(
+            tool_input,
+            tool_name="grep",
+            error_code=ErrorCode.TOOL_TIMEOUT,
+            safe_details={"timeout_seconds": tool_input.timeout_seconds},
+        )
+    except OSError:
+        return _tool_error_result(
+            tool_input,
+            tool_name="grep",
+            error_code=ErrorCode.INTERNAL_ERROR,
+            safe_details={"path": normalized_path, "reason": "rg_failed"},
+        )
+
+    if completed.returncode == 1:
+        return _grep_success_result(
+            tool_input,
+            matches=[],
+            truncated=False,
+        )
+    if completed.returncode != 0:
+        reason = (
+            "rg_permission_denied"
+            if "permission denied" in completed.stderr.lower()
+            else "rg_failed"
+        )
+        return _tool_error_result(
+            tool_input,
+            tool_name="grep",
+            error_code=ErrorCode.INTERNAL_ERROR,
+            safe_details={
+                "path": normalized_path,
+                "reason": reason,
+                "returncode": completed.returncode,
+            },
+        )
+
+    matches: list[GrepResultItem] = []
+    truncated = False
+    for raw_line in completed.stdout.splitlines():
+        if not raw_line.strip():
+            continue
+        try:
+            event = json.loads(raw_line)
+        except json.JSONDecodeError:
+            return _tool_error_result(
+                tool_input,
+                tool_name="grep",
+                error_code=ErrorCode.INTERNAL_ERROR,
+                safe_details={"path": normalized_path, "reason": "rg_json_invalid"},
+            )
+        if event.get("type") != "match":
+            continue
+        item_or_error = _grep_result_item(
+            event,
+            workspace=workspace,
+            options=options,
+            tool_input=tool_input,
+        )
+        if isinstance(item_or_error, ToolResult):
+            return item_or_error
+        if item_or_error is None:
+            continue
+        if len(matches) >= options.max_results:
+            truncated = True
+            break
+        matches.append(item_or_error)
+
+    ordered_matches = sorted(
+        matches,
+        key=lambda item: (item.path, item.line_number, item.snippet),
+    )
+    return _grep_success_result(
+        tool_input,
+        matches=ordered_matches,
+        truncated=truncated,
+    )
+
+
 def _failed_result(
     tool_input: ToolInput,
     *,
@@ -734,6 +1023,27 @@ def _failed_result(
             ErrorCode.TOOL_INPUT_SCHEMA_INVALID,
             trace_context=tool_input.trace_context,
             safe_details={target_key: path, "reason": reason},
+        ),
+        trace_context=tool_input.trace_context,
+        coordination_key=tool_input.coordination_key,
+    )
+
+
+def _tool_error_result(
+    tool_input: ToolInput,
+    *,
+    tool_name: str,
+    error_code: ErrorCode,
+    safe_details: dict[str, object],
+) -> ToolResult:
+    return ToolResult(
+        tool_name=tool_name,
+        call_id=tool_input.call_id,
+        status=ToolResultStatus.FAILED,
+        error=ToolError.from_code(
+            error_code,
+            trace_context=tool_input.trace_context,
+            safe_details=safe_details,
         ),
         trace_context=tool_input.trace_context,
         coordination_key=tool_input.coordination_key,
@@ -757,6 +1067,110 @@ def _workspace_boundary_failed_result(
         ),
         trace_context=tool_input.trace_context,
         coordination_key=tool_input.coordination_key,
+    )
+
+
+def _grep_success_result(
+    tool_input: ToolInput,
+    *,
+    matches: Sequence[GrepResultItem],
+    truncated: bool,
+) -> ToolResult:
+    payload_matches = [item.as_payload() for item in matches]
+    return ToolResult(
+        tool_name="grep",
+        call_id=tool_input.call_id,
+        status=ToolResultStatus.SUCCEEDED,
+        output_payload={"matches": payload_matches, "truncated": truncated},
+        output_preview=_preview(
+            "\n".join(
+                f"{item['path']}:{item['line_number']}:{item['snippet']}"
+                for item in payload_matches
+            )
+        ),
+        trace_context=tool_input.trace_context,
+        coordination_key=tool_input.coordination_key,
+    )
+
+
+def _grep_result_item(
+    event: object,
+    *,
+    workspace: RunWorkspace,
+    options: WorkspaceGrepOptions,
+    tool_input: ToolInput,
+) -> GrepResultItem | ToolResult | None:
+    if not isinstance(event, Mapping):
+        return None
+    data = event.get("data")
+    if not isinstance(data, Mapping):
+        return None
+    path_data = data.get("path")
+    lines_data = data.get("lines")
+    line_number = data.get("line_number")
+    if not isinstance(path_data, Mapping) or not isinstance(lines_data, Mapping):
+        return None
+    relative_path = str(path_data.get("text", "")).replace("\\", "/")
+    if _is_excluded_path(relative_path, workspace):
+        return None
+    if _is_grep_glob_excluded(relative_path, options.excluded_globs):
+        return None
+    snippet, snippet_truncated, blocked = _grep_snippet(
+        str(lines_data.get("text", "")).rstrip("\r\n"),
+        limit=options.snippet_char_limit,
+    )
+    if blocked:
+        return _tool_error_result(
+            tool_input,
+            tool_name="grep",
+            error_code=ErrorCode.INTERNAL_ERROR,
+            safe_details={
+                "path": relative_path,
+                "line_number": int(line_number or 0),
+                "reason": "grep_match_blocked",
+            },
+        )
+    return GrepResultItem(
+        path=relative_path,
+        line_number=int(line_number or 0),
+        snippet=snippet,
+        snippet_truncated=snippet_truncated,
+    )
+
+
+def _grep_snippet(text: str, *, limit: int) -> tuple[str, bool, bool]:
+    redacted = RedactionPolicy(
+        max_text_length=max(len(text), limit, 32),
+        excerpt_length=max(len(text), limit, 32),
+    ).summarize_text(
+        text,
+        payload_type="grep_match",
+    )
+    if redacted.redaction_status.value == "blocked":
+        return "", False, True
+    visible = str(redacted.redacted_payload or "")
+    if len(visible) <= limit:
+        return visible, False, False
+    if limit <= 3:
+        return "." * max(limit, 0), True, False
+    return f"{visible[: limit - 3]}...", True, False
+
+
+def _is_grep_glob_excluded(
+    relative_path: str,
+    excluded_globs: Sequence[str],
+) -> bool:
+    normalized_path = _normalize_relative_path(relative_path)
+    return any(
+        fnmatch.fnmatchcase(normalized_path, glob_pattern.rstrip("/"))
+        or (
+            glob_pattern.endswith("/**")
+            and (
+                normalized_path == glob_pattern[:-3].rstrip("/")
+                or normalized_path.startswith(f"{glob_pattern[:-3].rstrip('/')}/")
+            )
+        )
+        for glob_pattern in excluded_globs
     )
 
 
@@ -849,8 +1263,12 @@ __all__ = [
     "FileEditTool",
     "FileReadTool",
     "FileWriteTool",
+    "GrepResultItem",
+    "GrepTool",
     "GlobTool",
+    "WorkspaceGrepOptions",
     "edit_file",
+    "grep",
     "glob",
     "read_file",
     "write_file",
