@@ -227,6 +227,7 @@ Acceleration lane pre-merge checklist:
 - The lane did not modify another lane owner's shared entry, or the owner conflict has been resolved in the integration checkpoint plan.
 - Focused verification evidence is fresh for the lane diff.
 - Claims marked `mock_ready` remain partial and do not update final platform/split plan status.
+- The checkpoint approval request explicitly states whether the approved closeout also includes `post-checkpoint --apply`.
 
 Integration branch to `main` pre-merge checklist:
 - The integration checkpoint has run the declared verification commands.
@@ -244,6 +245,7 @@ Do not merge when:
 - Included claims are only `reported`, exist only as local dirty worktree changes, or lack a user-approved checkpoint commit.
 - Shared coordination store, checkpoint snapshot, and platform/split plan status disagree.
 - Integration checkpoint verification is stale or has not run.
+- The integration checkpoint was presented as complete even though the approved closeout omitted the required `post-checkpoint --apply` follow-through without an explicit exception.
 
 After merge approval, optionally propose local branch deletion only if:
 - The branch is fully integrated.
