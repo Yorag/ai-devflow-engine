@@ -512,7 +512,7 @@
 ## F4.2 Run 控制按钮与终止入口
 
 **计划周期**：Week 6
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现暂停、恢复和终止的前端控制入口，使运行控制不与普通消息发送混用。
 **实施计划**：`docs/plans/implementation/f4.2-run-control-buttons.md`
 
@@ -520,20 +520,27 @@
 - Create: `frontend/src/features/composer/RunControlButtons.tsx`
 - Create: `frontend/src/features/runs/TerminateRunAction.tsx`
 - Create: `frontend/src/features/composer/__tests__/RunControlButtons.test.tsx`
+- Modify: `frontend/src/features/composer/Composer.tsx`
+- Modify: `frontend/src/features/composer/__tests__/Composer.test.tsx`
+- Modify: `frontend/src/features/workspace/WorkspaceShell.tsx`
+- Modify: `frontend/src/features/workspace/__tests__/WorkspaceShell.test.tsx`
+- Modify: `frontend/src/mocks/fixtures.ts`
+- Modify: `frontend/src/styles/global.css`
 
 **实现类/函数**：
 - `RunControlButtons`
 - `TerminateRunAction`
 - `canPauseRun()`
-- `canResumeRun()`
 - `canTerminateRun()`
 
 **验收标准**：
 - paused 显示恢复。
 - waiting_clarification 且主按钮承担发送时，当前活动 run 仍存在可触发的次级暂停入口。
+- running、waiting_approval 和 paused 下的主 Composer 生命周期按钮可直接执行暂停或恢复，不再只是只读展示。
 - 终止动作位于中栏右上工具区。
 - 终止只作用于当前活动 run。
 - 历史 run 不展示可执行暂停、恢复或终止操作。
+- 运行控制动作成功后同时刷新 `sessionWorkspace` 和 `projectSessions` 查询，避免工作台与会话列表状态漂移。
 
 **前端设计质量门**：
 - 继承项目级前端主基调。
@@ -542,6 +549,8 @@
 
 **测试方法**：
 - `npm --prefix frontend run test -- RunControlButtons`
+- `npm --prefix frontend test`
+- `npm --prefix frontend run build`
 
 <a id="f43"></a>
 

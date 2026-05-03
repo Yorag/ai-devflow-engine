@@ -257,7 +257,7 @@
 | H4.6 | Terminate 与 system_status | Week 6 | [ ] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#h46) |
 | H4.7 | 重新尝试命令与多 run 分界 | Week 6 | [ ] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#h47) |
 | F4.1 | Composer 生命周期按钮状态 | Week 6 | [x] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f41) |
-| F4.2 | Run 控制按钮与终止入口 | Week 6 | [ ] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f42) |
+| F4.2 | Run 控制按钮与终止入口 | Week 6 | [x] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f42) |
 | F4.3 | Approval Block 与 Reject 输入 | Week 6 | [ ] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f43) |
 | F4.3a | Tool Confirmation Block 与确认交互 | Week 6-7 | [ ] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f43a) |
 | F4.4 | 重新尝试 UI 与历史审批禁用态 | Week 6 | [ ] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f44) |
