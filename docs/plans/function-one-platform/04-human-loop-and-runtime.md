@@ -598,7 +598,7 @@
 ## F4.3 Approval Block 与 Reject 输入
 
 **计划周期**：Week 6
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现内联审批块和 Reject 理由输入，使人工决策留在 Narrative Feed 中。
 **实施计划**：`docs/plans/implementation/f4.3-approval-block-reject.md`
 
