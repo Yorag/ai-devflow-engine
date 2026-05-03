@@ -229,7 +229,7 @@
 | R3.4b | RuntimeLimitSnapshot 与 ProviderCallPolicySnapshot 固化 | Week 4 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#r34b) |
 | R3.5 | GraphDefinition 固定主链编译 | Week 4 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#r35) |
 | R3.6 | StageRun 持久化 | Week 4-5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#r36) |
-| R3.7 | StageArtifact 存储 | Week 4-5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#r37) |
+| R3.7 | StageArtifact 存储 | Week 4-5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#r37) |
 | Q3.1 | SessionWorkspaceProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q31) |
 | Q3.2 | RunTimelineProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q32) |
 | Q3.3 | StageInspectorProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q33) |
