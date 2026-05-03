@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session
 from backend.app.db.models.control import SessionModel
 from backend.app.db.models.runtime import PipelineRunModel, StageRunModel
 from backend.app.domain.enums import RunStatus, SessionStatus, StageStatus, StageType
+from backend.app.domain.provider_call_policy_snapshot import ProviderCallPolicySnapshot
 from backend.app.domain.provider_snapshot import ModelBindingSnapshot, ProviderSnapshot
+from backend.app.domain.runtime_limit_snapshot import RuntimeLimitSnapshot
 from backend.app.domain.template_snapshot import TemplateSnapshot
 from backend.app.repositories.runtime import RuntimeSnapshotRepository
 
@@ -77,6 +79,40 @@ class RunLifecycleService:
         for snapshot in model_binding_snapshots:
             repository.save_model_binding_snapshot(snapshot)
 
+        run.updated_at = self._now()
+        self._runtime_session.add(run)
+        return run
+
+    def attach_runtime_limit_snapshot(
+        self,
+        run: PipelineRunModel,
+        snapshot: RuntimeLimitSnapshot,
+    ) -> PipelineRunModel:
+        if run.run_id != snapshot.run_id:
+            raise ValueError(
+                "runtime limit snapshot run_id must match PipelineRun.run_id"
+            )
+        RuntimeSnapshotRepository(self._runtime_session).save_runtime_limit_snapshot(
+            snapshot
+        )
+        run.runtime_limit_snapshot_ref = snapshot.snapshot_id
+        run.updated_at = self._now()
+        self._runtime_session.add(run)
+        return run
+
+    def attach_provider_call_policy_snapshot(
+        self,
+        run: PipelineRunModel,
+        snapshot: ProviderCallPolicySnapshot,
+    ) -> PipelineRunModel:
+        if run.run_id != snapshot.run_id:
+            raise ValueError(
+                "provider call policy snapshot run_id must match PipelineRun.run_id"
+            )
+        RuntimeSnapshotRepository(
+            self._runtime_session
+        ).save_provider_call_policy_snapshot(snapshot)
+        run.provider_call_policy_snapshot_ref = snapshot.snapshot_id
         run.updated_at = self._now()
         self._runtime_session.add(run)
         return run
