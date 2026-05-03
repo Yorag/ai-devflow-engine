@@ -231,7 +231,7 @@
 | R3.6 | StageRun 持久化 | Week 4-5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#r36) |
 | R3.7 | StageArtifact 存储 | Week 4-5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#r37) |
 | Q3.1 | SessionWorkspaceProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q31) |
-| Q3.2 | RunTimelineProjection | Week 5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q32) |
+| Q3.2 | RunTimelineProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q32) |
 | Q3.3 | StageInspectorProjection | Week 5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q33) |
 | Q3.4 | ControlItemInspectorProjection | Week 5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q34) |
 | Q3.4a | ToolConfirmationInspectorProjection | Week 5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q34a) |
@@ -241,7 +241,7 @@
 | F3.2 | SSE Client 与 Event Reducer | Week 5 | [x] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f32) |
 | F3.3 | Feed Entry Renderer | Week 5-6 | [x] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f33) |
 | F3.4 | StageNode 与阶段内部条目 | Week 5-6 | [x] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f34) |
-| F3.5 | Run Boundary 与 Run Switcher | Week 5-6 | [ ] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f35) |
+| F3.5 | Run Boundary 与 Run Switcher | Week 5-6 | [x] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f35) |
 | F3.6 | Inspector Shell 与打开状态 | Week 5-6 | [ ] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f36) |
 | F3.7 | Inspector 分组与 Metrics 展示 | Week 5-6 | [ ] | 前端 | [03](function-one-platform/03-run-projection-and-feed.md#f37) |
 | A4.0 | Runtime orchestration boundary | Week 6 | [x] | 后端核心 | [04](function-one-platform/04-human-loop-and-runtime.md#a40) |
@@ -249,7 +249,7 @@
 | L4.2 | 审计日志查询 API | Week 6 | [ ] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#l42) |
 | H4.1 | 澄清记录与后端消息语义 | Week 6 | [x] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#h41) |
 | H4.2 | Composer 澄清输入语义 | Week 6 | [ ] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#h42) |
-| H4.3 | 审批对象与投影语义 | Week 6 | [ ] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#h43) |
+| H4.3 | 审批对象与投影语义 | Week 6 | [x] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#h43) |
 | D4.0 | Delivery snapshot gate | Week 6 | [ ] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#d40) |
 | H4.4 | 审批命令与交付就绪阻塞 | Week 6 | [ ] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#h44) |
 | H4.4a | ToolConfirmationRequest 与工具确认命令 | Week 6-7 | [ ] | 后端 | [04](function-one-platform/04-human-loop-and-runtime.md#h44a) |
@@ -263,7 +263,7 @@
 | F4.4 | 重新尝试 UI 与历史审批禁用态 | Week 6 | [ ] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f44) |
 | A4.1 | RuntimeEngine 接口 | Week 7 | [x] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#a41) |
 | W5.0 | ToolProtocol 与工具注册表 | Week 7 | [x] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w50) |
-| W5.0a | 统一错误码字典与错误响应契约 | Week 7 | [ ] | 后端契约 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w50a) |
+| W5.0a | 统一错误码字典与错误响应契约 | Week 7 | [x] | 后端契约 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w50a) |
 | W5.1 | WorkspaceManager 隔离工作区 | Week 7 | [ ] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w51) |
 | W5.0b | ToolRegistry execution gate | Week 7-8 | [ ] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w50b) |
 | W5.0c | 后端测试 fixture、fake provider 与 fake tool 契约 | Week 7-8 | [ ] | 后端测试 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w50c) |

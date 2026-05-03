@@ -191,9 +191,10 @@
 ## H4.3 审批对象与投影语义
 
 **计划周期**：Week 6
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现 solution design 与 code review 的审批对象创建和投影字段，使审批请求成为 Narrative Feed 顶层条目。
 **实施计划**：`docs/plans/implementation/h4.3-approval-object-projection.md`
+**验证摘要**：实施计划 `docs/plans/implementation/h4.3-approval-object-projection.md` 已完成并在 integration checkpoint 合入 `3cd8bb7`。`uv run pytest backend/tests/api/test_query_api.py backend/tests/projections/test_timeline_projection.py backend/tests/projections/test_approval_projection.py backend/tests/services/test_approval_creation.py backend/tests/errors/test_error_code_catalog.py` 通过 34 个 focused backend tests。
 
 **修改文件列表**：
 - Create: `backend/app/services/approvals.py`

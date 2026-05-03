@@ -56,9 +56,10 @@
 ## W5.0a 统一错误码字典与错误响应契约
 
 **计划周期**：Week 7
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：扩展 B0.2 已建立的后端错误码体系，使 API 错误、工具错误、交付错误、日志审计错误和回归断言共享稳定 `error_code` 来源，避免各切片用自由文本或局部常量定义错误兼容边界。
 **实施计划**：`docs/plans/implementation/w5.0a-error-code-catalog-contract.md`
+**验证摘要**：实施计划 `docs/plans/implementation/w5.0a-error-code-catalog-contract.md` 已完成并在 integration checkpoint 合入 `e2c777c`。`uv run pytest backend/tests/api/test_query_api.py backend/tests/projections/test_timeline_projection.py backend/tests/projections/test_approval_projection.py backend/tests/services/test_approval_creation.py backend/tests/errors/test_error_code_catalog.py` 通过 34 个 focused backend tests。
 
 **修改文件列表**：
 - Modify: `backend/app/api/error_codes.py`

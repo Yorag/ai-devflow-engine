@@ -118,9 +118,25 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | Claim | Task | Lane | Branch | Status | Coordination Base | Worker HEAD | Evidence | Blocker |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | AL01-R3.1 | R3.1 | AL01 | `feat/al-run-core-events` | done | 5d44d4a | 222396d | `docs/plans/acceleration/reports/AL01-R3.1.md` | - |
+| AL01-E3.1 | E3.1 | AL01 | `feat/al-run-core-events` | done | 4ea6251 | 38defe9 | `docs/plans/acceleration/reports/AL01-E3.1.md` | - |
+| AL01-R3.4 | R3.4 | AL01 | `feat/al-run-core-events` | done | 67f5290 | d1fcb14 | `docs/plans/acceleration/reports/AL01-R3.4.md` | - |
+| AL01-R3.4a | R3.4a | AL01 | `feat/al-run-core-events` | claimed | 74578b0 | - | `docs/plans/acceleration/reports/AL01-R3.4a.md` | - |
+| AL02-Q3.1 | Q3.1 | AL02 | `feat/al-projections-streams` | done | 67f5290 | d07f094 | `docs/plans/acceleration/reports/AL02-Q3.1.md` | - |
+| AL02-Q3.2 | Q3.2 | AL02 | `feat/al-projections-streams` | done | 74578b0 | 827d4dd | `docs/plans/acceleration/reports/AL02-Q3.2.md` | - |
 | AL03-A4.0 | A4.0 | AL03 | `feat/al-runtime-human-loop` | done | 5d44d4a | ebfcb61 | `docs/plans/acceleration/reports/AL03-A4.0.md` | - |
+| AL03-L4.1 | L4.1 | AL03 | `feat/al-runtime-human-loop` | done | 4ea6251 | c6290f5 | `docs/plans/acceleration/reports/AL03-L4.1.md` | - |
+| AL03-H4.1 | H4.1 | AL03 | `feat/al-runtime-human-loop` | done | 67f5290 | 8040668 | `docs/plans/acceleration/reports/AL03-H4.1.md` | - |
+| AL03-H4.3 | H4.3 | AL03 | `feat/al-runtime-human-loop` | done | 74578b0 | 3cd8bb7 | `docs/plans/acceleration/reports/AL03-H4.3.md` | - |
+| AL04-A4.1 | A4.1 | AL04 | `feat/al-tools-deterministic-delivery` | done | cf4828c | 3cba4f8 | `docs/plans/acceleration/reports/AL04-A4.1.md` | - |
+| AL04-W5.0 | W5.0 | AL04 | `feat/al-tools-deterministic-delivery` | done | 67f5290 | 2b78be5 | `docs/plans/acceleration/reports/AL04-W5.0.md` | - |
+| AL04-W5.0a | W5.0a | AL04 | `feat/al-tools-deterministic-delivery` | done | 74578b0 | e2c777c | `docs/plans/acceleration/reports/AL04-W5.0a.md` | - |
 | AL05-A4.8 | A4.8 | AL05 | `feat/al-provider-langgraph-context` | done | 5d44d4a | aee52fb | `docs/plans/acceleration/reports/AL05-A4.8.md` | - |
+| AL05-A4.8a | A4.8a | AL05 | `feat/al-provider-langgraph-context` | blocked | 4ea6251 | - | `docs/plans/acceleration/reports/AL05-A4.8a.md` | Source Trace Conflict Gate: run-start validation hook requires AL01 run-start surface or explicit owner reassignment. |
 | AL06-F3.1 | F3.1 | AL06 | `feat/al-frontend-runtime-ui` | done | 5d44d4a | 564624a | `docs/plans/acceleration/reports/AL06-F3.1.md` | - |
+| AL06-F3.2 | F3.2 | AL06 | `feat/al-frontend-runtime-ui` | done | 4ea6251 | c5f11d1 | `docs/plans/acceleration/reports/AL06-F3.2.md` | - |
+| AL06-F3.3 | F3.3 | AL06 | `feat/al-frontend-runtime-ui` | done | ab9e0d3 | 47946f8 | `docs/plans/acceleration/reports/AL06-F3.3.md` | - |
+| AL06-F3.4 | F3.4 | AL06 | `feat/al-frontend-runtime-ui` | done | 67f5290 | f694762 | `docs/plans/acceleration/reports/AL06-F3.4.md` | - |
+| AL06-F3.5 | F3.5 | AL06 | `feat/al-frontend-runtime-ui` | done | 74578b0 | 4042594 | `docs/plans/acceleration/reports/AL06-F3.5.md` | - |
 
 当前基线不预置 live claim。主协调会话在认领 ready task 时写入共享 coordination store，并记录当时的 Coordination Base。
 
