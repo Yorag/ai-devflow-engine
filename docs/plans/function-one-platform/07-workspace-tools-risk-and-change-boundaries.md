@@ -15,9 +15,10 @@
 ## W5.0 ToolProtocol 与工具注册表
 
 **计划周期**：Week 7
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：在 workspace 文件工具、`bash` 工具、LangGraph runtime、Provider adapter 和后续 delivery tool 之前固定抽象工具协议，使所有工具绑定只依赖 `ToolProtocol` 和注册表。
 **实施计划**：`docs/plans/implementation/w5.0-tool-protocol-registry.md`
+**验证摘要**：实施计划 `docs/plans/implementation/w5.0-tool-protocol-registry.md` 已完成并在 integration checkpoint 合入 `2b78be5`。`uv run python -m pytest backend/tests/services/test_template_snapshot.py backend/tests/services/test_clarification_flow.py backend/tests/api/test_clarification_reply_api.py backend/tests/projections/test_workspace_projection.py backend/tests/api/test_query_api.py backend/tests/tools/test_tool_protocol_registry.py -v` 通过 39 个 focused backend tests；`uv run python -m pytest -q` 通过 395 个 backend tests。
 
 **修改文件列表**：
 - Create: `backend/app/tools/protocol.py`

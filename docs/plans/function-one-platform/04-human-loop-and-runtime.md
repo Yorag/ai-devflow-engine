@@ -118,9 +118,10 @@
 ## H4.1 澄清记录与后端消息语义
 
 **计划周期**：Week 6
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现 Requirement Analysis 内部澄清记录和 `clarification_reply` 后端语义，保证澄清不被建模为审批流程。
 **实施计划**：`docs/plans/implementation/h4.1-clarification-backend.md`
+**验证摘要**：实施计划 `docs/plans/implementation/h4.1-clarification-backend.md` 已完成并在 integration checkpoint 合入 `8040668`。本 checkpoint 手工融合 `backend/app/services/runs.py` 中的 R3.4 template snapshot run lifecycle surface 与 H4.1 clarification lifecycle surface。`uv run python -m pytest backend/tests/services/test_template_snapshot.py backend/tests/services/test_clarification_flow.py backend/tests/api/test_clarification_reply_api.py backend/tests/projections/test_workspace_projection.py backend/tests/api/test_query_api.py backend/tests/tools/test_tool_protocol_registry.py -v` 通过 39 个 focused backend tests；`uv run python -m pytest -q` 通过 395 个 backend tests。
 
 **修改文件列表**：
 - Modify: `backend/app/services/runs.py`
