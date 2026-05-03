@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session
 from backend.app.db.models.control import SessionModel
 from backend.app.db.models.runtime import PipelineRunModel, StageRunModel
 from backend.app.domain.enums import RunStatus, SessionStatus, StageStatus, StageType
+from backend.app.domain.provider_snapshot import ModelBindingSnapshot, ProviderSnapshot
 from backend.app.domain.template_snapshot import TemplateSnapshot
+from backend.app.repositories.runtime import RuntimeSnapshotRepository
 
 
 class RunLifecycleServiceError(ValueError):
@@ -35,6 +37,46 @@ class RunLifecycleService:
         if run.run_id != snapshot.run_id:
             raise ValueError("template snapshot run_id must match PipelineRun.run_id")
         run.template_snapshot_ref = snapshot.snapshot_ref
+        run.updated_at = self._now()
+        self._runtime_session.add(run)
+        return run
+
+    def attach_provider_snapshots(
+        self,
+        run: PipelineRunModel,
+        *,
+        provider_snapshots: tuple[ProviderSnapshot, ...],
+        model_binding_snapshots: tuple[ModelBindingSnapshot, ...],
+    ) -> PipelineRunModel:
+        if not provider_snapshots:
+            raise ValueError("provider_snapshots must not be empty")
+        if not model_binding_snapshots:
+            raise ValueError("model_binding_snapshots must not be empty")
+        for snapshot in provider_snapshots:
+            if run.run_id != snapshot.run_id:
+                raise ValueError(
+                    "provider snapshot run_id must match PipelineRun.run_id"
+                )
+        provider_snapshot_ids = {
+            snapshot.snapshot_id for snapshot in provider_snapshots
+        }
+        for snapshot in model_binding_snapshots:
+            if run.run_id != snapshot.run_id:
+                raise ValueError(
+                    "model binding snapshot run_id must match PipelineRun.run_id"
+                )
+            if snapshot.provider_snapshot_id not in provider_snapshot_ids:
+                raise ValueError(
+                    "model binding snapshot provider_snapshot_id must reference "
+                    "attached provider_snapshots"
+                )
+
+        repository = RuntimeSnapshotRepository(self._runtime_session)
+        for snapshot in provider_snapshots:
+            repository.save_provider_snapshot(snapshot)
+        for snapshot in model_binding_snapshots:
+            repository.save_model_binding_snapshot(snapshot)
+
         run.updated_at = self._now()
         self._runtime_session.add(run)
         return run
