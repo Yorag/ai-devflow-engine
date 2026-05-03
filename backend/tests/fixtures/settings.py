@@ -8,6 +8,8 @@ from backend.app.core.config import EnvironmentSettings
 from backend.app.schemas.runtime_settings import (
     AgentRuntimeLimits,
     ContextLimits,
+    InternalModelBindingSelection,
+    InternalModelBindings,
     LogPolicy,
     PlatformHardLimits,
     PlatformRuntimeSettingsRead,
@@ -71,6 +73,7 @@ def runtime_settings_snapshot_fixture(
     updated_at: datetime | None = None,
     agent_limits: AgentRuntimeLimits | None = None,
     provider_call_policy: ProviderCallPolicy | None = None,
+    internal_model_bindings: InternalModelBindings | None = None,
     context_limits: ContextLimits | None = None,
     log_policy: LogPolicy | None = None,
     hard_limits: PlatformHardLimits | None = None,
@@ -86,6 +89,27 @@ def runtime_settings_snapshot_fixture(
         ),
         agent_limits=agent_limits or AgentRuntimeLimits(),
         provider_call_policy=provider_call_policy or ProviderCallPolicy(),
+        internal_model_bindings=internal_model_bindings
+        or InternalModelBindings(
+            context_compression=InternalModelBindingSelection(
+                provider_id="provider-deepseek",
+                model_id="deepseek-chat",
+                model_parameters={"temperature": 0},
+                source_config_version=config_version,
+            ),
+            structured_output_repair=InternalModelBindingSelection(
+                provider_id="provider-deepseek",
+                model_id="deepseek-chat",
+                model_parameters={"temperature": 0},
+                source_config_version=config_version,
+            ),
+            validation_pass=InternalModelBindingSelection(
+                provider_id="provider-deepseek",
+                model_id="deepseek-reasoner",
+                model_parameters={"temperature": 0},
+                source_config_version=config_version,
+            ),
+        ),
         context_limits=context_limits or ContextLimits(),
         log_policy=log_policy or LogPolicy(),
         hard_limits=hard_limits or PlatformHardLimits(),

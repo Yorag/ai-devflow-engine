@@ -22,6 +22,12 @@ from backend.app.tools.protocol import (
     _validate_json_object,
 )
 from backend.app.tools.registry import InvalidToolDefinitionError, UnknownToolError
+from backend.app.tools.risk import (
+    ToolConfirmationGrant,
+    ToolConfirmationRequestPort,
+    ToolRiskAssessment,
+    ToolRiskClassifier,
+)
 
 
 JsonObject = dict[str, Any]
@@ -92,6 +98,7 @@ class ToolExecutionRequest(_StrictBaseModel):
     trace_context: TraceContext
     coordination_key: str = Field(min_length=1)
     timeout_seconds: float | None = Field(default=None, gt=0)
+    confirmation_grant: ToolConfirmationGrant | None = None
 
 
 @dataclass(frozen=True)
@@ -105,6 +112,7 @@ class ToolExecutionContext:
     audit_recorder: ToolAuditRecorderPort | None = None
     run_log_recorder: ToolRunLogRecorderPort | None = None
     risk_policy: ToolRiskInspectionPort | None = None
+    confirmation_port: ToolConfirmationRequestPort | None = None
 
     @property
     def allowed_tools(self) -> tuple[str, ...]:
@@ -278,6 +286,7 @@ class ToolExecutionGate:
         self._schema_validator = ToolInputSchemaValidator()
         self._timeout_policy = ToolTimeoutPolicy()
         self._audit_policy = ToolAuditPolicy()
+        self._risk_classifier = ToolRiskClassifier()
 
     def available_tools(
         self,
@@ -426,22 +435,6 @@ class ToolExecutionGate:
         if boundary_result is not None:
             return boundary_result
 
-        if context.risk_policy is not None:
-            try:
-                context.risk_policy.inspect_tool_intent(
-                    request=request,
-                    tool_name=tool.name,
-                    trace_context=request.trace_context,
-                )
-            except Exception:
-                return self._error_result(
-                    request=request,
-                    context=context,
-                    error_code=ErrorCode.INTERNAL_ERROR,
-                    tool_name=tool.name,
-                    safe_details={"reason": "risk_policy_failed"},
-                )
-
         timeout_seconds = self._timeout_policy.resolve_timeout(
             request=request,
             context=context,
@@ -456,11 +449,200 @@ class ToolExecutionGate:
         if isinstance(audit_ref, ToolResult):
             return audit_ref
 
+        if context.risk_policy is not None:
+            try:
+                context.risk_policy.inspect_tool_intent(
+                    request=request,
+                    tool_name=tool.name,
+                    trace_context=request.trace_context,
+                )
+            except Exception:
+                return self._error_result(
+                    request=request,
+                    context=context,
+                    error_code=ErrorCode.INTERNAL_ERROR,
+                    tool_name=tool.name,
+                    safe_details={"reason": "risk_policy_failed"},
+                    audit_ref=audit_ref,
+                )
+
+        assessment = self._risk_classifier.classify(tool=tool, request=request)
+        risk_result = self._validate_risk_confirmation(
+            request=request,
+            context=context,
+            tool=tool,
+            assessment=assessment,
+            audit_ref=audit_ref,
+        )
+        if risk_result is not None:
+            return risk_result
+
         return _ValidatedExecution(
             tool=tool,
             audit_ref=audit_ref,
             timeout_seconds=timeout_seconds,
         )
+
+    def _validate_risk_confirmation(
+        self,
+        *,
+        request: ToolExecutionRequest,
+        context: ToolExecutionContext,
+        tool: ToolProtocol,
+        assessment: ToolRiskAssessment,
+        audit_ref: ToolAuditRef | None,
+    ) -> ToolResult | None:
+        if assessment.is_blocked:
+            rejection_audit_ref = self._record_rejection_audit(
+                request=request,
+                context=context,
+                error_code=ErrorCode.TOOL_RISK_BLOCKED,
+            )
+            return self._error_result(
+                request=request,
+                context=context,
+                error_code=ErrorCode.TOOL_RISK_BLOCKED,
+                status=ToolResultStatus.BLOCKED,
+                tool_name=tool.name,
+                safe_details=self._risk_safe_details(assessment),
+                audit_ref=rejection_audit_ref,
+            )
+
+        if not assessment.requires_confirmation:
+            return None
+
+        if self._grant_matches(
+            request.confirmation_grant,
+            assessment,
+            request=request,
+            tool_name=tool.name,
+        ):
+            return None
+
+        return self._build_waiting_confirmation_result(
+            request=request,
+            context=context,
+            tool_name=tool.name,
+            assessment=assessment,
+            audit_ref=audit_ref,
+        )
+
+    def _grant_matches(
+        self,
+        grant: ToolConfirmationGrant | None,
+        assessment: ToolRiskAssessment,
+        *,
+        request: ToolExecutionRequest,
+        tool_name: str,
+    ) -> bool:
+        if grant is None:
+            return False
+        return (
+            request.trace_context.tool_confirmation_id == grant.tool_confirmation_id
+            and grant.tool_name == tool_name
+            and grant.confirmation_object_ref == assessment.confirmation_object_ref
+            and grant.input_digest == assessment.input_digest
+            and grant.target_summary == assessment.target_summary
+            and grant.risk_level is assessment.risk_level
+            and list(grant.risk_categories) == list(assessment.risk_categories)
+        )
+
+    def _build_waiting_confirmation_result(
+        self,
+        *,
+        request: ToolExecutionRequest,
+        context: ToolExecutionContext,
+        tool_name: str,
+        assessment: ToolRiskAssessment,
+        audit_ref: ToolAuditRef | None,
+    ) -> ToolResult:
+        if context.confirmation_port is None:
+            return self._error_result(
+                request=request,
+                context=context,
+                error_code=ErrorCode.INTERNAL_ERROR,
+                tool_name=tool_name,
+                safe_details={"reason": "confirmation_port_unavailable"},
+                audit_ref=audit_ref,
+            )
+
+        session_id = request.trace_context.session_id
+        run_id = request.trace_context.run_id
+        stage_run_id = request.trace_context.stage_run_id
+        if session_id is None or run_id is None or stage_run_id is None:
+            return self._error_result(
+                request=request,
+                context=context,
+                error_code=ErrorCode.INTERNAL_ERROR,
+                tool_name=tool_name,
+                safe_details={"reason": "confirmation_target_missing"},
+                audit_ref=audit_ref,
+            )
+
+        try:
+            created = context.confirmation_port.create_request(
+                session_id=session_id,
+                run_id=run_id,
+                stage_run_id=stage_run_id,
+                confirmation_object_ref=assessment.confirmation_object_ref,
+                tool_name=tool_name,
+                command_preview=assessment.command_preview,
+                target_summary=assessment.target_summary,
+                risk_level=assessment.risk_level,
+                risk_categories=list(assessment.risk_categories),
+                reason=assessment.reason,
+                expected_side_effects=list(assessment.expected_side_effects),
+                alternative_path_summary=assessment.alternative_path_summary,
+                trace_context=request.trace_context,
+            )
+        except Exception:
+            return self._error_result(
+                request=request,
+                context=context,
+                error_code=ErrorCode.INTERNAL_ERROR,
+                tool_name=tool_name,
+                safe_details={"reason": "confirmation_request_failed"},
+                audit_ref=audit_ref,
+            )
+
+        tool_confirmation_id = getattr(created, "tool_confirmation_id", None)
+        if not isinstance(tool_confirmation_id, str) or not tool_confirmation_id:
+            return self._error_result(
+                request=request,
+                context=context,
+                error_code=ErrorCode.INTERNAL_ERROR,
+                tool_name=tool_name,
+                safe_details={"reason": "confirmation_request_invalid"},
+                audit_ref=audit_ref,
+            )
+
+        return self._error_result(
+            request=request,
+            context=context,
+            error_code=ErrorCode.TOOL_CONFIRMATION_REQUIRED,
+            status=ToolResultStatus.WAITING_CONFIRMATION,
+            tool_name=tool_name,
+            safe_details=self._risk_safe_details(assessment, include_digest=True),
+            audit_ref=audit_ref,
+            tool_confirmation_ref=tool_confirmation_id,
+        )
+
+    def _risk_safe_details(
+        self,
+        assessment: ToolRiskAssessment,
+        *,
+        include_digest: bool = False,
+    ) -> JsonObject:
+        details: JsonObject = {
+            "risk_level": assessment.risk_level.value,
+            "risk_categories": [
+                category.value for category in assessment.risk_categories
+            ],
+            "target_summary": assessment.target_summary,
+        }
+        if include_digest:
+            details["input_digest"] = assessment.input_digest
+        return details
 
     def _validate_workspace_boundary(
         self,
@@ -666,6 +848,7 @@ class ToolExecutionGate:
         safe_details: JsonObject,
         status: ToolResultStatus = ToolResultStatus.FAILED,
         audit_ref: ToolAuditRef | None = None,
+        tool_confirmation_ref: str | None = None,
     ) -> ToolResult:
         try:
             error = ToolError.from_code(
@@ -689,6 +872,7 @@ class ToolExecutionGate:
             audit_ref=audit_ref,
             trace_context=context.trace_context,
             coordination_key=request.coordination_key,
+            tool_confirmation_ref=tool_confirmation_ref,
         )
 
     def _record_log(
@@ -715,6 +899,7 @@ class ToolExecutionGate:
 __all__ = [
     "ToolAuditPolicy",
     "ToolAuditRecorderPort",
+    "ToolConfirmationRequestPort",
     "ToolExecutionContext",
     "ToolExecutionGate",
     "ToolExecutionRequest",
