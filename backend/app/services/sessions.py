@@ -6,18 +6,27 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from sqlalchemy import exists, update
 from sqlalchemy.orm import Session
 
 from backend.app.api.error_codes import ErrorCode
-from backend.app.db.models.control import PipelineTemplateModel, ProjectModel, SessionModel
+from backend.app.db.models.control import (
+    PipelineTemplateModel,
+    ProjectModel,
+    SessionModel,
+    StartupPublicationModel,
+)
+from backend.app.db.models.runtime import PipelineRunModel
 from backend.app.domain.enums import SessionStatus
-from backend.app.domain.state_machine import InvalidRunStateTransition
+from backend.app.domain.publication_boundary import PUBLICATION_STATE_PENDING
+from backend.app.domain.state_machine import InvalidRunStateTransition, RunStateMachine
 from backend.app.domain.trace_context import TraceContext
 from backend.app.observability.log_writer import JsonlLogWriter
 from backend.app.observability.redaction import RedactionPolicy
 from backend.app.observability.runtime_data import RuntimeDataSettings
 from backend.app.schemas.feed import MessageFeedEntry
 from backend.app.schemas.observability import AuditActorType, AuditResult
+from backend.app.schemas.session import SessionDeleteResult
 from backend.app.services.clarifications import (
     ClarificationAnswerResult,
     ClarificationService,
@@ -41,6 +50,15 @@ TEMPLATE_NOT_FOUND_MESSAGE = "Pipeline template was not found."
 TEMPLATE_UPDATE_BLOCKED_MESSAGE = (
     "Only draft Sessions without a run can change templates."
 )
+SESSION_DELETE_BLOCKED_MESSAGE = "Session has an active run."
+SESSION_DELETE_SUCCESS_MESSAGE = "Session removed from regular product history."
+SESSION_ALREADY_REMOVED_MESSAGE = "Session was already removed from product history."
+SESSION_RUNTIME_UNAVAILABLE_MESSAGE = (
+    "Runtime session is required to verify current run state before deleting a Session."
+)
+SESSION_DELETE_BLOCKED_ERROR_CODE = "session_active_run_blocks_delete"
+SESSION_DELETE_ACTION = "session.delete"
+SESSION_DELETE_REJECTED_ACTION = "session.delete.rejected"
 
 
 class SessionServiceError(RuntimeError):
@@ -172,6 +190,17 @@ class SessionService:
             .all()
         )
 
+    def list_visible_sessions(
+        self,
+        *,
+        project_id: str,
+        trace_context: TraceContext,
+    ) -> list[SessionModel]:
+        return self.list_project_sessions(
+            project_id=project_id,
+            trace_context=trace_context,
+        )
+
     def get_session(
         self,
         session_id: str,
@@ -185,6 +214,338 @@ class SessionService:
                 SessionModel.is_visible.is_(True),
             )
             .one_or_none()
+        )
+
+    def assert_session_deletable(
+        self,
+        *,
+        session_id: str,
+        trace_context: TraceContext,
+    ) -> tuple[SessionModel, PipelineRunModel | None]:
+        model = self._load_session_any_visibility(session_id)
+        if model is None:
+            self._record_delete_rejection(
+                session_id=session_id,
+                reason=SESSION_NOT_FOUND_MESSAGE,
+                trace_context=trace_context,
+                metadata={"session_id": session_id},
+            )
+            raise SessionServiceError(
+                ErrorCode.NOT_FOUND,
+                SESSION_NOT_FOUND_MESSAGE,
+                404,
+            )
+        if not model.is_visible:
+            self._record_delete_rejection(
+                session_id=session_id,
+                reason=SESSION_ALREADY_REMOVED_MESSAGE,
+                trace_context=trace_context,
+                metadata={
+                    "session_id": model.session_id,
+                    "project_id": model.project_id,
+                },
+            )
+            raise SessionServiceError(
+                ErrorCode.VALIDATION_ERROR,
+                SESSION_ALREADY_REMOVED_MESSAGE,
+                409,
+            )
+        if model.current_run_id is None:
+            return model, None
+        if self._runtime_session is None:
+            raise SessionServiceError(
+                ErrorCode.INTERNAL_ERROR,
+                SESSION_RUNTIME_UNAVAILABLE_MESSAGE,
+                500,
+            )
+        run = self._runtime_session.get(PipelineRunModel, model.current_run_id)
+        return model, run
+
+    def delete_session(
+        self,
+        *,
+        session_id: str,
+        trace_context: TraceContext,
+    ) -> SessionDeleteResult:
+        model, run = self.assert_session_deletable(
+            session_id=session_id,
+            trace_context=trace_context,
+        )
+        pending_publication = self._pending_startup_publication(
+            session_id=model.session_id
+        )
+        if pending_publication is not None:
+            return self._blocked_delete_result(
+                model=model,
+                blocking_run_id=pending_publication.run_id,
+                trace_context=trace_context,
+            )
+        if run is not None and RunStateMachine.is_active_run_status(run.status):
+            return self._blocked_delete_result(
+                model=model,
+                run=run,
+                trace_context=trace_context,
+            )
+        return self._soft_delete_checked_session(
+            model=model,
+            trace_context=trace_context,
+            retry_on_guard_loss=True,
+        )
+
+    def _soft_delete_checked_session(
+        self,
+        *,
+        model: SessionModel,
+        trace_context: TraceContext,
+        retry_on_guard_loss: bool,
+    ) -> SessionDeleteResult:
+        original_updated_at = model.updated_at
+        timestamp = self._now()
+        statement = (
+            update(SessionModel)
+            .where(
+                SessionModel.session_id == model.session_id,
+                SessionModel.is_visible.is_(True),
+                SessionModel.status == model.status,
+                self._current_run_matches_checked_state(model.current_run_id),
+                self._no_pending_startup_publication(model.session_id),
+            )
+            .values(
+                is_visible=False,
+                visibility_removed_at=timestamp,
+                updated_at=timestamp,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        result = self._session.execute(statement)
+        if result.rowcount != 1:
+            self._session.rollback()
+            fresh_model, fresh_run = self.assert_session_deletable(
+                session_id=model.session_id,
+                trace_context=trace_context,
+            )
+            pending_publication = self._pending_startup_publication(
+                session_id=fresh_model.session_id
+            )
+            if pending_publication is not None:
+                return self._blocked_delete_result(
+                    model=fresh_model,
+                    blocking_run_id=pending_publication.run_id,
+                    trace_context=trace_context,
+                )
+            if fresh_run is not None and RunStateMachine.is_active_run_status(
+                fresh_run.status
+            ):
+                return self._blocked_delete_result(
+                    model=fresh_model,
+                    run=fresh_run,
+                    trace_context=trace_context,
+                )
+            if retry_on_guard_loss:
+                return self._soft_delete_checked_session(
+                    model=fresh_model,
+                    trace_context=trace_context,
+                    retry_on_guard_loss=False,
+                )
+            raise SessionServiceError(
+                ErrorCode.VALIDATION_ERROR,
+                "Session delete state changed before visibility update.",
+                409,
+        )
+
+        try:
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
+        self._session.refresh(model)
+
+        audit_succeeded = True
+        try:
+            audit_succeeded = self._record_delete_success_audit(
+                model=model,
+                timestamp=timestamp,
+                trace_context=trace_context,
+            )
+        except Exception:
+            self._restore_session_visibility_after_audit_failure(
+                model=model,
+                deleted_at=timestamp,
+                restored_updated_at=original_updated_at,
+            )
+            raise
+        if not audit_succeeded:
+            self._session.refresh(model)
+        return SessionDeleteResult(
+            session_id=model.session_id,
+            project_id=model.project_id,
+            visibility_removed=True,
+            blocked_by_active_run=False,
+            blocking_run_id=None,
+            error_code=None,
+            message=SESSION_DELETE_SUCCESS_MESSAGE,
+        )
+
+    def _record_delete_success_audit(
+        self,
+        *,
+        model: SessionModel,
+        timestamp: datetime,
+        trace_context: TraceContext,
+    ) -> bool:
+        metadata = {
+            "session_id": model.session_id,
+            "project_id": model.project_id,
+            "status": model.status.value,
+            "current_run_id": model.current_run_id,
+            "visibility_removed": True,
+            "visibility_removed_at": timestamp.isoformat(),
+        }
+        try:
+            self._audit_service.record_command_result(
+                actor_type=AuditActorType.USER,
+                actor_id="api-user",
+                action=SESSION_DELETE_ACTION,
+                target_type="session",
+                target_id=model.session_id,
+                result=AuditResult.SUCCEEDED,
+                reason=None,
+                metadata=metadata,
+                trace_context=trace_context,
+                created_at=timestamp,
+            )
+        except TypeError:
+            self._audit_service.record_command_result(
+                actor_type=AuditActorType.USER,
+                actor_id="api-user",
+                action=SESSION_DELETE_ACTION,
+                target_type="session",
+                target_id=model.session_id,
+                result=AuditResult.SUCCEEDED,
+                reason=None,
+                metadata=metadata,
+                trace_context=trace_context,
+            )
+        except Exception:
+            if self._delete_success_audit_exists(
+                model=model,
+                timestamp=timestamp,
+                trace_context=trace_context,
+            ):
+                return False
+            raise
+        return True
+
+    def _delete_success_audit_exists(
+        self,
+        *,
+        model: SessionModel,
+        timestamp: datetime,
+        trace_context: TraceContext,
+    ) -> bool:
+        scalars = getattr(self._audit_service, "_session", None)
+        if scalars is None:
+            return False
+        from backend.app.db.models.log import AuditLogEntryModel
+
+        return (
+            scalars.query(AuditLogEntryModel)
+            .filter(
+                AuditLogEntryModel.action == SESSION_DELETE_ACTION,
+                AuditLogEntryModel.target_type == "session",
+                AuditLogEntryModel.target_id == model.session_id,
+                AuditLogEntryModel.result == AuditResult.SUCCEEDED,
+                AuditLogEntryModel.request_id == trace_context.request_id,
+                AuditLogEntryModel.correlation_id == trace_context.correlation_id,
+                AuditLogEntryModel.created_at == timestamp,
+            )
+            .first()
+            is not None
+        )
+
+    def _restore_session_visibility_after_audit_failure(
+        self,
+        *,
+        model: SessionModel,
+        deleted_at: datetime,
+        restored_updated_at: datetime,
+    ) -> None:
+        self._session.execute(
+            update(SessionModel)
+            .where(
+                SessionModel.session_id == model.session_id,
+                SessionModel.is_visible.is_(False),
+                SessionModel.visibility_removed_at == deleted_at,
+            )
+            .values(
+                is_visible=True,
+                visibility_removed_at=None,
+                updated_at=restored_updated_at,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        self._session.commit()
+
+    def _current_run_matches_checked_state(self, current_run_id: str | None):  # noqa: ANN202
+        if current_run_id is None:
+            return SessionModel.current_run_id.is_(None)
+        return SessionModel.current_run_id == current_run_id
+
+    def _no_pending_startup_publication(self, session_id: str):  # noqa: ANN202
+        return ~exists().where(
+            StartupPublicationModel.pending_session_id == session_id,
+            StartupPublicationModel.publication_state == PUBLICATION_STATE_PENDING,
+        )
+
+    def _pending_startup_publication(
+        self,
+        *,
+        session_id: str,
+    ) -> StartupPublicationModel | None:
+        return (
+            self._session.query(StartupPublicationModel)
+            .filter(
+                StartupPublicationModel.pending_session_id == session_id,
+                StartupPublicationModel.publication_state == PUBLICATION_STATE_PENDING,
+            )
+            .one_or_none()
+        )
+
+    def _blocked_delete_result(
+        self,
+        *,
+        model: SessionModel,
+        run: PipelineRunModel | None = None,
+        blocking_run_id: str | None = None,
+        trace_context: TraceContext,
+    ) -> SessionDeleteResult:
+        blocking_run_id = run.run_id if run is not None else blocking_run_id
+        self._audit_service.record_command_result(
+            actor_type=AuditActorType.USER,
+            actor_id="api-user",
+            action=SESSION_DELETE_ACTION,
+            target_type="session",
+            target_id=model.session_id,
+            result=AuditResult.BLOCKED,
+            reason=SESSION_DELETE_BLOCKED_MESSAGE,
+            metadata={
+                "session_id": model.session_id,
+                "project_id": model.project_id,
+                "status": model.status.value,
+                "current_run_id": model.current_run_id,
+                "blocking_run_id": blocking_run_id,
+                "visibility_removed": False,
+            },
+            trace_context=trace_context,
+        )
+        return SessionDeleteResult(
+            session_id=model.session_id,
+            project_id=model.project_id,
+            visibility_removed=False,
+            blocked_by_active_run=True,
+            blocking_run_id=blocking_run_id,
+            error_code=SESSION_DELETE_BLOCKED_ERROR_CODE,
+            message=SESSION_DELETE_BLOCKED_MESSAGE,
         )
 
     def rename_session(
@@ -412,6 +773,9 @@ class SessionService:
             .one_or_none()
         )
 
+    def _load_session_any_visibility(self, session_id: str) -> SessionModel | None:
+        return self._session.get(SessionModel, session_id)
+
     def _record_success(
         self,
         *,
@@ -428,6 +792,25 @@ class SessionService:
             target_id=model.session_id,
             result=AuditResult.SUCCEEDED,
             reason=None,
+            metadata=metadata,
+            trace_context=trace_context,
+        )
+
+    def _record_delete_rejection(
+        self,
+        *,
+        session_id: str,
+        reason: str,
+        trace_context: TraceContext,
+        metadata: dict[str, Any],
+    ) -> None:
+        self._audit_service.record_rejected_command(
+            actor_type=AuditActorType.USER,
+            actor_id="api-user",
+            action=SESSION_DELETE_REJECTED_ACTION,
+            target_type="session",
+            target_id=session_id,
+            reason=reason,
             metadata=metadata,
             trace_context=trace_context,
         )
@@ -533,6 +916,11 @@ __all__ = [
     "DEFAULT_SESSION_DISPLAY_NAME",
     "PROJECT_NOT_FOUND_MESSAGE",
     "SESSION_NOT_FOUND_MESSAGE",
+    "SESSION_ALREADY_REMOVED_MESSAGE",
+    "SESSION_DELETE_BLOCKED_ERROR_CODE",
+    "SESSION_DELETE_BLOCKED_MESSAGE",
+    "SESSION_DELETE_SUCCESS_MESSAGE",
+    "SESSION_RUNTIME_UNAVAILABLE_MESSAGE",
     "TEMPLATE_NOT_FOUND_MESSAGE",
     "TEMPLATE_UPDATE_BLOCKED_MESSAGE",
     "SessionService",

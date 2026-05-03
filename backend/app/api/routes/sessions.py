@@ -31,6 +31,7 @@ from backend.app.observability.log_writer import JsonlLogWriter
 from backend.app.observability.runtime_data import RuntimeDataSettings
 from backend.app.schemas.run import RunCommandResponse, RunSummaryProjection
 from backend.app.schemas.session import (
+    SessionDeleteResult,
     SessionMessageAppendRequest,
     SessionMessageAppendResponse,
     SessionRead,
@@ -489,6 +490,29 @@ def get_session(
             404,
         )
     return _session_read(session)
+
+
+@router.delete(
+    "/sessions/{sessionId}",
+    response_model=SessionDeleteResult,
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+def delete_session(
+    sessionId: str,
+    service: SessionService = Depends(get_session_service),
+) -> SessionDeleteResult:
+    try:
+        return service.delete_session(
+            session_id=sessionId,
+            trace_context=get_trace_context(),
+        )
+    except SessionServiceError as exc:
+        _raise_api_error(exc)
 
 
 @router.patch(
