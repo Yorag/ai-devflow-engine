@@ -575,6 +575,10 @@ def test_deny_updates_request_result_projection_and_resumes_runtime(tmp_path: Pa
 
     assert result.tool_confirmation.status is ToolConfirmationStatus.DENIED
     assert result.tool_confirmation.decision is ToolConfirmationStatus.DENIED
+    assert result.tool_confirmation.deny_followup_action == "continue_current_stage"
+    assert result.tool_confirmation.deny_followup_summary == (
+        "Code Generation will continue with a low-risk fallback."
+    )
     assert runtime_port.calls[-1][1]["resume_payload"].values == {
         "decision": "denied",
         "tool_confirmation_id": confirmation_id,

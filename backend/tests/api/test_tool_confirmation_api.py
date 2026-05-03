@@ -289,6 +289,10 @@ def test_post_tool_confirmation_deny_returns_tool_confirmation_projection(
     assert body["tool_confirmation"]["tool_confirmation_id"] == confirmation_id
     assert body["tool_confirmation"]["status"] == "denied"
     assert body["tool_confirmation"]["decision"] == "denied"
+    assert body["tool_confirmation"]["deny_followup_action"] == "continue_current_stage"
+    assert body["tool_confirmation"]["deny_followup_summary"] == (
+        "Code Generation will continue with a low-risk fallback."
+    )
     assert app.state.h41_runtime_port.calls[-1][1]["resume_payload"].values == {
         "decision": "denied",
         "tool_confirmation_id": confirmation_id,

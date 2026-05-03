@@ -4,9 +4,11 @@ import json
 from datetime import timedelta
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.db.base import DatabaseRole
+from backend.app.db.models.runtime import ToolConfirmationRequestModel
 from backend.app.domain.enums import SseEventType
 from backend.app.schemas import common
 from backend.app.schemas.feed import (
@@ -17,6 +19,10 @@ from backend.app.schemas.feed import (
 from backend.app.services.events import DomainEvent, DomainEventType, EventStore
 from backend.tests.api.test_query_api import build_query_api_app
 from backend.tests.projections.test_workspace_projection import NOW, _trace
+from backend.tests.projections.test_workspace_projection import (
+    _append_denied_tool_confirmation_event_without_followup,
+    _mark_tool_confirmation_denied_with_followup,
+)
 
 
 def test_sse_event_encoder_serializes_tool_confirmation_result_with_correlation_id() -> None:
@@ -106,6 +112,80 @@ def test_session_event_stream_replays_after_last_event_id_with_provider_and_deni
     assert tool_result["disabled_reason"] == "Denied by user."
 
 
+def test_session_event_stream_hydrates_tool_confirmation_deny_followup_from_runtime_model(
+    tmp_path: Path,
+) -> None:
+    app = build_query_api_app(tmp_path)
+    _mark_tool_confirmation_denied_with_followup(app.state.database_manager)
+    _append_denied_tool_confirmation_event_without_followup(app.state.database_manager)
+
+    with TestClient(app) as client:
+        with client.stream(
+            "GET",
+            "/api/sessions/session-1/events/stream",
+            headers={
+                "Last-Event-ID": "3",
+                "X-Request-ID": "req-event-stream-deny-followup",
+                "X-Correlation-ID": "corr-event-stream-deny-followup",
+            },
+            params={"after": 0, "limit": 1},
+        ) as response:
+            assert response.status_code == 200
+            frames = _read_sse_frames(response)
+
+    assert [frame["event"] for frame in frames] == ["tool_confirmation_result"]
+    tool_result = frames[0]["data"]["payload"]["tool_confirmation"]
+    assert tool_result["decision"] == "denied"
+    assert tool_result["deny_followup_action"] == "continue_current_stage"
+    assert tool_result["deny_followup_summary"] == (
+        "Code Generation will continue with a low-risk fallback."
+    )
+
+
+def test_session_event_stream_rejects_invalid_hydrated_tool_confirmation_contract(
+    tmp_path: Path,
+) -> None:
+    from pydantic import ValidationError
+
+    from backend.app.api.routes.events import _hydrate_tool_confirmation_event
+
+    app = build_query_api_app(tmp_path)
+    _mark_tool_confirmation_denied_with_followup(app.state.database_manager)
+    _append_denied_tool_confirmation_event_without_followup(app.state.database_manager)
+    with app.state.database_manager.session(DatabaseRole.RUNTIME) as runtime_session:
+        request = runtime_session.get(
+            ToolConfirmationRequestModel,
+            "tool-confirmation-1",
+        )
+        assert request is not None
+        request.deny_followup_action = "retry_current_stage"
+        runtime_session.add(request)
+        runtime_session.commit()
+        event = DomainEvent(
+            event_id="event-tool-denied",
+            session_id="session-1",
+            run_id="run-active",
+            event_type=SseEventType.TOOL_CONFIRMATION_RESULT,
+            occurred_at=NOW + timedelta(minutes=8),
+            payload={
+                "tool_confirmation": {
+                    **_denied_tool_confirmation_payload(
+                        entry_id="entry-tool-denied"
+                    ),
+                    "deny_followup_action": None,
+                    "deny_followup_summary": None,
+                }
+            },
+            stage_run_id="stage-active",
+            sequence_index=5,
+            correlation_id="correlation-1",
+            causation_event_id="event-tool-requested",
+        )
+
+        with pytest.raises(ValidationError):
+            _hydrate_tool_confirmation_event(event, runtime_session)
+
+
 def test_session_event_stream_openapi_documents_route_parameters_and_error(
     tmp_path: Path,
 ) -> None:
@@ -144,6 +224,7 @@ def test_session_event_stream_openapi_documents_route_parameters_and_error(
 
 
 def _append_reconnect_replay_events(app) -> None:
+    _mark_tool_confirmation_denied_with_followup(app.state.database_manager)
     with app.state.database_manager.session(DatabaseRole.EVENT) as session:
         store = EventStore(
             session,
@@ -231,6 +312,10 @@ def _denied_tool_confirmation_payload(*, entry_id: str) -> dict[str, object]:
         requested_at=NOW + timedelta(minutes=7),
         responded_at=NOW + timedelta(minutes=8),
         decision=common.ToolConfirmationStatus.DENIED,
+        deny_followup_action="continue_current_stage",
+        deny_followup_summary=(
+            "Code Generation will continue with a low-risk fallback."
+        ),
         disabled_reason="Denied by user.",
     ).model_dump(mode="json")
 

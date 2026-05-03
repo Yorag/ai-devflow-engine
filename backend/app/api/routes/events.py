@@ -10,8 +10,10 @@ from sqlalchemy.orm import Session
 
 from backend.app.db.base import DatabaseRole
 from backend.app.api.errors import ErrorResponse
+from backend.app.db.models.runtime import ToolConfirmationRequestModel
 from backend.app.db.session import DatabaseManager
-from backend.app.services.events import EventStore, SseEventEncoder
+from backend.app.schemas.feed import ToolConfirmationFeedEntry
+from backend.app.services.events import DomainEvent, EventStore, SseEventEncoder
 from backend.app.services.publication_boundary import PublicationBoundaryService
 
 
@@ -89,7 +91,9 @@ def stream_session_events(
                         if event.run_id is not None and event.run_id in hidden_run_ids:
                             continue
                         last_keepalive_at = monotonic()
-                        yield encoder.encode(event)
+                        yield encoder.encode(
+                            _hydrate_tool_confirmation_event(event, runtime_session)
+                        )
                     if close_after_batch:
                         break
                     continue
@@ -122,3 +126,56 @@ def _resolve_after_cursor(request: Request, after: int) -> int:
     except ValueError:
         replay_cursor = 0
     return max(after, replay_cursor, 0)
+
+
+def _hydrate_tool_confirmation_event(
+    event: DomainEvent,
+    runtime_session: Session,
+) -> DomainEvent:
+    tool_confirmation = event.payload.get("tool_confirmation")
+    if not isinstance(tool_confirmation, dict):
+        return event
+    hydrated = _hydrate_tool_confirmation_payload(tool_confirmation, runtime_session)
+    if hydrated == tool_confirmation:
+        return event
+    return DomainEvent(
+        event_id=event.event_id,
+        session_id=event.session_id,
+        run_id=event.run_id,
+        event_type=event.event_type,
+        occurred_at=event.occurred_at,
+        payload={**event.payload, "tool_confirmation": hydrated},
+        stage_run_id=event.stage_run_id,
+        sequence_index=event.sequence_index,
+        correlation_id=event.correlation_id,
+        causation_event_id=event.causation_event_id,
+    )
+
+
+def _hydrate_tool_confirmation_payload(
+    value: dict[str, object],
+    runtime_session: Session,
+) -> dict[str, object]:
+    tool_confirmation_id = value.get("tool_confirmation_id")
+    if not isinstance(tool_confirmation_id, str):
+        return value
+    if value.get("decision") != "denied":
+        hydrated = {
+            **value,
+            "deny_followup_action": None,
+            "deny_followup_summary": None,
+        }
+        return ToolConfirmationFeedEntry.model_validate(hydrated).model_dump(
+            mode="json"
+        )
+    request = runtime_session.get(ToolConfirmationRequestModel, tool_confirmation_id)
+    hydrated = {
+        **value,
+        "deny_followup_action": (
+            request.deny_followup_action if request is not None else None
+        ),
+        "deny_followup_summary": (
+            request.deny_followup_summary if request is not None else None
+        ),
+    }
+    return ToolConfirmationFeedEntry.model_validate(hydrated).model_dump(mode="json")

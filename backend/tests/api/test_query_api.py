@@ -29,6 +29,8 @@ from backend.app.main import create_app
 from backend.app.schemas.observability import LogCategory, LogLevel, RedactionStatus
 from backend.tests.projections.test_workspace_projection import (
     _default_internal_model_bindings,
+    _append_denied_tool_confirmation_event_without_followup,
+    _mark_tool_confirmation_denied_with_followup,
     _seed_workspace,
 )
 
@@ -394,6 +396,60 @@ def test_get_run_timeline_returns_projection_and_unified_not_found(
         "request_id": "req-timeline-missing",
         "correlation_id": "corr-timeline-missing",
     }
+
+
+def test_query_read_surfaces_hydrate_tool_confirmation_deny_followup(
+    tmp_path: Path,
+) -> None:
+    app = build_query_api_app(tmp_path)
+    _mark_tool_confirmation_denied_with_followup(app.state.database_manager)
+    _append_denied_tool_confirmation_event_without_followup(app.state.database_manager)
+
+    with TestClient(app) as client:
+        workspace_response = client.get(
+            "/api/sessions/session-1/workspace",
+            headers={
+                "X-Request-ID": "req-workspace-deny-followup",
+                "X-Correlation-ID": "corr-workspace-deny-followup",
+            },
+        )
+        timeline_response = client.get(
+            "/api/runs/run-active/timeline",
+            headers={
+                "X-Request-ID": "req-timeline-deny-followup",
+                "X-Correlation-ID": "corr-timeline-deny-followup",
+            },
+        )
+
+    assert workspace_response.status_code == 200
+    workspace = workspace_response.json()
+    workspace_tool_confirmation = next(
+        entry
+        for entry in workspace["narrative_feed"]
+        if entry["type"] == "tool_confirmation"
+    )
+    assert workspace_tool_confirmation["decision"] == "denied"
+    assert (
+        workspace_tool_confirmation["deny_followup_action"]
+        == "continue_current_stage"
+    )
+    assert workspace_tool_confirmation["deny_followup_summary"] == (
+        "Code Generation will continue with a low-risk fallback."
+    )
+
+    assert timeline_response.status_code == 200
+    timeline = timeline_response.json()
+    timeline_tool_confirmation = next(
+        entry for entry in timeline["entries"] if entry["type"] == "tool_confirmation"
+    )
+    assert timeline_tool_confirmation["decision"] == "denied"
+    assert (
+        timeline_tool_confirmation["deny_followup_action"]
+        == "continue_current_stage"
+    )
+    assert timeline_tool_confirmation["deny_followup_summary"] == (
+        "Code Generation will continue with a low-risk fallback."
+    )
 
 
 def test_get_run_logs_returns_paginated_filtered_entries_and_unified_not_found(

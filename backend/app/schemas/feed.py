@@ -9,6 +9,11 @@ from backend.app.schemas import common
 
 
 JsonObject: TypeAlias = dict[str, Any]
+ToolConfirmationDenyFollowupAction: TypeAlias = Literal[
+    "continue_current_stage",
+    "run_failed",
+    "awaiting_run_control",
+]
 
 
 class _StrictBaseModel(BaseModel):
@@ -147,12 +152,30 @@ class ToolConfirmationFeedEntry(FeedEntry):
         ]
         | None
     ) = None
+    deny_followup_action: ToolConfirmationDenyFollowupAction | None = None
+    deny_followup_summary: str | None = Field(default=None, min_length=1)
     disabled_reason: str | None = None
 
     @model_validator(mode="after")
     def require_high_risk_tool_confirmation(self) -> "ToolConfirmationFeedEntry":
         if self.risk_level is not common.ToolRiskLevel.HIGH_RISK:
             raise ValueError("tool_confirmation risk_level must be high_risk")
+        if self.decision is common.ToolConfirmationStatus.DENIED:
+            if self.deny_followup_action is None:
+                raise ValueError(
+                    "tool_confirmation denied decision requires deny_followup_action"
+                )
+            if self.deny_followup_summary is None:
+                raise ValueError(
+                    "tool_confirmation denied decision requires deny_followup_summary"
+                )
+        elif (
+            self.deny_followup_action is not None
+            or self.deny_followup_summary is not None
+        ):
+            raise ValueError(
+                "tool_confirmation deny follow-up fields require denied decision"
+            )
         return self
 
 
