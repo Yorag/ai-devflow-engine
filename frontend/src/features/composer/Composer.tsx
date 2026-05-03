@@ -9,12 +9,8 @@ import type {
   SessionRead,
   StageType,
 } from "../../api/types";
-import {
-  canSubmitComposerMessage,
-  getComposerButtonLabel,
-  getComposerHelperText,
-  resolveComposerMode,
-} from "./composer-mode";
+import { getComposerHelperText } from "./composer-mode";
+import { resolveComposerState } from "./composer-state";
 
 type ComposerProps = {
   session: SessionRead | null;
@@ -32,8 +28,8 @@ export function Composer({
   const queryClient = useQueryClient();
   const [value, setValue] = useState("");
   const [isSubmitting, setSubmitting] = useState(false);
-  const resolved = resolveComposerMode(composerState, currentStageType);
-  const canSend = Boolean(session) && canSubmitComposerMessage(composerState, currentStageType);
+  const resolved = resolveComposerState(composerState, currentStageType);
+  const canSend = Boolean(session) && resolved.canSend;
 
   useEffect(() => {
     setValue("");
@@ -75,7 +71,7 @@ export function Composer({
             aria-label="Composer input"
             value={value}
             onChange={(event) => setValue(event.target.value)}
-            disabled={!canSend || isSubmitting}
+            disabled={!resolved.inputEnabled || isSubmitting}
             placeholder={
               resolved.mode === "waiting_clarification" ? "补充澄清信息" : "输入需求"
             }
@@ -93,15 +89,15 @@ export function Composer({
             : "尚未绑定 run"}
         </span>
         <button
-          type="submit"
+          type={resolved.lifecycle === "send" ? "submit" : "button"}
           className={`workspace-button${
-            canSend ? "" : " workspace-button--secondary"
+            resolved.lifecycle === "send" ? "" : " workspace-button--secondary"
           }`}
-          disabled={!canSend || !value.trim() || isSubmitting}
+          disabled={
+            resolved.lifecycle !== "send" || !value.trim() || isSubmitting
+          }
         >
-          {isSubmitting
-            ? "发送中"
-            : getComposerButtonLabel(composerState, currentStageType)}
+          {isSubmitting ? "发送中" : resolved.actionLabel}
         </button>
       </div>
     </form>

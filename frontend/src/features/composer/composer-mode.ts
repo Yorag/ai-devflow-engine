@@ -1,4 +1,9 @@
 import type { ComposerStateProjection, StageType } from "../../api/types";
+import {
+  canSendMessage,
+  resolveComposerActionLabel,
+  resolveComposerState,
+} from "./composer-state";
 
 export type ResolvedComposerMode =
   | {
@@ -18,90 +23,75 @@ export function resolveComposerMode(
   composerState: ComposerStateProjection | null,
   currentStageType: StageType | null,
 ): ResolvedComposerMode {
-  if (!composerState) {
-    return {
-      mode: "readonly",
-      canSend: false,
-      messageType: null,
-      buttonLabel: "不可用",
-    };
+  const resolved = resolveComposerState(composerState, currentStageType);
+  switch (resolved.mode) {
+    case "draft":
+      return {
+        mode: "draft",
+        canSend: true,
+        messageType: "new_requirement",
+        buttonLabel: "发送",
+      };
+    case "waiting_clarification":
+      return {
+        mode: "waiting_clarification",
+        canSend: true,
+        messageType: "clarification_reply",
+        buttonLabel: "发送",
+      };
+    case "running_requirement_analysis":
+      return {
+        mode: "running_requirement_analysis",
+        canSend: false,
+        messageType: null,
+        buttonLabel: "暂停",
+      };
+    case "paused":
+      return {
+        mode: "paused",
+        canSend: false,
+        messageType: null,
+        buttonLabel: "恢复",
+      };
+    case "readonly":
+      return {
+        mode: "readonly",
+        canSend: false,
+        messageType: null,
+        buttonLabel: "不可用",
+      };
+    case "control_only":
+    default:
+      return {
+        mode: "control_only",
+        canSend: false,
+        messageType: null,
+        buttonLabel: "暂停",
+      };
   }
-
-  if (composerState.mode === "draft") {
-    return {
-      mode: "draft",
-      canSend: true,
-      messageType: "new_requirement",
-      buttonLabel: "发送",
-    };
-  }
-
-  if (composerState.mode === "waiting_clarification") {
-    return {
-      mode: "waiting_clarification",
-      canSend: true,
-      messageType: "clarification_reply",
-      buttonLabel: "发送",
-    };
-  }
-
-  if (
-    composerState.mode === "running" &&
-    currentStageType === "requirement_analysis"
-  ) {
-    return {
-      mode: "running_requirement_analysis",
-      canSend: false,
-      messageType: null,
-      buttonLabel: "暂停",
-    };
-  }
-
-  if (composerState.mode === "paused") {
-    return {
-      mode: "paused",
-      canSend: false,
-      messageType: null,
-      buttonLabel: "恢复",
-    };
-  }
-
-  if (composerState.mode === "readonly") {
-    return {
-      mode: "readonly",
-      canSend: false,
-      messageType: null,
-      buttonLabel: "不可用",
-    };
-  }
-
-  return {
-    mode: "control_only",
-    canSend: false,
-    messageType: null,
-    buttonLabel: "暂停",
-  };
 }
 
 export function canSubmitComposerMessage(
   composerState: ComposerStateProjection | null,
   currentStageType: StageType | null,
 ): boolean {
-  return resolveComposerMode(composerState, currentStageType).canSend;
+  return canSendMessage(composerState, currentStageType);
 }
 
 export function getComposerButtonLabel(
   composerState: ComposerStateProjection | null,
   currentStageType: StageType | null,
 ): string {
-  return resolveComposerMode(composerState, currentStageType).buttonLabel;
+  return resolveComposerActionLabel(
+    resolveComposerState(composerState, currentStageType).lifecycle,
+  );
 }
 
 export function getComposerHelperText(
   composerState: ComposerStateProjection | null,
   currentStageType: StageType | null,
 ): string {
-  const resolved = resolveComposerMode(composerState, currentStageType);
+  const resolved = resolveComposerState(composerState, currentStageType);
 
   switch (resolved.mode) {
     case "draft":
