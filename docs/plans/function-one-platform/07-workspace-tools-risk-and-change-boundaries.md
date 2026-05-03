@@ -253,7 +253,7 @@
 ## W5.2 文件工具 read_file/write_file/edit_file/glob
 
 **计划周期**：Week 7-8
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：基于 W5.0 `ToolProtocol` 实现核心文件工具，使 `deterministic test runtime`、LangGraph runtime 与 Provider adapter 可以在隔离工作区中读取文本代码文件、创建或覆盖文件、精确编辑文件并按模式匹配路径，且不需要临时工具接口。
 **实施计划**：`docs/plans/implementation/w5.2-workspace-file-tools.md`
 
