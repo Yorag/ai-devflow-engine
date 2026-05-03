@@ -1,5 +1,4 @@
 import type {
-  ApprovalRequestFeedEntry,
   ApprovalResultFeedEntry,
   ControlItemFeedEntry,
   DeliveryResultFeedEntry,
@@ -9,11 +8,18 @@ import type {
   ToolConfirmationFeedEntry,
   TopLevelFeedEntry,
 } from "../../api/types";
+import type { ApiRequestOptions } from "../../api/client";
+import { ApprovalBlock } from "../approvals/ApprovalBlock";
 import { StageNode } from "./StageNode";
 
 export type FeedEntryRendererProps = {
   entry: TopLevelFeedEntry;
+  currentRunId?: string | null;
+  sessionId?: string;
+  projectId?: string;
+  request?: ApiRequestOptions;
   onOpenInspectorTarget?: (entry: TopLevelFeedEntry) => void;
+  onOpenSettings?: () => void;
 };
 
 const stageLabels: Record<StageType, string> = {
@@ -26,7 +32,12 @@ const stageLabels: Record<StageType, string> = {
 };
 
 export type FeedEntryRendererOptions = {
+  currentRunId?: string | null;
+  sessionId?: string;
+  projectId?: string;
+  request?: ApiRequestOptions;
   onOpenInspectorTarget?: (entry: TopLevelFeedEntry) => void;
+  onOpenSettings?: () => void;
 };
 
 export function renderFeedEntryByType(
@@ -36,14 +47,24 @@ export function renderFeedEntryByType(
   return (
     <FeedEntryRenderer
       entry={entry}
+      currentRunId={options.currentRunId}
+      sessionId={options.sessionId}
+      projectId={options.projectId}
+      request={options.request}
       onOpenInspectorTarget={options.onOpenInspectorTarget}
+      onOpenSettings={options.onOpenSettings}
     />
   );
 }
 
 export function FeedEntryRenderer({
   entry,
+  currentRunId,
+  sessionId,
+  projectId,
+  request,
   onOpenInspectorTarget,
+  onOpenSettings,
 }: FeedEntryRendererProps): JSX.Element {
   switch (entry.type) {
     case "user_message":
@@ -56,7 +77,16 @@ export function FeedEntryRenderer({
         />
       );
     case "approval_request":
-      return <ApprovalRequestEntry entry={entry} />;
+      return (
+        <ApprovalBlock
+          entry={entry}
+          sessionId={sessionId}
+          projectId={projectId}
+          currentRunId={currentRunId}
+          request={request}
+          onOpenSettings={onOpenSettings}
+        />
+      );
     case "tool_confirmation":
       return (
         <ToolConfirmationEntry
@@ -93,52 +123,6 @@ function UserMessageEntry({ entry }: { entry: MessageFeedEntry }): JSX.Element {
     >
       <EntryHeader label={formatAuthor(entry.author)} timestamp={entry.occurred_at} />
       <p className="feed-entry__body">{entry.content}</p>
-    </article>
-  );
-}
-
-function ApprovalRequestEntry({
-  entry,
-}: {
-  entry: ApprovalRequestFeedEntry;
-}): JSX.Element {
-  return (
-    <article
-      className="feed-entry feed-entry--approval-request"
-      aria-label="Approval request feed entry"
-    >
-      <EntryHeader
-        label={formatApprovalType(entry.approval_type)}
-        timestamp={entry.requested_at}
-        badge={formatLabel(entry.status)}
-      />
-      <h2>{entry.title}</h2>
-      <p className="feed-entry__body">{entry.approval_object_excerpt}</p>
-      {entry.risk_excerpt ? (
-        <p className="feed-entry__supporting">{entry.risk_excerpt}</p>
-      ) : null}
-      <div className="feed-entry__meta-grid" aria-label="Approval metadata">
-        {entry.delivery_readiness_status ? (
-          <Metadata
-            label="Delivery readiness"
-            value={formatLabel(entry.delivery_readiness_status)}
-          />
-        ) : null}
-        {entry.delivery_readiness_message ? (
-          <Metadata label="Readiness note" value={entry.delivery_readiness_message} />
-        ) : null}
-        {entry.disabled_reason ? (
-          <Metadata label="Disabled" value={entry.disabled_reason} />
-        ) : null}
-      </div>
-      <div className="feed-entry__actions" aria-label="Approval actions">
-        <button type="button" disabled={!entry.is_actionable}>
-          Approve
-        </button>
-        <button type="button" disabled={!entry.is_actionable}>
-          Reject
-        </button>
-      </div>
     </article>
   );
 }
@@ -397,7 +381,7 @@ function formatAuthor(author: MessageFeedEntry["author"]): string {
   return author === "user" ? "User" : formatLabel(author);
 }
 
-function formatApprovalType(value: ApprovalRequestFeedEntry["approval_type"]): string {
+function formatApprovalType(value: ApprovalResultFeedEntry["approval_type"]): string {
   return value === "solution_design_approval"
     ? "Solution design approval"
     : "Code review approval";

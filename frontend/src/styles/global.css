@@ -865,6 +865,83 @@ a {
   background: oklch(97% 0.018 26);
 }
 
+.approval-block {
+  gap: 14px;
+}
+
+.approval-block__readiness {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid oklch(84% 0.035 26);
+  border-radius: 8px;
+  background: oklch(97.5% 0.015 26);
+  color: oklch(40% 0.08 26);
+}
+
+.approval-block__readiness p {
+  margin: 0;
+  color: inherit;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.approval-block__readiness .workspace-button {
+  justify-self: start;
+}
+
+.approval-block__reject-form {
+  display: grid;
+  gap: 10px;
+}
+
+.approval-block__field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: oklch(33% 0.02 248);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.approval-block__field textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 112px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: oklch(27% 0.022 248);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.approval-block__field textarea:disabled {
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.approval-block__reject-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.approval-block__reject-actions .workspace-button {
+  width: auto;
+}
+
+.approval-block__error {
+  margin: 0;
+  color: oklch(40% 0.08 26);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
 .stage-node {
   gap: 12px;
 }
@@ -2292,6 +2369,11 @@ a {
 
   .feed-entry__actions button {
     flex: 1 1 160px;
+  }
+
+  .approval-block__reject-actions .workspace-button,
+  .approval-block__readiness .workspace-button {
+    width: 100%;
   }
 }
 

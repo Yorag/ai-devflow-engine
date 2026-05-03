@@ -1,7 +1,9 @@
+import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { renderWithAppProviders } from "../../../app/test-utils";
+import { createQueryClient } from "../../../app/query-client";
 import type { TopLevelFeedEntry } from "../../../api/types";
 import { mockFeedEntriesByType, mockSessionWorkspaces } from "../../../mocks/fixtures";
 import { mockApiRequestOptions } from "../../../mocks/handlers";
@@ -15,7 +17,9 @@ afterEach(() => {
 
 describe("FeedEntryRenderer", () => {
   it("renders each supported top-level entry with distinct semantics", () => {
-    render(<NarrativeFeed entries={Object.values(mockFeedEntriesByType)} />);
+    renderWithAppProviders(
+      <NarrativeFeed entries={Object.values(mockFeedEntriesByType)} />,
+    );
 
     expect(
       screen.getByRole("article", { name: "User message feed entry" }),
@@ -82,7 +86,7 @@ describe("FeedEntryRenderer", () => {
       mockFeedEntriesByType.delivery_result,
     ];
 
-    render(<NarrativeFeed entries={entries} />);
+    renderWithAppProviders(<NarrativeFeed entries={entries} />);
 
     const labels = screen
       .getAllByRole("listitem")
@@ -148,6 +152,37 @@ describe("FeedEntryRenderer", () => {
       screen.getByRole("region", { name: "Narrative Feed empty state" }),
     ).toBeTruthy();
     expect(screen.getByText("No run entries yet")).toBeTruthy();
+  });
+
+  it("renders approval actions for the current run but not for a historical run", () => {
+    const currentApproval = {
+      ...mockFeedEntriesByType.approval_request,
+      run_id: "run-waiting-approval",
+    };
+
+    const { rerender } = renderWithAppProviders(
+      renderFeedEntryByType(currentApproval, {
+        currentRunId: "run-waiting-approval",
+        sessionId: "session-waiting-approval",
+        projectId: "project-default",
+      }),
+    );
+
+    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeTruthy();
+
+    rerender(
+      <QueryClientProvider client={createQueryClient()}>
+        {renderFeedEntryByType(currentApproval, {
+          currentRunId: "run-latest-other",
+          sessionId: "session-waiting-approval",
+          projectId: "project-default",
+        })}
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
   });
 });
 

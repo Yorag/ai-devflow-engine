@@ -37,6 +37,12 @@ export function SettingsModal({
   onCloseRef.current = onClose;
 
   useEffect(() => {
+    if (isOpen) {
+      setActiveTab("general");
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
     if (!isOpen) {
       return;
     }
