@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from backend.app.api.error_codes import ErrorCode
 from backend.app.db.models.control import ProjectModel, SessionModel
 from backend.app.db.models.runtime import PipelineRunModel, StageRunModel
+from backend.app.domain.enums import RunStatus
 from backend.app.schemas.feed import ApprovalResultFeedEntry, TopLevelFeedEntry
 from backend.app.schemas.run import RunTimelineProjection
 from backend.app.services.events import DomainEvent, EventStore
@@ -44,6 +45,7 @@ class TimelineProjectionService:
 
     def get_run_timeline(self, run_id: str) -> RunTimelineProjection:
         run = self._get_visible_run(run_id)
+        session = self._get_visible_session_for_run(run)
         return RunTimelineProjection(
             run_id=run.run_id,
             session_id=run.session_id,
@@ -52,7 +54,10 @@ class TimelineProjectionService:
             status=run.status,
             started_at=self._projection_datetime(run.started_at),
             ended_at=self._projection_datetime(run.ended_at),
-            current_stage_type=self._stage_type_for_run(run),
+            current_stage_type=self._stage_type_for_run_summary(
+                run,
+                session=session,
+            ),
             entries=self.build_timeline_entries(run.run_id, run.session_id),
         )
 
@@ -75,15 +80,19 @@ class TimelineProjectionService:
         run = self._runtime_session.get(PipelineRunModel, run_id)
         if run is None:
             self._raise_not_found()
-        session = self._control_session.get(SessionModel, run.session_id)
-        if session is None or not session.is_visible:
-            self._raise_not_found()
+        session = self._get_visible_session_for_run(run)
         project = self._control_session.get(ProjectModel, run.project_id)
         if project is None or not project.is_visible:
             self._raise_not_found()
         if session.project_id != project.project_id:
             self._raise_not_found()
         return run
+
+    def _get_visible_session_for_run(self, run: PipelineRunModel) -> SessionModel:
+        session = self._control_session.get(SessionModel, run.session_id)
+        if session is None or not session.is_visible:
+            self._raise_not_found()
+        return session
 
     def _entry_from_event(self, event: DomainEvent) -> TopLevelFeedEntry | None:
         for key in (
@@ -161,6 +170,28 @@ class TimelineProjectionService:
         if stage.run_id != run.run_id:
             return None
         return stage.stage_type
+
+    def _stage_type_for_run_summary(
+        self,
+        run: PipelineRunModel,
+        *,
+        session: SessionModel,
+    ):
+        stage_type = self._stage_type_for_run(run)
+        if stage_type is not None:
+            return stage_type
+        terminal = run.status in {
+            RunStatus.COMPLETED,
+            RunStatus.FAILED,
+            RunStatus.TERMINATED,
+        }
+        if (
+            run.run_id == session.current_run_id
+            and run.current_stage_run_id is None
+            and not terminal
+        ):
+            return session.latest_stage_type
+        return None
 
     @staticmethod
     def _projection_datetime(value: datetime | None) -> datetime | None:

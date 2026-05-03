@@ -359,6 +359,44 @@ def test_timeline_projection_does_not_leak_current_stage_from_another_run(
     assert timeline.current_stage_type is None
 
 
+def test_timeline_projection_uses_session_latest_stage_for_active_run_without_stage_row(
+    tmp_path,
+) -> None:
+    from backend.app.db.models.runtime import PipelineRunModel
+    from backend.app.domain.enums import RunStatus, SessionStatus, StageType
+    from backend.app.services.projections.timeline import TimelineProjectionService
+
+    manager = _manager(tmp_path)
+    _seed_workspace(manager)
+    with manager.session(DatabaseRole.CONTROL) as session:
+        control_session = session.get(SessionModel, "session-1")
+        assert control_session is not None
+        control_session.status = SessionStatus.RUNNING
+        control_session.latest_stage_type = StageType.REQUIREMENT_ANALYSIS
+        session.add(control_session)
+        session.commit()
+    with manager.session(DatabaseRole.RUNTIME) as session:
+        run = session.get(PipelineRunModel, "run-active")
+        assert run is not None
+        run.status = RunStatus.RUNNING
+        run.current_stage_run_id = None
+        session.add(run)
+        session.commit()
+
+    with (
+        manager.session(DatabaseRole.CONTROL) as control_session,
+        manager.session(DatabaseRole.RUNTIME) as runtime_session,
+        manager.session(DatabaseRole.EVENT) as event_session,
+    ):
+        timeline = TimelineProjectionService(
+            control_session,
+            runtime_session,
+            event_session,
+        ).get_run_timeline("run-active")
+
+    assert timeline.current_stage_type is StageType.REQUIREMENT_ANALYSIS
+
+
 def test_timeline_projection_skips_off_target_malformed_payload_before_parsing(
     tmp_path,
 ) -> None:

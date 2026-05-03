@@ -649,6 +649,86 @@ def test_workspace_projection_replays_approval_result_into_matching_request(
     ] == ["approval-1"]
 
 
+def test_workspace_projection_uses_session_latest_stage_for_active_run_without_stage_row(
+    tmp_path,
+) -> None:
+    from backend.app.services.projections.workspace import WorkspaceProjectionService
+
+    manager = _manager(tmp_path)
+    _seed_workspace(manager)
+    with manager.session(DatabaseRole.CONTROL) as session:
+        control_session = session.get(SessionModel, "session-1")
+        assert control_session is not None
+        control_session.status = SessionStatus.RUNNING
+        control_session.latest_stage_type = StageType.REQUIREMENT_ANALYSIS
+        session.add(control_session)
+        session.commit()
+    with manager.session(DatabaseRole.RUNTIME) as session:
+        run = session.get(PipelineRunModel, "run-active")
+        assert run is not None
+        run.status = RunStatus.RUNNING
+        run.current_stage_run_id = None
+        session.add(run)
+        session.commit()
+
+    with (
+        manager.session(DatabaseRole.CONTROL) as control_session,
+        manager.session(DatabaseRole.RUNTIME) as runtime_session,
+        manager.session(DatabaseRole.EVENT) as event_session,
+    ):
+        workspace = WorkspaceProjectionService(
+            control_session,
+            runtime_session,
+            event_session,
+        ).get_session_workspace("session-1")
+
+    dumped = workspace.model_dump(mode="json")
+    active_run = next(run for run in dumped["runs"] if run["run_id"] == "run-active")
+    assert active_run["current_stage_type"] == "requirement_analysis"
+    assert active_run["is_active"] is True
+    assert dumped["current_stage_type"] == "requirement_analysis"
+
+
+def test_workspace_projection_does_not_leak_latest_stage_for_terminal_current_run_without_stage_row(
+    tmp_path,
+) -> None:
+    from backend.app.services.projections.workspace import WorkspaceProjectionService
+
+    manager = _manager(tmp_path)
+    _seed_workspace(manager)
+    with manager.session(DatabaseRole.CONTROL) as session:
+        control_session = session.get(SessionModel, "session-1")
+        assert control_session is not None
+        control_session.status = SessionStatus.TERMINATED
+        control_session.latest_stage_type = StageType.REQUIREMENT_ANALYSIS
+        session.add(control_session)
+        session.commit()
+    with manager.session(DatabaseRole.RUNTIME) as session:
+        run = session.get(PipelineRunModel, "run-active")
+        assert run is not None
+        run.status = RunStatus.TERMINATED
+        run.current_stage_run_id = None
+        session.add(run)
+        session.commit()
+
+    with (
+        manager.session(DatabaseRole.CONTROL) as control_session,
+        manager.session(DatabaseRole.RUNTIME) as runtime_session,
+        manager.session(DatabaseRole.EVENT) as event_session,
+    ):
+        workspace = WorkspaceProjectionService(
+            control_session,
+            runtime_session,
+            event_session,
+        ).get_session_workspace("session-1")
+
+    dumped = workspace.model_dump(mode="json")
+    active_run = next(run for run in dumped["runs"] if run["run_id"] == "run-active")
+    assert active_run["current_stage_type"] is None
+    assert active_run["is_active"] is False
+    assert dumped["current_stage_type"] == "requirement_analysis"
+
+
 def test_workspace_projection_rejects_removed_session(tmp_path) -> None:
     from backend.app.services.projections.workspace import (
         WorkspaceProjectionService,

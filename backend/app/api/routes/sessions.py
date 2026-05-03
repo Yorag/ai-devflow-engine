@@ -23,21 +23,26 @@ from backend.app.domain.runtime_refs import (
     RuntimeCommandType,
     RuntimeResumePayload,
 )
+from backend.app.db.models.control import SessionModel
+from backend.app.db.models.runtime import PipelineRunModel
 from backend.app.observability.audit import AuditService
 from backend.app.observability.context import get_trace_context
 from backend.app.observability.log_writer import JsonlLogWriter
 from backend.app.observability.runtime_data import RuntimeDataSettings
+from backend.app.schemas.run import RunCommandResponse, RunSummaryProjection
 from backend.app.schemas.session import (
     SessionMessageAppendRequest,
     SessionMessageAppendResponse,
     SessionRead,
     SessionRenameRequest,
+    SessionRerunRequest,
     SessionTemplateUpdateRequest,
 )
 from backend.app.services.clarifications import (
     ClarificationService,
     ClarificationServiceError,
 )
+from backend.app.services.runs import RunLifecycleService, RunLifecycleServiceError
 from backend.app.services.runtime_orchestration import RuntimeOrchestrationService
 from backend.app.services.sessions import SessionService, SessionServiceError
 
@@ -66,6 +71,15 @@ def _raise_api_error(exc: SessionServiceError) -> None:
         error_code=exc.error_code,
         message=exc.message,
         status_code=exc.status_code,
+    ) from exc
+
+
+def _raise_run_api_error(exc: RunLifecycleServiceError) -> None:
+    raise ApiError(
+        error_code=exc.error_code,
+        message=str(exc),
+        status_code=exc.status_code,
+        detail_ref=exc.detail_ref,
     ) from exc
 
 
@@ -279,10 +293,14 @@ def _waiting_status(interrupt_type: GraphInterruptType) -> GraphThreadStatus:
 def _runtime_orchestration_from_app_state(
     request: Request,
 ) -> RuntimeOrchestrationService:
-    runtime_port = getattr(request.app.state, "h41_runtime_port", None)
+    runtime_port = getattr(request.app.state, "h45_runtime_port", None)
+    if runtime_port is None:
+        runtime_port = getattr(request.app.state, "h41_runtime_port", None)
     if runtime_port is None:
         runtime_port = InMemoryRuntimeCommandPort()
-    checkpoint_port = getattr(request.app.state, "h41_checkpoint_port", None)
+    checkpoint_port = getattr(request.app.state, "h45_checkpoint_port", None)
+    if checkpoint_port is None:
+        checkpoint_port = getattr(request.app.state, "h41_checkpoint_port", None)
     if checkpoint_port is None:
         checkpoint_port = InMemoryCheckpointPort()
     return RuntimeOrchestrationService(
@@ -312,6 +330,68 @@ def get_clarification_service(
         )
     finally:
         log_session.close()
+
+
+def get_run_lifecycle_service(
+    request: Request,
+    control_session: Session = Depends(get_control_session),
+    runtime_session: Session = Depends(get_runtime_session),
+    event_session: Session = Depends(get_event_session),
+) -> Iterator[RunLifecycleService]:
+    manager: DatabaseManager = request.app.state.database_manager
+    settings = request.app.state.environment_settings
+    log_session = manager.session(DatabaseRole.LOG)
+    log_writer = JsonlLogWriter(RuntimeDataSettings.from_environment_settings(settings))
+    audit_service = getattr(
+        request.app.state,
+        "h45_audit_service",
+        AuditService(log_session, audit_writer=log_writer),
+    )
+    try:
+        yield RunLifecycleService(
+            control_session=control_session,
+            runtime_session=runtime_session,
+            event_session=event_session,
+            runtime_orchestration=_runtime_orchestration_from_app_state(request),
+            audit_service=audit_service,
+            log_writer=log_writer,
+        )
+    finally:
+        log_session.close()
+
+
+def _run_summary(
+    run: PipelineRunModel,
+    *,
+    current_stage_type: StageType | None,
+    is_active: bool,
+) -> RunSummaryProjection:
+    return RunSummaryProjection.model_validate(
+        {
+            "run_id": run.run_id,
+            "attempt_index": run.attempt_index,
+            "status": run.status,
+            "trigger_source": run.trigger_source,
+            "started_at": run.started_at,
+            "ended_at": run.ended_at,
+            "current_stage_type": current_stage_type,
+            "is_active": is_active,
+        }
+    )
+
+
+def _run_command_response(
+    session: SessionModel,
+    run: PipelineRunModel,
+) -> RunCommandResponse:
+    return RunCommandResponse(
+        session=_session_read(session),
+        run=_run_summary(
+            run,
+            current_stage_type=session.latest_stage_type,
+            is_active=session.current_run_id == run.run_id,
+        ),
+    )
 
 
 @router.post(
@@ -476,3 +556,40 @@ def append_session_message(
         session=_session_read(session),
         message_item=answer.message_item,
     )
+
+
+@router.post(
+    "/sessions/{sessionId}/runs",
+    response_model=RunCommandResponse,
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/SessionRerunRequest"}
+                }
+            },
+            "required": False,
+        }
+    },
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+def create_session_rerun(
+    sessionId: str,
+    body: SessionRerunRequest | None = None,
+    service: RunLifecycleService = Depends(get_run_lifecycle_service),
+) -> RunCommandResponse:
+    del body
+    try:
+        result = service.create_rerun(
+            session_id=sessionId,
+            actor_id="session-user",
+            trace_context=get_trace_context(),
+        )
+    except RunLifecycleServiceError as exc:
+        _raise_run_api_error(exc)
+    return _run_command_response(result.session, result.run)
