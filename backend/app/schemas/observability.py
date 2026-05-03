@@ -56,7 +56,7 @@ class _TimeRangeQuery(_StrictBaseModel):
     since: datetime | None = None
     until: datetime | None = None
     cursor: str | None = Field(default=None, min_length=1)
-    limit: PositiveInt = Field(default=100, le=500)
+    limit: PositiveInt = Field(default=100, le=5000)
 
     @model_validator(mode="after")
     def validate_time_range(self) -> "_TimeRangeQuery":
@@ -150,6 +150,13 @@ class AuditLogEntryProjection(_StrictBaseModel):
     created_at: datetime
 
 
+class RunLogQueryResponse(_StrictBaseModel):
+    entries: list[RunLogEntryProjection]
+    next_cursor: str | None = Field(default=None, min_length=1)
+    has_more: bool
+    query: RunLogQuery
+
+
 __all__ = [
     "AuditActorType",
     "AuditLogEntryProjection",
@@ -160,4 +167,5 @@ __all__ = [
     "RedactionStatus",
     "RunLogEntryProjection",
     "RunLogQuery",
+    "RunLogQueryResponse",
 ]

@@ -1,18 +1,29 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Coroutine, Iterator
+from datetime import datetime
+from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 from sqlalchemy.orm import Session
 
+from backend.app.api.error_codes import ErrorCode
 from backend.app.api.errors import ApiError, ErrorResponse
 from backend.app.api.routes import events
 from backend.app.db.base import DatabaseRole
 from backend.app.db.session import DatabaseManager
+from backend.app.observability.log_query import LogQueryService, LogQueryServiceError
 from backend.app.schemas.inspector import (
     ControlItemInspectorProjection,
     StageInspectorProjection,
     ToolConfirmationInspectorProjection,
+)
+from backend.app.schemas.observability import (
+    LogCategory,
+    LogLevel,
+    RunLogQueryResponse,
 )
 from backend.app.schemas.run import RunTimelineProjection
 from backend.app.schemas.workspace import SessionWorkspaceProjection
@@ -30,7 +41,25 @@ from backend.app.services.projections.workspace import (
 )
 
 
+class LogQueryRoute(APIRoute):
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        original_handler = super().get_route_handler()
+
+        async def custom_handler(request: Request) -> Response:
+            try:
+                return await original_handler(request)
+            except RequestValidationError as exc:
+                raise ApiError(
+                    error_code=ErrorCode.LOG_QUERY_INVALID,
+                    message="Log query is invalid.",
+                    status_code=422,
+                ) from exc
+
+        return custom_handler
+
+
 router = APIRouter(tags=["query"])
+log_query_router = APIRouter(tags=["query"], route_class=LogQueryRoute)
 router.include_router(events.router)
 
 
@@ -55,6 +84,15 @@ def get_runtime_session(request: Request) -> Iterator[Session]:
 def get_event_session(request: Request) -> Iterator[Session]:
     manager: DatabaseManager = request.app.state.database_manager
     session = manager.session(DatabaseRole.EVENT)
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+def get_log_session(request: Request) -> Iterator[Session]:
+    manager: DatabaseManager = request.app.state.database_manager
+    session = manager.session(DatabaseRole.LOG)
     try:
         yield session
     finally:
@@ -100,11 +138,20 @@ def get_inspector_projection_service(
     )
 
 
+def get_log_query_service(
+    control_session: Session = Depends(get_control_session),
+    runtime_session: Session = Depends(get_runtime_session),
+    log_session: Session = Depends(get_log_session),
+) -> Iterator[LogQueryService]:
+    yield LogQueryService(control_session, runtime_session, log_session)
+
+
 def _raise_api_error(
     exc: (
         WorkspaceProjectionServiceError
         | TimelineProjectionServiceError
         | InspectorProjectionServiceError
+        | LogQueryServiceError
     ),
 ) -> None:
     raise ApiError(
@@ -150,6 +197,79 @@ def get_run_timeline(
         return service.get_run_timeline(runId)
     except TimelineProjectionServiceError as exc:
         _raise_api_error(exc)
+
+
+@log_query_router.get(
+    "/runs/{runId}/logs",
+    response_model=RunLogQueryResponse,
+    responses={
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_run_logs(
+    runId: str,
+    level: LogLevel | None = None,
+    category: LogCategory | None = None,
+    source: str | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    cursor: str | None = None,
+    limit: int | None = Query(default=None),
+    service: LogQueryService = Depends(get_log_query_service),
+) -> RunLogQueryResponse:
+    try:
+        return service.list_run_logs(
+            runId,
+            level=level,
+            category=category,
+            source=source,
+            since=since,
+            until=until,
+            cursor=cursor,
+            limit=limit,
+        )
+    except LogQueryServiceError as exc:
+        _raise_api_error(exc)
+
+
+@log_query_router.get(
+    "/stages/{stageRunId}/logs",
+    response_model=RunLogQueryResponse,
+    responses={
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_stage_logs(
+    stageRunId: str,
+    level: LogLevel | None = None,
+    category: LogCategory | None = None,
+    source: str | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    cursor: str | None = None,
+    limit: int | None = Query(default=None),
+    service: LogQueryService = Depends(get_log_query_service),
+) -> RunLogQueryResponse:
+    try:
+        return service.list_stage_logs(
+            stageRunId,
+            level=level,
+            category=category,
+            source=source,
+            since=since,
+            until=until,
+            cursor=cursor,
+            limit=limit,
+        )
+    except LogQueryServiceError as exc:
+        _raise_api_error(exc)
+
+
+router.include_router(log_query_router)
 
 
 @router.get(

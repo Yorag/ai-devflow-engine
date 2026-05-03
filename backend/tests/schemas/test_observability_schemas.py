@@ -200,11 +200,14 @@ def test_log_and_audit_queries_are_focused_readonly_and_bounded() -> None:
     assert audit_query.model_dump(mode="json")["actor_type"] == "system"
     assert audit_query.model_dump(mode="json")["correlation_id"] == "correlation-1"
 
-    with pytest.raises(ValidationError):
-        RunLogQuery(limit=501)
+    assert RunLogQuery(limit=5000).limit == 5000
+    assert AuditLogQuery(limit=5000).limit == 5000
 
     with pytest.raises(ValidationError):
-        AuditLogQuery(limit=501)
+        RunLogQuery(limit=5001)
+
+    with pytest.raises(ValidationError):
+        AuditLogQuery(limit=5001)
 
     with pytest.raises(ValidationError):
         RunLogQuery(since=datetime(2026, 1, 3, tzinfo=UTC), until=NOW)
@@ -214,6 +217,81 @@ def test_log_and_audit_queries_are_focused_readonly_and_bounded() -> None:
 
     with pytest.raises(ValidationError):
         RunLogQuery(delete_after=NOW)
+
+
+def test_run_log_query_response_echoes_typed_query_and_pagination() -> None:
+    from backend.app.schemas.observability import (
+        LogCategory,
+        LogLevel,
+        RedactionStatus,
+        RunLogEntryProjection,
+        RunLogQuery,
+        RunLogQueryResponse,
+    )
+
+    entry = RunLogEntryProjection(
+        log_id="log-1",
+        session_id="session-1",
+        run_id="run-1",
+        stage_run_id="stage-1",
+        approval_id=None,
+        tool_confirmation_id=None,
+        delivery_record_id=None,
+        graph_thread_id="graph-thread-1",
+        request_id="request-1",
+        source="runtime.stage",
+        category=LogCategory.RUNTIME,
+        level=LogLevel.INFO,
+        message="Stage started.",
+        log_file_ref="logs/runs/run-1.jsonl",
+        line_offset=0,
+        line_number=1,
+        log_file_generation="run-1",
+        payload_ref=None,
+        payload_excerpt=None,
+        payload_size_bytes=0,
+        redaction_status=RedactionStatus.NOT_REQUIRED,
+        correlation_id="correlation-1",
+        trace_id="trace-1",
+        span_id="span-1",
+        parent_span_id=None,
+        created_at=NOW,
+    )
+    response = RunLogQueryResponse(
+        entries=[entry],
+        next_cursor="cursor-2",
+        has_more=True,
+        query=RunLogQuery(
+            run_id="run-1",
+            stage_run_id="stage-1",
+            level=LogLevel.INFO,
+            category=LogCategory.RUNTIME,
+            source="runtime.stage",
+            since=NOW,
+            until=NOW,
+            cursor="cursor-1",
+            limit=5000,
+        ),
+    )
+
+    dumped = response.model_dump(mode="json")
+    assert dumped["entries"][0]["log_id"] == "log-1"
+    assert dumped["next_cursor"] == "cursor-2"
+    assert dumped["has_more"] is True
+    assert dumped["query"]["run_id"] == "run-1"
+    assert dumped["query"]["stage_run_id"] == "stage-1"
+    assert dumped["query"]["level"] == "info"
+    assert dumped["query"]["category"] == "runtime"
+    assert dumped["query"]["limit"] == 5000
+
+    with pytest.raises(ValidationError):
+        RunLogQueryResponse(
+            entries=[entry],
+            next_cursor="cursor-2",
+            has_more=True,
+            query=RunLogQuery(limit=5000),
+            raw_payload={"secret": "must not be accepted"},
+        )
 
 
 def test_trace_context_inherits_correlation_and_records_parent_span() -> None:

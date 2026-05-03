@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
 
@@ -8,17 +8,25 @@ from fastapi.testclient import TestClient
 
 from backend.app.core.config import EnvironmentSettings
 from backend.app.db.base import DatabaseRole
-from backend.app.db.models.control import ControlBase, ProjectModel, SessionModel
+from backend.app.db.models.control import (
+    ControlBase,
+    PlatformRuntimeSettingsModel,
+    ProjectModel,
+    SessionModel,
+)
 from backend.app.db.models.event import EventBase
-from backend.app.db.models.log import LogBase
+from backend.app.db.models.log import LogBase, LogPayloadModel, RunLogEntryModel
 from backend.app.db.models.runtime import (
     ClarificationRecordModel,
     RunControlRecordModel,
     RuntimeBase,
     StageArtifactModel,
+    StageRunModel,
 )
+from backend.app.repositories.runtime_settings import RUNTIME_SETTINGS_ID
 from backend.app.schemas.common import RunControlRecordType, StageType
 from backend.app.main import create_app
+from backend.app.schemas.observability import LogCategory, LogLevel, RedactionStatus
 from backend.tests.projections.test_workspace_projection import _seed_workspace
 
 
@@ -139,6 +147,159 @@ def _seed_tool_confirmation_detail_projection(app) -> None:
         session.commit()
 
 
+def _seed_log_query_rows(app) -> None:
+    with app.state.database_manager.session(DatabaseRole.CONTROL) as session:
+        session.add(
+            PlatformRuntimeSettingsModel(
+                settings_id=RUNTIME_SETTINGS_ID,
+                config_version="platform-runtime-settings-config-v1",
+                schema_version="platform-runtime-settings-v1",
+                hard_limits_version="platform-hard-limits-v1",
+                agent_limits={"max_react_iterations_per_stage": 30},
+                provider_call_policy={"network_error_max_retries": 3},
+                context_limits={"grep_max_results": 100},
+                log_policy={
+                    "run_log_retention_days": 30,
+                    "audit_log_retention_days": 180,
+                    "log_rotation_max_bytes": 10485760,
+                    "log_query_default_limit": 2,
+                    "log_query_max_limit": 3,
+                },
+                created_by_actor_id=None,
+                updated_by_actor_id=None,
+                last_audit_log_id=None,
+                last_trace_id=None,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.commit()
+    with app.state.database_manager.session(DatabaseRole.RUNTIME) as session:
+        session.add(
+            StageRunModel(
+                stage_run_id="stage-other",
+                run_id="run-active",
+                stage_type=StageType.CODE_REVIEW,
+                status="running",
+                attempt_index=2,
+                graph_node_key="code_review.main",
+                stage_contract_ref="stage-contract-code-review",
+                input_ref=None,
+                output_ref=None,
+                summary="Another stage in the same run.",
+                started_at=NOW + timedelta(minutes=5),
+                ended_at=None,
+                created_at=NOW + timedelta(minutes=5),
+                updated_at=NOW + timedelta(minutes=5),
+            )
+        )
+        session.commit()
+    with app.state.database_manager.session(DatabaseRole.LOG) as session:
+        session.add(
+            LogPayloadModel(
+                payload_id="payload-query-1",
+                payload_type="tool_output",
+                summary={"stdout_excerpt": "pytest -q"},
+                storage_ref=None,
+                content_hash="sha256:payload-query-1",
+                redaction_status=RedactionStatus.REDACTED,
+                payload_size_bytes=128,
+                schema_version="log-payload-v1",
+                created_at=NOW + timedelta(minutes=3),
+            )
+        )
+        session.add_all(
+            [
+                _log_query_row(
+                    log_id="log-api-1",
+                    stage_run_id=None,
+                    source="runtime.stage",
+                    category=LogCategory.RUNTIME,
+                    level=LogLevel.INFO,
+                    message="Run started.",
+                    created_at=NOW + timedelta(minutes=3),
+                    line_number=1,
+                ),
+                _log_query_row(
+                    log_id="log-api-2",
+                    stage_run_id="stage-active",
+                    source="tool.registry",
+                    category=LogCategory.TOOL,
+                    level=LogLevel.ERROR,
+                    message="Tool call requires confirmation.",
+                    created_at=NOW + timedelta(minutes=4),
+                    line_number=2,
+                    payload_ref="payload-query-1",
+                    payload_excerpt="tool=bash risk=high_risk",
+                    payload_size_bytes=128,
+                    redaction_status=RedactionStatus.REDACTED,
+                    error_code="tool_confirmation_required",
+                ),
+                _log_query_row(
+                    log_id="log-api-other-stage",
+                    stage_run_id="stage-other",
+                    source="provider.deepseek",
+                    category=LogCategory.MODEL,
+                    level=LogLevel.WARNING,
+                    message="Another stage row.",
+                    created_at=NOW + timedelta(minutes=5),
+                    line_number=3,
+                    payload_excerpt="backoff=2s",
+                    payload_size_bytes=16,
+                ),
+            ]
+        )
+        session.commit()
+
+
+def _log_query_row(
+    *,
+    log_id: str,
+    stage_run_id: str | None,
+    source: str,
+    category: LogCategory,
+    level: LogLevel,
+    message: str,
+    created_at: datetime,
+    line_number: int,
+    payload_ref: str | None = None,
+    payload_excerpt: str | None = None,
+    payload_size_bytes: int = 0,
+    redaction_status: RedactionStatus = RedactionStatus.NOT_REQUIRED,
+    error_code: str | None = None,
+) -> RunLogEntryModel:
+    return RunLogEntryModel(
+        log_id=log_id,
+        session_id="session-1",
+        run_id="run-active",
+        stage_run_id=stage_run_id,
+        approval_id=None,
+        tool_confirmation_id="tool-confirmation-1" if payload_ref else None,
+        delivery_record_id=None,
+        graph_thread_id="graph-thread-active",
+        request_id=f"request-{line_number}",
+        source=source,
+        category=category,
+        level=level,
+        message=message,
+        log_file_ref="logs/runs/run-active.jsonl",
+        line_offset=(line_number - 1) * 140,
+        line_number=line_number,
+        log_file_generation="run-active",
+        payload_ref=payload_ref,
+        payload_excerpt=payload_excerpt,
+        payload_size_bytes=payload_size_bytes,
+        redaction_status=redaction_status,
+        correlation_id=f"correlation-{line_number}",
+        trace_id="trace-run-active",
+        span_id=f"span-{line_number}",
+        parent_span_id=None,
+        duration_ms=10 + line_number,
+        error_code=error_code,
+        created_at=created_at,
+    )
+
+
 def test_get_session_workspace_returns_projection_and_unified_not_found(
     tmp_path: Path,
 ) -> None:
@@ -227,6 +388,162 @@ def test_get_run_timeline_returns_projection_and_unified_not_found(
         "request_id": "req-timeline-missing",
         "correlation_id": "corr-timeline-missing",
     }
+
+
+def test_get_run_logs_returns_paginated_filtered_entries_and_unified_not_found(
+    tmp_path: Path,
+) -> None:
+    app = build_query_api_app(tmp_path)
+    _seed_log_query_rows(app)
+
+    with TestClient(app) as client:
+        ok_response = client.get(
+            "/api/runs/run-active/logs",
+            params={"limit": "2"},
+            headers={
+                "X-Request-ID": "req-run-logs",
+                "X-Correlation-ID": "corr-run-logs",
+            },
+        )
+        filtered_response = client.get(
+            "/api/runs/run-active/logs",
+            params={
+                "level": "error",
+                "category": "tool",
+                "source": "tool.registry",
+                "limit": "3",
+            },
+            headers={
+                "X-Request-ID": "req-run-logs-filtered",
+                "X-Correlation-ID": "corr-run-logs-filtered",
+            },
+        )
+        missing_response = client.get(
+            "/api/runs/run-missing/logs",
+            headers={
+                "X-Request-ID": "req-run-logs-missing",
+                "X-Correlation-ID": "corr-run-logs-missing",
+            },
+        )
+
+    assert ok_response.status_code == 200
+    ok_payload = ok_response.json()
+    assert [entry["log_id"] for entry in ok_payload["entries"]] == [
+        "log-api-1",
+        "log-api-2",
+    ]
+    assert ok_payload["has_more"] is True
+    assert ok_payload["next_cursor"]
+    assert ok_payload["query"]["run_id"] == "run-active"
+    assert ok_payload["query"]["stage_run_id"] is None
+    assert ok_payload["query"]["limit"] == 2
+
+    assert filtered_response.status_code == 200
+    filtered_payload = filtered_response.json()
+    assert [entry["log_id"] for entry in filtered_payload["entries"]] == ["log-api-2"]
+    assert filtered_payload["has_more"] is False
+    assert filtered_payload["query"]["level"] == "error"
+    assert filtered_payload["query"]["category"] == "tool"
+    assert filtered_payload["query"]["source"] == "tool.registry"
+
+    assert missing_response.status_code == 404
+    assert missing_response.json() == {
+        "error_code": "not_found",
+        "message": "Run logs were not found.",
+        "request_id": "req-run-logs-missing",
+        "correlation_id": "corr-run-logs-missing",
+    }
+
+
+def test_get_stage_logs_scopes_to_stage_and_rejects_invalid_limit(
+    tmp_path: Path,
+) -> None:
+    app = build_query_api_app(tmp_path)
+    _seed_log_query_rows(app)
+
+    with TestClient(app) as client:
+        ok_response = client.get(
+            "/api/stages/stage-active/logs",
+            headers={
+                "X-Request-ID": "req-stage-logs",
+                "X-Correlation-ID": "corr-stage-logs",
+            },
+        )
+        invalid_limit_response = client.get(
+            "/api/stages/stage-active/logs",
+            params={"limit": "999"},
+            headers={
+                "X-Request-ID": "req-stage-logs-invalid",
+                "X-Correlation-ID": "corr-stage-logs-invalid",
+            },
+        )
+        missing_stage_response = client.get(
+            "/api/stages/stage-missing/logs",
+            headers={
+                "X-Request-ID": "req-stage-logs-missing",
+                "X-Correlation-ID": "corr-stage-logs-missing",
+            },
+        )
+        malformed_limit_response = client.get(
+            "/api/runs/run-active/logs",
+            params={"limit": "not-an-int"},
+            headers={
+                "X-Request-ID": "req-run-logs-malformed-limit",
+                "X-Correlation-ID": "corr-run-logs-malformed-limit",
+            },
+        )
+
+    assert ok_response.status_code == 200
+    payload = ok_response.json()
+    assert [entry["log_id"] for entry in payload["entries"]] == ["log-api-2"]
+    assert payload["query"]["stage_run_id"] == "stage-active"
+    assert all(entry["stage_run_id"] == "stage-active" for entry in payload["entries"])
+
+    assert invalid_limit_response.status_code == 422
+    assert invalid_limit_response.json() == {
+        "error_code": "log_query_invalid",
+        "message": "Log query is invalid.",
+        "request_id": "req-stage-logs-invalid",
+        "correlation_id": "corr-stage-logs-invalid",
+    }
+    assert missing_stage_response.status_code == 404
+    assert missing_stage_response.json() == {
+        "error_code": "not_found",
+        "message": "Stage logs were not found.",
+        "request_id": "req-stage-logs-missing",
+        "correlation_id": "corr-stage-logs-missing",
+    }
+    assert malformed_limit_response.status_code == 422
+    assert malformed_limit_response.json() == {
+        "error_code": "log_query_invalid",
+        "message": "Log query is invalid.",
+        "request_id": "req-run-logs-malformed-limit",
+        "correlation_id": "corr-run-logs-malformed-limit",
+    }
+
+
+def test_get_run_logs_returns_config_unavailable_when_runtime_settings_missing(
+    tmp_path: Path,
+) -> None:
+    app = build_query_api_app(tmp_path)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/runs/run-active/logs",
+            headers={
+                "X-Request-ID": "req-run-logs-config-missing",
+                "X-Correlation-ID": "corr-run-logs-config-missing",
+            },
+        )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "error_code": "config_snapshot_unavailable",
+        "message": "Configuration snapshot is unavailable.",
+        "request_id": "req-run-logs-config-missing",
+        "correlation_id": "corr-run-logs-config-missing",
+    }
+
 
 def test_session_event_stream_returns_event_store_frames(tmp_path: Path) -> None:
     app = build_query_api_app(tmp_path)
@@ -658,4 +975,95 @@ def test_query_workspace_route_is_documented_in_openapi(tmp_path: Path) -> None:
     assert "StageInspectorProjection" in schemas
     assert "ControlItemInspectorProjection" in schemas
     assert "ToolConfirmationInspectorProjection" in schemas
+    assert "ErrorResponse" in schemas
+
+
+def test_query_log_routes_are_documented_in_openapi(tmp_path: Path) -> None:
+    app = build_query_api_app(tmp_path)
+
+    with TestClient(app) as client:
+        response = client.get("/api/openapi.json")
+
+    assert response.status_code == 200
+    document = response.json()
+    paths = document["paths"]
+    schemas = document["components"]["schemas"]
+
+    run_logs_route = paths["/api/runs/{runId}/logs"]["get"]
+    stage_logs_route = paths["/api/stages/{stageRunId}/logs"]["get"]
+
+    assert set(run_logs_route["responses"]) == {"200", "404", "422", "503"}
+    assert set(stage_logs_route["responses"]) == {"200", "404", "422", "503"}
+    assert (
+        run_logs_route["responses"]["200"]["content"]["application/json"]["schema"][
+            "$ref"
+        ]
+        == "#/components/schemas/RunLogQueryResponse"
+    )
+    assert (
+        stage_logs_route["responses"]["200"]["content"]["application/json"]["schema"][
+            "$ref"
+        ]
+        == "#/components/schemas/RunLogQueryResponse"
+    )
+
+    run_param_names = {parameter["name"] for parameter in run_logs_route["parameters"]}
+    stage_param_names = {
+        parameter["name"] for parameter in stage_logs_route["parameters"]
+    }
+    assert {
+        "runId",
+        "level",
+        "category",
+        "source",
+        "since",
+        "until",
+        "cursor",
+        "limit",
+    } <= run_param_names
+    assert {
+        "stageRunId",
+        "level",
+        "category",
+        "source",
+        "since",
+        "until",
+        "cursor",
+        "limit",
+    } <= stage_param_names
+
+    run_limit_parameter = next(
+        parameter for parameter in run_logs_route["parameters"] if parameter["name"] == "limit"
+    )
+    stage_limit_parameter = next(
+        parameter
+        for parameter in stage_logs_route["parameters"]
+        if parameter["name"] == "limit"
+    )
+    assert {schema["type"] for schema in run_limit_parameter["schema"]["anyOf"]} == {
+        "integer",
+        "null",
+    }
+    assert {schema["type"] for schema in stage_limit_parameter["schema"]["anyOf"]} == {
+        "integer",
+        "null",
+    }
+
+    for status_code in ("404", "422", "503"):
+        assert (
+            run_logs_route["responses"][status_code]["content"]["application/json"][
+                "schema"
+            ]["$ref"]
+            == "#/components/schemas/ErrorResponse"
+        )
+        assert (
+            stage_logs_route["responses"][status_code]["content"]["application/json"][
+                "schema"
+            ]["$ref"]
+            == "#/components/schemas/ErrorResponse"
+        )
+
+    assert "RunLogQueryResponse" in schemas
+    assert "RunLogEntryProjection" in schemas
+    assert "RunLogQuery" in schemas
     assert "ErrorResponse" in schemas
