@@ -157,10 +157,18 @@ class RunLogQueryResponse(_StrictBaseModel):
     query: RunLogQuery
 
 
+class AuditLogQueryResponse(_StrictBaseModel):
+    entries: list[AuditLogEntryProjection]
+    next_cursor: str | None = Field(default=None, min_length=1)
+    has_more: bool
+    query: AuditLogQuery
+
+
 __all__ = [
     "AuditActorType",
     "AuditLogEntryProjection",
     "AuditLogQuery",
+    "AuditLogQueryResponse",
     "AuditResult",
     "LogCategory",
     "LogLevel",

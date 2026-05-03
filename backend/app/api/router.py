@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from backend.app.api.routes import (
     approvals,
+    audit_logs,
     health,
     projects,
     providers,
@@ -27,4 +28,5 @@ def build_api_router() -> APIRouter:
     router.include_router(providers.router)
     router.include_router(runtime_settings.router)
     router.include_router(query.router)
+    router.include_router(audit_logs.router)
     return router

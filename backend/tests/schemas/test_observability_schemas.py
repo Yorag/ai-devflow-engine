@@ -294,6 +294,80 @@ def test_run_log_query_response_echoes_typed_query_and_pagination() -> None:
         )
 
 
+def test_audit_log_query_response_echoes_typed_query_and_pagination() -> None:
+    from backend.app.schemas.observability import (
+        AuditActorType,
+        AuditLogEntryProjection,
+        AuditLogQuery,
+        AuditLogQueryResponse,
+        AuditResult,
+    )
+
+    entry = AuditLogEntryProjection(
+        audit_id="audit-1",
+        actor_type=AuditActorType.USER,
+        actor_id="user-local",
+        action="tool_confirmation.allow",
+        target_type="tool_confirmation",
+        target_id="tool-confirmation-1",
+        session_id="session-1",
+        run_id="run-1",
+        stage_run_id="stage-1",
+        approval_id=None,
+        tool_confirmation_id="tool-confirmation-1",
+        delivery_record_id=None,
+        request_id="request-1",
+        result=AuditResult.ACCEPTED,
+        reason="User allowed this high-risk command.",
+        metadata_ref="audit-metadata-1",
+        metadata_excerpt="Allowed bash command npm install.",
+        correlation_id="correlation-1",
+        trace_id="trace-1",
+        span_id="span-audit-1",
+        created_at=NOW,
+    )
+    response = AuditLogQueryResponse(
+        entries=[entry],
+        next_cursor="cursor-2",
+        has_more=True,
+        query=AuditLogQuery(
+            actor_type=AuditActorType.USER,
+            action="tool_confirmation.allow",
+            target_type="tool_confirmation",
+            target_id="tool-confirmation-1",
+            run_id="run-1",
+            stage_run_id="stage-1",
+            correlation_id="correlation-1",
+            result=AuditResult.ACCEPTED,
+            since=NOW,
+            until=NOW,
+            cursor="cursor-1",
+            limit=5000,
+        ),
+    )
+
+    dumped = response.model_dump(mode="json")
+    assert dumped["entries"][0]["audit_id"] == "audit-1"
+    assert dumped["next_cursor"] == "cursor-2"
+    assert dumped["has_more"] is True
+    assert dumped["query"]["actor_type"] == "user"
+    assert dumped["query"]["stage_run_id"] == "stage-1"
+    assert dumped["query"]["correlation_id"] == "correlation-1"
+    assert dumped["query"]["result"] == "accepted"
+    assert dumped["query"]["limit"] == 5000
+    assert "metadata" not in dumped["entries"][0]
+    assert "raw_metadata" not in dumped["entries"][0]
+
+    with pytest.raises(ValidationError):
+        AuditLogQueryResponse(
+            entries=[entry],
+            next_cursor="cursor-2",
+            has_more=True,
+            query=AuditLogQuery(limit=5000),
+            raw_metadata={"secret": "must not be accepted"},
+        )
+
+
 def test_trace_context_inherits_correlation_and_records_parent_span() -> None:
     from backend.app.domain.trace_context import TraceContext
 
