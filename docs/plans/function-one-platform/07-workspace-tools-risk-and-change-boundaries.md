@@ -298,7 +298,7 @@
 ## W5.3 grep 工具
 
 **计划周期**：Week 7-8
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现基于 ripgrep 的工作区 `grep` 工具，使 runtime 可以受控正则搜索当前 run 工作区内容。
 **实施计划**：`docs/plans/implementation/w5.3-workspace-grep-tool.md`
 
