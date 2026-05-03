@@ -635,7 +635,7 @@
 ## F4.3a Tool Confirmation Block 与确认交互
 
 **计划周期**：Week 6-7
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现 Narrative Feed 中的高风险工具确认块，使用户可以针对具体工具动作允许或拒绝本次执行，并与 Approval Block 保持交互和文案边界。
 **实施计划**：`docs/plans/implementation/f4.3a-tool-confirmation-block.md`
 
@@ -678,7 +678,7 @@
 ## F4.4 重新尝试 UI 与历史审批禁用态
 
 **计划周期**：Week 6
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现失败或终止后的重新尝试入口，并完善历史 run 审批块只读态。
 **实施计划**：`docs/plans/implementation/f4.4-rerun-ui-historical-approval.md`
 
@@ -705,3 +705,4 @@
 
 **测试方法**：
 - `npm --prefix frontend run test -- RerunAction`
+**验证摘要**：实施计划 `docs/plans/implementation/f4.4-rerun-ui-historical-approval.md` 已完成并在 integration checkpoint 合入 `d58895c`。`npm --prefix frontend run test -- RerunAction`、`npm --prefix frontend run test -- ApprovalBlock`、`npm --prefix frontend run test -- FeedEntryRenderer`、`npm --prefix frontend run test -- WorkspaceShell` 与 `npm --prefix frontend run test -- RunSwitcher` 全部通过对应 focused frontend tests；本次 IC4 integration verification 中 `npm --prefix frontend test` 通过 22 个 test files、183 个 tests，`npm --prefix frontend run build` 成功完成 TypeScript 检查与生产构建。
