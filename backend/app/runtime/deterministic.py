@@ -15,14 +15,17 @@ from backend.app.db.models.control import SessionModel
 from backend.app.db.models.runtime import (
     ApprovalRequestModel,
     ClarificationRecordModel,
+    DeliveryChannelSnapshotModel,
     PipelineRunModel,
     StageArtifactModel,
     StageRunModel,
     ToolConfirmationRequestModel,
 )
+from backend.app.delivery.base import DeliveryAdapterInput
 from backend.app.domain.enums import (
     ApprovalStatus,
     ApprovalType,
+    DeliveryMode,
     RunStatus,
     SessionStatus,
     SseEventType,
@@ -58,6 +61,7 @@ from backend.app.schemas.observability import LogCategory, LogLevel
 from backend.app.services.approvals import ApprovalService
 from backend.app.services.artifacts import ArtifactStore
 from backend.app.services.clarifications import ClarificationService
+from backend.app.services.delivery import DeliveryService
 from backend.app.services.events import DomainEvent, DomainEventType, EventStore
 from backend.app.services.runtime_orchestration import (
     CheckpointPort,
@@ -111,6 +115,9 @@ _TERMINAL_STAGE_STATUSES = frozenset(
         StageStatus.TERMINATED,
         StageStatus.SUPERSEDED,
     }
+)
+INCOMPATIBLE_DELIVERY_SERVICE_MESSAGE = (
+    "Deterministic demo delivery requires a same-session non-autocommit DeliveryService."
 )
 
 
@@ -212,6 +219,7 @@ class DeterministicRuntimeEngine:
         stage_service: StageRunService | None = None,
         artifact_store: ArtifactStore | None = None,
         event_store: EventStore | None = None,
+        delivery_service: DeliveryService | None = None,
         log_writer: RunLogWriter | None = None,
         redaction_policy: RedactionPolicy | None = None,
         now: Callable[[], datetime] | None = None,
@@ -238,6 +246,7 @@ class DeterministicRuntimeEngine:
             event_session,
             now=self._now,
         )
+        self._delivery_service = delivery_service
         self._interrupt_config = DeterministicInterruptConfig()
         self._terminal_config = DeterministicTerminalConfig()
 
@@ -442,6 +451,14 @@ class DeterministicRuntimeEngine:
             artifact_ref=artifact.artifact_id,
             trace_context=stage_trace,
         )
+        delivery_event_refs, delivery_audit_refs, delivery_log_refs = (
+            self._maybe_run_demo_delivery(
+                context=context,
+                stage=completed_stage,
+                artifact=artifact,
+                trace_context=stage_trace,
+            )
+        )
         checkpoint = checkpoint_port.save_checkpoint(
             thread=context.thread,
             purpose=CheckpointPurpose.RUNNING_SAFE_POINT,
@@ -454,6 +471,7 @@ class DeterministicRuntimeEngine:
         event_refs = [
             *([start_event.event_id] if start_event is not None else []),
             *[event.event_id for event in update_events],
+            *delivery_event_refs,
         ]
         log_summary_ref = self._write_stage_log(
             context=context,
@@ -478,8 +496,11 @@ class DeterministicRuntimeEngine:
             trace_context=stage_trace,
             artifact_refs=[artifact.artifact_id],
             domain_event_refs=event_refs,
-            log_summary_refs=[log_summary_ref] if log_summary_ref is not None else [],
-            audit_refs=[],
+            log_summary_refs=[
+                *([log_summary_ref] if log_summary_ref is not None else []),
+                *delivery_log_refs,
+            ],
+            audit_refs=delivery_audit_refs,
             checkpoint_ref=checkpoint,
         )
 
@@ -2262,6 +2283,131 @@ class DeterministicRuntimeEngine:
         ).scalars().all()
         return [row.output_ref for row in rows if row.output_ref]
 
+    def _maybe_run_demo_delivery(
+        self,
+        *,
+        context: RuntimeExecutionContext,
+        stage: StageRunModel,
+        artifact: StageArtifactModel,
+        trace_context: TraceContext,
+    ) -> tuple[list[str], list[str], list[str]]:
+        if self._delivery_service is None:
+            return [], [], []
+        if stage.stage_type is not StageType.DELIVERY_INTEGRATION:
+            return [], [], []
+        run = self._runtime_session.get(
+            PipelineRunModel,
+            context.run_id,
+            populate_existing=True,
+        )
+        if run is None or not run.delivery_channel_snapshot_ref:
+            return [], [], []
+        snapshot = self._runtime_session.get(
+            DeliveryChannelSnapshotModel,
+            run.delivery_channel_snapshot_ref,
+            populate_existing=True,
+        )
+        if snapshot is None or snapshot.delivery_mode is not DeliveryMode.DEMO_DELIVERY:
+            return [], [], []
+        self._delivery_service.assert_deterministic_runtime_boundary(
+            runtime_session=self._runtime_session,
+            event_session=self._event_session,
+            message=INCOMPATIBLE_DELIVERY_SERVICE_MESSAGE,
+        )
+        delivery_input = self._demo_delivery_input(
+            context=context,
+            stage=stage,
+            artifact=artifact,
+            snapshot=snapshot,
+            trace_context=trace_context,
+        )
+        adapter = self._delivery_service.get_adapter(
+            DeliveryMode.DEMO_DELIVERY,
+            trace_context=trace_context,
+        )
+        adapter_result = adapter.deliver(delivery_input)
+        record = self._delivery_service.create_delivery_record_from_adapter_result(
+            adapter_result=adapter_result,
+        )
+        event = self._delivery_service.append_delivery_result(
+            record=record,
+            trace_context=trace_context.model_copy(
+                update={"delivery_record_id": record.delivery_record_id}
+            ),
+        )
+        self._artifact_store.append_process_record(
+            artifact_id=artifact.artifact_id,
+            process_key="demo_delivery",
+            process_value={
+                "delivery_record_id": record.delivery_record_id,
+                "delivery_mode": record.delivery_mode.value,
+                "status": record.status,
+                "result_ref": record.result_ref,
+                "process_ref": record.process_ref,
+                "branch_name": record.branch_name,
+                "commit_sha": record.commit_sha,
+                "code_review_url": record.code_review_url,
+                "audit_refs": list(adapter_result.audit_refs),
+                "log_summary_refs": list(adapter_result.log_summary_refs),
+                "delivery_result_event_ref": event.event_id,
+                "no_git_actions": True,
+                "git_write_actions": [],
+            },
+            trace_context=trace_context,
+        )
+        return [event.event_id], list(adapter_result.audit_refs), list(
+            adapter_result.log_summary_refs
+        )
+
+    def _demo_delivery_input(
+        self,
+        *,
+        context: RuntimeExecutionContext,
+        stage: StageRunModel,
+        artifact: StageArtifactModel,
+        snapshot: DeliveryChannelSnapshotModel,
+        trace_context: TraceContext,
+    ) -> DeliveryAdapterInput:
+        refs_by_stage = self._stage_output_refs_by_type(context.run_id)
+        return DeliveryAdapterInput(
+            run_id=context.run_id,
+            stage_run_id=stage.stage_run_id,
+            delivery_channel_snapshot_ref=snapshot.delivery_channel_snapshot_id,
+            delivery_mode=snapshot.delivery_mode,
+            requirement_refs=refs_by_stage.get(StageType.REQUIREMENT_ANALYSIS, []),
+            solution_refs=refs_by_stage.get(StageType.SOLUTION_DESIGN, []),
+            changeset_refs=refs_by_stage.get(StageType.CODE_GENERATION, []),
+            test_result_refs=refs_by_stage.get(
+                StageType.TEST_GENERATION_EXECUTION,
+                [],
+            ),
+            review_refs=refs_by_stage.get(StageType.CODE_REVIEW, []),
+            approval_result_refs=[],
+            artifact_refs=self._dedupe_refs(
+                [
+                    *self._previous_stage_refs(context.run_id),
+                    artifact.artifact_id,
+                ]
+            ),
+            trace_context=trace_context,
+        )
+
+    @staticmethod
+    def _dedupe_refs(refs: list[str]) -> list[str]:
+        return list(dict.fromkeys(refs))
+
+    def _stage_output_refs_by_type(self, run_id: str) -> dict[StageType, list[str]]:
+        rows = self._runtime_session.execute(
+            select(StageRunModel)
+            .where(StageRunModel.run_id == run_id)
+            .order_by(StageRunModel.started_at.asc())
+        ).scalars().all()
+        refs: dict[StageType, list[str]] = {}
+        for row in rows:
+            if row.output_ref:
+                refs.setdefault(row.stage_type, []).append(row.output_ref)
+        return refs
+
     def _snapshot_refs(self, context: RuntimeExecutionContext) -> dict[str, object]:
         return {
             "template_snapshot_ref": context.template_snapshot_ref,
@@ -2292,7 +2438,7 @@ class DeterministicRuntimeEngine:
             ),
             StageType.CODE_REVIEW: "Deterministic review summary produced.",
             StageType.DELIVERY_INTEGRATION: (
-                "Delivery integration handoff prepared for later demo_delivery slice."
+                "Delivery integration completed for demo_delivery path."
             ),
         }
         return {

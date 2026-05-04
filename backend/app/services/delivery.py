@@ -15,16 +15,19 @@ from backend.app.db.models.runtime import (
     StageRunModel,
 )
 from backend.app.delivery.base import DeliveryAdapter, DeliveryAdapterResult
+from backend.app.delivery.demo import DEMO_DELIVERY_SUMMARY
 from backend.app.domain.enums import DeliveryMode, StageType
 from backend.app.domain.trace_context import TraceContext
 from backend.app.observability.log_writer import LogPayloadSummary, LogRecordInput
 from backend.app.observability.redaction import RedactionPolicy
+from backend.app.schemas.feed import DeliveryResultFeedEntry
 from backend.app.schemas.observability import (
     AuditActorType,
     AuditResult,
     LogCategory,
     LogLevel,
 )
+from backend.app.services.events import DomainEvent, DomainEventType, EventStore
 
 
 DELIVERY_RECORD_NOT_FOUND_MESSAGE = "DeliveryRecord was not found."
@@ -43,6 +46,10 @@ DELIVERY_ADAPTER_NOT_FOUND_MESSAGE = (
     "Delivery adapter was not found for the frozen delivery mode."
 )
 DELIVERY_ADAPTER_REGISTRY_INVALID_MESSAGE = "Delivery adapter registry is invalid."
+DEMO_DELIVERY_MODE_REQUIRED_MESSAGE = "Demo delivery requires demo_delivery mode."
+DELIVERY_RESULT_RECORD_INVALID_MESSAGE = (
+    "delivery_result requires a succeeded DeliveryRecord."
+)
 LOG_SOURCE = "services.delivery"
 ACTOR_ID = "delivery-service"
 TERMINAL_DELIVERY_RECORD_STATUSES = frozenset({"succeeded", "failed", "blocked"})
@@ -73,6 +80,14 @@ class DeliveryRecordService:
         self._redaction_policy = redaction_policy or RedactionPolicy()
         self._auto_commit = auto_commit
         self._now = now or (lambda: datetime.now(UTC))
+
+    @property
+    def runtime_session(self) -> Session:
+        return self._runtime_session
+
+    @property
+    def auto_commit(self) -> bool:
+        return self._auto_commit
 
     def create_record(
         self,
@@ -204,6 +219,35 @@ class DeliveryRecordService:
                 404,
             )
         return record
+
+    def create_demo_record(
+        self,
+        *,
+        adapter_result: DeliveryAdapterResult,
+    ) -> DeliveryRecordModel:
+        if adapter_result.delivery_mode is not DeliveryMode.DEMO_DELIVERY:
+            raise DeliveryServiceError(
+                ErrorCode.VALIDATION_ERROR,
+                DEMO_DELIVERY_MODE_REQUIRED_MESSAGE,
+                409,
+            )
+        return self.create_record(
+            run_id=adapter_result.run_id,
+            stage_run_id=adapter_result.stage_run_id,
+            delivery_mode=adapter_result.delivery_mode,
+            status=adapter_result.status,
+            result_ref=adapter_result.result_ref,
+            process_ref=adapter_result.process_ref,
+            branch_name=adapter_result.branch_name,
+            commit_sha=adapter_result.commit_sha,
+            code_review_url=adapter_result.code_review_url,
+            failure_reason=(
+                adapter_result.error.safe_message
+                if adapter_result.error is not None
+                else None
+            ),
+            trace_context=adapter_result.trace_context,
+        )
 
     def record_adapter_selection_rejected(
         self,
@@ -508,9 +552,33 @@ class DeliveryService:
         *,
         record_service: DeliveryRecordService,
         adapters: Mapping[DeliveryMode, DeliveryAdapter] | Sequence[DeliveryAdapter] | None = None,
+        event_store: EventStore | None = None,
+        now: Callable[[], datetime] | None = None,
     ) -> None:
         self._record_service = record_service
         self._adapters = self._normalize_adapters(adapters)
+        self._event_store = event_store
+        self._now = now or (lambda: datetime.now(UTC))
+
+    @property
+    def record_service(self) -> DeliveryRecordService:
+        return self._record_service
+
+    def assert_deterministic_runtime_boundary(
+        self,
+        *,
+        runtime_session: Session,
+        event_session: Session,
+        message: str,
+    ) -> None:
+        if self._record_service.runtime_session is not runtime_session:
+            raise ValueError(message)
+        if self._record_service.auto_commit:
+            raise ValueError(message)
+        if self._event_store is None:
+            raise ValueError(message)
+        if getattr(self._event_store, "_session", None) is not event_session:
+            raise ValueError(message)
 
     def get_adapter(
         self,
@@ -536,6 +604,10 @@ class DeliveryService:
         *,
         adapter_result: DeliveryAdapterResult,
     ) -> DeliveryRecordModel:
+        if adapter_result.delivery_mode is DeliveryMode.DEMO_DELIVERY:
+            return self._record_service.create_demo_record(
+                adapter_result=adapter_result,
+            )
         return self._record_service.create_record(
             run_id=adapter_result.run_id,
             stage_run_id=adapter_result.stage_run_id,
@@ -552,6 +624,55 @@ class DeliveryService:
                 else None
             ),
             trace_context=adapter_result.trace_context,
+        )
+
+    def append_delivery_result(
+        self,
+        *,
+        record: DeliveryRecordModel,
+        trace_context: TraceContext,
+        event_store: EventStore | None = None,
+    ) -> DomainEvent:
+        if record.status != "succeeded":
+            raise DeliveryServiceError(
+                ErrorCode.VALIDATION_ERROR,
+                DELIVERY_RESULT_RECORD_INVALID_MESSAGE,
+                409,
+            )
+        resolved_event_store = event_store or self._event_store
+        if resolved_event_store is None:
+            raise DeliveryServiceError(
+                ErrorCode.VALIDATION_ERROR,
+                "Delivery result append requires an EventStore.",
+                409,
+            )
+        delivery_result = DeliveryResultFeedEntry(
+            entry_id=f"entry-delivery-result-{record.delivery_record_id}",
+            run_id=record.run_id,
+            occurred_at=self._now(),
+            delivery_record_id=record.delivery_record_id,
+            delivery_mode=record.delivery_mode,
+            status="succeeded",
+            summary=(
+                DEMO_DELIVERY_SUMMARY
+                if record.delivery_mode is DeliveryMode.DEMO_DELIVERY
+                else "Delivery completed."
+            ),
+            branch_name=record.branch_name,
+            commit_sha=record.commit_sha,
+            code_review_url=record.code_review_url,
+            test_summary="Deterministic test path completed.",
+            result_ref=record.result_ref,
+        )
+        return resolved_event_store.append(
+            DomainEventType.DELIVERY_PREPARED,
+            payload={"delivery_result": delivery_result.model_dump(mode="json")},
+            trace_context=trace_context.model_copy(
+                update={"delivery_record_id": record.delivery_record_id}
+            ),
+            session_id=trace_context.session_id,
+            run_id=record.run_id,
+            stage_run_id=record.stage_run_id,
         )
 
     @staticmethod
@@ -594,12 +715,14 @@ class DeliveryService:
 
 __all__ = [
     "DELIVERY_ADAPTER_NOT_FOUND_MESSAGE",
+    "DELIVERY_RESULT_RECORD_INVALID_MESSAGE",
     "DELIVERY_RECORD_MODE_MISMATCH_MESSAGE",
     "DELIVERY_RECORD_NOT_FOUND_MESSAGE",
     "DELIVERY_RECORD_SNAPSHOT_MISMATCH_MESSAGE",
     "DELIVERY_RECORD_STAGE_MISMATCH_MESSAGE",
     "DELIVERY_RECORD_STATUS_INVALID_MESSAGE",
     "DELIVERY_RECORD_TARGET_NOT_FOUND_MESSAGE",
+    "DEMO_DELIVERY_MODE_REQUIRED_MESSAGE",
     "DeliveryRecordService",
     "DeliveryService",
     "DeliveryServiceError",
