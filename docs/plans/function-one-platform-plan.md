@@ -278,7 +278,7 @@
 | A4.3 | deterministic test runtime 澄清与审批中断 | Week 7 | [x] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#a43) |
 | A4.4 | deterministic test runtime 终态控制 | Week 7 | [x] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#a44) |
 | D4.1 | Delivery base 与 DeliveryRecord | Week 7 | [x] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#d41) |
-| D4.2 | demo_delivery adapter 与 delivery_result | Week 7 | [ ] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#d42) |
+| D4.2 | demo_delivery adapter 与 delivery_result | Week 7 | [x] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#d42) |
 | D4.3 | DeliveryResultDetailProjection 正式实现 | Week 7 | [ ] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#d43) |
 | A4.5 | LangGraph 主链与 checkpoint | Week 8 | [x] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a45) |
 | A4.6 | LangGraph interrupt resume | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a46) |

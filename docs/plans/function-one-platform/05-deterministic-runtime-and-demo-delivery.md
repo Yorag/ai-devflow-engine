@@ -174,7 +174,7 @@
 ## D4.2 demo_delivery adapter 与 delivery_result
 
 **计划周期**：Week 7
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现 `demo_delivery` 交付路径，使 deterministic 成功链路可生成完整 DeliveryRecord 和展示型交付结果且不执行真实 Git 写动作。
 **实施计划**：`docs/plans/implementation/d4.2-demo-delivery-adapter.md`
 
