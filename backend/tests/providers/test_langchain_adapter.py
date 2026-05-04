@@ -40,19 +40,21 @@ def trace_context() -> TraceContext:
     )
 
 
-def provider_policy_snapshot() -> ProviderCallPolicySnapshotRead:
+def provider_policy_snapshot(**overrides: object) -> ProviderCallPolicySnapshotRead:
+    policy_values = {
+        "request_timeout_seconds": 45,
+        "network_error_max_retries": 3,
+        "rate_limit_max_retries": 2,
+        "backoff_base_seconds": 1.0,
+        "backoff_max_seconds": 8.0,
+        "circuit_breaker_failure_threshold": 5,
+        "circuit_breaker_recovery_seconds": 60,
+        **overrides,
+    }
     return ProviderCallPolicySnapshotRead(
         snapshot_id="provider-policy-snapshot-run-1",
         run_id="run-1",
-        provider_call_policy=ProviderCallPolicy(
-            request_timeout_seconds=45,
-            network_error_max_retries=3,
-            rate_limit_max_retries=2,
-            backoff_base_seconds=1.0,
-            backoff_max_seconds=8.0,
-            circuit_breaker_failure_threshold=5,
-            circuit_breaker_recovery_seconds=60,
-        ),
+        provider_call_policy=ProviderCallPolicy(**policy_values),
         source_config_version="runtime-settings-v2",
         schema_version="provider-call-policy-snapshot-v1",
         created_at=NOW,
@@ -139,6 +141,51 @@ class _FakeRawDictModel:
 
     def invoke(self, _messages):
         return dict(self._payload)
+
+
+class _RetrySequenceModel:
+    def __init__(self, outcomes) -> None:
+        self.outcomes = list(outcomes)
+        self.invocations = 0
+
+    def with_structured_output(self, schema, **kwargs):
+        self.structured_schema = schema
+        self.structured_kwargs = kwargs
+        return self
+
+    def invoke(self, _messages):
+        self.invocations += 1
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        if isinstance(outcome, dict):
+            return {
+                "parsed": dict(outcome),
+                "raw": AIMessage(content="ok"),
+            }
+        return outcome
+
+
+class _ArtifactProcessRecordRecorder:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def append_process_record(
+        self,
+        *,
+        artifact_id: str,
+        process_key: str,
+        process_value: object,
+        trace_context: TraceContext,
+    ) -> None:
+        self.calls.append(
+            {
+                "artifact_id": artifact_id,
+                "process_key": process_key,
+                "process_value": process_value,
+                "trace_context": trace_context,
+            }
+        )
 
 
 def test_create_chat_model_uses_only_frozen_snapshot_configuration(
@@ -616,6 +663,409 @@ def test_invoke_structured_returns_structured_failure_for_provider_errors() -> N
     assert result.provider_error_message == "Provider call failed."
     assert result.structured_output is None
     assert result.tool_call_requests == ()
+
+
+def test_invoke_structured_preserves_setup_errors_before_provider_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from backend.app.providers.langchain_adapter import (
+        LangChainProviderAdapter,
+        LangChainProviderAdapterError,
+    )
+
+    fake_provider = fake_provider_fixture(
+        provider_snapshot=provider_snapshot_fixture(
+            api_key_ref="env:AI_DEVFLOW_CREDENTIAL_MISSING_PROVIDER_KEY"
+        )
+    )
+    monkeypatch.delenv("AI_DEVFLOW_CREDENTIAL_MISSING_PROVIDER_KEY", raising=False)
+    adapter = LangChainProviderAdapter(
+        provider_config=fake_provider.config,
+        provider_call_policy_snapshot=provider_policy_snapshot(),
+    )
+
+    with pytest.raises(LangChainProviderAdapterError) as error:
+        adapter.invoke_structured(
+            messages=(SystemMessage(content="system"), HumanMessage(content="user")),
+            response_schema={"type": "object"},
+            model_call_type=ModelCallType.STAGE_EXECUTION,
+            tool_descriptions=(),
+            trace_context=trace_context(),
+        )
+
+    assert error.value.error_code == "provider_credential_unavailable"
+
+
+def test_invoke_with_retry_retries_timeout_with_exponential_backoff() -> None:
+    from backend.app.providers.langchain_adapter import LangChainProviderAdapter
+
+    waits: list[float] = []
+    model = _RetrySequenceModel(
+        [
+            TimeoutError("request timed out"),
+            ConnectionError("network down"),
+            {"summary": "done"},
+        ]
+    )
+    fake_provider = fake_provider_fixture()
+    adapter = LangChainProviderAdapter(
+        provider_config=fake_provider.config,
+        provider_call_policy_snapshot=provider_policy_snapshot(),
+        chat_model_factory=lambda _config, _timeout, _max_tokens: model,
+    )
+
+    result = adapter.invoke_with_retry(
+        messages=(SystemMessage(content="system"), HumanMessage(content="user")),
+        response_schema={
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+            "required": ["summary"],
+            "additionalProperties": False,
+        },
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        tool_descriptions=(),
+        trace_context=trace_context(),
+        sleep=waits.append,
+    )
+
+    assert result.provider_error_code is None
+    assert result.structured_output == {"summary": "done"}
+    assert waits == [1.0, 2.0]
+    assert model.invocations == 3
+    assert [trace.status for trace in result.provider_retry_trace] == [
+        "scheduled",
+        "scheduled",
+        "succeeded",
+    ]
+    assert result.provider_retry_trace[0].run_id == "run-1"
+    assert result.provider_retry_trace[0].stage_run_id == "stage-run-1"
+
+
+def test_invoke_with_retry_uses_unique_trace_refs_across_repeated_retries() -> None:
+    from backend.app.providers.langchain_adapter import LangChainProviderAdapter
+
+    model = _RetrySequenceModel(
+        [
+            TimeoutError("request timed out"),
+            {"summary": "first"},
+            TimeoutError("request timed out again"),
+            {"summary": "second"},
+        ]
+    )
+    fake_provider = fake_provider_fixture()
+    adapter = LangChainProviderAdapter(
+        provider_config=fake_provider.config,
+        provider_call_policy_snapshot=provider_policy_snapshot(),
+        chat_model_factory=lambda _config, _timeout, _max_tokens: model,
+    )
+    times = iter(
+        [
+            NOW,
+            NOW.replace(second=1),
+            NOW.replace(second=2),
+            NOW.replace(second=3),
+        ]
+    )
+
+    first = adapter.invoke_with_retry(
+        messages=(SystemMessage(content="system"), HumanMessage(content="user")),
+        response_schema={"type": "object"},
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        tool_descriptions=(),
+        trace_context=trace_context(),
+        sleep=lambda _seconds: None,
+        now=lambda: next(times),
+    )
+    second = adapter.invoke_with_retry(
+        messages=(SystemMessage(content="system"), HumanMessage(content="user")),
+        response_schema={"type": "object"},
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        tool_descriptions=(),
+        trace_context=trace_context(),
+        sleep=lambda _seconds: None,
+        now=lambda: next(times),
+    )
+
+    trace_refs = [
+        trace.trace_ref
+        for trace in [*first.provider_retry_trace, *second.provider_retry_trace]
+    ]
+    assert len(trace_refs) == 4
+    assert len(set(trace_refs)) == 4
+
+
+def test_invoke_with_retry_does_not_retry_non_retryable_provider_errors() -> None:
+    from backend.app.providers.langchain_adapter import LangChainProviderAdapter
+
+    waits: list[float] = []
+    model = _RetrySequenceModel([RuntimeError("401 unauthorized api key")])
+    fake_provider = fake_provider_fixture()
+    adapter = LangChainProviderAdapter(
+        provider_config=fake_provider.config,
+        provider_call_policy_snapshot=provider_policy_snapshot(
+            circuit_breaker_failure_threshold=1
+        ),
+        chat_model_factory=lambda _config, _timeout, _max_tokens: model,
+    )
+
+    result = adapter.invoke_with_retry(
+        messages=(SystemMessage(content="system"), HumanMessage(content="user")),
+        response_schema={"type": "object"},
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        tool_descriptions=(),
+        trace_context=trace_context(),
+        sleep=waits.append,
+    )
+
+    assert waits == []
+    assert model.invocations == 1
+    assert result.provider_error_code is ErrorCode.PROVIDER_RETRY_EXHAUSTED
+    assert result.provider_retry_trace[-1].status == "not_retryable"
+    assert result.provider_circuit_breaker_trace == ()
+
+
+def test_invoke_with_retry_does_not_retry_empty_structured_response() -> None:
+    from backend.app.providers.langchain_adapter import LangChainProviderAdapter
+
+    waits: list[float] = []
+    model = _RetrySequenceModel([{}])
+    fake_provider = fake_provider_fixture()
+    adapter = LangChainProviderAdapter(
+        provider_config=fake_provider.config,
+        provider_call_policy_snapshot=provider_policy_snapshot(),
+        chat_model_factory=lambda _config, _timeout, _max_tokens: model,
+    )
+
+    result = adapter.invoke_with_retry(
+        messages=(SystemMessage(content="system"), HumanMessage(content="user")),
+        response_schema={"type": "object"},
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        tool_descriptions=(),
+        trace_context=trace_context(),
+        sleep=waits.append,
+    )
+
+    assert waits == []
+    assert model.invocations == 1
+    assert result.provider_error_code is ErrorCode.PROVIDER_RETRY_EXHAUSTED
+    assert result.provider_retry_trace[-1].failure_kind == "empty_response"
+    assert result.provider_retry_trace[-1].status == "not_retryable"
+
+
+def test_invoke_with_retry_does_not_retry_unparseable_structured_output() -> None:
+    from backend.app.providers.langchain_adapter import LangChainProviderAdapter
+
+    waits: list[float] = []
+    model = _RetrySequenceModel(["not structured"])
+    fake_provider = fake_provider_fixture()
+    adapter = LangChainProviderAdapter(
+        provider_config=fake_provider.config,
+        provider_call_policy_snapshot=provider_policy_snapshot(),
+        chat_model_factory=lambda _config, _timeout, _max_tokens: model,
+    )
+
+    result = adapter.invoke_with_retry(
+        messages=(SystemMessage(content="system"), HumanMessage(content="user")),
+        response_schema={"type": "object"},
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        tool_descriptions=(),
+        trace_context=trace_context(),
+        sleep=waits.append,
+    )
+
+    assert waits == []
+    assert model.invocations == 1
+    assert result.provider_error_code is ErrorCode.PROVIDER_RETRY_EXHAUSTED
+    assert result.provider_retry_trace[-1].failure_kind == (
+        "structured_output_unparseable"
+    )
+    assert result.provider_retry_trace[-1].status == "not_retryable"
+
+
+def test_invoke_with_retry_opens_circuit_and_blocks_later_same_binding_call() -> None:
+    from backend.app.providers.langchain_adapter import LangChainProviderAdapter
+
+    model = _RetrySequenceModel(
+        [
+            ConnectionError("network down"),
+            ConnectionError("network still down"),
+            {"summary": "should not be reached"},
+        ]
+    )
+    fake_provider = fake_provider_fixture()
+    adapter = LangChainProviderAdapter(
+        provider_config=fake_provider.config,
+        provider_call_policy_snapshot=provider_policy_snapshot(
+            circuit_breaker_failure_threshold=2,
+            network_error_max_retries=5,
+        ),
+        chat_model_factory=lambda _config, _timeout, _max_tokens: model,
+    )
+
+    first = adapter.invoke_with_retry(
+        messages=(SystemMessage(content="system"), HumanMessage(content="user")),
+        response_schema={"type": "object"},
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        tool_descriptions=(),
+        trace_context=trace_context(),
+        sleep=lambda _seconds: None,
+    )
+    second = adapter.invoke_with_retry(
+        messages=(SystemMessage(content="system"), HumanMessage(content="user")),
+        response_schema={"type": "object"},
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        tool_descriptions=(),
+        trace_context=trace_context(),
+        sleep=lambda _seconds: None,
+    )
+
+    assert first.provider_error_code is ErrorCode.PROVIDER_CIRCUIT_OPEN
+    assert first.provider_circuit_breaker_trace[-1].action == "opened"
+    assert first.provider_circuit_breaker_trace[-1].stage_run_id == "stage-run-1"
+    assert [trace.status for trace in first.provider_retry_trace] == [
+        "scheduled",
+        "exhausted",
+    ]
+    assert first.provider_retry_trace[-1].status == "exhausted"
+    assert first.provider_retry_trace[-1].backoff_wait_seconds is None
+    assert second.provider_error_code is ErrorCode.PROVIDER_CIRCUIT_OPEN
+    assert second.provider_circuit_breaker_trace[-1].action == "blocked"
+    assert model.invocations == 2
+
+
+def test_invoke_with_retry_records_closed_trace_after_half_open_success() -> None:
+    from backend.app.providers.langchain_adapter import LangChainProviderAdapter
+
+    model = _RetrySequenceModel(
+        [
+            ConnectionError("network down"),
+            {"summary": "recovered"},
+        ]
+    )
+    fake_provider = fake_provider_fixture()
+    adapter = LangChainProviderAdapter(
+        provider_config=fake_provider.config,
+        provider_call_policy_snapshot=provider_policy_snapshot(
+            circuit_breaker_failure_threshold=1,
+            circuit_breaker_recovery_seconds=30,
+        ),
+        chat_model_factory=lambda _config, _timeout, _max_tokens: model,
+    )
+
+    opened = adapter.invoke_with_retry(
+        messages=(SystemMessage(content="system"), HumanMessage(content="user")),
+        response_schema={"type": "object"},
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        tool_descriptions=(),
+        trace_context=trace_context(),
+        sleep=lambda _seconds: None,
+        now=lambda: NOW,
+    )
+    recovered = adapter.invoke_with_retry(
+        messages=(SystemMessage(content="system"), HumanMessage(content="user")),
+        response_schema={"type": "object"},
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        tool_descriptions=(),
+        trace_context=trace_context(),
+        sleep=lambda _seconds: None,
+        now=lambda: NOW.replace(second=31),
+    )
+
+    assert opened.provider_error_code is ErrorCode.PROVIDER_CIRCUIT_OPEN
+    assert recovered.provider_error_code is None
+    assert recovered.structured_output == {"summary": "recovered"}
+    assert [trace.action for trace in recovered.provider_circuit_breaker_trace] == [
+        "half_open",
+        "closed",
+    ]
+
+
+def test_provider_traces_use_ordinary_artifact_process_record_keys() -> None:
+    from backend.app.providers.langchain_adapter import LangChainProviderAdapter
+    from backend.app.services.artifacts import ArtifactStore
+
+    assert not hasattr(ArtifactStore, "append_provider_retry_trace")
+    assert not hasattr(ArtifactStore, "append_provider_circuit_breaker_trace")
+
+    model = _RetrySequenceModel([ConnectionError("network down")])
+    fake_provider = fake_provider_fixture()
+    adapter = LangChainProviderAdapter(
+        provider_config=fake_provider.config,
+        provider_call_policy_snapshot=provider_policy_snapshot(
+            circuit_breaker_failure_threshold=1,
+            network_error_max_retries=5,
+        ),
+        chat_model_factory=lambda _config, _timeout, _max_tokens: model,
+    )
+
+    result = adapter.invoke_with_retry(
+        messages=(SystemMessage(content="system"), HumanMessage(content="user")),
+        response_schema={"type": "object"},
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        tool_descriptions=(),
+        trace_context=trace_context(),
+        sleep=lambda _seconds: None,
+        now=lambda: NOW,
+    )
+    recorder = _ArtifactProcessRecordRecorder()
+    retry_records = [
+        trace.model_dump(mode="json") for trace in result.provider_retry_trace
+    ]
+    circuit_records = [
+        trace.model_dump(mode="json")
+        for trace in result.provider_circuit_breaker_trace
+    ]
+
+    recorder.append_process_record(
+        artifact_id="artifact-stage-1",
+        process_key="provider_retry_trace",
+        process_value=retry_records,
+        trace_context=trace_context(),
+    )
+    recorder.append_process_record(
+        artifact_id="artifact-stage-1",
+        process_key="provider_retry_trace_refs",
+        process_value=[trace["trace_ref"] for trace in retry_records],
+        trace_context=trace_context(),
+    )
+    recorder.append_process_record(
+        artifact_id="artifact-stage-1",
+        process_key="provider_retry_trace_ref",
+        process_value=retry_records[-1]["trace_ref"],
+        trace_context=trace_context(),
+    )
+    recorder.append_process_record(
+        artifact_id="artifact-stage-1",
+        process_key="provider_circuit_breaker_trace",
+        process_value=circuit_records,
+        trace_context=trace_context(),
+    )
+    recorder.append_process_record(
+        artifact_id="artifact-stage-1",
+        process_key="provider_circuit_breaker_trace_refs",
+        process_value=[trace["trace_ref"] for trace in circuit_records],
+        trace_context=trace_context(),
+    )
+    recorder.append_process_record(
+        artifact_id="artifact-stage-1",
+        process_key="provider_circuit_breaker_trace_ref",
+        process_value=circuit_records[-1]["trace_ref"],
+        trace_context=trace_context(),
+    )
+
+    assert result.provider_error_code is ErrorCode.PROVIDER_CIRCUIT_OPEN
+    assert [call["process_key"] for call in recorder.calls] == [
+        "provider_retry_trace",
+        "provider_retry_trace_refs",
+        "provider_retry_trace_ref",
+        "provider_circuit_breaker_trace",
+        "provider_circuit_breaker_trace_refs",
+        "provider_circuit_breaker_trace_ref",
+    ]
+    assert recorder.calls[0]["process_value"] == retry_records
+    assert recorder.calls[3]["process_value"] == circuit_records
+    assert retry_records[0]["run_id"] == "run-1"
+    assert circuit_records[0]["stage_run_id"] == "stage-run-1"
 
 
 def test_invoke_structured_does_not_emit_native_reasoning_when_capability_is_false() -> None:
