@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from backend.app.domain.enums import StageType
+from backend.app.domain.enums import StageStatus, StageType
 from backend.app.domain.graph_definition import GraphDefinition
 from backend.app.domain.runtime_limit_snapshot import RuntimeLimitSnapshot
 from backend.app.domain.template_snapshot import TemplateSnapshot
@@ -17,6 +18,8 @@ from backend.app.schemas.runtime_settings import (
     PlatformHardLimits,
     RuntimeLimitSnapshotRead,
 )
+from backend.app.schemas.feed import ControlItemFeedEntry
+from backend.app.services.control_records import RetryControlResult
 
 
 AUTO_REGRESSION_ROUTE_KEY = "review_regression_retry"
@@ -29,6 +32,38 @@ STABLE_REVIEW_DECISIONS = frozenset({"approved", "no_changes_requested"})
 
 class RunLogWriter(Protocol):
     def write_run_log(self, record: LogRecordInput) -> object: ...
+
+
+class RetryControlRecorder(Protocol):
+    def append_retry_control_item(
+        self,
+        *,
+        run_id: str,
+        stage_run_id: str,
+        source_stage_type: StageType,
+        target_stage_type: StageType,
+        payload_ref: str,
+        summary: str,
+        retry_index: int,
+        source_attempt_index: int,
+        policy_source_attempt_index: int | None = None,
+        trace_context: TraceContext,
+    ) -> RetryControlResult: ...
+
+
+class CodeReviewApprovalCreator(Protocol):
+    def create_code_review_approval(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        stage_run_id: str,
+        payload_ref: str,
+        approval_object_excerpt: str,
+        risk_excerpt: str | None,
+        approval_object_preview: dict[str, Any],
+        trace_context: TraceContext,
+    ) -> object: ...
 
 
 class AutoRegressionDecision(BaseModel):
@@ -365,6 +400,172 @@ class AutoRegressionPolicy:
             return
 
 
+@dataclass(frozen=True)
+class AutoRegressionExhaustedFailure:
+    run_id: str
+    stage_run_id: str
+    stage_status: StageStatus
+    reason: str
+    user_visible_summary: str
+    retry_index: int | None
+    source_attempt_index: int
+    attempts_used: int
+    max_retries: int
+    evidence_refs: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AutoRegressionRunnerResult:
+    decision: AutoRegressionDecision
+    status: Literal[
+        "retry_control_item_appended",
+        "approval_requested",
+        "retry_exhausted",
+        "blocked",
+    ]
+    control_item: ControlItemFeedEntry | None = None
+    control_record_id: str | None = None
+    trace_artifact_id: str | None = None
+    approval_result: object | None = None
+    exhausted_failure: AutoRegressionExhaustedFailure | None = None
+
+
+class AutoRegressionRunner:
+    def __init__(
+        self,
+        *,
+        policy: AutoRegressionPolicy | None = None,
+        control_records: RetryControlRecorder | None = None,
+        approval_creator: CodeReviewApprovalCreator | None = None,
+    ) -> None:
+        self._policy = policy or AutoRegressionPolicy()
+        self._control_records = control_records
+        self._approval_creator = approval_creator
+
+    def run(
+        self,
+        *,
+        session_id: str,
+        code_review_artifact: Mapping[str, object],
+        code_review_artifact_ref: str,
+        template_snapshot: TemplateSnapshot,
+        runtime_limit_snapshot: RuntimeLimitSnapshotRead | RuntimeLimitSnapshot,
+        graph_definition: GraphDefinition,
+        attempts_used: int,
+        source_attempt_index: int,
+        trace_context: TraceContext,
+        approval_object_excerpt: str,
+        risk_excerpt: str | None,
+        approval_object_preview: Mapping[str, object] | None = None,
+    ) -> AutoRegressionRunnerResult:
+        decision = self._policy.should_retry_review_issue(
+            code_review_artifact=code_review_artifact,
+            template_snapshot=template_snapshot,
+            runtime_limit_snapshot=runtime_limit_snapshot,
+            graph_definition=graph_definition,
+            attempts_used=attempts_used,
+            source_attempt_index=source_attempt_index,
+            trace_context=trace_context,
+        )
+        if decision.should_retry:
+            retry = self.append_retry_control_item(
+                decision=decision,
+                payload_ref=code_review_artifact_ref,
+                trace_context=trace_context,
+            )
+            return AutoRegressionRunnerResult(
+                decision=decision,
+                status="retry_control_item_appended",
+                control_item=retry.control_item,
+                control_record_id=retry.control_record.control_record_id,
+                trace_artifact_id=retry.trace_artifact.artifact_id,
+            )
+        if decision.status == "exhausted":
+            return AutoRegressionRunnerResult(
+                decision=decision,
+                status="retry_exhausted",
+                exhausted_failure=self.mark_retry_exhausted(
+                    decision=decision,
+                    code_review_artifact=code_review_artifact,
+                ),
+            )
+        if decision.approval_allowed and decision.reason == "stable_review":
+            if self._approval_creator is None:
+                raise ValueError(
+                    "approval_creator is required to create code review approval"
+                )
+            approval = self._approval_creator.create_code_review_approval(
+                session_id=session_id,
+                run_id=decision.run_id,
+                stage_run_id=decision.stage_run_id,
+                payload_ref=code_review_artifact_ref,
+                approval_object_excerpt=approval_object_excerpt,
+                risk_excerpt=risk_excerpt,
+                approval_object_preview=dict(approval_object_preview or {}),
+                trace_context=trace_context,
+            )
+            return AutoRegressionRunnerResult(
+                decision=decision,
+                status="approval_requested",
+                approval_result=approval,
+            )
+        return AutoRegressionRunnerResult(decision=decision, status="blocked")
+
+    def append_retry_control_item(
+        self,
+        *,
+        decision: AutoRegressionDecision,
+        payload_ref: str,
+        trace_context: TraceContext,
+    ) -> RetryControlResult:
+        if self._control_records is None:
+            raise ValueError("control_records is required to append retry control item")
+        if not decision.should_retry or decision.retry_index is None:
+            raise ValueError("retry control items require a retry decision")
+        if decision.return_stage is not AUTO_REGRESSION_RETURN_STAGE:
+            raise ValueError("retry control items must target code_generation")
+        visible_source_attempt_index = max(1, decision.source_attempt_index)
+        summary = (
+            f"Automatic regression retry {decision.retry_index} within the current run; "
+            f"continue in {AUTO_REGRESSION_RETURN_STAGE.value} from Code Review "
+            f"attempt {visible_source_attempt_index}."
+        )
+        return self._control_records.append_retry_control_item(
+            run_id=decision.run_id,
+            stage_run_id=decision.stage_run_id,
+            source_stage_type=StageType.CODE_REVIEW,
+            target_stage_type=AUTO_REGRESSION_RETURN_STAGE,
+            payload_ref=payload_ref,
+            summary=summary,
+            retry_index=decision.retry_index,
+            source_attempt_index=visible_source_attempt_index,
+            policy_source_attempt_index=decision.source_attempt_index,
+            trace_context=trace_context,
+        )
+
+    def mark_retry_exhausted(
+        self,
+        *,
+        decision: AutoRegressionDecision,
+        code_review_artifact: Mapping[str, object],
+    ) -> AutoRegressionExhaustedFailure:
+        return AutoRegressionExhaustedFailure(
+            run_id=decision.run_id,
+            stage_run_id=decision.stage_run_id,
+            stage_status=StageStatus.FAILED,
+            reason="auto_regression_retry_limit_exhausted",
+            user_visible_summary=(
+                "Retry limit exhausted for Code Review automatic regression; "
+                "the run must stop instead of silently advancing to approval."
+            ),
+            retry_index=decision.retry_index,
+            source_attempt_index=decision.source_attempt_index,
+            attempts_used=decision.attempts_used,
+            max_retries=decision.max_retries,
+            evidence_refs=_stable_evidence_refs(code_review_artifact),
+        )
+
+
 def resolve_max_auto_regression_retries(
     *,
     template_snapshot: TemplateSnapshot,
@@ -509,6 +710,17 @@ def _stable_reference(value: object) -> bool:
     return "://" in text or text.startswith(("sha256:", "stage-", "artifact-"))
 
 
+def _stable_evidence_refs(artifact: Mapping[str, object]) -> tuple[str, ...]:
+    evidence_refs = artifact.get("evidence_refs")
+    if not isinstance(evidence_refs, list | tuple):
+        return ()
+    return tuple(
+        str(item).strip()
+        for item in evidence_refs
+        if _stable_reference(item)
+    )
+
+
 __all__ = [
     "AUTO_REGRESSION_LOG_SOURCE",
     "AUTO_REGRESSION_POLICY_PAYLOAD_TYPE",
@@ -517,7 +729,12 @@ __all__ = [
     "CHANGES_REQUESTED",
     "STABLE_REVIEW_DECISIONS",
     "AutoRegressionDecision",
+    "AutoRegressionExhaustedFailure",
     "AutoRegressionPolicy",
+    "AutoRegressionRunner",
+    "AutoRegressionRunnerResult",
+    "CodeReviewApprovalCreator",
+    "RetryControlRecorder",
     "RunLogWriter",
     "resolve_max_auto_regression_retries",
     "should_retry_review_issue",
