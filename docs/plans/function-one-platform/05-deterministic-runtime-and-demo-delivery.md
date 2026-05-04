@@ -111,9 +111,10 @@
 ## A4.4 deterministic test runtime 终态控制
 
 **计划周期**：Week 7
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：为 `deterministic test runtime` 增加失败和终止路径，使端到端测试能覆盖 run 终态和重新尝试前置条件。
 **实施计划**：`docs/plans/implementation/a4.4-deterministic-terminal-control.md`
+**验证摘要**：实施计划 `docs/plans/implementation/a4.4-deterministic-terminal-control.md` 已在 integration checkpoint 合入 `74f7d38`。Worker verification 中 focused terminal 命令通过 11 个 tests，impacted runtime / contract 命令通过 45 个 tests，H4.6 terminate 与 rerun service regression 通过 25 个 tests，完整 backend suite 通过 1053 个 tests。本次 integration verification 在 `integration/function-one-acceleration` 上重复运行 focused terminal、impacted runtime / contract、H4.6 terminate / rerun regression 和完整 backend suite；`uv run pytest -q` 通过 1068 个 backend tests，保留既有 LangChain adapter `temperature` warning。
 
 **修改文件列表**：
 - Modify: `backend/app/runtime/deterministic.py`
