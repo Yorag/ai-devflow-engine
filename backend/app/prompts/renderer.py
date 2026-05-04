@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.app.domain.enums import StageType
 from backend.app.prompts.definitions import (
+    COMPRESSION_PROMPT_ID,
     RUNTIME_INSTRUCTIONS_PROMPT_ID,
     STRUCTURED_OUTPUT_REPAIR_PROMPT_ID,
     TOOL_USAGE_TEMPLATE_PROMPT_ID,
@@ -114,6 +115,9 @@ class PromptRenderRequest(_StrictBaseModel):
     output_schema_ref: str = Field(min_length=1)
     tool_schema_version: str = Field(min_length=1)
     parse_error: str | None = Field(default=None, min_length=1)
+    compression_source_context: str | None = Field(default=None, min_length=1)
+    compression_trigger_reason: str | None = Field(default=None, min_length=1)
+    full_trace_ref: str | None = Field(default=None, min_length=1)
     created_at: datetime
 
     @field_validator("stage_contracts")
@@ -251,9 +255,66 @@ class PromptRenderer:
             model_call_type=ModelCallType.STRUCTURED_OUTPUT_REPAIR,
         )
 
+    def render_context_compression(
+        self,
+        request: PromptRenderRequest,
+    ) -> PromptRenderResult:
+        if request.model_call_type is not ModelCallType.CONTEXT_COMPRESSION:
+            self._raise_unsupported_model_call_type(request)
+        if not request.compression_source_context:
+            raise PromptRenderException(
+                PromptRenderError(
+                    code="compression_context_missing",
+                    message=(
+                        "compression_source_context is required for context "
+                        "compression."
+                    ),
+                    stage_type=request.stage_type,
+                )
+            )
+        asset = self._get_asset(COMPRESSION_PROMPT_ID)
+        prompt_body = "\n\n".join(section.body for section in asset.sections)
+        section = self._asset_section(
+            request=request,
+            section_id="compression_prompt",
+            title="Context Compression",
+            body="\n".join(
+                [
+                    prompt_body,
+                    "Compression Trigger",
+                    request.compression_trigger_reason
+                    or "compression_threshold_exceeded",
+                    "Full trace ref:",
+                    request.full_trace_ref or "unavailable",
+                    "Response schema:",
+                    _stable_json(request.response_schema),
+                ]
+            ),
+            prompt_ref=self._prompt_ref(asset),
+            authority_level=PromptAuthorityLevel.SYSTEM_TRUSTED,
+            cache_scope=asset.cache_scope,
+        )
+        messages = [
+            PromptRenderedMessage(role="system", content=section.body),
+            PromptRenderedMessage(
+                role="user",
+                content=request.compression_source_context,
+            ),
+        ]
+        return self._result(
+            request=request,
+            messages=messages,
+            sections=[section],
+            model_call_type=ModelCallType.CONTEXT_COMPRESSION,
+        )
+
     def render_messages(self, request: PromptRenderRequest) -> PromptRenderResult:
         if request.model_call_type is ModelCallType.STRUCTURED_OUTPUT_REPAIR:
             return self.render_structured_output_repair(request)
+        if request.model_call_type is ModelCallType.CONTEXT_COMPRESSION:
+            if not self._has_asset(COMPRESSION_PROMPT_ID):
+                self._raise_unsupported_model_call_type(request)
+            return self.render_context_compression(request)
         if request.model_call_type is not ModelCallType.STAGE_EXECUTION:
             self._raise_unsupported_model_call_type(request)
 
@@ -392,8 +453,8 @@ class PromptRenderer:
             PromptRenderError(
                 code="unsupported_model_call_type",
                 message=(
-                    "PromptRenderer supports only stage_execution and "
-                    "structured_output_repair in this slice; received "
+                    "PromptRenderer supports stage_execution, "
+                    "structured_output_repair, and context_compression; received "
                     f"{request.model_call_type.value}"
                 ),
                 stage_type=request.stage_type,
@@ -411,6 +472,13 @@ class PromptRenderer:
                     prompt_id=prompt_id,
                 )
             ) from exc
+
+    def _has_asset(self, prompt_id: str) -> bool:
+        try:
+            self._registry.get(prompt_id)
+        except PromptAssetNotFoundError:
+            return False
+        return True
 
     def _asset_section(
         self,

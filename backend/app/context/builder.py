@@ -3,8 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from math import floor
-from typing import Callable, Sequence
+from typing import Any, Callable, Sequence
 
+from backend.app.context.compression import (
+    CompressedContextBlock,
+    ContextCompressionRequest,
+    ContextCompressionRunner,
+)
 from backend.app.context.schemas import (
     ContextBlock,
     ContextBoundaryAction,
@@ -17,6 +22,7 @@ from backend.app.context.schemas import (
     RenderedOutputKind,
 )
 from backend.app.context.source_resolver import ContextSourceResolver
+from backend.app.context.size_guard import ContextOverflowError, ContextSizeGuard
 from backend.app.db.models.runtime import (
     ApprovalDecisionModel,
     ClarificationRecordModel,
@@ -73,6 +79,11 @@ class ContextBuildRequest:
     clarifications: tuple[ClarificationRecordModel, ...] = ()
     approval_decisions: tuple[ApprovalDecisionModel, ...] = ()
     allowed_context_run_ids: tuple[str, ...] = ()
+    reserved_output_tokens: int = 0
+    max_recent_observation_blocks: int | None = None
+    full_trace_ref: str | None = None
+    compression_covered_step_range: str | None = None
+    provider_adapter: Any | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,12 +104,16 @@ class ContextEnvelopeBuilder:
         tool_registry: ToolRegistry,
         artifact_store: ArtifactStore,
         source_resolver: ContextSourceResolver | None = None,
+        context_size_guard: ContextSizeGuard | None = None,
+        compression_runner: ContextCompressionRunner | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._prompt_renderer = prompt_renderer
         self._tool_registry = tool_registry
         self._artifact_store = artifact_store
         self._source_resolver = source_resolver or ContextSourceResolver()
+        self._context_size_guard = context_size_guard
+        self._compression_runner = compression_runner
         self._now = now or (lambda: datetime.now(UTC))
 
     def build_for_stage_call(self, request: ContextBuildRequest) -> ContextBuildResult:
@@ -218,6 +233,11 @@ class ContextEnvelopeBuilder:
                 "ContextEnvelope.model_binding_snapshot_ref must match "
                 "model_binding_snapshot.snapshot_id"
             )
+        envelope = self._apply_size_guard(
+            envelope=envelope,
+            request=request,
+            built_at=built_at,
+        )
 
         rendered_messages = self.render_messages(
             envelope=envelope,
@@ -243,9 +263,8 @@ class ContextEnvelopeBuilder:
             compression_threshold_ratio=(
                 request.runtime_limit_snapshot.context_limits.compression_threshold_ratio
             ),
-            compression_trigger_token_threshold=floor(
-                request.provider_snapshot.capabilities.context_window_tokens
-                * request.runtime_limit_snapshot.context_limits.compression_threshold_ratio
+            compression_trigger_token_threshold=self._compression_trigger_tokens(
+                request=request
             ),
         )
         self.append_manifest_record(
@@ -260,6 +279,264 @@ class ContextEnvelopeBuilder:
             rendered_output_ref=rendered_output_ref,
             render_hash=render_hash,
             prompt_render_result=prompt_render,
+        )
+
+    def _apply_size_guard(
+        self,
+        *,
+        envelope: ContextEnvelope,
+        request: ContextBuildRequest,
+        built_at: datetime,
+    ) -> ContextEnvelope:
+        if self._context_size_guard is None:
+            return envelope
+
+        input_artifact_refs = self._budget_blocks(
+            envelope.input_artifact_refs,
+            request=request,
+            built_at=built_at,
+        )
+        context_references = self._budget_blocks(
+            envelope.context_references,
+            request=request,
+            built_at=built_at,
+        )
+        working_observations = self._budget_blocks(
+            envelope.working_observations,
+            request=request,
+            built_at=built_at,
+        )
+        working_observations = self._window_blocks(
+            working_observations,
+            request=request,
+            built_at=built_at,
+        )
+        reasoning_trace = self._budget_blocks(
+            envelope.reasoning_trace,
+            request=request,
+            built_at=built_at,
+        )
+        reasoning_trace = self._window_blocks(
+            reasoning_trace,
+            request=request,
+            built_at=built_at,
+        )
+        recent_observations = self._budget_blocks(
+            envelope.recent_observations,
+            request=request,
+            built_at=built_at,
+        )
+        recent_observations = self._window_blocks(
+            recent_observations,
+            request=request,
+            built_at=built_at,
+        )
+
+        guarded = envelope.model_copy(
+            update={
+                "input_artifact_refs": input_artifact_refs,
+                "context_references": context_references,
+                "working_observations": working_observations,
+                "reasoning_trace": reasoning_trace,
+                "recent_observations": recent_observations,
+            }
+        )
+        decision = self._context_size_guard.ensure_within_model_window(
+            envelope=guarded,
+            provider_snapshot=request.provider_snapshot,
+            runtime_limit_snapshot=request.runtime_limit_snapshot,
+            reserved_output_tokens=request.reserved_output_tokens,
+        )
+        if not decision.requires_compression:
+            return guarded
+        if self._compression_runner is None:
+            self._raise_compression_required(
+                decision=decision,
+                safe_message=(
+                    "Context compression required but no compression runner is "
+                    "configured."
+                ),
+            )
+        if request.provider_adapter is None:
+            self._raise_compression_required(
+                decision=decision,
+                safe_message=(
+                    "Context compression required but no provider adapter is "
+                    "configured."
+                ),
+            )
+        compression_result = self._compression_runner.compress(
+            ContextCompressionRequest(
+                envelope=guarded,
+                manifest=self._pre_compression_manifest(
+                    envelope=guarded,
+                    request=request,
+                ),
+                stage_artifact_id=request.stage_artifact_id,
+                trace_context=request.trace_context,
+                full_trace_ref=(
+                    request.full_trace_ref
+                    or f"stage-process://{request.stage_run_id}/full"
+                ),
+                covered_step_range=request.compression_covered_step_range or "unknown",
+                compression_trigger_reason="compression_threshold_exceeded",
+                provider_adapter=request.provider_adapter,
+                requested_max_output_tokens=request.reserved_output_tokens or None,
+            )
+        )
+        if compression_result.compressed_context_block is None:
+            self._raise_compression_required(
+                decision=decision,
+                safe_message="Context compression required but compression failed.",
+            )
+        compressed_block = self._compressed_context_block(
+            compression_result.compressed_context_block
+        )
+        compressed = guarded.model_copy(
+            update={
+                "context_references": (),
+                "working_observations": (),
+                "reasoning_trace": (),
+                "recent_observations": (compressed_block,),
+            }
+        )
+        post_compression_decision = self._context_size_guard.ensure_within_model_window(
+            envelope=compressed,
+            provider_snapshot=request.provider_snapshot,
+            runtime_limit_snapshot=request.runtime_limit_snapshot,
+            reserved_output_tokens=request.reserved_output_tokens,
+        )
+        if post_compression_decision.requires_compression:
+            self._raise_compression_required(
+                decision=post_compression_decision,
+                safe_message="Compressed context still exceeds the model window.",
+            )
+        return compressed
+
+    def _budget_blocks(
+        self,
+        blocks: Sequence[ContextBlock],
+        *,
+        request: ContextBuildRequest,
+        built_at: datetime,
+    ) -> tuple[ContextBlock, ...]:
+        if self._context_size_guard is None or not blocks:
+            return tuple(blocks)
+        return self._context_size_guard.apply_observation_budget(
+            blocks=blocks,
+            runtime_limit_snapshot=request.runtime_limit_snapshot,
+            built_at=built_at,
+        ).blocks
+
+    def _window_blocks(
+        self,
+        blocks: Sequence[ContextBlock],
+        *,
+        request: ContextBuildRequest,
+        built_at: datetime,
+    ) -> tuple[ContextBlock, ...]:
+        if (
+            self._context_size_guard is None
+            or not blocks
+            or request.max_recent_observation_blocks is None
+        ):
+            return tuple(blocks)
+        return self._context_size_guard.apply_sliding_window(
+            blocks=blocks,
+            max_recent_blocks=request.max_recent_observation_blocks,
+            stage_run_id=request.stage_run_id,
+            built_at=built_at,
+        ).blocks
+
+    def _compression_trigger_tokens(self, *, request: ContextBuildRequest) -> int:
+        if self._context_size_guard is None:
+            base_threshold = max(
+                1,
+                floor(
+                request.provider_snapshot.capabilities.context_window_tokens
+                * request.runtime_limit_snapshot.context_limits.compression_threshold_ratio
+                ),
+            )
+            if request.reserved_output_tokens <= 0:
+                return base_threshold
+            conservative_threshold = floor(
+                max(
+                    1,
+                    request.provider_snapshot.capabilities.context_window_tokens
+                    - request.reserved_output_tokens,
+                )
+                * request.runtime_limit_snapshot.context_limits.compression_threshold_ratio
+            )
+            return max(1, min(base_threshold, conservative_threshold))
+        return max(
+            1,
+            self._context_size_guard.compression_trigger_tokens(
+                provider_snapshot=request.provider_snapshot,
+                runtime_limit_snapshot=request.runtime_limit_snapshot,
+                reserved_output_tokens=request.reserved_output_tokens,
+            ),
+        )
+
+    def _pre_compression_manifest(
+        self,
+        *,
+        envelope: ContextEnvelope,
+        request: ContextBuildRequest,
+    ) -> ContextManifest:
+        return ContextManifest.from_envelope(
+            envelope,
+            provider_snapshot=request.provider_snapshot,
+            prompt_refs=[],
+            render_hash="0" * 64,
+            rendered_output_ref=(
+                f"artifact://context-envelopes/{request.run_id}/"
+                f"{request.stage_run_id}/pre_compression"
+            ),
+            rendered_output_kind=RenderedOutputKind.MESSAGE_SEQUENCE,
+            template_version=request.template_version,
+            output_schema_ref=request.output_schema_ref,
+            tool_schema_version=request.tool_schema_version,
+            runtime_limit_snapshot_ref=request.runtime_limit_snapshot.snapshot_id,
+            compression_threshold_ratio=(
+                request.runtime_limit_snapshot.context_limits.compression_threshold_ratio
+            ),
+            compression_trigger_token_threshold=self._compression_trigger_tokens(
+                request=request
+            ),
+        )
+
+    @staticmethod
+    def _compressed_context_block(block: CompressedContextBlock) -> ContextBlock:
+        content_ref = f"compressed_context_block://{block.compressed_context_id}"
+        return ContextBlock(
+            block_id=f"compressed-context:{block.compressed_context_id}",
+            section=ContextEnvelopeSection.RECENT_OBSERVATIONS,
+            trust_level=ContextTrustLevel.TRUSTED_REFERENCE,
+            boundary_action=ContextBoundaryAction.REFERENCE_ONLY,
+            summary=block.summary,
+            content_ref=content_ref,
+            sources=(
+                ContextSourceRef(
+                    source_kind="compressed_context_block",
+                    source_ref=content_ref,
+                    source_label=block.compressed_context_id,
+                ),
+            ),
+            estimated_chars=len(block.summary),
+            compressed=True,
+        )
+
+    @staticmethod
+    def _raise_compression_required(
+        *,
+        decision: object,
+        safe_message: str,
+    ) -> None:
+        raise ContextOverflowError(
+            safe_message,
+            reason="compression_required",
+            total_estimated_tokens=decision.total_estimated_tokens,
+            compression_trigger_tokens=decision.compression_trigger_tokens,
         )
 
     def render_messages(
