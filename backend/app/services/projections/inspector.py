@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from backend.app.api.error_codes import ErrorCode
@@ -14,6 +14,8 @@ from backend.app.db.models.runtime import (
     ApprovalDecisionModel,
     ApprovalRequestModel,
     ClarificationRecordModel,
+    DeliveryChannelSnapshotModel,
+    DeliveryRecordModel,
     PipelineRunModel,
     RunControlRecordModel,
     StageArtifactModel,
@@ -29,6 +31,7 @@ from backend.app.schemas.feed import (
 )
 from backend.app.schemas.inspector import (
     ControlItemInspectorProjection,
+    DeliveryResultDetailProjection,
     InspectorSection,
     StageInspectorProjection,
     ToolConfirmationInspectorProjection,
@@ -53,6 +56,7 @@ CONTROL_ITEM_INSPECTOR_NOT_FOUND_MESSAGE = "Control item inspector was not found
 TOOL_CONFIRMATION_INSPECTOR_NOT_FOUND_MESSAGE = (
     "Tool confirmation inspector was not found."
 )
+DELIVERY_RESULT_DETAIL_NOT_FOUND_MESSAGE = "Delivery result detail was not found."
 
 
 class InspectorProjectionServiceError(RuntimeError):
@@ -231,6 +235,36 @@ class InspectorProjectionService:
             reason=confirmation.reason,
             expected_side_effects=confirmation.expected_side_effects,
             decision=decision,
+            identity=sections["identity"],
+            input=sections["input"],
+            process=sections["process"],
+            output=sections["output"],
+            artifacts=sections["artifacts"],
+            metrics=sections["metrics"],
+        )
+
+    def get_delivery_record_detail(
+        self,
+        delivery_record_id: str,
+    ) -> DeliveryResultDetailProjection:
+        record, snapshot, run, stage = self._get_visible_delivery_record_context(
+            delivery_record_id
+        )
+        artifacts = self._stage_artifacts_for_delivery_record(record)
+        sections = self.build_delivery_result_sections(
+            record,
+            snapshot,
+            run,
+            stage,
+            artifacts,
+        )
+
+        return DeliveryResultDetailProjection(
+            delivery_record_id=record.delivery_record_id,
+            run_id=run.run_id,
+            delivery_mode=record.delivery_mode,
+            status="succeeded",
+            created_at=self._projection_datetime(record.created_at),
             identity=sections["identity"],
             input=sections["input"],
             process=sections["process"],
@@ -435,6 +469,141 @@ class InspectorProjectionService:
                     *context_refs,
                     *self._string_list(control_record.payload_ref),
                 ]
+            ),
+            log_refs=log_refs,
+        )
+        return {
+            "identity": identity,
+            "input": input_section,
+            "process": process,
+            "output": output,
+            "artifacts": artifacts_section,
+            "metrics": metrics,
+        }
+
+    def build_delivery_result_sections(
+        self,
+        record: DeliveryRecordModel,
+        snapshot: DeliveryChannelSnapshotModel,
+        run: PipelineRunModel,
+        stage: StageRunModel,
+        artifacts: Sequence[StageArtifactModel],
+    ) -> dict[str, InspectorSection | MetricSet]:
+        artifact_processes = self._artifact_processes(artifacts)
+        delivery_process = self._delivery_process_record(record, artifact_processes)
+        upstream_refs = self._delivery_upstream_refs(artifact_processes)
+        process_refs = self._unique_strings(
+            [
+                record.process_ref,
+                *self._delivery_process_refs(delivery_process),
+            ]
+        )
+        audit_refs = self._delivery_audit_refs(delivery_process, artifact_processes)
+        log_summary_refs = self._delivery_log_summary_refs(
+            delivery_process,
+            artifact_processes,
+        )
+        log_refs = self._unique_strings([*self._log_refs(artifacts), *log_summary_refs])
+        artifact_refs = [artifact.artifact_id for artifact in artifacts]
+        payload_refs = [artifact.payload_ref for artifact in artifacts]
+        delivery_artifacts = self._unique_strings(
+            [
+                *artifact_refs,
+                record.result_ref,
+                record.process_ref,
+                record.branch_name,
+                record.commit_sha,
+                record.code_review_url,
+            ]
+        )
+        output_snapshot = self._latest_delivery_output_snapshot(artifact_processes)
+        upstream_stage_summaries = self._delivery_upstream_stage_summaries(
+            run,
+            upstream_refs,
+        )
+        metrics = self._delivery_metrics(stage, artifacts, artifact_processes)
+
+        identity = InspectorSection(
+            title="identity",
+            records={
+                "delivery_record_id": record.delivery_record_id,
+                "run_id": run.run_id,
+                "stage_run_id": stage.stage_run_id,
+                "delivery_channel_snapshot_ref": record.delivery_channel_snapshot_ref,
+                "delivery_mode": record.delivery_mode.value,
+                "status": record.status,
+                "created_at": self._projection_datetime(record.created_at),
+                "completed_at": self._projection_datetime(record.completed_at),
+            },
+            stable_refs=self._unique_strings(
+                [
+                    record.delivery_record_id,
+                    run.run_id,
+                    stage.stage_run_id,
+                    record.delivery_channel_snapshot_ref,
+                ]
+            ),
+        )
+        input_section = InspectorSection(
+            title="input",
+            records={
+                "delivery_channel_snapshot": self._delivery_snapshot_record(snapshot),
+                "upstream_refs": upstream_refs,
+                "delivery_channel_snapshot_ref": record.delivery_channel_snapshot_ref,
+                "stage_input_ref": stage.input_ref,
+            },
+            stable_refs=self._unique_strings(
+                [record.delivery_channel_snapshot_ref, stage.input_ref, *upstream_refs]
+            ),
+        )
+        process = InspectorSection(
+            title="process",
+            records={
+                "delivery_process": delivery_process,
+                "delivery_process_refs": process_refs,
+                "stage_status": stage.status.value,
+                "delivery_result_event_ref": delivery_process.get(
+                    "delivery_result_event_ref"
+                ),
+                "audit_refs": audit_refs,
+                "log_summary_refs": log_summary_refs,
+                "no_git_actions": delivery_process.get("no_git_actions"),
+                "git_write_actions": delivery_process.get("git_write_actions"),
+            },
+            stable_refs=self._unique_strings(process_refs),
+            log_refs=log_refs,
+        )
+        output = InspectorSection(
+            title="output",
+            records={
+                "summary": self._delivery_summary(output_snapshot, record),
+                "delivery_status": record.status,
+                "result_ref": record.result_ref,
+                "branch_name": record.branch_name,
+                "commit_sha": record.commit_sha,
+                "code_review_url": record.code_review_url,
+                "failure_reason": record.failure_reason,
+                "test_summary": upstream_stage_summaries.get(
+                    StageType.TEST_GENERATION_EXECUTION
+                )
+                or self._delivery_test_summary(output_snapshot),
+                "review_summary": upstream_stage_summaries.get(StageType.CODE_REVIEW)
+                or self._delivery_review_summary(output_snapshot),
+            },
+            stable_refs=self._unique_strings([record.result_ref]),
+        )
+        artifacts_section = InspectorSection(
+            title="artifacts",
+            records={
+                "artifact_refs": artifact_refs,
+                "payload_refs": payload_refs,
+                "artifact_types": [artifact.artifact_type for artifact in artifacts],
+                "delivery_artifacts": delivery_artifacts,
+                "audit_refs": audit_refs,
+                "log_summary_refs": log_summary_refs,
+            },
+            stable_refs=self._unique_strings(
+                [*artifact_refs, *payload_refs, *delivery_artifacts, *audit_refs]
             ),
             log_refs=log_refs,
         )
@@ -749,6 +918,56 @@ class InspectorProjectionService:
             self._raise_not_found()
         return stage, run
 
+    def _get_visible_delivery_record_context(
+        self,
+        delivery_record_id: str,
+    ) -> tuple[
+        DeliveryRecordModel,
+        DeliveryChannelSnapshotModel,
+        PipelineRunModel,
+        StageRunModel,
+    ]:
+        record = self._runtime_session.get(DeliveryRecordModel, delivery_record_id)
+        if record is None or record.status != "succeeded":
+            self._raise_delivery_result_detail_not_found()
+        try:
+            self._publication_boundary.assert_run_visible(
+                run_id=record.run_id,
+                not_found_message=DELIVERY_RESULT_DETAIL_NOT_FOUND_MESSAGE,
+            )
+        except PublicationBoundaryServiceError:
+            self._raise_delivery_result_detail_not_found()
+
+        run = self._runtime_session.get(PipelineRunModel, record.run_id)
+        stage = self._runtime_session.get(StageRunModel, record.stage_run_id)
+        snapshot = self._runtime_session.get(
+            DeliveryChannelSnapshotModel,
+            record.delivery_channel_snapshot_ref,
+        )
+        if run is None or stage is None or snapshot is None:
+            self._raise_delivery_result_detail_not_found()
+        if record.delivery_channel_snapshot_ref != run.delivery_channel_snapshot_ref:
+            self._raise_delivery_result_detail_not_found()
+        if stage.run_id != run.run_id or snapshot.run_id != run.run_id:
+            self._raise_delivery_result_detail_not_found()
+        if stage.stage_type != StageType.DELIVERY_INTEGRATION:
+            self._raise_delivery_result_detail_not_found()
+        if record.delivery_mode != snapshot.delivery_mode:
+            self._raise_delivery_result_detail_not_found()
+
+        session = self._control_session.get(SessionModel, run.session_id)
+        project = self._control_session.get(ProjectModel, run.project_id)
+        if (
+            session is None
+            or project is None
+            or not session.is_visible
+            or not project.is_visible
+        ):
+            self._raise_delivery_result_detail_not_found()
+        if session.project_id != run.project_id:
+            self._raise_delivery_result_detail_not_found()
+        return record, snapshot, run, stage
+
     def _get_visible_tool_confirmation_context(
         self,
         tool_confirmation_id: str,
@@ -824,6 +1043,28 @@ class InspectorProjectionService:
             )
         )
         return list(self._runtime_session.execute(statement).scalars().all())
+
+    def _stage_artifacts_for_delivery_record(
+        self,
+        record: DeliveryRecordModel,
+    ) -> list[StageArtifactModel]:
+        statement = (
+            select(StageArtifactModel)
+            .where(
+                StageArtifactModel.run_id == record.run_id,
+                StageArtifactModel.stage_run_id == record.stage_run_id,
+            )
+            .order_by(
+                StageArtifactModel.created_at.asc(),
+                StageArtifactModel.artifact_id.asc(),
+            )
+        )
+        artifacts = list(self._runtime_session.execute(statement).scalars().all())
+        return [
+            artifact
+            for artifact in artifacts
+            if self._artifact_matches_delivery_record(artifact, record)
+        ]
 
     def _stage_artifacts_for_tool_confirmation(
         self,
@@ -1352,6 +1593,254 @@ class InspectorProjectionService:
             self._extend_unique(refs, self._string_list(process.get("log_refs")))
         return refs
 
+    def _delivery_snapshot_record(
+        self,
+        snapshot: DeliveryChannelSnapshotModel,
+    ) -> dict[str, Any]:
+        return {
+            "delivery_channel_snapshot_ref": snapshot.delivery_channel_snapshot_id,
+            "delivery_mode": snapshot.delivery_mode.value,
+            "scm_provider_type": (
+                snapshot.scm_provider_type.value
+                if snapshot.scm_provider_type is not None
+                else None
+            ),
+            "repository_identifier": snapshot.repository_identifier,
+            "default_branch": snapshot.default_branch,
+            "code_review_request_type": (
+                snapshot.code_review_request_type.value
+                if snapshot.code_review_request_type is not None
+                else None
+            ),
+            "credential_ref": snapshot.credential_ref,
+            "credential_status": snapshot.credential_status.value,
+            "readiness_status": snapshot.readiness_status.value,
+            "readiness_message": snapshot.readiness_message,
+            "last_validated_at": self._projection_datetime(snapshot.last_validated_at),
+            "schema_version": snapshot.schema_version,
+        }
+
+    @classmethod
+    def _delivery_process_record(
+        cls,
+        record: DeliveryRecordModel,
+        artifact_processes: Sequence[Mapping[str, Any]],
+    ) -> Mapping[str, Any]:
+        for process in artifact_processes:
+            value = process.get(record.delivery_mode.value)
+            if (
+                isinstance(value, Mapping)
+                and value.get("delivery_record_id") == record.delivery_record_id
+            ):
+                return cls._scrub_raw_graph_state(value)
+        for process in artifact_processes:
+            if process.get("delivery_record_id") == record.delivery_record_id:
+                return cls._scrub_raw_graph_state(process)
+        return {
+            "delivery_record_id": record.delivery_record_id,
+            "delivery_mode": record.delivery_mode.value,
+            "status": record.status,
+            "result_ref": record.result_ref,
+            "process_ref": record.process_ref,
+            "branch_name": record.branch_name,
+            "commit_sha": record.commit_sha,
+            "code_review_url": record.code_review_url,
+        }
+
+    @classmethod
+    def _delivery_upstream_refs(
+        cls,
+        artifact_processes: Sequence[Mapping[str, Any]],
+    ) -> list[str]:
+        refs: list[str] = []
+        for process in artifact_processes:
+            cls._extend_unique(refs, cls._string_list(process.get("input_refs")))
+            input_snapshot = process.get("input_snapshot")
+            if isinstance(input_snapshot, Mapping):
+                cls._extend_unique(
+                    refs,
+                    cls._string_list(input_snapshot.get("upstream_refs")),
+                )
+                for key in (
+                    "requirement_refs",
+                    "solution_refs",
+                    "changeset_refs",
+                    "test_result_refs",
+                    "review_refs",
+                    "approval_result_refs",
+                ):
+                    cls._extend_unique(refs, cls._string_list(input_snapshot.get(key)))
+            for key in (
+                "requirement_refs",
+                "solution_refs",
+                "changeset_refs",
+                "test_result_refs",
+                "review_refs",
+                "approval_result_refs",
+            ):
+                cls._extend_unique(refs, cls._string_list(process.get(key)))
+        return refs
+
+    @classmethod
+    def _delivery_process_refs(cls, delivery_process: Mapping[str, Any]) -> list[str]:
+        refs: list[str] = []
+        cls._extend_unique(refs, cls._string_list(delivery_process.get("process_ref")))
+        cls._extend_unique(refs, cls._string_list(delivery_process.get("process_refs")))
+        return refs
+
+    @classmethod
+    def _delivery_audit_refs(
+        cls,
+        delivery_process: Mapping[str, Any],
+        artifact_processes: Sequence[Mapping[str, Any]],
+    ) -> list[str]:
+        refs: list[str] = []
+        cls._extend_unique(refs, cls._string_list(delivery_process.get("audit_ref")))
+        cls._extend_unique(refs, cls._string_list(delivery_process.get("audit_refs")))
+        for process in artifact_processes:
+            cls._extend_unique(refs, cls._string_list(process.get("audit_ref")))
+            cls._extend_unique(refs, cls._string_list(process.get("audit_refs")))
+        return refs
+
+    @classmethod
+    def _delivery_log_summary_refs(
+        cls,
+        delivery_process: Mapping[str, Any],
+        artifact_processes: Sequence[Mapping[str, Any]],
+    ) -> list[str]:
+        refs: list[str] = []
+        cls._extend_unique(
+            refs,
+            cls._string_list(delivery_process.get("log_summary_ref")),
+        )
+        cls._extend_unique(
+            refs,
+            cls._string_list(delivery_process.get("log_summary_refs")),
+        )
+        for process in artifact_processes:
+            cls._extend_unique(refs, cls._string_list(process.get("log_summary_ref")))
+            cls._extend_unique(refs, cls._string_list(process.get("log_summary_refs")))
+        return refs
+
+    @classmethod
+    def _latest_delivery_output_snapshot(
+        cls,
+        artifact_processes: Sequence[Mapping[str, Any]],
+    ) -> Mapping[str, Any] | None:
+        for process in reversed(artifact_processes):
+            value = process.get("output_snapshot")
+            if isinstance(value, Mapping):
+                return cls._scrub_raw_graph_state(value)
+        return None
+
+    @staticmethod
+    def _delivery_summary(
+        output_snapshot: Mapping[str, Any] | None,
+        record: DeliveryRecordModel,
+    ) -> str | None:
+        if isinstance(output_snapshot, Mapping):
+            value = output_snapshot.get("summary")
+            if isinstance(value, str) and value:
+                return value
+        if record.status == "succeeded":
+            return "Delivery completed."
+        return record.failure_reason
+
+    @staticmethod
+    def _delivery_test_summary(output_snapshot: Mapping[str, Any] | None) -> str | None:
+        if isinstance(output_snapshot, Mapping):
+            value = output_snapshot.get("test_summary")
+            if isinstance(value, str) and value:
+                return value
+        return None
+
+    @staticmethod
+    def _delivery_review_summary(
+        output_snapshot: Mapping[str, Any] | None,
+    ) -> str | None:
+        if isinstance(output_snapshot, Mapping):
+            value = output_snapshot.get("review_summary")
+            if isinstance(value, str) and value:
+                return value
+        return None
+
+    def _delivery_upstream_stage_summaries(
+        self,
+        run: PipelineRunModel,
+        upstream_refs: Sequence[str],
+    ) -> dict[StageType, str]:
+        refs = self._unique_strings(list(upstream_refs))
+        if not refs:
+            return {}
+        statement = (
+            select(StageArtifactModel)
+            .where(
+                StageArtifactModel.run_id == run.run_id,
+                or_(
+                    StageArtifactModel.artifact_id.in_(refs),
+                    StageArtifactModel.payload_ref.in_(refs),
+                ),
+            )
+            .order_by(
+                StageArtifactModel.created_at.asc(),
+                StageArtifactModel.artifact_id.asc(),
+            )
+        )
+        summaries: dict[StageType, str] = {}
+        for artifact in self._runtime_session.execute(statement).scalars().all():
+            stage = self._runtime_session.get(StageRunModel, artifact.stage_run_id)
+            if stage is None or stage.run_id != run.run_id:
+                continue
+            if stage.stage_type not in {
+                StageType.TEST_GENERATION_EXECUTION,
+                StageType.CODE_REVIEW,
+            }:
+                continue
+            summary = self._delivery_upstream_summary(artifact, stage)
+            if summary is not None:
+                summaries[stage.stage_type] = summary
+        return summaries
+
+    @classmethod
+    def _delivery_upstream_summary(
+        cls,
+        artifact: StageArtifactModel,
+        stage: StageRunModel,
+    ) -> str | None:
+        if isinstance(artifact.process, Mapping):
+            output_snapshot = artifact.process.get("output_snapshot")
+            if isinstance(output_snapshot, Mapping):
+                value = output_snapshot.get("summary")
+                if isinstance(value, str) and value:
+                    return value
+        return stage.summary
+
+    def _delivery_metrics(
+        self,
+        stage: StageRunModel,
+        artifacts: Sequence[StageArtifactModel],
+        artifact_processes: Sequence[Mapping[str, Any]],
+    ) -> MetricSet:
+        metric_values: dict[str, int] = {}
+        allowed_fields = set(MetricSet.model_fields)
+        for artifact in artifacts:
+            self._merge_known_metrics(metric_values, artifact.metrics, allowed_fields)
+        for process in artifact_processes:
+            process_metrics = process.get("metrics")
+            if isinstance(process_metrics, Mapping):
+                self._merge_known_metrics(
+                    metric_values,
+                    process_metrics,
+                    allowed_fields,
+                )
+        metric_values["attempt_index"] = stage.attempt_index
+        if "duration_ms" not in metric_values and stage.ended_at is not None:
+            duration = self._projection_datetime(stage.ended_at) - self._projection_datetime(
+                stage.started_at
+            )
+            metric_values["duration_ms"] = max(0, int(duration.total_seconds() * 1000))
+        return MetricSet.model_validate(metric_values)
+
     @staticmethod
     def _artifact_matches_control_record(
         artifact: StageArtifactModel,
@@ -1361,6 +1850,21 @@ class InspectorProjectionService:
             return False
         process_control_record_id = artifact.process.get("control_record_id")
         return process_control_record_id == control_record_id
+
+    @staticmethod
+    def _artifact_matches_delivery_record(
+        artifact: StageArtifactModel,
+        record: DeliveryRecordModel,
+    ) -> bool:
+        if not isinstance(artifact.process, Mapping):
+            return False
+        process = artifact.process
+        delivery_process = process.get(record.delivery_mode.value)
+        if isinstance(delivery_process, Mapping):
+            return delivery_process.get("delivery_record_id") == record.delivery_record_id
+        if process.get("delivery_record_id") == record.delivery_record_id:
+            return True
+        return False
 
     @staticmethod
     def _artifact_matches_tool_confirmation(
@@ -1604,6 +2108,14 @@ class InspectorProjectionService:
         raise InspectorProjectionServiceError(
             ErrorCode.NOT_FOUND,
             TOOL_CONFIRMATION_INSPECTOR_NOT_FOUND_MESSAGE,
+            404,
+        )
+
+    @staticmethod
+    def _raise_delivery_result_detail_not_found() -> None:
+        raise InspectorProjectionServiceError(
+            ErrorCode.NOT_FOUND,
+            DELIVERY_RESULT_DETAIL_NOT_FOUND_MESSAGE,
             404,
         )
 

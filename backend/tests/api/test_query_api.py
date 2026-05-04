@@ -27,6 +27,9 @@ from backend.app.repositories.runtime_settings import RUNTIME_SETTINGS_ID
 from backend.app.schemas.common import RunControlRecordType, StageType
 from backend.app.main import create_app
 from backend.app.schemas.observability import LogCategory, LogLevel, RedactionStatus
+from backend.tests.projections.test_delivery_result_detail_projection import (
+    _seed_delivery_result_detail,
+)
 from backend.tests.projections.test_workspace_projection import (
     _default_internal_model_bindings,
     _append_denied_tool_confirmation_event_without_followup,
@@ -150,6 +153,10 @@ def _seed_tool_confirmation_detail_projection(app) -> None:
             ]
         )
         session.commit()
+
+
+def _seed_delivery_result_detail_projection(app) -> None:
+    _seed_delivery_result_detail(app.state.database_manager)
 
 
 def _seed_log_query_rows(app) -> None:
@@ -883,6 +890,59 @@ def test_get_tool_confirmation_detail_returns_projection_and_unified_not_found(
     }
 
 
+def test_get_delivery_record_detail_returns_projection_and_unified_not_found(
+    tmp_path: Path,
+) -> None:
+    app = build_query_api_app(tmp_path)
+    _seed_delivery_result_detail_projection(app)
+
+    with TestClient(app) as client:
+        ok_response = client.get(
+            "/api/delivery-records/delivery-record-1",
+            headers={
+                "X-Request-ID": "req-delivery-record",
+                "X-Correlation-ID": "corr-delivery-record",
+            },
+        )
+        missing_response = client.get(
+            "/api/delivery-records/delivery-record-missing",
+            headers={
+                "X-Request-ID": "req-delivery-record-missing",
+                "X-Correlation-ID": "corr-delivery-record-missing",
+            },
+        )
+
+    assert ok_response.status_code == 200
+    payload = ok_response.json()
+    assert payload["delivery_record_id"] == "delivery-record-1"
+    assert payload["run_id"] == "run-delivery"
+    assert payload["delivery_mode"] == "demo_delivery"
+    assert payload["status"] == "succeeded"
+    assert (
+        payload["input"]["records"]["delivery_channel_snapshot_ref"]
+        == "delivery-snapshot-1"
+    )
+    assert payload["process"]["records"]["delivery_process_refs"] == [
+        "demo-delivery-process:run-delivery"
+    ]
+    assert payload["output"]["records"]["result_ref"] == (
+        "demo-delivery-result:run-delivery"
+    )
+    assert payload["artifacts"]["records"]["audit_refs"] == ["audit-demo-1"]
+    assert payload["artifacts"]["log_refs"] == [
+        "log-delivery-stage-1",
+        "log-demo-1",
+    ]
+
+    assert missing_response.status_code == 404
+    assert missing_response.json() == {
+        "error_code": "not_found",
+        "message": "Delivery result detail was not found.",
+        "request_id": "req-delivery-record-missing",
+        "correlation_id": "corr-delivery-record-missing",
+    }
+
+
 def test_get_session_workspace_rejects_removed_session(
     tmp_path: Path,
 ) -> None:
@@ -1096,9 +1156,34 @@ def test_query_workspace_route_is_documented_in_openapi(tmp_path: Path) -> None:
             == "#/components/schemas/ErrorResponse"
         )
 
+    delivery_record_route = paths["/api/delivery-records/{deliveryRecordId}"]["get"]
+    assert set(delivery_record_route["responses"]) == {"200", "404", "422", "500"}
+    assert (
+        delivery_record_route["responses"]["200"]["content"]["application/json"][
+            "schema"
+        ]["$ref"]
+        == "#/components/schemas/DeliveryResultDetailProjection"
+    )
+    delivery_record_id_parameter = next(
+        parameter
+        for parameter in delivery_record_route["parameters"]
+        if parameter["name"] == "deliveryRecordId"
+    )
+    assert delivery_record_id_parameter["in"] == "path"
+    assert delivery_record_id_parameter["required"] is True
+    assert delivery_record_id_parameter["schema"]["type"] == "string"
+    for status_code in ("404", "422", "500"):
+        assert (
+            delivery_record_route["responses"][status_code]["content"][
+                "application/json"
+            ]["schema"]["$ref"]
+            == "#/components/schemas/ErrorResponse"
+        )
+
     assert "StageInspectorProjection" in schemas
     assert "ControlItemInspectorProjection" in schemas
     assert "ToolConfirmationInspectorProjection" in schemas
+    assert "DeliveryResultDetailProjection" in schemas
     assert "ErrorResponse" in schemas
 
 

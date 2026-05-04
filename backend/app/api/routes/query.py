@@ -17,6 +17,7 @@ from backend.app.db.session import DatabaseManager
 from backend.app.observability.log_query import LogQueryService, LogQueryServiceError
 from backend.app.schemas.inspector import (
     ControlItemInspectorProjection,
+    DeliveryResultDetailProjection,
     StageInspectorProjection,
     ToolConfirmationInspectorProjection,
 )
@@ -325,5 +326,24 @@ def get_tool_confirmation_detail(
 ) -> ToolConfirmationInspectorProjection:
     try:
         return service.get_tool_confirmation_detail(toolConfirmationId)
+    except InspectorProjectionServiceError as exc:
+        _raise_api_error(exc)
+
+
+@router.get(
+    "/delivery-records/{deliveryRecordId}",
+    response_model=DeliveryResultDetailProjection,
+    responses={
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+def get_delivery_record_detail(
+    deliveryRecordId: str,
+    service: InspectorProjectionService = Depends(get_inspector_projection_service),
+) -> DeliveryResultDetailProjection:
+    try:
+        return service.get_delivery_record_detail(deliveryRecordId)
     except InspectorProjectionServiceError as exc:
         _raise_api_error(exc)
