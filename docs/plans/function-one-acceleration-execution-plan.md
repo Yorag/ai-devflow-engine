@@ -171,6 +171,7 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | AL06-F4.3a | F4.3a | AL06 | `feat/al-frontend-runtime-ui` | done | 90a2437 | 5e73325 | `docs/plans/acceleration/reports/AL06-F4.3a.md` | - |
 | AL06-F4.4 | F4.4 | AL06 | `feat/al-frontend-runtime-ui` | done | 5cc45f2 | d58895c | `docs/plans/acceleration/reports/AL06-F4.4.md` | - |
 | AL06-F5.1 | F5.1 | AL06 | `feat/al-frontend-runtime-ui` | integrated | 47c3899 | 060cda4 | `docs/plans/acceleration/reports/AL06-F5.1.md` | Mock-first frontend slice integrated against frozen projection and mock payload shape; final completion still depends on a later checkpoint proving real backend `code_generation` / `test_generation_execution` payloads and inspector detail semantics. |
+| AL06-F5.2a | F5.2a | AL06 | `feat/al-frontend-runtime-ui` | integrated | 2451ebd | 48264fc | `docs/plans/acceleration/reports/AL06-F5.2a.md` | Mock-first demo_delivery result UI integrated against frozen feed and Inspector mock payloads; final completion still depends on real backend `delivery_result` / `DeliveryResultDetailProjection` payload verification. |
 | AL01-R3.7 | R3.7 | AL01 | `feat/al-run-core-events` | done | 5707ce3 | 3313a4a | `docs/plans/acceleration/reports/AL01-R3.7.md` | - |
 | AL01-C2.9a | C2.9a | AL01 | `feat/al-run-core-events` | done | 874161e | d06be5c | `docs/plans/acceleration/reports/AL01-C2.9a.md` | - |
 | AL01-C2.9b | C2.9b | AL01 | `feat/al-run-core-events` | done | f03d52b | eeb54a3 | `docs/plans/acceleration/reports/AL01-C2.9b.md` | - |
