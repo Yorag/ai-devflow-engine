@@ -142,9 +142,20 @@ describe("InspectorSections detail states", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open demo_delivery details" }));
 
     const inspector = screen.getByRole("complementary", { name: "Inspector" });
-    expect(await within(inspector).findByText("feat/runtime-inspector")).toBeTruthy();
-    expect(within(inspector).getByText("abc1234")).toBeTruthy();
-    expect(within(inspector).getByText("https://example.test/pr/17")).toBeTruthy();
+    expect(
+      await within(inspector).findByText(
+        "Prepared a display-only delivery outcome for review without Git write actions.",
+      ),
+    ).toBeTruthy();
+    expect(within(inspector).getByText("Demo delivery workspace summary")).toBeTruthy();
+    expect(
+      within(inspector).getByText(
+        "feat(workspace): present demo delivery result in narrative feed",
+      ),
+    ).toBeTruthy();
+    expect(within(inspector).queryByText("feat/runtime-inspector")).toBeNull();
+    expect(within(inspector).queryByText("abc1234")).toBeNull();
+    expect(within(inspector).queryByText("https://example.test/pr/17")).toBeNull();
     expect(within(inspector).getByText("12 tests passed.")).toBeTruthy();
 
     const reviewNotes = within(inspector).getByText(/Checklist preserved\./);

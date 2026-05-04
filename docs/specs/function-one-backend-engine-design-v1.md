@@ -1817,6 +1817,12 @@ Narrative Feed 顶层条目必须至少支持以下类型：
 - 审批请求、工具确认、审批结果和交付结果以顶层条目出现
 - 底层 graph node 事件不得直接作为顶层条目类型暴露给前端
 
+其中 `delivery_result` 顶层条目必须满足以下规则：
+- `delivery_result` 只在 `Delivery Integration` 成功完成后生成，用于表达最终交付结果摘要
+- `Delivery Integration` 失败时不得生成 `delivery_result`；失败结果必须由 run 尾部 `system_status` 与 `delivery_integration` 阶段过程记录表达
+- `delivery_result` 顶层条目是 Narrative Feed 摘要契约，不等同于 `DeliveryRecord` 领域对象，也不等同于 `DeliveryResultDetailProjection`
+- 前端允许在当前 `DeliveryResultFeedEntry` 顶层条目与 `DeliveryResultDetailProjection` 之上构建共享展示模型，但后端不得额外引入并行的公开 `DeliveryResultProjection` 契约名
+
 ### 8.3 执行结点投影
 
 `ExecutionNodeProjection` 至少包含：
@@ -1921,6 +1927,11 @@ Inspector 投影必须满足以下总规则：
   至少包含交付产物、分支、提交、MR/PR 与其他稳定引用
 - `metrics`
   至少包含适用的全量量化指标
+
+`delivery_result` 顶层条目的正式字段集合由当前 `DeliveryResultFeedEntry` 契约定义。
+其职责是提供最终交付摘要、稳定结果引用和模式特定结果要点，不承载完整目标、过程、产物或量化信息。
+
+若后续需要扩展更丰富的通用摘要字段，必须作为独立契约变更显式修订 frontend/backend types、schema 与相关 split-plan；不得由 F5.2a / F5.2b 暗含扩大当前公开契约。
 
 ### 8.5 审批块投影
 

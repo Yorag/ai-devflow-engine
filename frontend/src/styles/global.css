@@ -928,6 +928,21 @@ a {
   background: oklch(96.8% 0.02 150);
 }
 
+.delivery-result-block {
+  gap: 14px;
+}
+
+.delivery-result-block__mode-chip {
+  min-width: 0;
+  border: 1px solid oklch(78% 0.055 150);
+  border-radius: 999px;
+  background: oklch(98.2% 0.016 150);
+  color: oklch(32% 0.05 150);
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  font-weight: 760;
+}
+
 .feed-entry--system-status {
   border-color: oklch(82% 0.05 26);
   background: oklch(97% 0.018 26);

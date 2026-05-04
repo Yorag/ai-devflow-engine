@@ -445,7 +445,7 @@
 - 交付就绪阻塞只发生在 code review approval。
 - `git_auto_delivery` 通过 `read_delivery_snapshot` 读取已固化且字段完整的交付快照，不重新读取项目级最新 DeliveryChannel。
 - Git 分支、提交、推送和 MR/PR 创建步骤具备运行日志和审计记录，交付失败可定位到失败步骤与 DeliveryRecord。
-- git_auto_delivery 结果展示完成设计质量门检查，并与 `demo_delivery` 共用 `DeliveryResultProjection` 主结构。
+- git_auto_delivery 结果展示完成设计质量门检查，并与 `demo_delivery` 共用前端内部 `DeliveryResultViewModel` / `DeliveryResultBlock` 主结构。
 
 ### Week 11
 

@@ -64,12 +64,18 @@ describe("FeedEntryRenderer", () => {
     ).toBeTruthy();
     expect(screen.getByText("Approved")).toBeTruthy();
 
+    const deliveryEntry = screen.getByRole("article", {
+      name: "Delivery result feed entry",
+    });
+    expect(within(deliveryEntry).getByText("Demo delivery")).toBeTruthy();
     expect(
-      screen.getByRole("article", { name: "Delivery result feed entry" }),
+      within(deliveryEntry).getByText("Demo delivery generated a reviewable summary."),
     ).toBeTruthy();
-    expect(
-      screen.getByText("Demo delivery generated a reviewable summary."),
-    ).toBeTruthy();
+    expect(within(deliveryEntry).getByText("Reference")).toBeTruthy();
+    expect(within(deliveryEntry).getByText("delivery-result-ref-1")).toBeTruthy();
+    expect(deliveryEntry.textContent).not.toMatch(/\bBranch\b/i);
+    expect(deliveryEntry.textContent).not.toMatch(/\bCommit\b/i);
+    expect(deliveryEntry.textContent).not.toMatch(/\bCode review\b/i);
 
     const systemEntry = screen.getByRole("article", {
       name: "System status feed entry",
@@ -244,6 +250,7 @@ describe("FeedEntryRenderer guards", () => {
     expect(
       screen.getByRole("article", { name: "Delivery result feed entry" }),
     ).toBeTruthy();
-    expect(screen.getByText("demo_delivery")).toBeTruthy();
+    expect(screen.getByText("Demo delivery")).toBeTruthy();
+    expect(screen.getByText("delivery-result-ref-1")).toBeTruthy();
   });
 });
