@@ -1,8 +1,13 @@
-import type { DeliveryResultFeedEntry, TopLevelFeedEntry } from "../../api/types";
+import type {
+  DeliveryMode,
+  DeliveryResultFeedEntry,
+  TopLevelFeedEntry,
+} from "../../api/types";
 
 export type DeliveryResultMetadata = {
   label: string;
   value: string;
+  href?: string;
 };
 
 export type DeliveryResultViewModel = {
@@ -15,9 +20,38 @@ export type DeliveryResultViewModel = {
 export function buildDeliveryResultViewModel(
   entry: DeliveryResultFeedEntry,
 ): DeliveryResultViewModel {
-  const metadata: DeliveryResultMetadata[] = [
-    { label: "Mode", value: entry.delivery_mode },
-  ];
+  return {
+    modeLabel: formatDeliveryModeLabel(entry.delivery_mode),
+    title:
+      entry.delivery_mode === "demo_delivery" ? "Demo delivery" : "Git auto delivery",
+    summary: entry.summary,
+    metadata: [
+      { label: "Mode", value: entry.delivery_mode },
+      ...formatDeliveryHighlights(entry),
+    ],
+  };
+}
+
+export function formatDeliveryHighlights(
+  entry: DeliveryResultFeedEntry,
+): DeliveryResultMetadata[] {
+  const metadata: DeliveryResultMetadata[] = [];
+
+  if (entry.delivery_mode === "git_auto_delivery" && entry.branch_name) {
+    metadata.push({ label: "Branch", value: entry.branch_name });
+  }
+
+  if (entry.delivery_mode === "git_auto_delivery" && entry.commit_sha) {
+    metadata.push({ label: "Commit", value: entry.commit_sha });
+  }
+
+  if (entry.delivery_mode === "git_auto_delivery" && entry.code_review_url) {
+    metadata.push({
+      label: "Code review",
+      value: formatCodeReviewRequestTarget(entry.code_review_url),
+      href: entry.code_review_url,
+    });
+  }
 
   if (entry.test_summary) {
     metadata.push({ label: "Tests", value: entry.test_summary });
@@ -27,12 +61,16 @@ export function buildDeliveryResultViewModel(
     metadata.push({ label: "Reference", value: entry.result_ref });
   }
 
-  return {
-    modeLabel: "Demo Delivery",
-    title: entry.delivery_mode === "demo_delivery" ? "Demo delivery" : "Delivery result",
-    summary: entry.summary,
-    metadata,
-  };
+  return metadata;
+}
+
+export function formatCodeReviewRequestTarget(value: string): string {
+  try {
+    const url = new URL(value);
+    return `${url.hostname}${url.pathname}`;
+  } catch {
+    return value;
+  }
 }
 
 export function DeliveryResultBlock({
@@ -63,7 +101,20 @@ export function DeliveryResultBlock({
         {model.metadata.map((item) => (
           <span className="feed-entry__metadata" key={item.label}>
             <strong>{item.label}</strong>
-            <span>{item.value}</span>
+            <span>
+              {item.href ? (
+                <a
+                  href={item.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={`${item.label} ${item.value}`}
+                >
+                  {item.value}
+                </a>
+              ) : (
+                item.value
+              )}
+            </span>
           </span>
         ))}
       </div>
@@ -81,6 +132,10 @@ export function DeliveryResultBlock({
       ) : null}
     </article>
   );
+}
+
+function formatDeliveryModeLabel(value: DeliveryMode): string {
+  return value === "demo_delivery" ? "Demo Delivery" : "Git Auto Delivery";
 }
 
 function formatLabel(value: string): string {
