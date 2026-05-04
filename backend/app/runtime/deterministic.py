@@ -64,6 +64,7 @@ from backend.app.services.runtime_orchestration import (
     RuntimeCommandPort,
     RuntimeOrchestrationService,
 )
+from backend.app.services.runs import TerminalStatusProjector
 from backend.app.services.stages import StageRunService
 from backend.app.services.tool_confirmations import ToolConfirmationService
 
@@ -189,6 +190,16 @@ class DeterministicInterruptConfig:
     tool_confirmation: DeterministicToolConfirmationConfig | None = None
 
 
+@dataclass(frozen=True)
+class DeterministicTerminalConfig:
+    complete_after_stages: bool = False
+    fail_at_stage: StageType | None = None
+    terminate_at_stage: StageType | None = None
+    failure_reason: str = "Deterministic runtime fixture failed."
+    termination_reason: str = "Deterministic runtime fixture terminated."
+    completion_reason: str = "Deterministic runtime fixture completed."
+
+
 class DeterministicRuntimeEngine:
     def __init__(
         self,
@@ -228,6 +239,7 @@ class DeterministicRuntimeEngine:
             now=self._now,
         )
         self._interrupt_config = DeterministicInterruptConfig()
+        self._terminal_config = DeterministicTerminalConfig()
 
     def configure_interrupts(
         self,
@@ -256,6 +268,56 @@ class DeterministicRuntimeEngine:
             ),
         )
 
+    def configure_terminal_control(
+        self,
+        config: DeterministicTerminalConfig | None = None,
+        *,
+        complete_after_stages: bool | None = None,
+        fail_at_stage: StageType | None = None,
+        terminate_at_stage: StageType | None = None,
+        failure_reason: str | None = None,
+        termination_reason: str | None = None,
+        completion_reason: str | None = None,
+    ) -> None:
+        base = config or self._terminal_config
+        resolved_fail_at_stage = (
+            fail_at_stage if fail_at_stage is not None else base.fail_at_stage
+        )
+        resolved_terminate_at_stage = (
+            terminate_at_stage
+            if terminate_at_stage is not None
+            else base.terminate_at_stage
+        )
+        if (
+            resolved_fail_at_stage is not None
+            and resolved_terminate_at_stage is not None
+        ):
+            raise ValueError(
+                "deterministic terminal control cannot configure both failure and termination"
+            )
+        self._terminal_config = DeterministicTerminalConfig(
+            complete_after_stages=(
+                base.complete_after_stages
+                if complete_after_stages is None
+                else complete_after_stages
+            ),
+            fail_at_stage=resolved_fail_at_stage,
+            terminate_at_stage=resolved_terminate_at_stage,
+            failure_reason=(
+                base.failure_reason if failure_reason is None else failure_reason
+            ),
+            termination_reason=(
+                base.termination_reason
+                if termination_reason is None
+                else termination_reason
+            ),
+            completion_reason=(
+                base.completion_reason
+                if completion_reason is None
+                else completion_reason
+            ),
+        )
+
     def start(
         self,
         *,
@@ -276,7 +338,21 @@ class DeterministicRuntimeEngine:
         runtime_port: RuntimeCommandPort,
         checkpoint_port: CheckpointPort,
     ) -> RuntimeEngineResult:
-        next_stage = self._next_stage(context.run_id)
+        try:
+            next_stage = self._next_stage(context.run_id)
+        except ValueError as exc:
+            if (
+                "deterministic stage sequence is exhausted" in str(exc)
+                and self._terminal_config.complete_after_stages
+                and self._stage_sequence_completed(context.run_id)
+            ):
+                return self.emit_completed_terminal_result(
+                    context=context,
+                    runtime_port=runtime_port,
+                    checkpoint_port=checkpoint_port,
+                    reason=self._terminal_config.completion_reason,
+                )
+            raise
         stage: StageRunModel | None = (
             next_stage if isinstance(next_stage, StageRunModel) else None
         )
@@ -342,6 +418,17 @@ class DeterministicRuntimeEngine:
         )
         if interrupt_result is not None:
             return interrupt_result
+        terminal_result = self._maybe_emit_terminal_result(
+            context=context,
+            runtime_port=runtime_port,
+            checkpoint_port=checkpoint_port,
+            stage=stage,
+            artifact=artifact,
+            trace_context=stage_trace,
+            start_event_ref=start_event.event_id if start_event is not None else None,
+        )
+        if terminal_result is not None:
+            return terminal_result
         completed_stage = self._stage_service.complete_stage(
             stage_run_id=stage.stage_run_id,
             status=StageStatus.COMPLETED,
@@ -565,6 +652,42 @@ class DeterministicRuntimeEngine:
                 stage=stage,
                 artifact=artifact,
                 config=tool_config,
+                trace_context=trace_context,
+                start_event_ref=start_event_ref,
+        )
+        return None
+
+    def _maybe_emit_terminal_result(
+        self,
+        *,
+        context: RuntimeExecutionContext,
+        runtime_port: RuntimeCommandPort,
+        checkpoint_port: CheckpointPort,
+        stage: StageRunModel,
+        artifact: StageArtifactModel,
+        trace_context: TraceContext,
+        start_event_ref: str | None,
+    ) -> RuntimeTerminalResult | None:
+        config = self._terminal_config
+        if config.fail_at_stage is stage.stage_type:
+            return self.fail_run(
+                context=context,
+                runtime_port=runtime_port,
+                checkpoint_port=checkpoint_port,
+                stage=stage,
+                artifact=artifact,
+                reason=config.failure_reason,
+                trace_context=trace_context,
+                start_event_ref=start_event_ref,
+            )
+        if config.terminate_at_stage is stage.stage_type:
+            return self.terminate_run(
+                context=context,
+                runtime_port=runtime_port,
+                checkpoint_port=checkpoint_port,
+                stage=stage,
+                artifact=artifact,
+                reason=config.termination_reason,
                 trace_context=trace_context,
                 start_event_ref=start_event_ref,
             )
@@ -810,7 +933,328 @@ class DeterministicRuntimeEngine:
         runtime_port: RuntimeCommandPort,
         checkpoint_port: CheckpointPort,
     ) -> RuntimeTerminalResult:
-        raise NotImplementedError("deterministic terminal control belongs to A4.4")
+        run = self._load_run(context.run_id)
+        if run.current_stage_run_id is None:
+            raise ValueError("deterministic terminate requires a current stage")
+        stage = self._runtime_session.get(StageRunModel, run.current_stage_run_id)
+        if stage is None:
+            raise ValueError("deterministic terminate current stage was not found")
+        self._require_non_terminal_current_stage(stage)
+        terminate_trace = context.trace_context.child_span(
+            span_id=f"deterministic-terminate-{stage.stage_run_id}",
+            created_at=self._now(),
+            run_id=context.run_id,
+            stage_run_id=stage.stage_run_id,
+            graph_thread_id=context.thread.thread_id,
+        )
+        artifact = self._existing_stage_artifact(stage.stage_run_id)
+        if artifact is None:
+            artifact = self.emit_stage_artifacts(
+                context=context,
+                stage=stage,
+                trace_context=terminate_trace,
+            )
+        return self.terminate_run(
+            context=context,
+            runtime_port=runtime_port,
+            checkpoint_port=checkpoint_port,
+            stage=stage,
+            artifact=artifact,
+            reason="Deterministic runtime termination requested.",
+            trace_context=terminate_trace,
+        )
+
+    def fail_run(
+        self,
+        *,
+        context: RuntimeExecutionContext,
+        runtime_port: RuntimeCommandPort,
+        checkpoint_port: CheckpointPort,
+        stage: StageRunModel,
+        artifact: StageArtifactModel,
+        reason: str,
+        trace_context: TraceContext,
+        start_event_ref: str | None = None,
+    ) -> RuntimeTerminalResult:
+        return self.emit_terminal_result(
+            context=context,
+            runtime_port=runtime_port,
+            checkpoint_port=checkpoint_port,
+            terminal_status=GraphThreadStatus.FAILED,
+            run_status=RunStatus.FAILED,
+            stage=stage,
+            artifact=artifact,
+            reason=reason,
+            direct_failure_point=stage.stage_type.value,
+            trace_context=trace_context,
+            start_event_ref=start_event_ref,
+        )
+
+    def terminate_run(
+        self,
+        *,
+        context: RuntimeExecutionContext,
+        runtime_port: RuntimeCommandPort,
+        checkpoint_port: CheckpointPort,
+        stage: StageRunModel,
+        artifact: StageArtifactModel,
+        reason: str,
+        trace_context: TraceContext,
+        start_event_ref: str | None = None,
+    ) -> RuntimeTerminalResult:
+        run = self._load_run(context.run_id)
+        thread = self._terminal_source_thread(
+            context=context,
+            run=run,
+            stage=stage,
+        )
+        try:
+            command_result = self._runtime_orchestration(
+                runtime_port=runtime_port,
+                checkpoint_port=checkpoint_port,
+            ).terminate_thread(
+                thread=thread,
+                trace_context=trace_context,
+            )
+        except Exception:
+            self._runtime_session.rollback()
+            self._event_session.rollback()
+            if self._control_session is not None:
+                self._control_session.rollback()
+            raise
+        return self.emit_terminal_result(
+            context=context,
+            runtime_port=runtime_port,
+            checkpoint_port=checkpoint_port,
+            terminal_status=GraphThreadStatus.TERMINATED,
+            run_status=RunStatus.TERMINATED,
+            stage=stage,
+            artifact=artifact,
+            reason=reason,
+            direct_failure_point=stage.stage_type.value,
+            trace_context=command_result.trace_context,
+            thread=command_result.thread,
+            start_event_ref=start_event_ref,
+        )
+
+    def emit_terminal_result(
+        self,
+        *,
+        context: RuntimeExecutionContext,
+        runtime_port: RuntimeCommandPort,
+        checkpoint_port: CheckpointPort,
+        terminal_status: GraphThreadStatus,
+        run_status: RunStatus,
+        stage: StageRunModel,
+        artifact: StageArtifactModel,
+        reason: str,
+        direct_failure_point: str,
+        trace_context: TraceContext,
+        thread: GraphThreadRef | None = None,
+        start_event_ref: str | None = None,
+    ) -> RuntimeTerminalResult:
+        del runtime_port, checkpoint_port
+        control_session_db = self._require_control_session()
+        control_session = control_session_db.get(SessionModel, context.session_id)
+        if control_session is None:
+            raise ValueError("deterministic terminal control session was not found")
+        run = self._load_run(context.run_id)
+        self._validate_terminal_source_identity(
+            context=context,
+            run=run,
+            stage=stage,
+            artifact=artifact,
+        )
+        self._require_non_terminal_current_stage(stage)
+        occurred_at = self._now()
+        terminal_trace = trace_context.child_span(
+            span_id=f"deterministic-terminal-{run_status.value}-{context.run_id}",
+            created_at=occurred_at,
+            run_id=context.run_id,
+            stage_run_id=stage.stage_run_id,
+            graph_thread_id=context.thread.thread_id,
+        )
+
+        run.status = run_status
+        run.ended_at = occurred_at
+        run.updated_at = occurred_at
+        stage.status = self._stage_status_for_terminal(run_status)
+        stage.output_ref = artifact.artifact_id
+        stage.summary = reason
+        stage.ended_at = occurred_at
+        stage.updated_at = occurred_at
+        control_session.status = self._session_status_for_terminal(run_status)
+        control_session.latest_stage_type = stage.stage_type
+        control_session.updated_at = occurred_at
+        self._runtime_session.add_all([run, stage])
+        control_session_db.add(control_session)
+
+        self._artifact_store.append_process_record(
+            artifact_id=artifact.artifact_id,
+            process_key="terminal_result",
+            process_value={
+                "status": run_status.value,
+                "reason": reason,
+                "direct_failure_point": direct_failure_point,
+                "source_stage_type": stage.stage_type.value,
+                "retry_action": f"retry:{run.run_id}",
+            },
+            trace_context=terminal_trace,
+        )
+        stage_event = self._append_stage_event(
+            DomainEventType.STAGE_UPDATED,
+            context=context,
+            stage=stage,
+            status=stage.status,
+            trace_context=terminal_trace,
+            item_title=f"{_STAGE_TITLES[stage.stage_type]} terminal result",
+            item_summary=reason,
+            artifact_refs=[artifact.artifact_id],
+        )
+        domain_event_refs = [
+            *([start_event_ref] if start_event_ref is not None else []),
+            stage_event.event_id,
+        ]
+        if run_status in {RunStatus.FAILED, RunStatus.TERMINATED}:
+            domain_event_type = (
+                DomainEventType.RUN_TERMINATED
+                if run_status is RunStatus.TERMINATED
+                else DomainEventType.RUN_FAILED
+            )
+            TerminalStatusProjector(
+                events=self._event_store,
+                now=self._now,
+            ).append_terminal_system_status(
+                domain_event_type=domain_event_type,
+                run=run,
+                title="Run terminated"
+                if run_status is RunStatus.TERMINATED
+                else "Run failed",
+                reason=reason,
+                trace_context=terminal_trace,
+                is_current_tail=control_session.current_run_id == run.run_id,
+                occurred_at=occurred_at,
+            )
+            system_status_ref = self._latest_event_ref(
+                session_id=context.session_id,
+                run_id=context.run_id,
+                event_type=SseEventType.SYSTEM_STATUS,
+            )
+            if system_status_ref is not None:
+                domain_event_refs.append(system_status_ref)
+        self._runtime_session.commit()
+        control_session_db.commit()
+        self._event_session.commit()
+
+        terminal_thread = thread or self._thread_ref(
+            run=run,
+            stage=stage,
+            status=terminal_status,
+        )
+        if terminal_thread.status is not terminal_status:
+            terminal_thread = terminal_thread.model_copy(
+                update={"status": terminal_status}
+            )
+        result_ref = f"deterministic://{context.run_id}/terminal/{run_status.value}"
+        log_ref = self._write_terminal_log(
+            context=context,
+            stage=stage,
+            terminal_status=terminal_status,
+            run_status=run_status,
+            reason=reason,
+            direct_failure_point=direct_failure_point,
+            artifact_refs=[artifact.artifact_id],
+            event_refs=domain_event_refs,
+            result_ref=result_ref,
+            terminal_trace=terminal_trace,
+        )
+        return RuntimeTerminalResult(
+            run_id=context.run_id,
+            status=terminal_status,
+            thread=terminal_thread,
+            trace_context=terminal_trace,
+            result_ref=result_ref,
+            artifact_refs=[artifact.artifact_id],
+            domain_event_refs=domain_event_refs,
+            log_summary_refs=[log_ref] if log_ref is not None else [],
+            audit_refs=[],
+        )
+
+    def emit_completed_terminal_result(
+        self,
+        *,
+        context: RuntimeExecutionContext,
+        runtime_port: RuntimeCommandPort,
+        checkpoint_port: CheckpointPort,
+        reason: str,
+    ) -> RuntimeTerminalResult:
+        del runtime_port, checkpoint_port
+        control_session_db = self._require_control_session()
+        control_session = control_session_db.get(SessionModel, context.session_id)
+        if control_session is None:
+            raise ValueError("deterministic terminal control session was not found")
+        run = self._load_run(context.run_id)
+        occurred_at = self._now()
+        terminal_trace = context.trace_context.child_span(
+            span_id=f"deterministic-terminal-completed-{context.run_id}",
+            created_at=occurred_at,
+            run_id=context.run_id,
+            stage_run_id=None,
+            graph_thread_id=context.thread.thread_id,
+        )
+        run.status = RunStatus.COMPLETED
+        run.current_stage_run_id = None
+        run.ended_at = occurred_at
+        run.updated_at = occurred_at
+        control_session.status = SessionStatus.COMPLETED
+        control_session.updated_at = occurred_at
+        self._runtime_session.add(run)
+        control_session_db.add(control_session)
+        event = self._event_store.append(
+            DomainEventType.RUN_COMPLETED,
+            payload={
+                "session_id": context.session_id,
+                "status": SessionStatus.COMPLETED.value,
+                "current_run_id": context.run_id,
+                "current_stage_type": None,
+            },
+            trace_context=terminal_trace,
+            session_id=context.session_id,
+            run_id=context.run_id,
+        )
+        self._runtime_session.commit()
+        control_session_db.commit()
+        self._event_session.commit()
+        result_ref = f"deterministic://{context.run_id}/terminal/completed"
+        log_ref = self._write_terminal_log(
+            context=context,
+            stage=None,
+            terminal_status=GraphThreadStatus.COMPLETED,
+            run_status=RunStatus.COMPLETED,
+            reason=reason,
+            direct_failure_point=None,
+            artifact_refs=[],
+            event_refs=[event.event_id],
+            result_ref=result_ref,
+            terminal_trace=terminal_trace,
+        )
+        return RuntimeTerminalResult(
+            run_id=context.run_id,
+            status=GraphThreadStatus.COMPLETED,
+            thread=context.thread.model_copy(
+                update={
+                    "status": GraphThreadStatus.COMPLETED,
+                    "current_stage_run_id": None,
+                    "current_stage_type": None,
+                }
+            ),
+            trace_context=terminal_trace,
+            result_ref=result_ref,
+            artifact_refs=[],
+            domain_event_refs=[event.event_id],
+            log_summary_refs=[log_ref] if log_ref is not None else [],
+            audit_refs=[],
+        )
 
     def _runtime_orchestration(
         self,
@@ -834,6 +1278,98 @@ class DeterministicRuntimeEngine:
         if run is None:
             raise ValueError("PipelineRun was not found.")
         return run
+
+    def _latest_event_ref(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        event_type: SseEventType,
+    ) -> str | None:
+        event = (
+            self._event_session.query(DomainEventModel)
+            .filter(
+                DomainEventModel.event_type == event_type,
+                DomainEventModel.session_id == session_id,
+                DomainEventModel.run_id == run_id,
+            )
+            .order_by(
+                DomainEventModel.sequence_index.desc(),
+                DomainEventModel.event_id.desc(),
+            )
+            .first()
+        )
+        return event.event_id if event is not None else None
+
+    def _stage_sequence_completed(self, run_id: str) -> bool:
+        rows = self._runtime_session.execute(
+            select(StageRunModel).where(StageRunModel.run_id == run_id)
+        ).scalars().all()
+        rows_by_stage = {row.stage_type: row for row in rows}
+        return all(
+            (stage := rows_by_stage.get(stage_type)) is not None
+            and stage.status is StageStatus.COMPLETED
+            for stage_type in DETERMINISTIC_STAGE_SEQUENCE
+        )
+
+    def _terminal_source_thread(
+        self,
+        *,
+        context: RuntimeExecutionContext,
+        run: PipelineRunModel,
+        stage: StageRunModel,
+    ) -> GraphThreadRef:
+        if (
+            context.thread.current_stage_run_id == stage.stage_run_id
+            and context.thread.current_stage_type is stage.stage_type
+        ):
+            return context.thread
+        return self._thread_ref(
+            run=run,
+            stage=stage,
+            status=context.thread.status,
+        )
+
+    def _validate_terminal_source_identity(
+        self,
+        *,
+        context: RuntimeExecutionContext,
+        run: PipelineRunModel,
+        stage: StageRunModel,
+        artifact: StageArtifactModel,
+    ) -> None:
+        if stage.run_id != context.run_id:
+            raise ValueError("terminal source identity mismatch")
+        if run.current_stage_run_id != stage.stage_run_id:
+            raise ValueError("terminal source identity mismatch")
+        if artifact.run_id != context.run_id or artifact.run_id != stage.run_id:
+            raise ValueError("terminal source identity mismatch")
+        if artifact.stage_run_id != stage.stage_run_id:
+            raise ValueError("terminal source identity mismatch")
+
+    def _require_non_terminal_current_stage(self, stage: StageRunModel) -> None:
+        if stage.status in _TERMINAL_STAGE_STATUSES:
+            raise ValueError("deterministic terminal control requires a non-terminal current stage")
+
+    @staticmethod
+    def _stage_status_for_terminal(run_status: RunStatus) -> StageStatus:
+        if run_status is RunStatus.FAILED:
+            return StageStatus.FAILED
+        if run_status is RunStatus.TERMINATED:
+            return StageStatus.TERMINATED
+        if run_status is RunStatus.COMPLETED:
+            return StageStatus.COMPLETED
+        raise ValueError("deterministic terminal run status is unsupported")
+
+    @staticmethod
+    def _session_status_for_terminal(run_status: RunStatus) -> SessionStatus:
+        if run_status is RunStatus.FAILED:
+            return SessionStatus.FAILED
+        if run_status is RunStatus.TERMINATED:
+            return SessionStatus.TERMINATED
+        if run_status is RunStatus.COMPLETED:
+            return SessionStatus.COMPLETED
+        raise ValueError("deterministic terminal run status is unsupported")
 
     def _has_pending_clarification(self, stage: StageRunModel) -> bool:
         return (
@@ -1360,6 +1896,78 @@ class DeterministicRuntimeEngine:
             _LOGGER.exception(
                 "Deterministic runtime resume failure log write failed for stage_run_id=%s",
                 interrupt.stage_run_id,
+            )
+            return None
+
+    def _write_terminal_log(
+        self,
+        *,
+        context: RuntimeExecutionContext,
+        stage: StageRunModel | None,
+        terminal_status: GraphThreadStatus,
+        run_status: RunStatus,
+        reason: str,
+        direct_failure_point: str | None,
+        artifact_refs: list[str],
+        event_refs: list[str],
+        result_ref: str,
+        terminal_trace: TraceContext,
+    ) -> str | None:
+        if self._log_writer is None:
+            return None
+        retry_action = (
+            f"retry:{context.run_id}"
+            if run_status in {RunStatus.FAILED, RunStatus.TERMINATED}
+            else None
+        )
+        payload = {
+            "action": f"deterministic_terminal_{run_status.value}",
+            "run_id": context.run_id,
+            "session_id": context.session_id,
+            "stage_run_id": stage.stage_run_id if stage is not None else None,
+            "source_stage_type": stage.stage_type.value if stage is not None else None,
+            "graph_thread_id": context.thread.thread_id,
+            "terminal_status": terminal_status.value,
+            "run_status": run_status.value,
+            "terminal_reason": reason,
+            "direct_failure_point": direct_failure_point,
+            "retry_action": retry_action,
+            "artifact_refs": artifact_refs,
+            "event_refs": event_refs,
+            "result_ref": result_ref,
+            "span_id": terminal_trace.span_id,
+        }
+        try:
+            redacted = self._redaction_policy.summarize_payload(
+                payload,
+                payload_type="deterministic_runtime_terminal",
+            )
+            summary = LogPayloadSummary.from_redacted_payload(
+                "deterministic_runtime_terminal",
+                redacted,
+            )
+            if isinstance(redacted.redacted_payload, Mapping):
+                summary.summary.update(dict(redacted.redacted_payload))
+            summary.summary.update(payload)
+            result = self._log_writer.write_run_log(
+                LogRecordInput(
+                    source="runtime.deterministic",
+                    category=LogCategory.RUNTIME,
+                    level=LogLevel.ERROR
+                    if run_status is RunStatus.FAILED
+                    else LogLevel.INFO,
+                    message="Deterministic runtime emitted a terminal result.",
+                    trace_context=terminal_trace,
+                    payload=summary,
+                    created_at=self._now(),
+                )
+            )
+            log_id = getattr(result, "log_id", None)
+            return log_id if isinstance(log_id, str) and log_id else None
+        except Exception:
+            _LOGGER.exception(
+                "Deterministic runtime terminal log write failed for stage_run_id=%s",
+                stage.stage_run_id if stage is not None else None,
             )
             return None
 
