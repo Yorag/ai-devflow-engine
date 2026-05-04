@@ -175,7 +175,9 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | AL01-C2.9a | C2.9a | AL01 | `feat/al-run-core-events` | done | 874161e | d06be5c | `docs/plans/acceleration/reports/AL01-C2.9a.md` | - |
 | AL01-C2.9b | C2.9b | AL01 | `feat/al-run-core-events` | done | f03d52b | eeb54a3 | `docs/plans/acceleration/reports/AL01-C2.9b.md` | - |
 | AL04-W5.4 | W5.4 | AL04 | `feat/al-tools-deterministic-delivery` | done | 15a92a3 | 6798ce9 | `docs/plans/acceleration/reports/AL04-W5.4.md` | - |
+| AL04-W5.5 | W5.5 | AL04 | `feat/al-tools-deterministic-delivery` | done | 2451ebd | 14f5b52 | `docs/plans/acceleration/reports/AL04-W5.5.md` | Pure domain ChangeSet / ContextReference boundary integrated with future feature-two reference kinds reserved but no feature-two behavior enabled. |
 | AL05-A4.8d | A4.8d | AL05 | `feat/al-provider-langgraph-context` | done | 62535c5 | a9d28f3 | `docs/plans/acceleration/reports/AL05-A4.8d.md` | Integrated with candidate-a context provenance and trace hardening in `backend/app/context/schemas.py`. |
+| AL05-A4.9 | A4.9 | AL05 | `feat/al-provider-langgraph-context` | done | 2451ebd | aca5a8c | `docs/plans/acceleration/reports/AL05-A4.9.md` | LangChain provider adapter integrated with normalized tool-call candidates, `raw_response_ref`, and safe trace metadata boundaries. |
 
 当前基线不预置 live claim。主协调会话在认领 ready task 时写入共享 coordination store，并记录当时的 Coordination Base。
 

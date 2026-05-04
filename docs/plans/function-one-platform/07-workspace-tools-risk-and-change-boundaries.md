@@ -382,7 +382,7 @@
 ## W5.5 ChangeSet 与 ContextReference
 
 **计划周期**：Week 9
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：落地 ChangeSet 和 ContextReference 领域边界，为功能二选择驱动网页编辑保留复用对象。
 **实施计划**：`docs/plans/implementation/w5.5-change-set-context-reference.md`
 
@@ -405,6 +405,7 @@
 
 **测试方法**：
 - `pytest backend/tests/domain/test_change_set.py -v`
+**验证摘要**：实施计划 `docs/plans/implementation/w5.5-change-set-context-reference.md` 已完成并在 integration checkpoint 合入 `14f5b52`。`uv run pytest backend/tests/domain/test_change_set.py -v` 通过 11 个 focused tests；`uv run pytest backend/tests/domain/test_change_set.py backend/tests/context/test_context_schemas.py -v` 在 worker checkpoint 通过 17 个 impacted tests；本次 integration verification 中 `uv run pytest backend/tests/domain/test_change_set.py backend/tests/context/test_context_schemas.py backend/tests/providers/test_langchain_adapter.py backend/tests/providers/test_provider_registry.py backend/tests/fixtures/test_fixture_contracts.py -v` 通过 67 个 tests，覆盖 ChangeSet 边界与相邻 context/provider 契约。
 
 <a id="w56"></a>
 
