@@ -141,9 +141,10 @@
 ## D4.1 Delivery base 与 DeliveryRecord
 
 **计划周期**：Week 7
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立交付适配器基类和 DeliveryRecord 服务，使 `deterministic test runtime` 能进入正式 demo_delivery 出口；交付通道快照固化已经由 D4.0 负责。
 **实施计划**：`docs/plans/implementation/d4.1-delivery-base-record.md`
+**验证摘要**：实施计划 `docs/plans/implementation/d4.1-delivery-base-record.md` 已在 integration checkpoint 合入 `9ccf071`。Worker verification 中 focused DeliveryRecord service 命令通过 20 个 tests，delivery snapshot / runtime model regression 通过 18 个 tests，runtime regression 通过 20 个 tests，完整 backend suite 通过 1088 个 tests。本次 integration verification 在 `integration/function-one-acceleration` 上重复运行 focused D4.1、delivery snapshot / runtime model regression、runtime regression 和完整 backend suite；`uv run python -m pytest backend/tests -q` 通过 1114 个 backend tests，保留既有 LangChain adapter `temperature` warning。
 
 **修改文件列表**：
 - Create: `backend/app/delivery/base.py`
