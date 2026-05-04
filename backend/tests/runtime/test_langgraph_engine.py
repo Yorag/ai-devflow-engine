@@ -137,6 +137,27 @@ class FakeStageRunner:
         )
 
 
+class WaitingStageRunner:
+    def __init__(self) -> None:
+        self.invocations: list[Any] = []
+
+    def run_stage(self, invocation: Any) -> Any:
+        from backend.app.runtime.stage_runner_port import StageNodeResult
+
+        self.invocations.append(invocation)
+        return StageNodeResult(
+            run_id=invocation.run_id,
+            stage_run_id=invocation.stage_run_id,
+            stage_type=invocation.stage_type,
+            status=StageStatus.WAITING_TOOL_CONFIRMATION,
+            artifact_refs=[],
+            domain_event_refs=[],
+            log_summary_refs=[],
+            audit_refs=[],
+            route_key="waiting_tool_confirmation",
+        )
+
+
 class BadIdentityStageRunner:
     def __init__(self, *, field_name: str, value: object) -> None:
         self.field_name = field_name
@@ -361,6 +382,50 @@ def test_langgraph_runtime_returns_domain_refs_without_raw_graph_state() -> None
     assert "compiled_graph" not in dumped
     assert "checkpoint_payload" not in dumped
     assert all("raw" not in key.lower() for key in dumped)
+
+
+def test_langgraph_runtime_does_not_mark_waiting_stage_as_completed() -> None:
+    runner = WaitingStageRunner()
+    engine, _runner, checkpoint_port, runtime_port = build_engine(runner=runner)
+    context = build_context()
+
+    engine.run_next(
+        context=context,
+        runtime_port=runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+
+    snapshot = engine._checkpointer.get_tuple(  # noqa: SLF001
+        {"configurable": {"thread_id": "graph-thread-1"}}
+    )
+    values = snapshot.checkpoint["channel_values"]
+    assert values["last_result"]["status"] == (
+        StageStatus.WAITING_TOOL_CONFIRMATION.value
+    )
+    assert values["completed_stage_run_ids"] == []
+
+
+def test_langgraph_runtime_does_not_advance_after_waiting_stage_result() -> None:
+    runner = WaitingStageRunner()
+    engine, _runner, checkpoint_port, runtime_port = build_engine(runner=runner)
+    context = build_context()
+
+    engine.run_next(
+        context=context,
+        runtime_port=runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+
+    with pytest.raises(ValueError, match="non-completed stage result"):
+        engine.run_next(
+            context=context,
+            runtime_port=runtime_port,
+            checkpoint_port=checkpoint_port,
+        )
+
+    assert [call.stage_type for call in runner.invocations] == [
+        StageType.REQUIREMENT_ANALYSIS
+    ]
 
 
 def test_langgraph_runtime_logs_sanitized_internal_graph_events() -> None:

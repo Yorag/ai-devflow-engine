@@ -6,7 +6,7 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from backend.app.domain.enums import StageType
+from backend.app.domain.enums import StageStatus, StageType
 from backend.app.domain.graph_definition import GraphDefinition
 from backend.app.runtime.base import RuntimeExecutionContext
 from backend.app.runtime.stage_runner_port import (
@@ -17,6 +17,8 @@ from backend.app.runtime.stage_runner_port import (
 
 
 DEFAULT_ROUTE_KEY = "__default__"
+NON_COMPLETED_ROUTE_KEY = "__non_completed_stage_result__"
+NON_COMPLETED_BLOCKED_NODE = "__blocked_non_completed_stage_result__"
 
 
 class LangGraphRuntimeState(TypedDict, total=False):
@@ -37,6 +39,7 @@ def build_stage_graph(
 ) -> StateGraph:
     stage_nodes = tuple(graph_definition.stage_nodes)
     graph = StateGraph(LangGraphRuntimeState)
+    graph.add_node(NON_COMPLETED_BLOCKED_NODE, _non_completed_stage_result_action)
 
     for node in stage_nodes:
         node_key = _node_key(node)
@@ -69,13 +72,22 @@ def build_stage_graph(
                 for route in conditional_routes
             }
             route_map[DEFAULT_ROUTE_KEY] = default_target
+            route_map[NON_COMPLETED_ROUTE_KEY] = NON_COMPLETED_BLOCKED_NODE
             graph.add_conditional_edges(
                 node_key,
                 _route_selector(frozenset(route_map)),
                 route_map,
             )
         else:
-            graph.add_edge(node_key, default_target)
+            route_map = {
+                DEFAULT_ROUTE_KEY: default_target,
+                NON_COMPLETED_ROUTE_KEY: NON_COMPLETED_BLOCKED_NODE,
+            }
+            graph.add_conditional_edges(
+                node_key,
+                _route_selector(frozenset(route_map)),
+                route_map,
+            )
 
     return graph
 
@@ -111,10 +123,9 @@ def run_stage_node(
         stage_runner.run_stage(invocation)
     )
     _validate_stage_node_result_identity(result, invocation)
-    completed_stage_run_ids = [
-        *(state.get("completed_stage_run_ids") or []),
-        result.stage_run_id,
-    ]
+    completed_stage_run_ids = list(state.get("completed_stage_run_ids") or [])
+    if result.status is StageStatus.COMPLETED:
+        completed_stage_run_ids.append(result.stage_run_id)
     return {
         "run_id": runtime_context.run_id,
         "session_id": runtime_context.session_id,
@@ -150,12 +161,40 @@ def _stage_node_action(
 
 def _route_selector(valid_route_keys: frozenset[str]) -> Callable[[LangGraphRuntimeState], str]:
     def _select(state: LangGraphRuntimeState) -> str:
+        if _last_stage_status(state) is not StageStatus.COMPLETED:
+            return (
+                NON_COMPLETED_ROUTE_KEY
+                if NON_COMPLETED_ROUTE_KEY in valid_route_keys
+                else DEFAULT_ROUTE_KEY
+            )
         route_key = state.get("route_key") or DEFAULT_ROUTE_KEY
         if route_key in valid_route_keys:
             return route_key
         return DEFAULT_ROUTE_KEY
 
     return _select
+
+
+def _last_stage_status(state: LangGraphRuntimeState) -> StageStatus | None:
+    last_result = state.get("last_result")
+    if not isinstance(last_result, dict):
+        return None
+    status = last_result.get("status")
+    try:
+        return StageStatus(str(status))
+    except ValueError:
+        return None
+
+
+def _non_completed_stage_result_action(
+    state: LangGraphRuntimeState,
+) -> LangGraphRuntimeState:
+    last_result = state.get("last_result") or {}
+    status = last_result.get("status") if isinstance(last_result, dict) else None
+    raise ValueError(
+        "LangGraph cannot advance after non-completed stage result: "
+        f"{status or 'unknown'}"
+    )
 
 
 def _node_key(node: dict[str, Any]) -> str:
@@ -207,6 +246,8 @@ def _stage_contract_ref(
 __all__ = [
     "DEFAULT_ROUTE_KEY",
     "LangGraphRuntimeState",
+    "NON_COMPLETED_BLOCKED_NODE",
+    "NON_COMPLETED_ROUTE_KEY",
     "build_stage_graph",
     "run_stage_node",
 ]
