@@ -1,7 +1,6 @@
 import type {
   ApprovalResultFeedEntry,
   ControlItemFeedEntry,
-  DeliveryResultFeedEntry,
   MessageFeedEntry,
   SessionStatus,
   StageType,
@@ -10,6 +9,7 @@ import type {
 } from "../../api/types";
 import type { ApiRequestOptions } from "../../api/client";
 import { ApprovalBlock } from "../approvals/ApprovalBlock";
+import { DeliveryResultBlock } from "../delivery/DeliveryResultBlock";
 import { RerunAction } from "../runs/RerunAction";
 import { StageNode } from "./StageNode";
 import { ToolConfirmationBlock } from "./ToolConfirmationBlock";
@@ -116,7 +116,7 @@ export function FeedEntryRenderer({
       return <ApprovalResultEntry entry={entry} />;
     case "delivery_result":
       return (
-        <DeliveryResultEntry
+        <DeliveryResultBlock
           entry={entry}
           onOpenInspectorTarget={onOpenInspectorTarget}
         />
@@ -202,48 +202,6 @@ function ApprovalResultEntry({
       <div className="feed-entry__meta-grid" aria-label="Approval result metadata">
         <Metadata label="Next stage" value={stageLabels[entry.next_stage_type]} />
       </div>
-    </article>
-  );
-}
-
-function DeliveryResultEntry({
-  entry,
-  onOpenInspectorTarget,
-}: {
-  entry: DeliveryResultFeedEntry;
-  onOpenInspectorTarget?: (entry: TopLevelFeedEntry) => void;
-}): JSX.Element {
-  return (
-    <article
-      className="feed-entry feed-entry--delivery-result"
-      aria-label="Delivery result feed entry"
-    >
-      <EntryHeader
-        label="Delivery result"
-        timestamp={entry.occurred_at}
-        badge={formatLabel(entry.status)}
-      />
-      <h2>{formatLabel(entry.delivery_mode)}</h2>
-      <p className="feed-entry__body">{entry.summary}</p>
-      <div className="feed-entry__meta-grid" aria-label="Delivery result metadata">
-        <Metadata label="Mode" value={entry.delivery_mode} />
-        {entry.branch_name ? <Metadata label="Branch" value={entry.branch_name} /> : null}
-        {entry.commit_sha ? <Metadata label="Commit" value={entry.commit_sha} /> : null}
-        {entry.code_review_url ? (
-          <Metadata label="Code review" value={entry.code_review_url} />
-        ) : null}
-        {entry.test_summary ? (
-          <Metadata label="Tests" value={entry.test_summary} />
-        ) : null}
-      </div>
-      {onOpenInspectorTarget ? (
-        <div className="feed-entry__actions" aria-label="Delivery result actions">
-          <InspectorTrigger
-            label={entry.delivery_mode}
-            onClick={() => onOpenInspectorTarget(entry)}
-          />
-        </div>
-      ) : null}
     </article>
   );
 }

@@ -855,9 +855,11 @@ export const mockDeliveryResultDetailProjection: DeliveryResultDetailProjection 
   output: {
     title: "Output",
     records: {
-      branch_name: "feat/runtime-inspector",
-      commit_sha: "abc1234",
-      code_review_url: "https://example.test/pr/17",
+      delivery_summary:
+        "Prepared a display-only delivery outcome for review without Git write actions.",
+      delivery_target: "Demo delivery workspace summary",
+      commit_message_preview:
+        "feat(workspace): present demo delivery result in narrative feed",
     },
     stable_refs: ["delivery-output-ref-1"],
     log_refs: [],
