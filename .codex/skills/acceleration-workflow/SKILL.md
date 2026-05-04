@@ -87,7 +87,7 @@ git check-ignore -q .worktrees
 - **Sync Idle Branches**：integration checkpoint push 后，同步没有 active / blocked claim 的空闲 lane branch 到最新 integration base。
 - **Auto Advance**：integration checkpoint 完成后，为已同步到最新 integration base 且没有 active claim 的 lane 自动 claim 下一条 queue task。
 - **Checkpoint Closeout**：integration checkpoint push 后，在同一次主协调收尾中执行 `post-checkpoint --apply`，收敛 ingest、空闲 branch 同步和自动解封。
-- **Status Summary**：输出 AL01-AL06 lane、branch delta、dirty、latest claim 和下一动作。
+- **Status Summary**：输出 AL01-AL06 与 QA lane 的 branch delta、dirty、latest claim 和下一动作。
 - **Post Checkpoint**：在 integration checkpoint 后串联 scan/ingest、空闲同步和自动解封；默认 dry-run，`--apply` 才写 store 或执行 ff-only sync。
 - **Main Promotion**：integration checkpoint 通过后，按 `git-delivery-workflow` 准备进入 `main` 的 PR/MR-ready 或 merge-ready 报告。
 
@@ -185,7 +185,7 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py auto-advance-claims --apply
 ```
 
-`status-summary` 输出六路协调状态。主协调会话每次汇报都应包含该六路摘要，避免只讨论当前 lane。
+`status-summary` 输出 AL01-AL06 与 QA 的协调状态。主协调会话每次汇报都应包含该协调摘要，避免只讨论当前 lane。
 
 `post-checkpoint` 是 checkpoint closeout 的常用入口：默认 dry-run，串联 worker commit scan、可 ingest 判断、空闲 branch 同步候选和 auto-advance 候选。`post-checkpoint --apply` 才执行 committed ingest、`sync-idle-branches --apply` 和 `auto-advance-claims --apply`。它不执行 lane merge、verification、checkpoint commit 或 push；这些仍由 integration checkpoint 明确控制。
 

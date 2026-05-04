@@ -15,6 +15,7 @@ STORE_RELATIVE_PATH = Path("codex-coordination") / "function-one.sqlite"
 ACCELERATION_PLAN_PATH = Path("docs/plans/function-one-acceleration-execution-plan.md")
 PLATFORM_PLAN_PATH = Path("docs/plans/function-one-platform-plan.md")
 INTEGRATION_BRANCH = "integration/function-one-acceleration"
+LANE_ID_PATTERN = r"(?:AL\d+|QA)"
 
 CLAIM_STATUSES = {
     "claimed",
@@ -504,7 +505,7 @@ def parse_lane_registry(plan_text: str) -> dict[str, dict[str, Any]]:
     section = markdown_section(plan_text, "## 3. Lane Registry")
     registry: dict[str, dict[str, Any]] = {}
     for line in section.splitlines():
-        match = re.match(r"^\|\s*(AL\d+)\s*\|\s*`([^`]+)`\s*\|\s*([^|]+)\|", line)
+        match = re.match(rf"^\|\s*({LANE_ID_PATTERN})\s*\|\s*`([^`]+)`\s*\|\s*([^|]+)\|", line)
         if not match:
             continue
         lane_id, branch, tasks_text = match.groups()
@@ -517,7 +518,7 @@ def parse_lane_queues(plan_text: str) -> dict[str, list[str]]:
     section = markdown_section(plan_text, "## 7. Lane Queues")
     queues: dict[str, list[str]] = {}
     for line in section.splitlines():
-        match = re.match(r"^\|\s*(AL\d+)\s*\|\s*([^|]+)\|", line)
+        match = re.match(rf"^\|\s*({LANE_ID_PATTERN})\s*\|\s*([^|]+)\|", line)
         if not match:
             continue
         lane_id, queue_text = match.groups()
