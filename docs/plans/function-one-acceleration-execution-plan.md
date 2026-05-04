@@ -181,6 +181,7 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | AL05-A4.8d | A4.8d | AL05 | `feat/al-provider-langgraph-context` | done | 62535c5 | a9d28f3 | `docs/plans/acceleration/reports/AL05-A4.8d.md` | Integrated with candidate-a context provenance and trace hardening in `backend/app/context/schemas.py`. |
 | AL05-A4.9 | A4.9 | AL05 | `feat/al-provider-langgraph-context` | done | 2451ebd | aca5a8c | `docs/plans/acceleration/reports/AL05-A4.9.md` | LangChain provider adapter integrated with normalized tool-call candidates, `raw_response_ref`, and safe trace metadata boundaries. |
 | AL05-A4.9a | A4.9a | AL05 | `feat/al-provider-langgraph-context` | done | ea1aa8d | d349599 | `docs/plans/acceleration/reports/AL05-A4.9a.md` | ContextEnvelope Builder and ContextManifest recording integrated through existing `ArtifactStore.append_process_record(process_key="context_manifest", ...)` shared entry. |
+| AL06-F5.2b | F5.2b | AL06 | `feat/al-frontend-runtime-ui` | integrated | d424115 | 4071e82 | `docs/plans/acceleration/reports/AL06-F5.2b.md` | git_auto_delivery result UI integrated against the current frontend feed contract; final completion still depends on real backend `git_auto_delivery` / `delivery_result` payload verification. |
 
 当前基线不预置 live claim。主协调会话在认领 ready task 时写入共享 coordination store，并记录当时的 Coordination Base。
 
