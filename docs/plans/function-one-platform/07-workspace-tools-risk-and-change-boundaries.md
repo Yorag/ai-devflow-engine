@@ -412,7 +412,7 @@
 ## W5.6 PreviewTarget Schema 与查询接口
 
 **计划周期**：Week 9
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：定义 PreviewTarget 对象和查询接口，为功能二预览能力保留稳定 API 边界。
 **实施计划**：`docs/plans/implementation/w5.6-preview-target-query.md`
 
@@ -433,3 +433,4 @@
 
 **测试方法**：
 - `pytest backend/tests/api/test_preview_target_api.py -v`
+**验证摘要**：实施计划 `docs/plans/implementation/w5.6-preview-target-query.md` 已完成并在 integration checkpoint 合入 `7a8911a`。本次 integration verification 中 `uv run pytest backend/tests/api/test_preview_target_api.py -v` 通过 5 个 focused tests，`uv run pytest backend/tests/api/test_preview_target_api.py backend/tests/api/test_query_api.py -v` 通过 22 个 impacted API tests，`uv run pytest backend/tests -q` 通过 1003 个 backend tests，保留 3 个既有 LangChain adapter `temperature` 参数 warning。

@@ -176,6 +176,7 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | AL01-C2.9b | C2.9b | AL01 | `feat/al-run-core-events` | done | f03d52b | eeb54a3 | `docs/plans/acceleration/reports/AL01-C2.9b.md` | - |
 | AL04-W5.4 | W5.4 | AL04 | `feat/al-tools-deterministic-delivery` | done | 15a92a3 | 6798ce9 | `docs/plans/acceleration/reports/AL04-W5.4.md` | - |
 | AL04-W5.5 | W5.5 | AL04 | `feat/al-tools-deterministic-delivery` | done | 2451ebd | 14f5b52 | `docs/plans/acceleration/reports/AL04-W5.5.md` | Pure domain ChangeSet / ContextReference boundary integrated with future feature-two reference kinds reserved but no feature-two behavior enabled. |
+| AL04-W5.6 | W5.6 | AL04 | `feat/al-tools-deterministic-delivery` | done | ea1aa8d | 7a8911a | `docs/plans/acceleration/reports/AL04-W5.6.md` | PreviewTarget object and read-only query API integrated; focused, impacted API, and full backend verification passed. |
 | AL05-A4.8d | A4.8d | AL05 | `feat/al-provider-langgraph-context` | done | 62535c5 | a9d28f3 | `docs/plans/acceleration/reports/AL05-A4.8d.md` | Integrated with candidate-a context provenance and trace hardening in `backend/app/context/schemas.py`. |
 | AL05-A4.9 | A4.9 | AL05 | `feat/al-provider-langgraph-context` | done | 2451ebd | aca5a8c | `docs/plans/acceleration/reports/AL05-A4.9.md` | LangChain provider adapter integrated with normalized tool-call candidates, `raw_response_ref`, and safe trace metadata boundaries. |
 

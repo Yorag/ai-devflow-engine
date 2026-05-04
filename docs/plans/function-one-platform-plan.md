@@ -297,7 +297,7 @@
 | A4.10 | 自动回归策略 | Week 8-9 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a410) |
 | A4.11 | 自动回归控制条目与超限失败 | Week 8-9 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a411) |
 | W5.5 | ChangeSet 与 ContextReference | Week 9 | [x] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w55) |
-| W5.6 | PreviewTarget Schema 与查询接口 | Week 9 | [ ] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w56) |
+| W5.6 | PreviewTarget Schema 与查询接口 | Week 9 | [x] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w56) |
 | D5.1 | read_delivery_snapshot 与交付快照读取 | Week 10 | [ ] | 后端 | [08](function-one-platform/08-git-delivery-and-result-display.md#d51) |
 | D5.2 | prepare_branch 与 create_commit | Week 10 | [ ] | 后端 | [08](function-one-platform/08-git-delivery-and-result-display.md#d52) |
 | D5.3 | push_branch 与 create_code_review_request | Week 10 | [ ] | 后端 | [08](function-one-platform/08-git-delivery-and-result-display.md#d53) |
