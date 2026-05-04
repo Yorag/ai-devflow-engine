@@ -290,7 +290,7 @@
 | A4.8d | PromptRenderer 与消息序列渲染 | Week 8 | [x] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a48d) |
 | A4.9 | LangChain Provider Adapter | Week 8 | [x] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a49) |
 | A4.9a | ContextEnvelope Builder 与 ContextManifest 记录 | Week 8 | [x] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a49a) |
-| A4.9e | Provider retry、backoff 与 circuit breaker | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a49e) |
+| A4.9e | Provider retry、backoff 与 circuit breaker | Week 8 | [x] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a49e) |
 | A4.9b | Context Size Guard 与压缩过程记录 | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a49b) |
 | A4.9c | AgentDecision Schema 与解析器 | Week 8 | [ ] | 后端 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a49c) |
 | A4.9d | Stage Agent Runtime 执行循环 | Week 8 | [ ] | 后端核心 | [06](function-one-platform/06-langgraph-provider-context-stage-agent.md#a49d) |
