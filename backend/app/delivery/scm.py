@@ -36,6 +36,8 @@ from backend.app.tools.protocol import (
 READ_DELIVERY_SNAPSHOT_TOOL_NAME = "read_delivery_snapshot"
 PREPARE_BRANCH_TOOL_NAME = "prepare_branch"
 CREATE_COMMIT_TOOL_NAME = "create_commit"
+PUSH_BRANCH_TOOL_NAME = "push_branch"
+CREATE_CODE_REVIEW_REQUEST_TOOL_NAME = "create_code_review_request"
 DELIVERY_TOOL_CATEGORY = "delivery"
 _SCHEMA_VERSION = "tool-schema-v1"
 
@@ -131,6 +133,82 @@ _CREATE_COMMIT_RESULT_SCHEMA: dict[str, Any] = {
     "required": ["commit_sha", "changed_files", "delivery_record_id"],
     "additionalProperties": False,
 }
+_PUSH_BRANCH_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "repository_path": {"type": "string", "minLength": 1},
+        "remote_name": {"type": "string", "minLength": 1},
+        "branch_name": {"type": "string", "minLength": 1},
+        "delivery_record_id": {"type": "string", "minLength": 1},
+    },
+    "required": ["repository_path", "remote_name", "branch_name", "delivery_record_id"],
+    "additionalProperties": False,
+}
+_PUSH_BRANCH_RESULT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "remote_name": {"type": "string"},
+        "branch_name": {"type": "string"},
+        "remote_ref": {"type": "string"},
+        "pushed_sha": {"type": "string"},
+        "delivery_record_id": {"type": "string"},
+    },
+    "required": [
+        "remote_name",
+        "branch_name",
+        "remote_ref",
+        "pushed_sha",
+        "delivery_record_id",
+    ],
+    "additionalProperties": False,
+}
+_CREATE_CODE_REVIEW_REQUEST_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "repository_identifier": {"type": "string", "minLength": 1},
+        "source_branch": {"type": "string", "minLength": 1},
+        "target_branch": {"type": "string", "minLength": 1},
+        "title": {"type": "string", "minLength": 1},
+        "body": {"type": "string", "minLength": 1},
+        "code_review_request_type": {
+            "type": "string",
+            "enum": ["pull_request", "merge_request"],
+        },
+        "delivery_record_id": {"type": "string", "minLength": 1},
+    },
+    "required": [
+        "repository_identifier",
+        "source_branch",
+        "target_branch",
+        "title",
+        "body",
+        "code_review_request_type",
+        "delivery_record_id",
+    ],
+    "additionalProperties": False,
+}
+_CREATE_CODE_REVIEW_REQUEST_RESULT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "repository_identifier": {"type": "string"},
+        "source_branch": {"type": "string"},
+        "target_branch": {"type": "string"},
+        "code_review_request_type": {"type": "string"},
+        "code_review_url": {"type": "string"},
+        "code_review_number": {"type": "integer"},
+        "delivery_record_id": {"type": "string"},
+    },
+    "required": [
+        "repository_identifier",
+        "source_branch",
+        "target_branch",
+        "code_review_request_type",
+        "code_review_url",
+        "code_review_number",
+        "delivery_record_id",
+    ],
+    "additionalProperties": False,
+}
 _GIT_AUTO_REQUIRED_FIELDS = (
     "scm_provider_type",
     "repository_identifier",
@@ -159,6 +237,7 @@ class GitCliResult:
 class ScmDeliveryAdapter:
     runtime_session: Session | None = None
     audit_service: Any | None = None
+    remote_clients: Mapping[str, Any] | None = None
 
     def run_git_cli(
         self,
@@ -589,6 +668,265 @@ class ScmDeliveryAdapter:
             coordination_key=tool_input.coordination_key,
         )
 
+    def push_branch(self, tool_input: ToolInput) -> ToolResult:
+        payload = tool_input.input_payload
+        repository_path = str(payload["repository_path"])
+        remote_name = str(payload["remote_name"])
+        branch_name = str(payload["branch_name"])
+        delivery_record_id = str(payload["delivery_record_id"])
+        timeout_seconds = tool_input.timeout_seconds
+        push_command = "git push <remote> <branch>:<branch>"
+        local_branch_ref = f"refs/heads/{branch_name}"
+
+        audit_failure = self._git_audit_required_result(
+            tool_input,
+            tool_name=PUSH_BRANCH_TOOL_NAME,
+            command=push_command,
+        )
+        if audit_failure is not None:
+            return audit_failure
+
+        checked = self.run_git_cli(
+            repository_path,
+            ["check-ref-format", "--branch", branch_name],
+            timeout_seconds,
+        )
+        if checked.returncode != 0:
+            return self._git_failed_result(
+                tool_input,
+                tool_name=PUSH_BRANCH_TOOL_NAME,
+                command="git check-ref-format --branch",
+                exit_code=checked.returncode,
+                reason="invalid_branch_name",
+                delivery_record_id=delivery_record_id,
+                branch_name=branch_name,
+            )
+
+        remote_checked = self.run_git_cli(
+            repository_path,
+            ["remote", "get-url", remote_name],
+            timeout_seconds,
+        )
+        if remote_checked.returncode != 0:
+            return self._git_failed_result(
+                tool_input,
+                tool_name=PUSH_BRANCH_TOOL_NAME,
+                command="git remote get-url <remote>",
+                exit_code=remote_checked.returncode,
+                reason="remote_lookup_failed",
+                delivery_record_id=delivery_record_id,
+                branch_name=branch_name,
+            )
+
+        parsed = self.run_git_cli(
+            repository_path,
+            ["rev-parse", f"{local_branch_ref}^{{commit}}"],
+            timeout_seconds,
+        )
+        if parsed.returncode != 0:
+            return self._git_failed_result(
+                tool_input,
+                tool_name=PUSH_BRANCH_TOOL_NAME,
+                command="git rev-parse <branch>",
+                exit_code=parsed.returncode,
+                reason="rev_parse_failed",
+                delivery_record_id=delivery_record_id,
+                branch_name=branch_name,
+            )
+        pushed_sha = parsed.stdout.strip()
+
+        pushed = self.run_git_cli(
+            repository_path,
+            ["push", remote_name, f"{local_branch_ref}:{local_branch_ref}"],
+            timeout_seconds,
+        )
+        if pushed.returncode != 0:
+            return self._git_failed_result(
+                tool_input,
+                tool_name=PUSH_BRANCH_TOOL_NAME,
+                command=push_command,
+                exit_code=pushed.returncode,
+                reason="push_failed",
+                delivery_record_id=delivery_record_id,
+                branch_name=branch_name,
+            )
+
+        remote_ref = f"{remote_name}/{branch_name}"
+        audit_failure = self._record_git_call(
+            tool_input=tool_input,
+            tool_name=PUSH_BRANCH_TOOL_NAME,
+            command=push_command,
+            execution=_redacted_git_cli_result(pushed),
+            delivery_record_id=delivery_record_id,
+            branch_name=branch_name,
+            commit_sha=pushed_sha,
+            remote_name=remote_name,
+            remote_ref=remote_ref,
+        )
+        if audit_failure is not None:
+            return audit_failure
+
+        return ToolResult(
+            tool_name=PUSH_BRANCH_TOOL_NAME,
+            call_id=tool_input.call_id,
+            status=ToolResultStatus.SUCCEEDED,
+            output_payload={
+                "remote_name": remote_name,
+                "branch_name": branch_name,
+                "remote_ref": remote_ref,
+                "pushed_sha": pushed_sha,
+                "delivery_record_id": delivery_record_id,
+            },
+            output_preview=_safe_preview(f"pushed {branch_name} to {remote_ref}"),
+            side_effect_refs=[
+                f"git_push:{remote_ref}",
+                f"git_commit:{pushed_sha}",
+                f"delivery_record:{delivery_record_id}",
+            ],
+            reconciliation_status=ToolReconciliationStatus.PENDING,
+            trace_context=tool_input.trace_context,
+            coordination_key=tool_input.coordination_key,
+        )
+
+    def resolve_remote_client(self, repository_identifier: str) -> Any | None:
+        if self.remote_clients is None:
+            return None
+        return self.remote_clients.get(repository_identifier)
+
+    def create_code_review_request(self, tool_input: ToolInput) -> ToolResult:
+        payload = tool_input.input_payload
+        repository_identifier = str(payload["repository_identifier"])
+        source_branch = str(payload["source_branch"])
+        target_branch = str(payload["target_branch"])
+        title = str(payload["title"])
+        body = str(payload["body"])
+        request_type = str(payload["code_review_request_type"])
+        delivery_record_id = str(payload["delivery_record_id"])
+        command = f"create {request_type}"
+
+        audit_failure = self._remote_audit_required_result(
+            tool_input,
+            tool_name=CREATE_CODE_REVIEW_REQUEST_TOOL_NAME,
+            command=command,
+        )
+        if audit_failure is not None:
+            return audit_failure
+
+        client = self.resolve_remote_client(repository_identifier)
+        if client is None:
+            safe_details = {
+                "command": command,
+                "reason": "remote_client_unavailable",
+                "repository_identifier": repository_identifier,
+                "code_review_request_type": request_type,
+            }
+            audit_failure = self._record_remote_error(
+                tool_input=tool_input,
+                tool_name=CREATE_CODE_REVIEW_REQUEST_TOOL_NAME,
+                command=command,
+                reason="remote_client_unavailable",
+                metadata=safe_details,
+                delivery_record_id=delivery_record_id,
+            )
+            if audit_failure is not None:
+                return audit_failure
+            return _git_tool_error_result(
+                tool_input,
+                tool_name=CREATE_CODE_REVIEW_REQUEST_TOOL_NAME,
+                error_code=ErrorCode.DELIVERY_REMOTE_REQUEST_FAILED,
+                safe_details=safe_details,
+            )
+
+        try:
+            if request_type == "pull_request":
+                response = client.create_pull_request(
+                    repository_identifier=repository_identifier,
+                    source_branch=source_branch,
+                    target_branch=target_branch,
+                    title=title,
+                    body=body,
+                )
+            else:
+                response = client.create_merge_request(
+                    repository_identifier=repository_identifier,
+                    source_branch=source_branch,
+                    target_branch=target_branch,
+                    title=title,
+                    body=body,
+                )
+        except Exception as exc:
+            safe_reason = _safe_exception_summary(exc)
+            safe_details = {
+                "command": command,
+                "reason": "remote_request_failed",
+                "repository_identifier": repository_identifier,
+                "source_branch": source_branch,
+                "target_branch": target_branch,
+                "code_review_request_type": request_type,
+                "remote_error_summary": safe_reason,
+            }
+            audit_failure = self._record_remote_error(
+                tool_input=tool_input,
+                tool_name=CREATE_CODE_REVIEW_REQUEST_TOOL_NAME,
+                command=command,
+                reason="remote_request_failed",
+                metadata=safe_details,
+                delivery_record_id=delivery_record_id,
+            )
+            if audit_failure is not None:
+                return audit_failure
+            return _git_tool_error_result(
+                tool_input,
+                tool_name=CREATE_CODE_REVIEW_REQUEST_TOOL_NAME,
+                error_code=ErrorCode.DELIVERY_REMOTE_REQUEST_FAILED,
+                safe_details=safe_details,
+            )
+
+        code_review_url = str(response["url"])
+        code_review_number = int(response["number"])
+        audit_failure = self._record_remote_call(
+            tool_input=tool_input,
+            tool_name=CREATE_CODE_REVIEW_REQUEST_TOOL_NAME,
+            command=command,
+            delivery_record_id=delivery_record_id,
+            repository_identifier=repository_identifier,
+            source_branch=source_branch,
+            target_branch=target_branch,
+            request_type=request_type,
+            code_review_url=code_review_url,
+            code_review_number=code_review_number,
+        )
+        if audit_failure is not None:
+            return audit_failure
+
+        return ToolResult(
+            tool_name=CREATE_CODE_REVIEW_REQUEST_TOOL_NAME,
+            call_id=tool_input.call_id,
+            status=ToolResultStatus.SUCCEEDED,
+            output_payload={
+                "repository_identifier": repository_identifier,
+                "source_branch": source_branch,
+                "target_branch": target_branch,
+                "code_review_request_type": request_type,
+                "code_review_url": code_review_url,
+                "code_review_number": code_review_number,
+                "delivery_record_id": delivery_record_id,
+            },
+            output_preview=_safe_preview(
+                f"created {request_type} #{code_review_number} for {repository_identifier}"
+            ),
+            side_effect_refs=[
+                (
+                    f"code_review_request:{request_type}:"
+                    f"{repository_identifier}:{code_review_number}"
+                ),
+                f"delivery_record:{delivery_record_id}",
+            ],
+            reconciliation_status=ToolReconciliationStatus.PENDING,
+            trace_context=tool_input.trace_context,
+            coordination_key=tool_input.coordination_key,
+        )
+
     def _failed_result(
         self,
         tool_input: ToolInput,
@@ -671,6 +1009,25 @@ class ScmDeliveryAdapter:
             },
         )
 
+    def _remote_audit_required_result(
+        self,
+        tool_input: ToolInput,
+        *,
+        tool_name: str,
+        command: str,
+    ) -> ToolResult | None:
+        if self.audit_service is not None:
+            return None
+        return _git_tool_error_result(
+            tool_input,
+            tool_name=tool_name,
+            error_code=ErrorCode.TOOL_AUDIT_REQUIRED_FAILED,
+            safe_details={
+                "command": command,
+                "reason": "delivery_remote_write_audit_unavailable",
+            },
+        )
+
     def _git_failed_result(
         self,
         tool_input: ToolInput,
@@ -717,6 +1074,8 @@ class ScmDeliveryAdapter:
         base_branch: str | None = None,
         head_sha: str | None = None,
         commit_sha: str | None = None,
+        remote_name: str | None = None,
+        remote_ref: str | None = None,
         changed_files: Sequence[str] = (),
     ) -> ToolResult | None:
         if self.audit_service is None:
@@ -742,6 +1101,8 @@ class ScmDeliveryAdapter:
                 base_branch=base_branch,
                 head_sha=head_sha,
                 commit_sha=commit_sha,
+                remote_name=remote_name,
+                remote_ref=remote_ref,
                 delivery_record_id=delivery_record_id,
                 intent_audit_id=tool_input.side_effect_intent_ref,
                 trace_context=tool_input.trace_context,
@@ -754,6 +1115,105 @@ class ScmDeliveryAdapter:
                 safe_details={
                     "command": command,
                     "reason": "delivery_git_write_audit_failed",
+                },
+            )
+        return None
+
+    def _record_remote_call(
+        self,
+        *,
+        tool_input: ToolInput,
+        tool_name: str,
+        command: str,
+        delivery_record_id: str,
+        repository_identifier: str,
+        source_branch: str,
+        target_branch: str,
+        request_type: str,
+        code_review_url: str,
+        code_review_number: int,
+    ) -> ToolResult | None:
+        if self.audit_service is None:
+            return _git_tool_error_result(
+                tool_input,
+                tool_name=tool_name,
+                error_code=ErrorCode.TOOL_AUDIT_REQUIRED_FAILED,
+                safe_details={
+                    "command": command,
+                    "reason": "delivery_remote_write_audit_unavailable",
+                },
+            )
+        try:
+            self.audit_service.record_tool_call(
+                tool_name=tool_name,
+                command=command,
+                exit_code=0,
+                duration_ms=0,
+                changed_files=[],
+                stdout_excerpt="",
+                stderr_excerpt="",
+                repository_identifier=repository_identifier,
+                source_branch=source_branch,
+                target_branch=target_branch,
+                code_review_request_type=request_type,
+                code_review_url=code_review_url,
+                code_review_number=code_review_number,
+                delivery_record_id=delivery_record_id,
+                intent_audit_id=tool_input.side_effect_intent_ref,
+                trace_context=tool_input.trace_context,
+            )
+        except Exception:
+            return _git_tool_error_result(
+                tool_input,
+                tool_name=tool_name,
+                error_code=ErrorCode.TOOL_AUDIT_REQUIRED_FAILED,
+                safe_details={
+                    "command": command,
+                    "reason": "delivery_remote_write_audit_failed",
+                },
+            )
+        return None
+
+    def _record_remote_error(
+        self,
+        *,
+        tool_input: ToolInput,
+        tool_name: str,
+        command: str,
+        reason: str,
+        metadata: dict[str, object],
+        delivery_record_id: str,
+    ) -> ToolResult | None:
+        if self.audit_service is None:
+            return _git_tool_error_result(
+                tool_input,
+                tool_name=tool_name,
+                error_code=ErrorCode.TOOL_AUDIT_REQUIRED_FAILED,
+                safe_details={
+                    "command": command,
+                    "reason": "delivery_remote_write_audit_unavailable",
+                },
+            )
+        try:
+            self.audit_service.record_tool_error(
+                tool_name=tool_name,
+                command=command,
+                error_code=ErrorCode.DELIVERY_REMOTE_REQUEST_FAILED,
+                result=AuditResult.FAILED,
+                reason=reason,
+                metadata=metadata,
+                delivery_record_id=delivery_record_id,
+                intent_audit_id=tool_input.side_effect_intent_ref,
+                trace_context=tool_input.trace_context,
+            )
+        except Exception:
+            return _git_tool_error_result(
+                tool_input,
+                tool_name=tool_name,
+                error_code=ErrorCode.TOOL_AUDIT_REQUIRED_FAILED,
+                safe_details={
+                    "command": command,
+                    "reason": "delivery_remote_write_audit_failed",
                 },
             )
         return None
@@ -1024,6 +1484,151 @@ class CreateCommitTool:
         return self.adapter.create_commit(tool_input)
 
 
+@dataclass(frozen=True, slots=True)
+class PushBranchTool:
+    adapter: ScmDeliveryAdapter
+
+    @property
+    def name(self) -> str:
+        return PUSH_BRANCH_TOOL_NAME
+
+    @property
+    def category(self) -> str:
+        return DELIVERY_TOOL_CATEGORY
+
+    @property
+    def description(self) -> str:
+        return "Push a controlled delivery branch to its configured remote."
+
+    @property
+    def input_schema(self) -> Mapping[str, object]:
+        return _PUSH_BRANCH_INPUT_SCHEMA
+
+    @property
+    def result_schema(self) -> Mapping[str, object]:
+        return _PUSH_BRANCH_RESULT_SCHEMA
+
+    @property
+    def default_risk_level(self) -> ToolRiskLevel:
+        return ToolRiskLevel.HIGH_RISK
+
+    @property
+    def risk_categories(self) -> Sequence[ToolRiskCategory]:
+        return (ToolRiskCategory.UNKNOWN_COMMAND,)
+
+    @property
+    def permission_boundary(self) -> ToolPermissionBoundary:
+        return ToolPermissionBoundary(
+            boundary_type=DELIVERY_TOOL_CATEGORY,
+            requires_workspace=True,
+            resource_scopes=("git_repository", "delivery_record"),
+            workspace_target_paths=("repository_path",),
+        )
+
+    @property
+    def side_effect_level(self) -> ToolSideEffectLevel:
+        return ToolSideEffectLevel.GIT_WRITE
+
+    @property
+    def audit_required(self) -> bool:
+        return True
+
+    @property
+    def schema_version(self) -> str:
+        return _SCHEMA_VERSION
+
+    @property
+    def default_timeout_seconds(self) -> float | None:
+        return 30.0
+
+    def bindable_description(self) -> ToolBindableDescription:
+        return ToolBindableDescription(
+            name=self.name,
+            description=self.description,
+            input_schema=dict(self.input_schema),
+            result_schema=dict(self.result_schema),
+            risk_level=self.default_risk_level,
+            risk_categories=list(self.risk_categories),
+            schema_version=self.schema_version,
+            default_timeout_seconds=self.default_timeout_seconds,
+        )
+
+    def execute(self, tool_input: ToolInput) -> ToolResult:
+        return self.adapter.push_branch(tool_input)
+
+
+@dataclass(frozen=True, slots=True)
+class CreateCodeReviewRequestTool:
+    adapter: ScmDeliveryAdapter
+
+    @property
+    def name(self) -> str:
+        return CREATE_CODE_REVIEW_REQUEST_TOOL_NAME
+
+    @property
+    def category(self) -> str:
+        return DELIVERY_TOOL_CATEGORY
+
+    @property
+    def description(self) -> str:
+        return "Create a mock remote PR or MR request for a delivery branch."
+
+    @property
+    def input_schema(self) -> Mapping[str, object]:
+        return _CREATE_CODE_REVIEW_REQUEST_INPUT_SCHEMA
+
+    @property
+    def result_schema(self) -> Mapping[str, object]:
+        return _CREATE_CODE_REVIEW_REQUEST_RESULT_SCHEMA
+
+    @property
+    def default_risk_level(self) -> ToolRiskLevel:
+        return ToolRiskLevel.HIGH_RISK
+
+    @property
+    def risk_categories(self) -> Sequence[ToolRiskCategory]:
+        return (ToolRiskCategory.UNKNOWN_COMMAND,)
+
+    @property
+    def permission_boundary(self) -> ToolPermissionBoundary:
+        return ToolPermissionBoundary(
+            boundary_type=DELIVERY_TOOL_CATEGORY,
+            requires_workspace=False,
+            resource_scopes=("remote_delivery", "delivery_record"),
+        )
+
+    @property
+    def side_effect_level(self) -> ToolSideEffectLevel:
+        return ToolSideEffectLevel.REMOTE_DELIVERY_WRITE
+
+    @property
+    def audit_required(self) -> bool:
+        return True
+
+    @property
+    def schema_version(self) -> str:
+        return _SCHEMA_VERSION
+
+    @property
+    def default_timeout_seconds(self) -> float | None:
+        return 30.0
+
+    def bindable_description(self) -> ToolBindableDescription:
+        return ToolBindableDescription(
+            name=self.name,
+            description=self.description,
+            input_schema=dict(self.input_schema),
+            result_schema=dict(self.result_schema),
+            risk_level=self.default_risk_level,
+            risk_categories=list(self.risk_categories),
+            schema_version=self.schema_version,
+            default_timeout_seconds=self.default_timeout_seconds,
+        )
+
+    def execute(self, tool_input: ToolInput) -> ToolResult:
+        return self.adapter.create_code_review_request(tool_input)
+
+
 def _missing_required_snapshot_fields(
     snapshot: DeliveryChannelSnapshotModel,
 ) -> list[str]:
@@ -1081,6 +1686,25 @@ def _safe_preview(text: str) -> str:
     if isinstance(redacted.redacted_payload, str) and redacted.redacted_payload:
         return redacted.redacted_payload
     return redacted.excerpt or "[redacted]"
+
+
+def _safe_exception_summary(exc: Exception) -> str:
+    redacted = _PREVIEW_REDACTION.summarize_text(
+        str(exc),
+        payload_type="delivery_remote_error_summary",
+    )
+    if isinstance(redacted.redacted_payload, str) and redacted.redacted_payload:
+        return redacted.redacted_payload
+    return redacted.excerpt or "[redacted]"
+
+
+def _redacted_git_cli_result(result: GitCliResult) -> GitCliResult:
+    return GitCliResult(
+        returncode=result.returncode,
+        stdout="[redacted]",
+        stderr="[redacted]",
+        duration_ms=result.duration_ms,
+    )
 
 
 def _git_tool_error_result(
@@ -1163,11 +1787,15 @@ def _is_runtime_log_path(path: str) -> bool:
 
 __all__ = [
     "CREATE_COMMIT_TOOL_NAME",
+    "CREATE_CODE_REVIEW_REQUEST_TOOL_NAME",
     "PREPARE_BRANCH_TOOL_NAME",
+    "PUSH_BRANCH_TOOL_NAME",
     "READ_DELIVERY_SNAPSHOT_TOOL_NAME",
+    "CreateCodeReviewRequestTool",
     "CreateCommitTool",
     "GitCliResult",
     "PrepareBranchTool",
+    "PushBranchTool",
     "ScmDeliveryAdapter",
     "ReadDeliverySnapshotTool",
 ]
