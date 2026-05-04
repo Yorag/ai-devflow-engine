@@ -6,6 +6,22 @@ from backend.app.providers.langchain_adapter import (
     ModelCallTraceSummary,
     ModelCallUsage,
 )
+from backend.app.providers.retry_policy import (
+    CircuitBreakerAction,
+    ProviderCircuitBreaker,
+    ProviderCircuitBreakerBindingKey,
+    ProviderCircuitBreakerDecision,
+    ProviderCircuitBreakerState,
+    ProviderCircuitBreakerTraceRecord,
+    ProviderFailure,
+    ProviderFailureKind,
+    ProviderNonRetryableFailure,
+    ProviderRetryDecision,
+    ProviderRetryPolicy,
+    ProviderRetryTraceRecord,
+    RetryDecisionStatus,
+    classify_provider_failure,
+)
 
 __all__ = [
     "LangChainProviderAdapter",
@@ -14,4 +30,18 @@ __all__ = [
     "ModelCallToolRequest",
     "ModelCallTraceSummary",
     "ModelCallUsage",
+    "CircuitBreakerAction",
+    "ProviderCircuitBreaker",
+    "ProviderCircuitBreakerBindingKey",
+    "ProviderCircuitBreakerDecision",
+    "ProviderCircuitBreakerState",
+    "ProviderCircuitBreakerTraceRecord",
+    "ProviderFailure",
+    "ProviderFailureKind",
+    "ProviderNonRetryableFailure",
+    "ProviderRetryDecision",
+    "ProviderRetryPolicy",
+    "ProviderRetryTraceRecord",
+    "RetryDecisionStatus",
+    "classify_provider_failure",
 ]
