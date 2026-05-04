@@ -4,6 +4,7 @@ from backend.app.api.routes import (
     approvals,
     audit_logs,
     health,
+    preview_targets,
     projects,
     providers,
     query,
@@ -28,5 +29,6 @@ def build_api_router() -> APIRouter:
     router.include_router(providers.router)
     router.include_router(runtime_settings.router)
     router.include_router(query.router)
+    router.include_router(preview_targets.router)
     router.include_router(audit_logs.router)
     return router
