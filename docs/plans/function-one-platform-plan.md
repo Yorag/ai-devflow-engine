@@ -274,7 +274,7 @@
 | W5.2 | 文件工具 read_file/write_file/edit_file/glob | Week 7-8 | [x] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w52) |
 | W5.3 | grep 工具 | Week 7-8 | [x] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w53) |
 | W5.4 | bash 工具与白名单审计 | Week 7-8 | [x] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w54) |
-| A4.2 | deterministic test runtime 六阶段推进 | Week 7 | [ ] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#a42) |
+| A4.2 | deterministic test runtime 六阶段推进 | Week 7 | [x] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#a42) |
 | A4.3 | deterministic test runtime 澄清与审批中断 | Week 7 | [ ] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#a43) |
 | A4.4 | deterministic test runtime 终态控制 | Week 7 | [ ] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#a44) |
 | D4.1 | Delivery base 与 DeliveryRecord | Week 7 | [ ] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#d41) |

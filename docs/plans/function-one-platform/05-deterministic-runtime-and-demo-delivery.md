@@ -47,9 +47,10 @@
 ## A4.2 deterministic test runtime 六阶段推进
 
 **计划周期**：Week 7
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：实现稳定可控的 `deterministic test runtime` 六阶段推进，使端到端测试和前端联调不依赖真实模型输出。
 **实施计划**：`docs/plans/implementation/a4.2-deterministic-six-stage-runtime.md`
+**验证摘要**：实施计划 `docs/plans/implementation/a4.2-deterministic-six-stage-runtime.md` 已在 integration checkpoint 合入 `7f61772`。Worker verification 中 `uv run pytest backend/tests/runtime/test_deterministic_runtime.py -v` 通过 11 个 focused tests，`uv run pytest backend/tests/runtime/test_deterministic_runtime.py backend/tests/runtime/test_runtime_engine_contract.py backend/tests/services/test_stage_run_store.py backend/tests/services/test_artifact_store.py backend/tests/events/test_event_store.py -v` 通过 74 个 impacted backend tests，`uv run pytest -q` 通过 1014 个 backend tests。本次 integration verification 在 `integration/function-one-acceleration` 上重复运行 focused 与 impacted backend 命令并通过，`uv run pytest -q` 通过 1028 个 backend tests，保留既有 LangChain adapter `temperature` warning。
 
 **修改文件列表**：
 - Create: `backend/app/runtime/deterministic.py`
