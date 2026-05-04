@@ -208,7 +208,7 @@
 ## D4.3 DeliveryResultDetailProjection 正式实现
 
 **计划周期**：Week 7
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：在 DeliveryRecord 与 `demo_delivery` 落地后，实现正式交付结果详情投影，替代 Week 5 不允许实现的临时交付详情投影语义。
 **实施计划**：`docs/plans/implementation/d4.3-delivery-result-detail-projection.md`
 
