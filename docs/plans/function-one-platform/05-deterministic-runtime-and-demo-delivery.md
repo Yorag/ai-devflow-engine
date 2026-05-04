@@ -78,9 +78,10 @@
 ## A4.3 deterministic test runtime 澄清、审批与工具确认中断
 
 **计划周期**：Week 7
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：为 `deterministic test runtime` 增加可配置澄清、方案审批、代码评审审批和工具确认中断路径。
 **实施计划**：`docs/plans/implementation/a4.3-deterministic-interrupts.md`
+**验证摘要**：实施计划 `docs/plans/implementation/a4.3-deterministic-interrupts.md` 已在 integration checkpoint 合入 `370123d`。Worker verification 中 focused runtime / contract 命令通过 34 个 tests，AL03 service regression 通过 31 个 tests，`uv run pytest -q` 通过 1042 个 backend tests。本次 integration verification 在 `integration/function-one-acceleration` 上重复运行 focused runtime / contract、AL03 service regression 和完整 backend suite；`uv run pytest -q` 通过 1042 个 backend tests，保留既有 LangChain adapter `temperature` warning。
 
 **修改文件列表**：
 - Modify: `backend/app/runtime/deterministic.py`
