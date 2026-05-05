@@ -198,7 +198,7 @@
 ## V6.8 配置边界与运行快照回归
 
 **计划周期**：Week 12
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：补齐环境变量、平台运行设置、业务配置、系统内置提示词资产、前端设置边界和运行快照的跨链路回归，确保后续热重载或配置变更不破坏已启动 run 的语义。
 **实施计划**：`docs/plans/implementation/v6.8-config-snapshot-regression.md`
 
@@ -206,6 +206,7 @@
 - Create: `backend/tests/regression/test_config_snapshot_regression.py`
 - Create: `backend/tests/regression/test_prompt_asset_boundary_regression.py`
 - Create: `backend/tests/regression/test_project_session_history_regression.py`
+- Modify: `frontend/src/features/inspector/__tests__/InspectorPanel.test.tsx`
 - Create: `frontend/src/features/settings/__tests__/SettingsBoundary.test.tsx`
 - Create: `frontend/src/features/workspace/__tests__/ProjectSessionHistory.test.tsx`
 
@@ -241,8 +242,11 @@
 - `pytest backend/tests/regression/test_config_snapshot_regression.py -v`
 - `pytest backend/tests/regression/test_prompt_asset_boundary_regression.py -v`
 - `pytest backend/tests/regression/test_project_session_history_regression.py -v`
+- `npm --prefix frontend run test -- InspectorPanel`
 - `npm --prefix frontend run test -- SettingsBoundary`
 - `npm --prefix frontend run test -- ProjectSessionHistory`
+
+**Integration checkpoint note**：`QA-CONFIG-V6.8` 已集成到 `integration/function-one-acceleration`，并通过配置快照、系统内置提示词资产边界、项目 / 会话历史边界、Inspector 展示、设置边界、完整后端测试、完整前端测试和前端构建验证。
 
 <a id="l61"></a>
 
