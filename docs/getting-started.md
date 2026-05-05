@@ -73,8 +73,7 @@ npm --prefix e2e run test
 Run Playwright with the live backend harness:
 
 ```powershell
-$env:E2E_LIVE_BACKEND = "1"
-npm --prefix e2e run test
+npm --prefix e2e run test:live
 ```
 
 The live backend harness starts a backend server through `uv run --no-sync python e2e/support/live-backend-server.py` and starts the frontend dev server with the matching API base URL.

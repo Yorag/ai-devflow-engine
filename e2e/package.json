@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "playwright test"
+    "test": "playwright test",
+    "test:live": "node support/run-live-e2e.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.57.0"

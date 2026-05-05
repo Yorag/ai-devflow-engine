@@ -53,8 +53,7 @@ npm --prefix e2e run test
 Run Playwright with the live backend harness:
 
 ```powershell
-$env:E2E_LIVE_BACKEND = "1"
-npm --prefix e2e run test
+npm --prefix e2e run test:live
 ```
 
 Run a focused E2E spec:

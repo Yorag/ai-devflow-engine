@@ -135,7 +135,7 @@ E2E:
 
 ```powershell
 npm --prefix e2e run test
-$env:E2E_LIVE_BACKEND = "1"; npm --prefix e2e run test
+npm --prefix e2e run test:live
 ```
 
 See [Verification](docs/development/verification.md) for the focused commands and live-backend E2E path.
