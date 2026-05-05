@@ -73,7 +73,7 @@
 ## V6.3 Playwright 人工介入路径
 
 **计划周期**：Week 11
-**状态**：`[ ]`
+**状态**：`[/]`
 **目标**：建立跨端人工介入与工具确认 E2E，覆盖拒绝回退、高风险工具确认、暂停恢复、终止和重新尝试。
 **实施计划**：`docs/plans/implementation/v6.3-playwright-control-flow.md`
 
@@ -98,6 +98,8 @@
 
 **测试方法**：
 - `npm --prefix e2e run test -- function-one-control-flow.spec.ts`
+
+**Integration checkpoint note**：`QA-E2E-V6.3` 已作为 `mock_ready` checkpoint 集成到 `integration/function-one-acceleration`。当前 Playwright 人工介入路径通过 route-level projection fixtures 验证审批拒绝、暂停 / 恢复、终止、重新尝试、工具确认允许 / 拒绝、历史禁用态和窄屏布局；完整 `[x]` 仍等待真实后端编排、事件持久化和 SSE 交付进入 live E2E。
 
 <a id="v64"></a>
 
@@ -158,7 +160,7 @@
 ## V6.6 前端错误态与后端错误回归
 
 **计划周期**：Week 12
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：补齐关键 API 错误的前端展示和后端错误回归测试，使用户能理解失败原因。
 **实施计划**：`docs/plans/implementation/v6.6-error-states-regression.md`
 
