@@ -37,6 +37,10 @@ export function formatDeliveryHighlights(
 ): DeliveryResultMetadata[] {
   const metadata: DeliveryResultMetadata[] = [];
 
+  if (entry.delivery_mode === "demo_delivery" && entry.branch_name) {
+    metadata.push({ label: "Display branch", value: entry.branch_name });
+  }
+
   if (entry.delivery_mode === "git_auto_delivery" && entry.branch_name) {
     metadata.push({ label: "Branch", value: entry.branch_name });
   }
