@@ -22,7 +22,7 @@ const OPENAPI_ROUTE_METHODS = {
   "/api/projects/{projectId}/delivery-channel/validate": ["POST"],
   "/api/projects/{projectId}/sessions": ["GET", "POST"],
   "/api/providers": ["GET", "POST"],
-  "/api/providers/{providerId}": ["GET", "PATCH"],
+  "/api/providers/{providerId}": ["DELETE", "GET", "PATCH"],
   "/api/pipeline-templates": ["GET", "POST"],
   "/api/pipeline-templates/{templateId}": ["DELETE", "GET", "PATCH"],
   "/api/pipeline-templates/{templateId}/save-as": ["POST"],
@@ -55,6 +55,7 @@ const OPENAPI_ROUTE_METHODS = {
 const EXPECTED_FRONTEND_CLIENT_ROUTES = [
   "DELETE /api/pipeline-templates/{templateId}",
   "DELETE /api/projects/{projectId}",
+  "DELETE /api/providers/{providerId}",
   "DELETE /api/sessions/{sessionId}",
   "GET /api/control-records/{controlRecordId}",
   "GET /api/delivery-records/{deliveryRecordId}",
