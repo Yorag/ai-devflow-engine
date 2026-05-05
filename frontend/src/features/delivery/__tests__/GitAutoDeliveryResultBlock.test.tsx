@@ -2,6 +2,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { DeliveryResultFeedEntry } from "../../../api/types";
+import { mockGitDeliveryResultFeedEntry } from "../../../mocks/fixtures";
 import {
   DeliveryResultBlock,
   buildDeliveryResultViewModel,
@@ -89,6 +90,26 @@ describe("formatDeliveryHighlights", () => {
 });
 
 describe("buildDeliveryResultViewModel for git_auto_delivery", () => {
+  it("maps the real backend git delivery_result payload into the shared model", () => {
+    const model = buildDeliveryResultViewModel(mockGitDeliveryResultFeedEntry);
+
+    expect(model.modeLabel).toBe("Git Auto Delivery");
+    expect(model.title).toBe("Git auto delivery");
+    expect(model.summary).toBe("Delivery completed.");
+    expect(model.metadata).toEqual([
+      { label: "Mode", value: "git_auto_delivery" },
+      { label: "Branch", value: "feature/run-delivery" },
+      { label: "Commit", value: "abc123def456" },
+      {
+        label: "Code review",
+        value: "github.example/pulls/1",
+        href: "https://github.example/pulls/1",
+      },
+      { label: "Tests", value: "Resolved upstream test summary." },
+      { label: "Reference", value: "git-delivery-result:run-delivery" },
+    ]);
+  });
+
   it("uses the shared result model with git-auto-delivery mode labels", () => {
     const model = buildDeliveryResultViewModel(gitDeliveryEntry);
 

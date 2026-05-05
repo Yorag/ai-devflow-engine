@@ -9,6 +9,7 @@ import {
   mockConfigurationPackageImportSuccess,
   mockDeliveryResultDetailProjection,
   mockGitProjectDeliveryChannel,
+  mockGitDeliveryResultDetailProjection,
   mockPipelineTemplates,
   mockProjectDeliveryChannel,
   mockProjectList,
@@ -108,6 +109,9 @@ function createMockRoutes(
     ),
     route("GET", /^\/api\/delivery-records\/delivery-record-1$/u, () =>
       jsonResponse(mockDeliveryResultDetailProjection),
+    ),
+    route("GET", /^\/api\/delivery-records\/delivery-record-git-1$/u, () =>
+      jsonResponse(mockGitDeliveryResultDetailProjection),
     ),
     route("GET", /^\/api\/projects\/project-default\/delivery-channel$/u, () =>
       jsonResponse(mockProjectDeliveryChannel),

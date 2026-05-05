@@ -5,7 +5,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { renderWithAppProviders } from "../../../app/test-utils";
 import { createQueryClient } from "../../../app/query-client";
 import type { TopLevelFeedEntry } from "../../../api/types";
-import { mockFeedEntriesByType, mockSessionWorkspaces } from "../../../mocks/fixtures";
+import {
+  mockFeedEntriesByType,
+  mockGitDeliveryResultFeedEntry,
+  mockSessionWorkspaces,
+} from "../../../mocks/fixtures";
 import { mockApiRequestOptions } from "../../../mocks/handlers";
 import { ConsolePage } from "../../../pages/ConsolePage";
 import { FeedEntryRenderer, renderFeedEntryByType } from "../FeedEntryRenderer";
@@ -256,5 +260,28 @@ describe("FeedEntryRenderer guards", () => {
     expect(screen.getByText("Demo delivery")).toBeTruthy();
     expect(screen.getByText("demo/run-completed")).toBeTruthy();
     expect(screen.getByText("demo-delivery-result:run-completed")).toBeTruthy();
+  });
+
+  it("renders real backend-shaped git delivery_result payloads", () => {
+    renderWithAppProviders(renderFeedEntryByType(mockGitDeliveryResultFeedEntry));
+
+    const deliveryEntry = screen.getByRole("article", {
+      name: "Delivery result feed entry",
+    });
+    expect(within(deliveryEntry).getByText("Git auto delivery")).toBeTruthy();
+    expect(within(deliveryEntry).getByText("Delivery completed.")).toBeTruthy();
+    expect(within(deliveryEntry).getByText("feature/run-delivery")).toBeTruthy();
+    expect(within(deliveryEntry).getByText("abc123def456")).toBeTruthy();
+    expect(
+      within(deliveryEntry).getByRole("link", {
+        name: "Code review github.example/pulls/1",
+      }),
+    ).toBeTruthy();
+    expect(
+      within(deliveryEntry).getByText("Resolved upstream test summary."),
+    ).toBeTruthy();
+    expect(
+      within(deliveryEntry).getByText("git-delivery-result:run-delivery"),
+    ).toBeTruthy();
   });
 });
