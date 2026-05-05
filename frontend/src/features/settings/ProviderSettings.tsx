@@ -34,6 +34,15 @@ type ProviderDraft = {
   supportedModels: string;
   defaultModel: string;
   isEnabled: boolean;
+  capabilities: Record<string, CapabilityDraft>;
+};
+
+type CapabilityDraft = {
+  contextWindowTokens: string;
+  maxOutputTokens: string;
+  supportsToolCalling: boolean;
+  supportsStructuredOutput: boolean;
+  supportsNativeReasoning: boolean;
 };
 
 const providerTemplates: ProviderTemplate[] = [
@@ -254,6 +263,20 @@ function ProviderCard({
     setDraft((current) => ({ ...current, ...next }));
   }
 
+  function updateCapability(modelId: string, next: Partial<CapabilityDraft>) {
+    setDraft((current) => ({
+      ...current,
+      capabilities: {
+        ...current.capabilities,
+        [modelId]: {
+          ...createCapabilityDraft(capabilityForModel(provider.runtime_capabilities, modelId)),
+          ...current.capabilities[modelId],
+          ...next,
+        },
+      },
+    }));
+  }
+
   function saveProvider() {
     mutation.mutate(providerToWriteRequest(provider, draft));
   }
@@ -336,6 +359,100 @@ function ProviderCard({
               </datalist>
             </label>
           </div>
+          <details className="settings-disclosure">
+            <summary>高级设置</summary>
+            <div className="capability-grid">
+              {modelIds.map((modelId) => {
+                const capabilityDraft =
+                  draft.capabilities[modelId] ??
+                  createCapabilityDraft(
+                    capabilityForModel(provider.runtime_capabilities, modelId),
+                  );
+
+                return (
+                  <div
+                    key={modelId}
+                    className="capability-grid__group"
+                    role="group"
+                    aria-label={`Runtime capabilities for ${modelId}`}
+                  >
+                    <div className="capability-grid__header">
+                      <span>Runtime capabilities</span>
+                      <p>{modelId}</p>
+                    </div>
+                    <div className="capability-grid__number-fields">
+                      <label>
+                        <span>Context window</span>
+                        <input
+                          inputMode="numeric"
+                          min="1"
+                          type="number"
+                          value={capabilityDraft.contextWindowTokens}
+                          onChange={(event) =>
+                            updateCapability(modelId, {
+                              contextWindowTokens: event.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>Max output tokens</span>
+                        <input
+                          inputMode="numeric"
+                          min="1"
+                          type="number"
+                          value={capabilityDraft.maxOutputTokens}
+                          onChange={(event) =>
+                            updateCapability(modelId, {
+                              maxOutputTokens: event.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                    </div>
+                    <div className="capability-toggle-row">
+                      <label>
+                        <input
+                          checked={capabilityDraft.supportsToolCalling}
+                          type="checkbox"
+                          onChange={(event) =>
+                            updateCapability(modelId, {
+                              supportsToolCalling: event.target.checked,
+                            })
+                          }
+                        />
+                        <span>Tool calling</span>
+                      </label>
+                      <label>
+                        <input
+                          checked={capabilityDraft.supportsStructuredOutput}
+                          type="checkbox"
+                          onChange={(event) =>
+                            updateCapability(modelId, {
+                              supportsStructuredOutput: event.target.checked,
+                            })
+                          }
+                        />
+                        <span>Structured output</span>
+                      </label>
+                      <label>
+                        <input
+                          checked={capabilityDraft.supportsNativeReasoning}
+                          type="checkbox"
+                          onChange={(event) =>
+                            updateCapability(modelId, {
+                              supportsNativeReasoning: event.target.checked,
+                            })
+                          }
+                        />
+                        <span>Native reasoning</span>
+                      </label>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </details>
           <div className="settings-actions">
             {mutation.error ? (
               <p className="settings-form-error" role="alert">
@@ -412,7 +529,11 @@ function providerToWriteRequest(
     supported_model_ids: models,
     is_enabled: draft.isEnabled,
     runtime_capabilities: models.map((modelId) =>
-      capabilityForModel(provider.runtime_capabilities, modelId),
+      capabilityForModel(
+        provider.runtime_capabilities,
+        modelId,
+        draft.capabilities[modelId],
+      ),
     ),
   };
 }
@@ -425,17 +546,54 @@ function createProviderDraft(provider: ProviderRead): ProviderDraft {
     supportedModels: provider.supported_model_ids.join(", "),
     defaultModel: provider.default_model_id,
     isEnabled: provider.is_enabled,
+    capabilities: Object.fromEntries(
+      provider.runtime_capabilities.map((capability) => [
+        capability.model_id,
+        createCapabilityDraft(capability),
+      ]),
+    ),
   };
 }
 
 function capabilityForModel(
   capabilities: ModelRuntimeCapabilities[],
   modelId: string,
+  draft?: CapabilityDraft,
 ): ModelRuntimeCapabilities {
-  return (
+  const source =
     capabilities.find((capability) => capability.model_id === modelId) ??
-    createDefaultCapability(modelId)
-  );
+    createDefaultCapability(modelId);
+
+  if (!draft) {
+    return source;
+  }
+
+  return {
+    model_id: modelId,
+    context_window_tokens: parsePositiveInt(
+      draft.contextWindowTokens,
+      source.context_window_tokens,
+    ),
+    max_output_tokens: parsePositiveInt(
+      draft.maxOutputTokens,
+      source.max_output_tokens,
+    ),
+    supports_tool_calling: draft.supportsToolCalling,
+    supports_structured_output: draft.supportsStructuredOutput,
+    supports_native_reasoning: draft.supportsNativeReasoning,
+  };
+}
+
+function createCapabilityDraft(
+  capability: ModelRuntimeCapabilities,
+): CapabilityDraft {
+  return {
+    contextWindowTokens: String(capability.context_window_tokens),
+    maxOutputTokens: String(capability.max_output_tokens),
+    supportsToolCalling: capability.supports_tool_calling,
+    supportsStructuredOutput: capability.supports_structured_output,
+    supportsNativeReasoning: capability.supports_native_reasoning,
+  };
 }
 
 function createDefaultCapability(
@@ -458,6 +616,11 @@ function parseModelList(value: string): string[] {
     .split(",")
     .map((modelId) => modelId.trim())
     .filter(Boolean);
+}
+
+function parsePositiveInt(value: string, fallback: number): number {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function upsertProvider(

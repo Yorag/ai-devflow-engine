@@ -7,6 +7,8 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -424,6 +426,19 @@ describe("SettingsModal", () => {
       target: { value: "gpt-4.1-mini" },
     });
     fireEvent.click(within(card).getByLabelText("Provider enabled"));
+    fireEvent.click(within(card).getByText("高级设置"));
+
+    const miniCapabilities = await within(card).findByRole("group", {
+      name: "Runtime capabilities for gpt-4.1-mini",
+    });
+    fireEvent.change(within(miniCapabilities).getByLabelText("Context window"), {
+      target: { value: "256000" },
+    });
+    fireEvent.change(within(miniCapabilities).getByLabelText("Max output tokens"), {
+      target: { value: "16384" },
+    });
+    fireEvent.click(within(miniCapabilities).getByLabelText("Tool calling"));
+    fireEvent.click(within(miniCapabilities).getByLabelText("Native reasoning"));
     fireEvent.click(within(card).getByRole("button", { name: "Save provider" }));
 
     await waitFor(() => {
@@ -445,6 +460,16 @@ describe("SettingsModal", () => {
       "gpt-4.1",
       "gpt-4.1-mini",
     ]);
+    expect(
+      calls[0].body?.runtime_capabilities.find(
+        (capability) => capability.model_id === "gpt-4.1-mini",
+      ),
+    ).toMatchObject({
+      context_window_tokens: 256000,
+      max_output_tokens: 16384,
+      supports_tool_calling: true,
+      supports_native_reasoning: true,
+    });
   });
 
   it("shows provider configuration with only user-visible fields", async () => {
@@ -484,7 +509,21 @@ describe("SettingsModal", () => {
     expect(
       within(dialog).getByRole("button", { name: "Add custom provider" }),
     ).toBeTruthy();
-    expect(within(dialog).queryByText("高级设置")).toBeNull();
+    fireEvent.click(within(providerCard).getByText("高级设置"));
+    const runtimeCapabilities = within(providerCard).getByRole("group", {
+      name: "Runtime capabilities for doubao-seed-1-6",
+    });
+    expect(within(runtimeCapabilities).getByLabelText("Context window")).toBeTruthy();
+    expect(
+      within(runtimeCapabilities).getByLabelText("Max output tokens"),
+    ).toBeTruthy();
+    expect(within(runtimeCapabilities).getByLabelText("Tool calling")).toBeTruthy();
+    expect(
+      within(runtimeCapabilities).getByLabelText("Structured output"),
+    ).toBeTruthy();
+    expect(
+      within(runtimeCapabilities).getByLabelText("Native reasoning"),
+    ).toBeTruthy();
     expect(within(dialog).queryByText("context_window_tokens")).toBeNull();
     expect(within(dialog).queryByText("max_output_tokens")).toBeNull();
     expect(within(dialog).queryByText("supports_tool_calling")).toBeNull();
@@ -493,6 +532,24 @@ describe("SettingsModal", () => {
     expect(within(dialog).queryByText("model_id")).toBeNull();
     expect(within(dialog).queryByText(/prompt_version/i)).toBeNull();
     expect(within(dialog).queryByText(/compression_prompt/i)).toBeNull();
+  });
+
+  it("keeps provider fields in a two-column grid", () => {
+    const cwd = process.cwd();
+    const frontendRoot = cwd.endsWith("frontend") ? cwd : join(cwd, "frontend");
+    const css = readFileSync(join(frontendRoot, "src", "styles", "global.css"), "utf8");
+
+    expect(css).toMatch(
+      /\.settings-form-grid--compact\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/u,
+    );
+    expect(css).toMatch(
+      /\.capability-grid__number-fields\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/u,
+    );
+    expect(css).toMatch(
+      /\.capability-toggle-row\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/u,
+    );
+    expect(css).not.toMatch(/\.capability-grid__group\s*\{[^}]*border:/u);
+    expect(css).not.toMatch(/\.capability-toggle-row label\s*\{[^}]*border:/u);
   });
 
   it("updates visible provider controls when providers query refetches fresh data", async () => {

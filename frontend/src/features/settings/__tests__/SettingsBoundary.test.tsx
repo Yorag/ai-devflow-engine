@@ -70,7 +70,7 @@ describe("SettingsBoundary", () => {
     expectTextToExclude(dialog, forbiddenTerms);
   });
 
-  it("keeps provider capability internals out of user visible settings", async () => {
+  it("keeps provider identity fields out of user visible settings", async () => {
     const dialog = await openSettings();
 
     expect(await within(dialog).findByDisplayValue("demo_delivery")).toBeTruthy();
@@ -105,7 +105,12 @@ describe("SettingsBoundary", () => {
     expect(within(providerPanel).getAllByLabelText("Default model").length).toBeGreaterThan(
       0,
     );
-    expect(within(providerPanel).queryByText("高级设置")).toBeNull();
+    fireEvent.click(within(providerPanel).getByText("高级设置"));
+    expect(within(providerPanel).getByLabelText("Context window")).toBeTruthy();
+    expect(within(providerPanel).getByLabelText("Max output tokens")).toBeTruthy();
+    expect(within(providerPanel).getByLabelText("Tool calling")).toBeTruthy();
+    expect(within(providerPanel).getByLabelText("Structured output")).toBeTruthy();
+    expect(within(providerPanel).getByLabelText("Native reasoning")).toBeTruthy();
     expect(within(providerPanel).queryByText("context_window_tokens")).toBeNull();
     expect(within(providerPanel).queryByText("max_output_tokens")).toBeNull();
     expect(within(providerPanel).queryByText("supports_tool_calling")).toBeNull();
