@@ -8,6 +8,7 @@ import { terminateRun } from "../../../api/runs";
 import type {
   ExecutionNodeProjection,
   ProviderRead,
+  ProjectRead,
   SessionRead,
   SessionStatus,
   SessionWorkspaceProjection,
@@ -232,6 +233,235 @@ describe("WorkspaceShell", () => {
       screen.getByRole("region", { name: "Template empty state" }),
     ).toBeTruthy();
     expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", false);
+  });
+
+  it("loads a local project from the sidebar and switches to it", async () => {
+    const loadedProject: ProjectRead = {
+      project_id: "project-loaded-from-path",
+      name: "Loaded Flow",
+      root_path: "C:/work/loaded-flow",
+      default_delivery_channel_id: "delivery-loaded-flow",
+      is_default: false,
+      created_at: "2026-05-05T08:00:00.000Z",
+      updated_at: "2026-05-05T08:00:00.000Z",
+    };
+    const baseFetcher = createMockApiFetcher();
+    const projects: ProjectRead[] = [];
+    let createProjectBody: unknown = null;
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const path = normalizeTestPath(input);
+        const method = init?.method ?? "GET";
+
+        if (method === "GET" && path === "/api/projects") {
+          return jsonTestResponse(projects);
+        }
+
+        if (method === "POST" && path === "/api/projects") {
+          createProjectBody =
+            typeof init?.body === "string" ? JSON.parse(init.body) : null;
+          projects.unshift(loadedProject);
+          return jsonTestResponse(loadedProject, 201);
+        }
+
+        if (
+          method === "GET" &&
+          path === "/api/projects/project-loaded-from-path/sessions"
+        ) {
+          return jsonTestResponse([]);
+        }
+
+        if (
+          method === "GET" &&
+          path === "/api/projects/project-loaded-from-path/delivery-channel"
+        ) {
+          return jsonTestResponse({
+            project_id: loadedProject.project_id,
+            delivery_channel_id: "delivery-loaded-flow",
+            delivery_mode: "demo_delivery",
+            scm_provider_type: null,
+            repository_identifier: null,
+            default_branch: null,
+            code_review_request_type: null,
+            credential_ref: null,
+            credential_status: "ready",
+            readiness_status: "ready",
+            readiness_message: null,
+            last_validated_at: null,
+            updated_at: "2026-05-05T08:00:00.000Z",
+          });
+        }
+
+        return baseFetcher(input, init);
+      },
+    };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Load project" }));
+    fireEvent.change(screen.getByLabelText("Project root path"), {
+      target: { value: "C:/work/loaded-flow" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Load local project" }));
+
+    await waitFor(() => {
+      expect(createProjectBody).toEqual({ root_path: "C:/work/loaded-flow" });
+    });
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "Loaded Flow" }),
+    ).toBeTruthy();
+    expect(screen.getByText("C:/work/loaded-flow")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "New session" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+  });
+
+  it("keeps a loaded project visible through the query refresh flow", async () => {
+    renderWithAppProviders(null, { route: "/console" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Load project" }));
+    fireEvent.change(screen.getByLabelText("Project root path"), {
+      target: { value: "C:/work/query-refresh-flow" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Load local project" }));
+
+    expect(
+      await screen.findByRole("heading", {
+        level: 2,
+        name: "Query Refresh Flow",
+      }),
+    ).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Switch project")).toHaveProperty(
+        "value",
+        "project-loaded-3",
+      );
+    });
+    expect(screen.getByText("C:/work/query-refresh-flow")).toBeTruthy();
+  });
+
+  it("persists draft template changes before the first requirement can start", async () => {
+    const baseFetcher = createMockApiFetcher();
+    const draftSession: SessionRead = {
+      ...mockSessionWorkspaces["session-draft"].session,
+    };
+    const draftWorkspace: SessionWorkspaceProjection = {
+      ...mockSessionWorkspaces["session-draft"],
+      session: draftSession,
+    };
+    let templateUpdateBody: unknown = null;
+    let messageBody: unknown = null;
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const path = normalizeTestPath(input);
+        const method = init?.method ?? "GET";
+
+        if (method === "GET" && path === "/api/sessions/session-draft/workspace") {
+          return jsonTestResponse(draftWorkspace);
+        }
+
+        if (method === "PUT" && path === "/api/sessions/session-draft/template") {
+          templateUpdateBody =
+            typeof init?.body === "string" ? JSON.parse(init.body) : null;
+          draftSession.selected_template_id = "template-bugfix";
+          draftSession.updated_at = "2026-05-05T08:10:00.000Z";
+          draftWorkspace.session = draftSession;
+          return jsonTestResponse(draftSession);
+        }
+
+        if (method === "POST" && path === "/api/sessions/session-draft/messages") {
+          messageBody = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+          return baseFetcher(input, init);
+        }
+
+        return baseFetcher(input, init);
+      },
+    };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    expect(
+      await screen.findByRole("region", { name: "Template empty state" }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: /Bug 修复流程/u }));
+
+    await waitFor(() => {
+      expect(templateUpdateBody).toEqual({ template_id: "template-bugfix" });
+    });
+    expect(screen.getByRole("radio", { name: /Bug 修复流程/u })).toHaveProperty(
+      "checked",
+      true,
+    );
+
+    fireEvent.change(screen.getByLabelText("当前输入"), {
+      target: { value: "Use the persisted template for this first run." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => {
+      expect(messageBody).toEqual({
+        message_type: "new_requirement",
+        content: "Use the persisted template for this first run.",
+      });
+    });
+    expect(draftSession.selected_template_id).toBe("template-bugfix");
+  });
+
+  it("keeps draft template choices disabled while a template save is pending", async () => {
+    const pendingTemplateUpdate: {
+      resolve?: (session: SessionRead) => void;
+    } = {};
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const path = normalizeTestPath(input);
+        const method = init?.method ?? "GET";
+
+        if (method === "PUT" && path === "/api/sessions/session-draft/template") {
+          return new Promise<Response>((resolve) => {
+            pendingTemplateUpdate.resolve = (session) =>
+              resolve(jsonTestResponse(session));
+          });
+        }
+
+        return createMockApiFetcher()(input, init);
+      },
+    };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    expect(
+      await screen.findByRole("region", { name: "Template empty state" }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: /Bug 修复流程/u }));
+
+    await waitFor(() => {
+      expect(pendingTemplateUpdate.resolve).toBeDefined();
+    });
+    expect(screen.getByRole("radio", { name: /新功能开发流程/u })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(screen.getByRole("radio", { name: /Bug 修复流程/u })).toHaveProperty(
+      "disabled",
+      true,
+    );
+
+    const completeTemplateUpdate = pendingTemplateUpdate.resolve;
+    if (!completeTemplateUpdate) {
+      throw new Error("Template update request was not started.");
+    }
+    completeTemplateUpdate({
+      ...mockSessionWorkspaces["session-draft"].session,
+      selected_template_id: "template-bugfix",
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("radio", { name: /Bug 修复流程/u })).toHaveProperty(
+        "disabled",
+        false,
+      );
+    });
   });
 
   it("keeps the current session selected when new session creation fails", async () => {

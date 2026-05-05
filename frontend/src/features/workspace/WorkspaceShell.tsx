@@ -8,6 +8,8 @@ import {
 } from "../../api/hooks";
 import type { ApiRequestOptions } from "../../api/client";
 import type { ProjectRead, SessionEvent, SseEventType } from "../../api/types";
+import { updateSessionTemplate } from "../../api/sessions";
+import { ErrorState } from "../errors/ErrorState";
 import { Composer } from "../composer/Composer";
 import { NarrativeFeed } from "../feed/NarrativeFeed";
 import { InspectorPanel } from "../inspector/InspectorPanel";
@@ -36,6 +38,9 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
   const [currentSessionId, setCurrentSessionId] = useState("");
   const [templateSelections, setTemplateSelections] = useState<Record<string, string>>(
     {},
+  );
+  const [templateChangeError, setTemplateChangeError] = useState<unknown | null>(
+    null,
   );
   const [isSettingsOpen, setSettingsOpen] = useState(false);
   const inspector = useInspector();
@@ -90,6 +95,10 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
       : (workspace?.session.selected_template_id ??
         selectedSession?.selected_template_id ??
         "");
+  const templateIds = useMemo(
+    () => new Set((templatesQuery.data ?? []).map((template) => template.template_id)),
+    [templatesQuery.data],
+  );
   const selectedTemplate =
     (templatesQuery.data ?? []).find(
       (template) => template.template_id === selectedTemplateId,
@@ -160,10 +169,11 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
 
   function handleSessionChange(sessionId: string) {
     setCurrentSessionId(sessionId);
+    setTemplateChangeError(null);
     inspector.close();
   }
 
-  function handleTemplateChange(templateId: string) {
+  async function handleTemplateChange(templateId: string) {
     if (!selectedSession) {
       return;
     }
@@ -172,6 +182,38 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
       ...current,
       [selectedSession.session_id]: templateId,
     }));
+    setTemplateChangeError(null);
+
+    if (
+      selectedSession.status !== "draft" ||
+      !templateIds.has(templateId) ||
+      selectedSession.selected_template_id === templateId
+    ) {
+      return;
+    }
+
+    setWorkspaceActionBusy(true);
+    try {
+      const updatedSession = await updateSessionTemplate(
+        selectedSession.session_id,
+        { template_id: templateId },
+        request ?? {},
+      );
+      setTemplateSelections((current) => ({
+        ...current,
+        [updatedSession.session_id]: updatedSession.selected_template_id,
+      }));
+      await sessionsQuery.refetch();
+      await sessionWorkspaceQuery.refetch();
+    } catch (error) {
+      setTemplateChangeError(error);
+      setTemplateSelections((current) => ({
+        ...current,
+        [selectedSession.session_id]: selectedSession.selected_template_id,
+      }));
+    } finally {
+      setWorkspaceActionBusy(false);
+    }
   }
 
   return (
@@ -214,13 +256,17 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
         </div>
         <div className="narrative-feed" aria-label="Narrative Feed">
           {workspace?.session.status === "draft" ? (
-            <TemplateEmptyState
-              session={workspace.session}
-              templates={templatesQuery.data ?? []}
-              providers={providersQuery.data ?? []}
-              selectedTemplateId={selectedTemplateId}
-              onTemplateChange={handleTemplateChange}
-            />
+            <>
+              {templateChangeError ? <ErrorState error={templateChangeError} /> : null}
+              <TemplateEmptyState
+                session={workspace.session}
+                templates={templatesQuery.data ?? []}
+                providers={providersQuery.data ?? []}
+                selectedTemplateId={selectedTemplateId}
+                onTemplateChange={handleTemplateChange}
+                isTemplateChangeBusy={isWorkspaceActionBusy}
+              />
+            </>
           ) : workspace ? (
             <NarrativeFeed
               entries={workspace.narrative_feed}

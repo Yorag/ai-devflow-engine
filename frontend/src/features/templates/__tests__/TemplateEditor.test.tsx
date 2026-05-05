@@ -432,6 +432,31 @@ describe("TemplateEditor", () => {
     expect(screen.getAllByRole("radio", { name: /新功能开发流程/u })).toHaveLength(2);
   });
 
+  it("keeps local save-as templates unavailable for session start until persisted", () => {
+    const workspace = mockSessionWorkspaces["session-draft"];
+    const selectedTemplateIds: string[] = [];
+
+    renderWithAppProviders(
+      <TemplateEmptyState
+        session={workspace.session}
+        templates={mockPipelineTemplates}
+        providers={mockProviderList}
+        selectedTemplateId="template-feature"
+        onTemplateChange={(templateId) => selectedTemplateIds.push(templateId)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save as user template" }));
+
+    const featureOptions = screen.getAllByRole("radio", {
+      name: /新功能开发流程/u,
+    });
+    expect(featureOptions).toHaveLength(2);
+    expect(featureOptions[0]).toHaveProperty("disabled", false);
+    expect(featureOptions[1]).toHaveProperty("disabled", true);
+    expect(selectedTemplateIds).toEqual([]);
+  });
+
   it("does not reset an unsaved draft when the selected template object refreshes", () => {
     const workspace = mockSessionWorkspaces["session-draft"];
 
