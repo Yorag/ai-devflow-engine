@@ -40,9 +40,10 @@
 ## V6.2 Playwright 成功路径
 
 **计划周期**：Week 11
-**状态**：`[/]`
+**状态**：`[x]`
 **目标**：建立跨端成功路径 E2E，验证用户可在单一控制台完成输入、审批和交付结果回看。
 **实施计划**：`docs/plans/implementation/v6.2-playwright-success-flow.md`
+**验证摘要**：`QA-E2E-V6.2-FINAL` 已完成并在 integration checkpoint 合入 `98e1ef9`。`npm --prefix e2e run test -- function-one-full-flow.spec.ts` 通过 1 个 Playwright success-path E2E；`npm --prefix frontend run test -- --run WorkspaceShell` 通过 31 个 focused frontend tests；`npm --prefix frontend run test -- --run` 通过 229 个 frontend tests；`npm --prefix frontend run build` 通过 TypeScript 检查和 Vite production build。
 
 **修改文件列表**：
 - Create: `e2e/package.json`
@@ -66,7 +67,7 @@
 **测试方法**：
 - `npm --prefix e2e run test -- function-one-full-flow.spec.ts`
 
-**Integration checkpoint note**：`QA-E2E-V6.2` 已作为 `mock_ready` checkpoint 集成到 `integration/function-one-acceleration`。当前 Playwright 成功路径通过 API 预置 draft session 验证 Narrative Feed、Composer、Approval Block、Inspector、Delivery Result、Run Switcher、焦点恢复、全局 overflow 和窄屏可用性；`AL06-QA-E2E-V6.2` 已接入前端 `New session` 到真实 `POST /api/projects/{projectId}/sessions` 创建会话流程。完整 `[x]` 仍等待 QA-E2E 在 integration 分支上把成功路径改为 UI 创建 session 并重新验证。
+**Integration checkpoint note**：`QA-E2E-V6.2-FINAL` 已作为最终 checkpoint 集成到 `integration/function-one-acceleration`。Playwright 成功路径从无当前项目会话开始，点击真实侧栏 `New session`，验证 `POST /api/projects/{projectId}/sessions` 创建 draft session，然后完成首条需求、澄清回复、两次审批、`delivery_result` 回看、Inspector 打开、焦点恢复、全局 overflow 和窄屏可用性检查。
 
 <a id="v63"></a>
 
