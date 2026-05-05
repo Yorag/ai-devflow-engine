@@ -111,9 +111,10 @@
 ## A4.3a deterministic runtime E2E 推进 harness
 
 **计划周期**：Week 11
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：提供后端测试所有的 deterministic runtime 推进 harness，使浏览器 E2E 可以通过正常 API、持久化投影和 SSE 观察真实 `PipelineRun` 进入 `waiting_approval` 与 `waiting_tool_confirmation`，解除 V6.3 live Playwright 的 owner blocker。
 **实施计划**：`docs/plans/implementation/a4.3a-deterministic-e2e-advancement-harness.md`
+**验证摘要**：实施计划 `docs/plans/implementation/a4.3a-deterministic-e2e-advancement-harness.md` 已在 integration checkpoint 合入 `836a164`。Worker verification 中 focused harness、full API flow、OpenAPI、human-loop command regression 和 full backend suite 通过，full backend suite 记录为 `1329 passed, 3 warnings`。本次 integration verification 在 `integration/function-one-acceleration` 上重复运行 focused harness、full API flow、OpenAPI、pause/resume、approval 和 tool confirmation API regression；`backend/tests/e2e/test_deterministic_runtime_advancement_harness.py` 通过 4 个 tests，impacted regression 命令通过 34 个 tests。
 
 **修改文件列表**：
 - Create: `backend/app/testing/`
