@@ -144,22 +144,29 @@ describe("InspectorSections detail states", () => {
     const inspector = screen.getByRole("complementary", { name: "Inspector" });
     expect(
       await within(inspector).findByText(
-        "Prepared a display-only delivery outcome for review without Git write actions.",
+        "Delivery integration completed for demo_delivery path.",
       ),
     ).toBeTruthy();
-    expect(within(inspector).getByText("Demo delivery workspace summary")).toBeTruthy();
+    expect(
+      within(inspector).getAllByText("demo-delivery-result:run-completed").length,
+    ).toBeGreaterThan(0);
+    expect(
+      within(inspector).getAllByText("demo/run-completed").length,
+    ).toBeGreaterThan(0);
     expect(
       within(inspector).getByText(
-        "feat(workspace): present demo delivery result in narrative feed",
+        "Deterministic test plan and execution summary produced.",
       ),
     ).toBeTruthy();
+    expect(
+      within(inspector).getByText("Deterministic review summary produced."),
+    ).toBeTruthy();
+    expect(within(inspector).getByText("No Git Actions")).toBeTruthy();
+    expect(within(inspector).getByText("true")).toBeTruthy();
+    expect(within(inspector).getByText("Git Write Actions")).toBeTruthy();
     expect(within(inspector).queryByText("feat/runtime-inspector")).toBeNull();
     expect(within(inspector).queryByText("abc1234")).toBeNull();
     expect(within(inspector).queryByText("https://example.test/pr/17")).toBeNull();
-    expect(within(inspector).getByText("12 tests passed.")).toBeTruthy();
-
-    const reviewNotes = within(inspector).getByText(/Checklist preserved\./);
-    expect(reviewNotes.closest("pre")).toBeTruthy();
   });
 
   it("renders the unified API error state when detail loading fails", async () => {

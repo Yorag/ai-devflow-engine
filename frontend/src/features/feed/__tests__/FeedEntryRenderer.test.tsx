@@ -69,11 +69,14 @@ describe("FeedEntryRenderer", () => {
     });
     expect(within(deliveryEntry).getByText("Demo delivery")).toBeTruthy();
     expect(
-      within(deliveryEntry).getByText("Demo delivery generated a reviewable summary."),
+      within(deliveryEntry).getByText("Demo delivery completed without Git writes."),
     ).toBeTruthy();
+    expect(within(deliveryEntry).getByText("Display branch")).toBeTruthy();
+    expect(within(deliveryEntry).getByText("demo/run-completed")).toBeTruthy();
     expect(within(deliveryEntry).getByText("Reference")).toBeTruthy();
-    expect(within(deliveryEntry).getByText("delivery-result-ref-1")).toBeTruthy();
-    expect(deliveryEntry.textContent).not.toMatch(/\bBranch\b/i);
+    expect(
+      within(deliveryEntry).getByText("demo-delivery-result:run-completed"),
+    ).toBeTruthy();
     expect(deliveryEntry.textContent).not.toMatch(/\bCommit\b/i);
     expect(deliveryEntry.textContent).not.toMatch(/\bCode review\b/i);
 
@@ -251,6 +254,7 @@ describe("FeedEntryRenderer guards", () => {
       screen.getByRole("article", { name: "Delivery result feed entry" }),
     ).toBeTruthy();
     expect(screen.getByText("Demo delivery")).toBeTruthy();
-    expect(screen.getByText("delivery-result-ref-1")).toBeTruthy();
+    expect(screen.getByText("demo/run-completed")).toBeTruthy();
+    expect(screen.getByText("demo-delivery-result:run-completed")).toBeTruthy();
   });
 });

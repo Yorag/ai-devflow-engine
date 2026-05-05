@@ -23,16 +23,17 @@ describe("buildDeliveryResultViewModel", () => {
 
     expect(model.modeLabel).toBe("Demo Delivery");
     expect(model.title).toBe("Demo delivery");
-    expect(model.summary).toBe("Demo delivery generated a reviewable summary.");
+    expect(model.summary).toBe("Demo delivery completed without Git writes.");
     expect(model.metadata).toEqual([
       { label: "Mode", value: "demo_delivery" },
-      { label: "Tests", value: "12 tests passed." },
-      { label: "Reference", value: "delivery-result-ref-1" },
+      { label: "Display branch", value: "demo/run-completed" },
+      { label: "Tests", value: "Deterministic test path completed." },
+      { label: "Reference", value: "demo-delivery-result:run-completed" },
     ]);
     expect("highlights" in model).toBe(false);
   });
 
-  it("keeps demo-delivery display summary-only even if git-like fields are present", () => {
+  it("renders the demo display branch but not git write fields when git-like fields are present", () => {
     const model = buildDeliveryResultViewModel({
       ...(mockFeedEntriesByType.delivery_result as DeliveryResultFeedEntry),
       branch_name: "feat/leaked",
@@ -41,6 +42,19 @@ describe("buildDeliveryResultViewModel", () => {
     });
 
     expect(model.modeLabel).toBe("Demo Delivery");
+    expect(model.metadata).toContainEqual({
+      label: "Display branch",
+      value: "feat/leaked",
+    });
+    expect(model.metadata).not.toContainEqual({
+      label: "Commit",
+      value: "abc1234",
+    });
+    expect(model.metadata).not.toContainEqual({
+      label: "Code review",
+      value: "example.test/pr/17",
+      href: "https://example.test/pr/17",
+    });
     expect("highlights" in model).toBe(false);
   });
 });
@@ -60,15 +74,20 @@ describe("DeliveryResultBlock", () => {
     expect(within(article).getByText("Delivery result")).toBeTruthy();
     expect(within(article).getByText("Demo delivery")).toBeTruthy();
     expect(
-      within(article).getByText("Demo delivery generated a reviewable summary."),
+      within(article).getByText("Demo delivery completed without Git writes."),
     ).toBeTruthy();
     expect(within(article).getByText("Mode")).toBeTruthy();
     expect(within(article).getByText("demo_delivery")).toBeTruthy();
+    expect(within(article).getByText("Display branch")).toBeTruthy();
+    expect(within(article).getByText("demo/run-completed")).toBeTruthy();
     expect(within(article).getByText("Tests")).toBeTruthy();
-    expect(within(article).getByText("12 tests passed.")).toBeTruthy();
+    expect(
+      within(article).getByText("Deterministic test path completed."),
+    ).toBeTruthy();
     expect(within(article).getByText("Reference")).toBeTruthy();
-    expect(within(article).getByText("delivery-result-ref-1")).toBeTruthy();
-    expect(article.textContent).not.toMatch(/\bBranch\b/i);
+    expect(
+      within(article).getByText("demo-delivery-result:run-completed"),
+    ).toBeTruthy();
     expect(article.textContent).not.toMatch(/\bCommit\b/i);
     expect(article.textContent).not.toMatch(/\bCode review\b/i);
     expect(
@@ -92,7 +111,8 @@ describe("DeliveryResultBlock", () => {
     const article = screen.getByRole("article", {
       name: "Delivery result feed entry",
     });
-    expect(article.textContent).not.toMatch(/Branch:\s*feat\/leaked/i);
+    expect(article.textContent).toContain("Display branch");
+    expect(article.textContent).toContain("feat/leaked");
     expect(article.textContent).not.toMatch(/Commit:\s*abc1234/i);
     expect(article.textContent).not.toMatch(
       /Code review:\s*https:\/\/example\.test\/pr\/17/i,
@@ -116,19 +136,26 @@ describe("DeliveryResultBlock", () => {
 });
 
 describe("demo delivery detail fixture", () => {
-  it("keeps demo delivery detail free of git-auto-delivery output fields", () => {
+  it("matches the real backend demo DeliveryResultDetailProjection payload", () => {
     expect(mockDeliveryResultDetailProjection.delivery_mode).toBe("demo_delivery");
-    expect(mockDeliveryResultDetailProjection.output.records).toEqual({
-      delivery_summary:
-        "Prepared a display-only delivery outcome for review without Git write actions.",
-      delivery_target: "Demo delivery workspace summary",
-      commit_message_preview:
-        "feat(workspace): present demo delivery result in narrative feed",
+    expect(mockDeliveryResultDetailProjection.input.records).toMatchObject({
+      delivery_channel_snapshot_ref: "delivery-snapshot-1",
     });
-    expect(mockDeliveryResultDetailProjection.process.records).toEqual({
-      integration_summary: "Prepared reviewable delivery summary for demo output.",
-      review_status: "ready_for_review",
-      review_notes: "Checklist preserved.\nNo semantic rewrites.",
+    expect(mockDeliveryResultDetailProjection.process.records).toMatchObject({
+      no_git_actions: true,
+      git_write_actions: [],
+      delivery_result_event_ref: "event-delivery-result-1",
+    });
+    expect(mockDeliveryResultDetailProjection.output.records).toMatchObject({
+      summary: "Delivery integration completed for demo_delivery path.",
+      delivery_status: "succeeded",
+      result_ref: "demo-delivery-result:run-completed",
+      branch_name: "demo/run-completed",
+      commit_sha: null,
+      code_review_url: null,
+      failure_reason: null,
+      test_summary: "Deterministic test plan and execution summary produced.",
+      review_summary: "Deterministic review summary produced.",
     });
   });
 });
