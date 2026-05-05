@@ -277,6 +277,7 @@
 | W5.4 | bash 工具与白名单审计 | Week 7-8 | [x] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w54) |
 | A4.2 | deterministic test runtime 六阶段推进 | Week 7 | [x] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#a42) |
 | A4.3 | deterministic test runtime 澄清与审批中断 | Week 7 | [x] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#a43) |
+| A4.3a | deterministic runtime E2E 推进 harness | Week 11 | [ ] | 后端测试 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#a43a) |
 | A4.4 | deterministic test runtime 终态控制 | Week 7 | [x] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#a44) |
 | D4.1 | Delivery base 与 DeliveryRecord | Week 7 | [x] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#d41) |
 | D4.2 | demo_delivery adapter 与 delivery_result | Week 7 | [x] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#d42) |
