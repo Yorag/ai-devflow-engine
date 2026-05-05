@@ -8,15 +8,25 @@
 | lane_id | QA-E2E |
 | task_id | V6.3 |
 | branch | test/qa-e2e-regression |
-| coordination_base | cec9bb3 |
-| local_result | blocked |
-| expected_coordination_result | blocked |
+| coordination_base | f8ae3e7 |
+| local_result | reported |
+| post_commit_ingest_expectation | implemented |
 
 ## Scope
 
-This worker claim attempted to replace the existing V6.3 route-fixture `mock_ready` checkpoint with live backend-backed Playwright coverage. The worktree adds an opt-in live backend Playwright mode and a live V6.3 spec that uses real REST projections, SSE event frames, and the A4.3a hidden deterministic advancement route.
+This worker claim restores the V6.3 live backend-backed Playwright path after the AL06 `F4.4b` rerun response-shape fix. The worktree keeps an opt-in live backend Playwright mode and a live V6.3 spec that uses real REST projections, SSE event frames, and the A4.3a hidden deterministic advancement route.
 
-The worker did not write the coordination store, did not update central plan status, did not update platform or split-plan final status, did not edit current split specs, did not change backend runtime/API/projection source, did not edit frontend source, and did not modify dependency manifests or lockfiles.
+The worker did not update central plan status, did not update platform or split-plan final status, did not edit current split specs, did not change backend runtime/API/projection source, did not edit frontend source, and did not modify dependency manifests or lockfiles.
+
+## Recovery Summary
+
+The previous checkpoint at `517fbbf` correctly recorded a blocker: live and route-fixture V6.3 both failed rerun focus because the frontend consumed the backend `{ session, run }` rerun response as a bare run. AL06 fixed that owner issue in `AL06-F4.4b-RERUN-FOCUS`, and `test/qa-e2e-regression` merged the integration checkpoint at `f8ae3e7`.
+
+After the merge:
+
+- the route-fixture V6.3 scenario passes with `retry:<run_id>` and `{ session, run }`
+- the live backend V6.3 scenario now passes the previously blocked `Run 2 boundary` focus assertion
+- the live spec assertion after rerun was narrowed from a fixture-only pending-approval historical disabled message to the live backend truth: Run 1 is historical, the original approval request is already `Rejected`, and no Approve / Reject actions remain
 
 ## Changed Files
 
@@ -94,9 +104,9 @@ The failure page snapshot shows:
 
 This means the backend rerun command succeeds and the workspace projection refreshes, but the frontend does not focus the new run boundary.
 
-## Blocker
+## Resolved Blocker
 
-Live V6.3 is blocked by a frontend owner contract mismatch in the rerun response consumer.
+Live V6.3 was blocked by a frontend owner contract mismatch in the rerun response consumer.
 
 Backend route:
 
@@ -113,7 +123,7 @@ returns `RunCommandResponse`:
 }
 ```
 
-Current frontend `RerunAction` calls:
+The previous frontend `RerunAction` path called:
 
 ```ts
 const run = await createRerun(sessionId, request ?? {});
@@ -121,11 +131,7 @@ await invalidateWorkspaceQueries();
 focusRunBoundaryWhenAvailable(run.run_id);
 ```
 
-The existing frontend API type declares `createRerun()` as returning a bare `RunSummaryProjection`, so live response consumption loses the actual run id. The live test cannot be completed without changing frontend source or weakening the focus assertion. Both are outside this QA-E2E worker claim:
-
-- Frontend source is owned by AL06.
-- V6.3 acceptance requires rerun focus to the new run boundary.
-- Weakening the assertion would hide a real integrated behavior defect.
+The old frontend API type declared `createRerun()` as returning a bare `RunSummaryProjection`, so live response consumption lost the actual run id. AL06 fixed this by returning `RunCommandResponse` and focusing `response.run.run_id`. The QA-E2E recovery keeps the rerun focus assertion intact.
 
 ## Source Trace Evidence
 
@@ -232,13 +238,60 @@ Exit code: 1
 
 The repository-local uv Python is 3.11.13, but pytest is not installed in the local uv environment. Installing or syncing dependencies is outside the worker permission set without approval.
 
+### Recovery Verification After AL06 F4.4b
+
+Command:
+
+```powershell
+npm --prefix e2e run test -- function-one-control-flow.spec.ts
+```
+
+Exit code: 0
+
+```text
+Running 2 tests using 1 worker
+2 passed
+```
+
+Command:
+
+```powershell
+$env:E2E_LIVE_BACKEND='1'; npm --prefix e2e run test -- function-one-control-flow-live.spec.ts; Remove-Item Env:E2E_LIVE_BACKEND
+```
+
+Exit code: 0
+
+```text
+Running 2 tests using 1 worker
+2 passed
+```
+
+Command:
+
+```powershell
+npm --prefix e2e run test -- function-one-full-flow.spec.ts
+```
+
+Exit code: 0
+
+```text
+Running 1 test using 1 worker
+1 passed
+```
+
+Command:
+
+```powershell
+git diff --check
+```
+
+Exit code: 0; CRLF normalization warnings only, no whitespace errors.
+
 ## Mock-First / Live Status
 
-- Existing route-fixture V6.3 coverage now matches the real `retry:<run_id>` projection marker and `{ session, run }` rerun response shape. It therefore exposes the same rerun focus blocker instead of passing through a fixture-only response shape.
-- Live backend-backed V6.3 coverage is partially executable:
-  - Approval request, pause/resume disabled state, rejection, rollback, terminate, visible rerun entry, and SSE are exercised up to the rerun focus failure.
-  - Tool confirmation pause/resume, allow, deny, `continue_current_stage` follow-up, SSE, narrow viewport, and overflow checks pass.
-- Full live V6.3 remains blocked until AL06 fixes frontend rerun response-shape consumption.
+- Existing route-fixture V6.3 coverage matches the real `retry:<run_id>` projection marker and `{ session, run }` rerun response shape.
+- Live backend-backed V6.3 coverage passes for approval request, pause/resume disabled state, rejection, rollback, terminate, rerun focus, SSE, tool confirmation pause/resume, allow, deny, `continue_current_stage` follow-up, narrow viewport, and overflow checks.
+- Full live V6.3 is no longer blocked on rerun focus after AL06 F4.4b.
 
 ## Review Checkpoint
 
@@ -246,30 +299,28 @@ The repository-local uv Python is 3.11.13, but pytest is not installed in the lo
 - Code-quality reviewer found two Important issues, both fixed in this checkpoint:
   - Live Playwright `webServer` entries now use `reuseExistingServer: false`, so live runs do not attach to a stale frontend or backend process.
   - The V6.3 route fixture rerun response now matches the backend `{ session, run }` shape, so fixture coverage exposes the same frontend response-consumption blocker as live coverage.
-- Code-quality reviewer also noted that `.runtime/e2e-live` can accumulate sessions after interrupted local runs. This is recorded as a remaining risk and is not a blocker for the current blocked checkpoint.
+- Code-quality reviewer also noted that `.runtime/e2e-live` can accumulate sessions after interrupted local runs. This is recorded as a remaining risk and is not a blocker for the recovered checkpoint.
 - Final re-review after the live reject-submit helper found no Critical or Important issues. It confirmed the helper does not mask product behavior because it still uses the visible approval form, asserts the entered reason and enabled submit state, and retries only DOM replacement/timing failures from live refetch/SSE. It also confirmed live `webServer` `reuseExistingServer: false` and unchanged default fixture mode.
 
 ## Owner Conflict
 
-Owner: AL06 frontend runtime UI.
+Owner conflict resolved by AL06 frontend runtime UI.
 
-Required owner fix:
+Completed owner fix:
 
-- Update frontend `createRerun()` response typing and `RerunAction` consumption to read `RunCommandResponse.run.run_id`, or otherwise consume the true backend response shape without changing backend API semantics.
-- Keep `RerunAction` visibility tied to `system_status.retry_action = retry:<run_id>`.
-- Keep focus behavior on the new run boundary after successful rerun.
+- Frontend `createRerun()` response typing and `RerunAction` consumption now read `RunCommandResponse.run.run_id`.
+- `RerunAction` visibility remains tied to `system_status.retry_action = retry:<run_id>`.
+- Focus behavior moves to the new run boundary after successful rerun.
 
 QA-E2E follow-up after AL06 fix:
 
-- Rerun `E2E_LIVE_BACKEND=1 npm --prefix e2e run test -- function-one-control-flow-live.spec.ts`.
-- If green, this claim can be continued or re-claimed to update local result from `blocked` to `reported` with expected `implemented`.
+- Completed in this recovery checkpoint.
 
 ## Remaining Risks
 
-- The new live backend server uses `.runtime/e2e-live`, so repeated interrupted runs can leave local test sessions. This path is ignored by Git and does not affect committed source, but test isolation can be improved by adding a unique runtime-root strategy in a future non-blocked checkpoint.
 - Backend harness regression could not be rerun locally because the uv environment lacks pytest and dependency install/sync was not permitted.
-- Full V6.3 live acceptance cannot be claimed while rerun focus fails.
+- The live backend server uses `.runtime/e2e-live`, so repeated interrupted runs can leave local test sessions. This path is ignored by Git and does not affect committed source, but a unique runtime-root strategy remains a future hardening option.
 
 ## Commit Readiness
 
-Local result is `blocked`. A checkpoint commit is useful only to let the main coordination session ingest the blocker and the reusable live E2E harness work. It must not be represented as implementation progress for final V6.3 completion.
+Local result is `reported`. After this recovery checkpoint commit, the main coordination session can scan and ingest `QA-E2E-V6.3-LIVE` as `implemented`.

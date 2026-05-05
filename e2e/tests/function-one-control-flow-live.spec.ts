@@ -66,7 +66,10 @@ test.describe("function one live manual intervention path", () => {
     await expect(page.getByLabel("Run 2 boundary")).toContainText(
       "Requirement Analysis",
     );
-    await expect(approval).toContainText("This approval belongs to a historical run.");
+    await expect(page.getByLabel("Run 1 boundary")).toContainText("Historical run");
+    await expect(approval).toContainText("Rejected");
+    await expect(approval.getByRole("button", { name: "Approve" })).toHaveCount(0);
+    await expect(approval.getByRole("button", { name: "Reject" })).toHaveCount(0);
     await expectNoGlobalHorizontalOverflow(page);
   });
 
