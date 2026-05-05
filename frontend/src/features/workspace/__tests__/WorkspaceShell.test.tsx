@@ -7,6 +7,7 @@ import type { ApiRequestOptions } from "../../../api/client";
 import { terminateRun } from "../../../api/runs";
 import type {
   ExecutionNodeProjection,
+  SessionRead,
   SessionStatus,
   SessionWorkspaceProjection,
 } from "../../../api/types";
@@ -157,6 +158,130 @@ describe("WorkspaceShell", () => {
         name: "Open Add workspace shell",
       }),
     ).toHaveProperty("ariaCurrent", "page");
+  });
+
+  it("creates a new draft session from the sidebar and switches to it", async () => {
+    const createdSession: SessionRead = {
+      session_id: "session-created-from-sidebar",
+      project_id: "project-default",
+      display_name: "Untitled requirement",
+      status: "draft",
+      selected_template_id: "template-feature",
+      current_run_id: null,
+      latest_stage_type: null,
+      created_at: "2026-05-05T07:30:00.000Z",
+      updated_at: "2026-05-05T07:30:00.000Z",
+    };
+    const baseFetcher = createMockApiFetcher();
+    const projectSessions = Object.values(mockSessionWorkspaces)
+      .map((workspace) => workspace.session)
+      .filter((session) => session.project_id === "project-default");
+    let createSessionCalls = 0;
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const path = normalizeTestPath(input);
+        const method = init?.method ?? "GET";
+
+        if (
+          method === "GET" &&
+          path === "/api/projects/project-default/sessions"
+        ) {
+          return jsonTestResponse(projectSessions);
+        }
+
+        if (
+          method === "POST" &&
+          path === "/api/projects/project-default/sessions"
+        ) {
+          createSessionCalls += 1;
+          projectSessions.unshift(createdSession);
+          return jsonTestResponse(createdSession);
+        }
+
+        if (
+          method === "GET" &&
+          path === "/api/sessions/session-created-from-sidebar/workspace"
+        ) {
+          return jsonTestResponse(createDraftWorkspace(createdSession));
+        }
+
+        return baseFetcher(input, init);
+      },
+    };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    const newSessionButton = await screen.findByRole("button", {
+      name: "New session",
+    });
+    await waitFor(() => {
+      expect(newSessionButton).toHaveProperty("disabled", false);
+    });
+
+    fireEvent.click(newSessionButton);
+
+    await waitFor(() => {
+      expect(createSessionCalls).toBe(1);
+    });
+    expect(
+      await screen.findByRole("button", { name: "Open Untitled requirement" }),
+    ).toHaveProperty("ariaCurrent", "page");
+    expect(
+      screen.getByRole("region", { name: "Template empty state" }),
+    ).toBeTruthy();
+    expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", false);
+  });
+
+  it("keeps the current session selected when new session creation fails", async () => {
+    const baseFetcher = createMockApiFetcher();
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const path = normalizeTestPath(input);
+        const method = init?.method ?? "GET";
+
+        if (
+          method === "POST" &&
+          path === "/api/projects/project-default/sessions"
+        ) {
+          return jsonTestResponse(
+            {
+              error_code: "validation_error",
+              code: "validation_error",
+              message: "Project cannot create a new session.",
+              request_id: "request-new-session-failed",
+            },
+            409,
+          );
+        }
+
+        return baseFetcher(input, init);
+      },
+    };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Add workspace shell" }),
+    );
+    await screen.findByRole("heading", {
+      level: 1,
+      name: "Add workspace shell",
+    });
+
+    const newSessionButton = screen.getByRole("button", { name: "New session" });
+    await waitFor(() => {
+      expect(newSessionButton).toHaveProperty("disabled", false);
+    });
+
+    fireEvent.click(newSessionButton);
+
+    expect((await screen.findByRole("alert")).textContent ?? "").toContain(
+      "Request needs correction",
+    );
+    expect(
+      screen.getByRole("button", { name: "Open Add workspace shell" }),
+    ).toHaveProperty("ariaCurrent", "page");
+    expect(screen.getByRole("region", { name: "Run 1 boundary" })).toBeTruthy();
   });
 
   it("uses product workspace copy and avoids implementation placeholder text", async () => {
@@ -1090,3 +1215,40 @@ type MockEventSource = {
   removeEventListener: ReturnType<typeof vi.fn>;
   listeners: Map<string, (event: MessageEvent<string>) => void>;
 };
+
+function createDraftWorkspace(session: SessionRead): SessionWorkspaceProjection {
+  const draftWorkspace = mockSessionWorkspaces["session-draft"];
+
+  return {
+    ...draftWorkspace,
+    session,
+    project: draftWorkspace.project,
+    runs: [],
+    narrative_feed: [],
+    current_run_id: null,
+    current_stage_type: null,
+    composer_state: {
+      mode: "draft",
+      is_input_enabled: true,
+      primary_action: "send",
+      secondary_actions: [],
+      bound_run_id: null,
+    },
+  };
+}
+
+function jsonTestResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function normalizeTestPath(input: RequestInfo | URL): string {
+  const raw = typeof input === "string" ? input : input.toString();
+  if (/^https?:\/\//u.test(raw)) {
+    const url = new URL(raw);
+    return url.pathname;
+  }
+  return raw;
+}

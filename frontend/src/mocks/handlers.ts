@@ -1,5 +1,9 @@
 import type { ApiRequestOptions } from "../api/client";
-import type { MessageFeedEntry, SessionWorkspaceProjection } from "../api/types";
+import type {
+  MessageFeedEntry,
+  SessionRead,
+  SessionWorkspaceProjection,
+} from "../api/types";
 import {
   mockApiError,
   mockCodeGenerationInspectorProjection,
@@ -61,11 +65,28 @@ function createMockRoutes(
   options: MockApiFetcherOptions,
   workspaces: Record<string, SessionWorkspaceProjection>,
 ): MockRoute[] {
+  const sessions = mockSessionList.map((session) => ({ ...session }));
+
   return [
     route("GET", /^\/api\/projects$/u, () => jsonResponse(mockProjectList)),
     route("GET", /^\/api\/projects\/([^/]+)\/sessions$/u, ([, projectId]) =>
-      jsonResponse(mockSessionList.filter((session) => session.project_id === projectId)),
+      jsonResponse(sessions.filter((session) => session.project_id === projectId)),
     ),
+    route("POST", /^\/api\/projects\/([^/]+)\/sessions$/u, ([, projectId]) => {
+      const project = mockProjectList.find(
+        (candidate) => candidate.project_id === projectId,
+      );
+      if (!project) {
+        return jsonResponse(mockApiError("not_found"), 404);
+      }
+
+      const createdSession = createMockDraftSession(projectId, sessions.length + 1);
+      sessions.unshift(createdSession);
+      workspaces[createdSession.session_id] = createMockDraftWorkspace(
+        createdSession,
+      );
+      return jsonResponse(createdSession);
+    }),
     route("GET", /^\/api\/pipeline-templates$/u, () =>
       jsonResponse(mockPipelineTemplates),
     ),
@@ -258,6 +279,52 @@ function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: { "content-type": "application/json" },
   });
+}
+
+function createMockDraftSession(projectId: string, index: number): SessionRead {
+  const timestamp = "2026-05-05T07:30:00.000Z";
+  return {
+    session_id: `session-created-${index}`,
+    project_id: projectId,
+    display_name: "Untitled requirement",
+    status: "draft",
+    selected_template_id: "template-feature",
+    current_run_id: null,
+    latest_stage_type: null,
+    created_at: timestamp,
+    updated_at: timestamp,
+  };
+}
+
+function createMockDraftWorkspace(
+  session: SessionRead,
+): SessionWorkspaceProjection {
+  const draftWorkspace = mockSessionWorkspaces["session-draft"];
+  const project =
+    mockProjectList.find((candidate) => candidate.project_id === session.project_id) ??
+    draftWorkspace.project;
+  const deliveryChannel =
+    session.project_id === "project-loaded"
+      ? mockGitProjectDeliveryChannel
+      : mockProjectDeliveryChannel;
+
+  return {
+    ...draftWorkspace,
+    session,
+    project,
+    delivery_channel: deliveryChannel,
+    runs: [],
+    narrative_feed: [],
+    current_run_id: null,
+    current_stage_type: null,
+    composer_state: {
+      mode: "draft",
+      is_input_enabled: true,
+      primary_action: "send",
+      secondary_actions: [],
+      bound_run_id: null,
+    },
+  };
 }
 
 function mockToolConfirmationFeedEntry() {
