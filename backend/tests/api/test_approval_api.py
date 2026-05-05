@@ -372,7 +372,7 @@ def test_post_approval_approve_returns_paused_conflict_without_mutation(
         )
 
     assert response.status_code == 409
-    assert response.json()["error_code"] == "validation_error"
+    assert response.json()["error_code"] == "approval_not_actionable"
     assert "paused" in response.json()["message"]
 
 

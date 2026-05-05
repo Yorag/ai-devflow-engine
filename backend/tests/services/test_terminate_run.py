@@ -818,7 +818,7 @@ def test_terminate_rejects_terminal_runs_without_mutation(
             trace_context=build_trace(),
         )
 
-    assert exc_info.value.error_code is ErrorCode.VALIDATION_ERROR
+    assert exc_info.value.error_code is ErrorCode.RUN_COMMAND_NOT_ACTIONABLE
     assert exc_info.value.status_code == 409
     assert runtime_port.calls == []
     with manager.session(DatabaseRole.RUNTIME) as session:
@@ -852,7 +852,7 @@ def test_terminate_rejects_non_current_run_without_mutation(
             trace_context=build_trace(),
         )
 
-    assert exc_info.value.error_code is ErrorCode.VALIDATION_ERROR
+    assert exc_info.value.error_code is ErrorCode.RUN_COMMAND_NOT_ACTIONABLE
     assert exc_info.value.status_code == 409
     assert runtime_port.calls == []
     with manager.session(DatabaseRole.RUNTIME) as session:

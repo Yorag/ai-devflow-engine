@@ -565,7 +565,7 @@ class ApprovalService:
                 started_at=started_at,
             )
             raise ApprovalServiceError(
-                ErrorCode.VALIDATION_ERROR,
+                ErrorCode.APPROVAL_NOT_ACTIONABLE,
                 APPROVAL_NOT_PENDING_MESSAGE,
                 409,
             )
@@ -580,7 +580,7 @@ class ApprovalService:
                 started_at=started_at,
             )
             raise ApprovalServiceError(
-                ErrorCode.VALIDATION_ERROR,
+                ErrorCode.APPROVAL_NOT_ACTIONABLE,
                 APPROVAL_PAUSED_MESSAGE,
                 409,
             )
@@ -598,7 +598,7 @@ class ApprovalService:
                 started_at=started_at,
             )
             raise ApprovalServiceError(
-                ErrorCode.VALIDATION_ERROR,
+                ErrorCode.APPROVAL_NOT_ACTIONABLE,
                 message,
                 409,
             )
@@ -902,25 +902,40 @@ class ApprovalService:
         stage: StageRunModel,
     ) -> None:
         if control_session.current_run_id != run.run_id:
-            self._raise_target_conflict("Session current_run_id does not match run.")
+            self._raise_target_conflict(
+                "Session current_run_id does not match run.",
+                error_code=ErrorCode.APPROVAL_NOT_ACTIONABLE,
+            )
         if run.session_id != control_session.session_id:
-            self._raise_target_conflict("Run does not belong to the Session.")
+            self._raise_target_conflict(
+                "Run does not belong to the Session.",
+                error_code=ErrorCode.APPROVAL_NOT_ACTIONABLE,
+            )
         if run.current_stage_run_id != stage.stage_run_id:
             self._raise_target_conflict(
-                "PipelineRun current_stage_run_id does not match stage."
+                "PipelineRun current_stage_run_id does not match stage.",
+                error_code=ErrorCode.APPROVAL_NOT_ACTIONABLE,
             )
         if stage.run_id != run.run_id:
-            self._raise_target_conflict("StageRun does not belong to the run.")
+            self._raise_target_conflict(
+                "StageRun does not belong to the run.",
+                error_code=ErrorCode.APPROVAL_NOT_ACTIONABLE,
+            )
         if approval.run_id != run.run_id:
-            self._raise_target_conflict("ApprovalRequest does not belong to the run.")
+            self._raise_target_conflict(
+                "ApprovalRequest does not belong to the run.",
+                error_code=ErrorCode.APPROVAL_NOT_ACTIONABLE,
+            )
         if approval.stage_run_id != stage.stage_run_id:
             self._raise_target_conflict(
-                "ApprovalRequest does not belong to the stage."
+                "ApprovalRequest does not belong to the stage.",
+                error_code=ErrorCode.APPROVAL_NOT_ACTIONABLE,
             )
         expected_stage_type = self._source_stage_type_for_approval(approval.approval_type)
         if stage.stage_type is not expected_stage_type:
             self._raise_target_conflict(
-                f"Expected source stage {expected_stage_type.value}."
+                f"Expected source stage {expected_stage_type.value}.",
+                error_code=ErrorCode.APPROVAL_NOT_ACTIONABLE,
             )
 
     def _mark_running_after_approval_command(
@@ -1324,8 +1339,12 @@ class ApprovalService:
         return False, "Current run is not waiting for approval."
 
     @staticmethod
-    def _raise_target_conflict(message: str) -> None:
-        raise ApprovalServiceError(ErrorCode.VALIDATION_ERROR, message, 409)
+    def _raise_target_conflict(
+        message: str,
+        *,
+        error_code: ErrorCode = ErrorCode.VALIDATION_ERROR,
+    ) -> None:
+        raise ApprovalServiceError(error_code, message, 409)
 
     def _commit_all(self) -> None:
         self._runtime_session.commit()

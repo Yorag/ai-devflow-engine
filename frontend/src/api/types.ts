@@ -116,12 +116,51 @@ export type ConfigErrorCode =
   | "config_storage_unavailable"
   | "config_snapshot_unavailable";
 
+export type RuntimeErrorCode =
+  | "approval_not_actionable"
+  | "run_command_not_actionable"
+  | "runtime_data_dir_unavailable";
+
+export type ToolErrorCode =
+  | "tool_unknown"
+  | "tool_not_allowed"
+  | "tool_input_schema_invalid"
+  | "tool_workspace_boundary_violation"
+  | "tool_timeout"
+  | "tool_audit_required_failed"
+  | "tool_confirmation_required"
+  | "tool_confirmation_denied"
+  | "tool_confirmation_not_actionable"
+  | "tool_risk_blocked"
+  | "bash_command_not_allowed";
+
+export type ProviderErrorCode =
+  | "provider_retry_exhausted"
+  | "provider_circuit_open";
+
+export type DeliveryErrorCode =
+  | "delivery_snapshot_missing"
+  | "delivery_snapshot_not_ready"
+  | "delivery_git_cli_failed"
+  | "delivery_remote_request_failed";
+
+export type LogAuditErrorCode =
+  | "audit_write_failed"
+  | "log_query_invalid"
+  | "log_payload_blocked";
+
 export type ApiErrorCode =
   | "internal_error"
   | "not_found"
   | "validation_error"
   | ConfigErrorCode
-  | "config_credential_env_not_allowed";
+  | "config_credential_env_not_allowed"
+  | "config_snapshot_mutation_blocked"
+  | RuntimeErrorCode
+  | ToolErrorCode
+  | ProviderErrorCode
+  | DeliveryErrorCode
+  | LogAuditErrorCode;
 
 export type ApiFieldError = {
   field: string;

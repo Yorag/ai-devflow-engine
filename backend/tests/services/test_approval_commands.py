@@ -689,7 +689,7 @@ def test_approval_commands_reject_paused_runs_without_creating_decision(
             trace_context=build_trace(),
         )
 
-    assert exc_info.value.error_code is ErrorCode.VALIDATION_ERROR
+    assert exc_info.value.error_code is ErrorCode.APPROVAL_NOT_ACTIONABLE
     assert exc_info.value.status_code == 409
     assert "paused" in exc_info.value.message
     with manager.session(DatabaseRole.RUNTIME) as session:
@@ -720,7 +720,7 @@ def test_approval_commands_reject_mismatched_session_current_run_without_creatin
             trace_context=build_trace(),
         )
 
-    assert exc_info.value.error_code is ErrorCode.VALIDATION_ERROR
+    assert exc_info.value.error_code is ErrorCode.APPROVAL_NOT_ACTIONABLE
     assert exc_info.value.status_code == 409
     assert "current_run_id does not match run" in exc_info.value.message
     with manager.session(DatabaseRole.RUNTIME) as session:

@@ -170,7 +170,7 @@ def test_post_session_runs_rejects_non_terminal_current_run(
         response = client.post("/api/sessions/session-1/runs", json={})
 
     assert response.status_code == 409
-    assert response.json()["error_code"] == "validation_error"
+    assert response.json()["error_code"] == "run_command_not_actionable"
 
 
 def test_post_session_runs_rejects_non_terminal_old_thread_from_runtime_boundary(
@@ -186,7 +186,7 @@ def test_post_session_runs_rejects_non_terminal_old_thread_from_runtime_boundary
         response = client.post("/api/sessions/session-1/runs", json={})
 
     assert response.status_code == 409
-    assert response.json()["error_code"] == "validation_error"
+    assert response.json()["error_code"] == "run_command_not_actionable"
 
 
 def test_post_session_runs_rejects_session_without_current_run_tail(
@@ -208,7 +208,7 @@ def test_post_session_runs_rejects_session_without_current_run_tail(
         response = client.post("/api/sessions/session-1/runs", json={})
 
     assert response.status_code == 409
-    assert response.json()["error_code"] == "validation_error"
+    assert response.json()["error_code"] == "run_command_not_actionable"
 
 
 def test_post_session_runs_route_is_documented_in_openapi(tmp_path: Path) -> None:

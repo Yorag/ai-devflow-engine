@@ -485,7 +485,7 @@ def test_post_run_resume_rejects_non_paused_run(tmp_path: Path) -> None:
         response = client.post("/api/runs/run-1/resume", json={})
 
     assert response.status_code == 409
-    assert response.json()["error_code"] == "validation_error"
+    assert response.json()["error_code"] == "run_command_not_actionable"
 
 
 def test_run_pause_resume_routes_are_documented_in_openapi(tmp_path: Path) -> None:

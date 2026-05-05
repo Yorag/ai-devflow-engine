@@ -1139,7 +1139,10 @@ class RunLifecycleService:
         try:
             session, run, stage = self._load_current_session_run_tail(session_id)
         except RunLifecycleServiceError as exc:
-            if exc.error_code is ErrorCode.VALIDATION_ERROR:
+            if exc.error_code in {
+                ErrorCode.VALIDATION_ERROR,
+                ErrorCode.RUN_COMMAND_NOT_ACTIONABLE,
+            }:
                 self._record_rejected_session_command(
                     action="runtime.rerun.rejected",
                     message="Run rerun command rejected.",
@@ -1303,7 +1306,7 @@ class RunLifecycleService:
             )
             raise RunLifecycleServiceError(
                 str(exc),
-                error_code=ErrorCode.VALIDATION_ERROR,
+                error_code=ErrorCode.RUN_COMMAND_NOT_ACTIONABLE,
                 status_code=409,
                 detail_ref=run.run_id,
             ) from exc
@@ -2576,7 +2579,7 @@ class RunLifecycleService:
     def _raise_validation(message: str) -> None:
         raise RunLifecycleServiceError(
             message,
-            error_code=ErrorCode.VALIDATION_ERROR,
+            error_code=ErrorCode.RUN_COMMAND_NOT_ACTIONABLE,
             status_code=409,
         )
 

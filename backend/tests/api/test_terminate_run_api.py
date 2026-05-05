@@ -193,4 +193,4 @@ def test_post_run_terminate_rejects_terminal_run(tmp_path: Path) -> None:
         response = client.post("/api/runs/run-1/terminate", json={})
 
     assert response.status_code == 409
-    assert response.json()["error_code"] == "validation_error"
+    assert response.json()["error_code"] == "run_command_not_actionable"

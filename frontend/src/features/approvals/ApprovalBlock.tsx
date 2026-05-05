@@ -2,9 +2,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { approveApproval, rejectApproval } from "../../api/approvals";
-import type { ApiRequestError, ApiRequestOptions } from "../../api/client";
+import type { ApiRequestOptions } from "../../api/client";
 import { apiQueryKeys } from "../../api/hooks";
 import type { ApprovalRequestFeedEntry, SessionStatus } from "../../api/types";
+import { ErrorState } from "../errors/ErrorState";
 import { DeliveryReadinessNotice } from "./DeliveryReadinessNotice";
 import { RejectReasonForm } from "./RejectReasonForm";
 
@@ -44,7 +45,7 @@ export function ApprovalBlock({
   const queryClient = useQueryClient();
   const [isBusy, setBusy] = useState(false);
   const [isRejectOpen, setRejectOpen] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<unknown | null>(null);
   const actionState = resolveApprovalActionState(
     entry,
     currentRunId,
@@ -73,13 +74,13 @@ export function ApprovalBlock({
     }
 
     setBusy(true);
-    setErrorMessage(null);
+    setApiError(null);
     try {
       await approveApproval(entry.approval_id, request ?? {});
       setRejectOpen(false);
       await invalidateWorkspaceQueries();
     } catch (error) {
-      setErrorMessage(readApiErrorMessage(error));
+      setApiError(error);
     } finally {
       setBusy(false);
     }
@@ -91,13 +92,13 @@ export function ApprovalBlock({
     }
 
     setBusy(true);
-    setErrorMessage(null);
+    setApiError(null);
     try {
       await rejectApproval(entry.approval_id, { reason }, request ?? {});
       setRejectOpen(false);
       await invalidateWorkspaceQueries();
     } catch (error) {
-      setErrorMessage(readApiErrorMessage(error));
+      setApiError(error);
     } finally {
       setBusy(false);
     }
@@ -122,7 +123,21 @@ export function ApprovalBlock({
       {disabledReason ? (
         <p className="feed-entry__supporting">{disabledReason}</p>
       ) : null}
-      {errorMessage ? <p className="approval-block__error">{errorMessage}</p> : null}
+      {apiError ? (
+        <ErrorState
+          error={apiError}
+          actionLabel={
+            onOpenSettings && errorHasCode(apiError, "delivery_snapshot_not_ready")
+              ? "Open settings"
+              : undefined
+          }
+          onAction={
+            onOpenSettings && errorHasCode(apiError, "delivery_snapshot_not_ready")
+              ? onOpenSettings
+              : undefined
+          }
+        />
+      ) : null}
       {actionState.showPrimaryActions ? (
         <div className="feed-entry__actions" aria-label="Approval actions">
           <button
@@ -144,10 +159,10 @@ export function ApprovalBlock({
       {isRejectOpen && actionState.canReject ? (
         <RejectReasonForm
           isBusy={isBusy}
-          errorMessage={errorMessage}
+          errorMessage={null}
           onCancel={() => {
             setRejectOpen(false);
-            setErrorMessage(null);
+            setApiError(null);
           }}
           onSubmit={handleReject}
         />
@@ -209,11 +224,11 @@ export function resolveHistoricalApprovalState(
   };
 }
 
-function readApiErrorMessage(error: unknown): string {
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as ApiRequestError).message);
+function errorHasCode(error: unknown, code: string): boolean {
+  if (!error || typeof error !== "object" || !("code" in error)) {
+    return false;
   }
-  return "Approval request failed.";
+  return (error as { code?: unknown }).code === code;
 }
 
 function formatApprovalType(value: ApprovalRequestFeedEntry["approval_type"]): string {
