@@ -1167,7 +1167,10 @@ class InspectorProjectionService:
                 control_item = CONTROL_ITEM_ADAPTER.validate_python(payload)
             except ValidationError:
                 continue
-            if control_item.control_record_id == control_record_id:
+            if (
+                control_item.run_id == run.run_id
+                and control_item.control_record_id == control_record_id
+            ):
                 matched = control_item
         return matched
 

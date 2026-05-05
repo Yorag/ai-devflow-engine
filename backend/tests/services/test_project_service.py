@@ -5,12 +5,36 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from backend.app.core.config import EnvironmentSettings
 from backend.app.db.base import DatabaseRole
-from backend.app.db.models.control import ControlBase, DeliveryChannelModel, ProjectModel
+from backend.app.db.models.control import (
+    ControlBase,
+    DeliveryChannelModel,
+    PipelineTemplateModel,
+    ProjectModel,
+    SessionModel,
+    StartupPublicationModel,
+)
+from backend.app.db.models.runtime import (
+    PipelineRunModel,
+    ProviderCallPolicySnapshotModel,
+    RuntimeBase,
+    RuntimeLimitSnapshotModel,
+)
 from backend.app.db.session import DatabaseManager
-from backend.app.domain.enums import CredentialStatus, DeliveryMode, DeliveryReadinessStatus
+from backend.app.domain.enums import (
+    CredentialStatus,
+    DeliveryMode,
+    DeliveryReadinessStatus,
+    RunStatus,
+    RunTriggerSource,
+    SessionStatus,
+    TemplateSource,
+)
+from backend.app.domain.publication_boundary import PUBLICATION_STATE_PENDING
 from backend.app.domain.trace_context import TraceContext
 from backend.app.schemas.observability import AuditResult
 
@@ -58,6 +82,120 @@ def build_control_manager(tmp_path: Path, default_project_root: Path) -> Databas
     manager = DatabaseManager.from_environment_settings(settings)
     ControlBase.metadata.create_all(manager.engine(DatabaseRole.CONTROL))
     return manager
+
+
+def seed_template_if_missing(manager: DatabaseManager) -> None:
+    with manager.session(DatabaseRole.CONTROL) as session:
+        if session.get(PipelineTemplateModel, "template-feature") is None:
+            session.add(
+                PipelineTemplateModel(
+                    template_id="template-feature",
+                    name="Feature",
+                    description=None,
+                    template_source=TemplateSource.SYSTEM_TEMPLATE,
+                    base_template_id=None,
+                    fixed_stage_sequence=[],
+                    stage_role_bindings=[],
+                    approval_checkpoints=[],
+                    auto_regression_enabled=False,
+                    max_auto_regression_retries=0,
+                    created_at=NOW,
+                    updated_at=NOW,
+                )
+            )
+            session.commit()
+
+
+def seed_pending_startup(
+    manager: DatabaseManager,
+    *,
+    project_id: str,
+    session_id: str,
+    run_id: str,
+) -> None:
+    seed_template_if_missing(manager)
+    RuntimeBase.metadata.create_all(manager.engine(DatabaseRole.RUNTIME))
+    with manager.session(DatabaseRole.CONTROL) as session:
+        session.add(
+            SessionModel(
+                session_id=session_id,
+                project_id=project_id,
+                display_name=session_id,
+                status=SessionStatus.DRAFT,
+                selected_template_id="template-feature",
+                current_run_id=None,
+                latest_stage_type=None,
+                is_visible=True,
+                visibility_removed_at=None,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            StartupPublicationModel(
+                publication_id=f"publication-{run_id}",
+                session_id=session_id,
+                run_id=run_id,
+                stage_run_id=f"stage-{run_id}",
+                publication_state=PUBLICATION_STATE_PENDING,
+                pending_session_id=session_id,
+                published_at=None,
+                aborted_at=None,
+                abort_reason=None,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.commit()
+
+    with manager.session(DatabaseRole.RUNTIME) as session:
+        session.add(
+            RuntimeLimitSnapshotModel(
+                snapshot_id=f"runtime-limit-{run_id}",
+                run_id=run_id,
+                agent_limits={},
+                context_limits={},
+                source_config_version="config-v1",
+                hard_limits_version="hard-limits-v1",
+                schema_version="runtime-limit-v1",
+                created_at=NOW,
+            )
+        )
+        session.add(
+            ProviderCallPolicySnapshotModel(
+                snapshot_id=f"policy-{run_id}",
+                run_id=run_id,
+                provider_call_policy={},
+                source_config_version="config-v1",
+                schema_version="provider-policy-v1",
+                created_at=NOW,
+            )
+        )
+        session.commit()
+        session.add(
+            PipelineRunModel(
+                run_id=run_id,
+                session_id=session_id,
+                project_id=project_id,
+                attempt_index=1,
+                status=RunStatus.COMPLETED,
+                trigger_source=RunTriggerSource.INITIAL_REQUIREMENT,
+                template_snapshot_ref="template-snapshot-1",
+                graph_definition_ref="graph-definition-1",
+                graph_thread_ref="graph-thread-1",
+                workspace_ref="workspace-1",
+                runtime_limit_snapshot_ref=f"runtime-limit-{run_id}",
+                provider_call_policy_snapshot_ref=f"policy-{run_id}",
+                delivery_channel_snapshot_ref=None,
+                current_stage_run_id=None,
+                trace_id=f"trace-{run_id}",
+                started_at=NOW,
+                ended_at=NOW,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.commit()
 
 
 def test_ensure_default_project_creates_demo_delivery_channel_and_audit(
@@ -308,3 +446,157 @@ def test_existing_project_load_rolls_back_channel_repair_when_success_audit_fail
     assert saved_project is not None
     assert saved_project.default_delivery_channel_id is None
     assert saved_channels == []
+
+
+def test_remove_project_blocks_real_pending_startup_publication_without_mutation(
+    tmp_path: Path,
+) -> None:
+    from backend.app.services.projects import (
+        PROJECT_REMOVE_BLOCKED_ERROR_CODE,
+        ProjectService,
+    )
+
+    default_root = tmp_path / "platform"
+    loaded_root = tmp_path / "loaded-app"
+    default_root.mkdir()
+    loaded_root.mkdir()
+    manager = build_control_manager(tmp_path, default_root)
+    RuntimeBase.metadata.create_all(manager.engine(DatabaseRole.RUNTIME))
+    settings = EnvironmentSettings(
+        platform_runtime_root=tmp_path / "runtime",
+        default_project_root=default_root,
+    )
+    audit = RecordingAuditService()
+
+    with manager.session(DatabaseRole.CONTROL) as session:
+        project = ProjectService(
+            session,
+            settings=settings,
+            audit_service=RecordingAuditService(),
+            now=lambda: NOW,
+        ).load_project(root_path=loaded_root, trace_context=build_trace())
+        project_id = project.project_id
+
+    seed_pending_startup(
+        manager,
+        project_id=project_id,
+        session_id="session-startup-pending",
+        run_id="run-startup-pending",
+    )
+
+    with (
+        manager.session(DatabaseRole.CONTROL) as control_session,
+        manager.session(DatabaseRole.RUNTIME) as runtime_session,
+    ):
+        result = ProjectService(
+            control_session,
+            settings=settings,
+            runtime_session=runtime_session,
+            audit_service=audit,
+            now=lambda: NOW,
+        ).remove_project(project_id=project_id, trace_context=build_trace())
+        saved_project = control_session.get(ProjectModel, project_id)
+        saved_session = control_session.get(SessionModel, "session-startup-pending")
+
+    assert result.visibility_removed is False
+    assert result.blocked_by_active_run is True
+    assert result.blocking_run_id == "run-startup-pending"
+    assert result.error_code == PROJECT_REMOVE_BLOCKED_ERROR_CODE
+    assert saved_project is not None
+    assert saved_project.is_visible is True
+    assert saved_project.visibility_removed_at is None
+    assert saved_session is not None
+    assert saved_session.is_visible is True
+    assert saved_session.visibility_removed_at is None
+    assert saved_session.current_run_id is None
+    assert audit.records[-1]["action"] == "project.remove"
+    assert audit.records[-1]["result"] is AuditResult.BLOCKED
+    assert audit.records[-1]["metadata"]["blocking_run_id"] == "run-startup-pending"
+
+
+def test_remove_project_raises_internal_error_when_runtime_barrier_cannot_be_acquired(
+    tmp_path: Path,
+) -> None:
+    from backend.app.api.error_codes import ErrorCode
+    from backend.app.services.projects import (
+        PROJECT_RUNTIME_STATE_UNAVAILABLE_MESSAGE,
+        ProjectService,
+        ProjectServiceError,
+    )
+
+    default_root = tmp_path / "platform"
+    loaded_root = tmp_path / "loaded-app"
+    default_root.mkdir()
+    loaded_root.mkdir()
+    manager = build_control_manager(tmp_path, default_root)
+    RuntimeBase.metadata.create_all(manager.engine(DatabaseRole.RUNTIME))
+    settings = EnvironmentSettings(
+        platform_runtime_root=tmp_path / "runtime",
+        default_project_root=default_root,
+    )
+    audit = RecordingAuditService()
+
+    with manager.session(DatabaseRole.CONTROL) as session:
+        project = ProjectService(
+            session,
+            settings=settings,
+            audit_service=RecordingAuditService(),
+            now=lambda: NOW,
+        ).load_project(root_path=loaded_root, trace_context=build_trace())
+        project_id = project.project_id
+    seed_template_if_missing(manager)
+    with manager.session(DatabaseRole.CONTROL) as session:
+        session.add(
+            SessionModel(
+                session_id="session-removable",
+                project_id=project_id,
+                display_name="session-removable",
+                status=SessionStatus.DRAFT,
+                selected_template_id="template-feature",
+                current_run_id=None,
+                latest_stage_type=None,
+                is_visible=True,
+                visibility_removed_at=None,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.commit()
+
+    runtime_engine = create_engine(
+        f"sqlite:///{manager.database_path(DatabaseRole.RUNTIME).as_posix()}",
+        connect_args={"check_same_thread": False, "timeout": 0},
+    )
+    runtime_session_factory = sessionmaker(bind=runtime_engine, expire_on_commit=False)
+    lock_connection = runtime_engine.connect()
+    lock_connection.exec_driver_sql("BEGIN IMMEDIATE")
+    try:
+        with (
+            manager.session(DatabaseRole.CONTROL) as control_session,
+            runtime_session_factory() as runtime_session,
+        ):
+            with pytest.raises(ProjectServiceError) as exc_info:
+                ProjectService(
+                    control_session,
+                    settings=settings,
+                    runtime_session=runtime_session,
+                    audit_service=audit,
+                    now=lambda: NOW,
+                ).remove_project(project_id=project_id, trace_context=build_trace())
+            saved_project = control_session.get(ProjectModel, project_id)
+            saved_session = control_session.get(SessionModel, "session-removable")
+    finally:
+        lock_connection.rollback()
+        lock_connection.close()
+        runtime_engine.dispose()
+
+    assert exc_info.value.error_code is ErrorCode.INTERNAL_ERROR
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.message == PROJECT_RUNTIME_STATE_UNAVAILABLE_MESSAGE
+    assert saved_project is not None
+    assert saved_project.is_visible is True
+    assert saved_project.visibility_removed_at is None
+    assert saved_session is not None
+    assert saved_session.is_visible is True
+    assert saved_session.visibility_removed_at is None
+    assert audit.records == []

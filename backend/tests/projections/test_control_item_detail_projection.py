@@ -206,6 +206,113 @@ def test_control_item_detail_projection_ignores_malformed_stage_node_payloads(
     assert dumped["input"]["records"]["trigger_reason"] == "Need the user to clarify file scope."
 
 
+def test_control_item_detail_projection_ignores_malformed_control_item_payloads(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    manager = _manager(tmp_path)
+    _seed_workspace(manager)
+    _seed_retry_control_projection(manager)
+
+    with (
+        manager.session(DatabaseRole.CONTROL) as control_session,
+        manager.session(DatabaseRole.RUNTIME) as runtime_session,
+        manager.session(DatabaseRole.EVENT) as event_session,
+    ):
+        service = InspectorProjectionService(
+            control_session,
+            runtime_session,
+            event_session,
+        )
+        original_list_for_session = service._event_store.list_for_session
+
+        def _list_with_malformed_control_items(session_id: str):
+            return [
+                SimpleNamespace(
+                    run_id="run-active",
+                    stage_run_id="stage-active",
+                    payload={
+                        "control_item": {
+                            "entry_id": "entry-control-malformed-1",
+                            "run_id": "run-active",
+                            "occurred_at": (NOW + timedelta(minutes=8)).isoformat(),
+                            "type": "control_item",
+                            "control_record_id": "control-retry-1",
+                            "control_type": "retry",
+                            "source_stage_type": "code_review",
+                            "target_stage_type": "code_generation",
+                            "title": "Malformed retry control item",
+                        }
+                    },
+                ),
+                SimpleNamespace(
+                    run_id="run-active",
+                    stage_run_id="stage-active",
+                    payload={
+                        "control_item": {
+                            "entry_id": "entry-control-malformed-2",
+                            "run_id": "run-active",
+                            "occurred_at": (NOW + timedelta(minutes=9)).isoformat(),
+                            "type": "control_item",
+                            "control_record_id": "control-retry-1",
+                            "control_type": "not_a_control_type",
+                            "source_stage_type": "code_review",
+                            "target_stage_type": "code_generation",
+                            "title": "Invalid retry control item",
+                            "summary": "Invalid enum must be ignored.",
+                        }
+                    },
+                ),
+                *original_list_for_session(session_id),
+                SimpleNamespace(
+                    run_id="run-active",
+                    stage_run_id="stage-active",
+                    payload={"control_item": "not-a-control-item-payload"},
+                ),
+                SimpleNamespace(
+                    run_id="run-active",
+                    stage_run_id="stage-active",
+                    payload={
+                        "control_item": {
+                            "entry_id": "entry-control-malformed-3",
+                            "run_id": "run-other",
+                            "occurred_at": (NOW + timedelta(minutes=10)).isoformat(),
+                            "type": "control_item",
+                            "control_record_id": "control-retry-1",
+                            "control_type": "retry",
+                            "source_stage_type": "code_review",
+                            "target_stage_type": "code_generation",
+                            "title": "Mismatched run control item",
+                            "summary": "Mismatched run payload must be ignored.",
+                        }
+                    },
+                ),
+            ]
+
+        monkeypatch.setattr(
+            service._event_store,
+            "list_for_session",
+            _list_with_malformed_control_items,
+        )
+        projection = service.get_control_item_detail("control-retry-1")
+
+    dumped = projection.model_dump(mode="json")
+    assert dumped["control_record_id"] == "control-retry-1"
+    assert dumped["process"]["records"]["control_event"]["entry_id"] == (
+        "entry-control-retry-1"
+    )
+    assert dumped["input"]["records"]["trigger_reason"] == (
+        "Regression test failed after review."
+    )
+    assert "entry-control-malformed-1" not in str(dumped)
+    assert "entry-control-malformed-2" not in str(dumped)
+    assert "Malformed retry control item" not in str(dumped)
+    assert "Invalid enum must be ignored." not in str(dumped)
+    assert "not-a-control-item-payload" not in str(dumped)
+    assert "entry-control-malformed-3" not in str(dumped)
+    assert "Mismatched run payload must be ignored." not in str(dumped)
+
+
 def test_control_item_detail_projection_does_not_expose_clarification_for_retry_payload_ref_collision(
     tmp_path,
 ) -> None:
