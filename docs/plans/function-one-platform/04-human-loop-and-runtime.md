@@ -755,9 +755,10 @@
 ## F4.4b RerunAction 响应形状与焦点修复
 
 **计划周期**：Week 11
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：修复重新尝试前端对后端 `POST /api/sessions/{sessionId}/runs` 响应形状的消费，使 `RerunAction` 在真实 `{ session, run }` 响应下使用新 run 的 `run_id` 聚焦新 run boundary，并解除 `QA-E2E-V6.3-LIVE` 的 rerun focus blocker。
 **实施计划**：`docs/plans/implementation/f4.4b-rerun-response-focus.md`
+**验证摘要**：实施计划 `docs/plans/implementation/f4.4b-rerun-response-focus.md` 已完成并在 integration checkpoint 合入 `fa64197`。`npm --prefix frontend run test -- RerunAction` 通过 9 个 focused tests；`npm --prefix frontend run test -- client` 通过 7 个 focused tests；`npm --prefix frontend test` 通过 29 个 test files、237 个 tests；`npm --prefix frontend run build` 完成 TypeScript 检查与生产构建；`npm --prefix e2e run test -- function-one-control-flow.spec.ts` 通过 2 个 Playwright route-fixture tests。
 
 **依赖关系**：
 - F4.4a 已完成 `system_status.retry_action = retry:<run_id>` 可见性契约重连。

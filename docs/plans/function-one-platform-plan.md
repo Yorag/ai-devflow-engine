@@ -266,7 +266,7 @@
 | F4.3a | Tool Confirmation Block 与确认交互 | Week 6-7 | [x] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f43a) |
 | F4.4 | 重新尝试 UI 与历史审批禁用态 | Week 6 | [x] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f44) |
 | F4.4a | RerunAction 真实 retry_action 契约重连 | Week 11 | [x] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f44a) |
-| F4.4b | RerunAction 响应形状与焦点修复 | Week 11 | [ ] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f44b) |
+| F4.4b | RerunAction 响应形状与焦点修复 | Week 11 | [x] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f44b) |
 | A4.1 | RuntimeEngine 接口 | Week 7 | [x] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#a41) |
 | W5.0 | ToolProtocol 与工具注册表 | Week 7 | [x] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w50) |
 | W5.0a | 统一错误码字典与错误响应契约 | Week 7 | [x] | 后端契约 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w50a) |
