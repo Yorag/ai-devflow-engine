@@ -400,7 +400,7 @@ const systemStatus: TopLevelFeedEntry = {
   status: "failed",
   title: "Run failed",
   reason: "Tests failed after retry limit.",
-  retry_action: "create_rerun",
+  retry_action: "retry:run-failed",
 };
 
 export const mockFeedEntriesByType = {

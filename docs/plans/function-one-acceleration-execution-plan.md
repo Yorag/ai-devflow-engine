@@ -68,7 +68,7 @@
 | AL03 | `feat/al-runtime-human-loop` | A4.0, L4.1, H4.1, H4.3, D4.0, H4.4, H4.4a, H4.4b, H4.5, H4.6, H4.7 | claimed | RuntimeOrchestrationService、clarification、approval、delivery snapshot gate、runtime control commands | 运行编排和人工介入后端 |
 | AL04 | `feat/al-tools-deterministic-delivery` | A4.1, W5.0, W5.0a, W5.0b, W5.0c, W5.0d, W5.1, W5.2, W5.3, W5.4, W5.5, W5.6, A4.2, A4.3, A4.3a, A4.4, D4.1, D4.2, D4.3, D5.1, D5.2, D5.3, D5.4 | claimed | RuntimeEngine、ToolProtocol、ToolRegistry、Workspace tools、ChangeSet、PreviewTarget、deterministic runtime、DeliveryRecord、delivery adapters | 工具、deterministic runtime 和交付适配 |
 | AL05 | `feat/al-provider-langgraph-context` | A4.5, A4.6, A4.7, A4.8, A4.8a, A4.8b, A4.8c, A4.8d, A4.9, A4.9a, A4.9e, A4.9b, A4.9c, A4.9d, A4.10, A4.11 | claimed | LangGraph runtime、Provider registry、PromptValidation、PromptRegistry、PromptRenderer、ContextEnvelope、Provider adapter、AgentDecision、StageAgentRuntime | Provider、LangGraph、上下文和 Stage Agent |
-| AL06 | `feat/al-frontend-runtime-ui` | F3.1, F3.2, F3.3, F3.4, F3.5, F3.6, F3.7, H4.2, F4.1, F4.2, F4.3, F4.3a, F4.4, F5.1, F5.2a, F5.2b | claimed | frontend workspace store、SSE reducer、Feed、StageNode、Inspector、Composer、Approval、Tool Confirmation、Delivery UI | 前端运行工作台和交付展示 |
+| AL06 | `feat/al-frontend-runtime-ui` | F3.1, F3.2, F3.3, F3.4, F3.5, F3.6, F3.7, H4.2, F4.1, F4.2, F4.3, F4.3a, F4.4, F4.4a, F5.1, F5.2a, F5.2b | claimed | frontend workspace store、SSE reducer、Feed、StageNode、Inspector、Composer、Approval、Tool Confirmation、Delivery UI | 前端运行工作台和交付展示 |
 | QA | `test/al-regression-hardening` | V6.1, V6.4, V6.5 | claimed | backend API flow、OpenAPI、frontend client/OpenAPI compatibility | contract regression and compatibility verification |
 | QA-E2E | `test/qa-e2e-regression` | V6.2, V6.3 | planned | Playwright harness、success path、manual intervention path、responsive/focus assertions | browser E2E regression |
 | QA-ERROR | `test/qa-error-regression` | V6.6 | planned | backend error-code regression、frontend ErrorState、error presentation and recovery actions | error contract and UI regression |
@@ -111,7 +111,7 @@ Start gate 只允许开始实现或 mock-first；它不等于完成 gate。
 | AL03 gate | AL03 可基于 AL01/AL02 的 stub 接口先行 A4.0、L4.1、H4.1、H4.3；审批命令、运行控制和 tool confirmation 的最终完成必须接入真实 run state 和 projection events；H4.4 的最终完成必须复用 R3.2a 的 publication boundary。H4.4b 只负责为 deny 路径固化 `continue_current_stage`、`run_failed`、`awaiting_run_control` 三类稳定后续处理语义来源，不直接修改 AL02 owner scope 的顶层 projection payload、SSE payload 或 query schema。 |
 | AL04 gate | AL04 可立即开始 ToolProtocol、错误码、WorkspaceManager、纯工具和 fixture；deterministic runtime 与 delivery adapter 的最终完成必须接入 AL01 run truth、AL03 runtime boundary 和当前基线的 delivery settings。 |
 | AL05 gate | AL05 可立即开始 PromptValidation、PromptRegistry、PromptRenderer、Context schema 和 provider registry；LangGraph 与 StageAgentRuntime 的最终完成必须接入 AL01、AL03、AL04。 |
-| AL06 gate | AL06 可基于冻结 projection/event/mock payload 先行所有 runtime UI；最终完成必须切换到真实 API/SSE、真实 error contract 和真实 delivery/result payload。F4.3a 的最终完成必须读取 Q3.4b 暴露的顶层 `tool_confirmation.deny_followup_action` / `deny_followup_summary`，不得从 Inspector、run terminal status 或 `alternative_path_summary` 私有字段自行推断拒绝后的后续运行语义。 |
+| AL06 gate | AL06 可基于冻结 projection/event/mock payload 先行所有 runtime UI；最终完成必须切换到真实 API/SSE、真实 error contract 和真实 delivery/result payload。F4.3a 的最终完成必须读取 Q3.4b 暴露的顶层 `tool_confirmation.deny_followup_action` / `deny_followup_summary`，不得从 Inspector、run terminal status 或 `alternative_path_summary` 私有字段自行推断拒绝后的后续运行语义。F4.4a 必须在 H4.7 真实 rerun 命令、Q3 workspace/timeline/SSE 投影和 A4.3a deterministic runtime advancement harness 均已集成后执行，只重连前端 `RerunAction` 对真实 `system_status.retry_action = retry:<run_id>` 的消费；不得修改后端 rerun 契约或 V6.3 Playwright 场景。 |
 | QA gate | QA lanes 可提前创建测试骨架、fixture 和 checklist；任何回归任务的 `done` 必须基于 integration 分支的真实实现验证。`QA-V6.4` 已在 integration 分支完成真实 OpenAPI 回归验证，V6.5 可在 `test/al-regression-hardening` 同步最新 integration base 后进入最终验证。QA-E2E、QA-ERROR、QA-CONFIG、QA-OBS 可在各自 lane 中并行 claim 未完成任务，但不得更新 platform plan 或 split plan 最终状态。QA-RELEASE / V6.7 只能在 contract、E2E、error、config 和 observability 回归均完成或有明确保留风险后启动。 |
 
 ## 6. Coordination Store And Checkpoint Snapshot
@@ -185,6 +185,7 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | AL06-F4.4 | F4.4 | AL06 | `feat/al-frontend-runtime-ui` | done | 5cc45f2 | d58895c | `docs/plans/acceleration/reports/AL06-F4.4.md` | - |
 | AL06-F5.1 | F5.1 | AL06 | `feat/al-frontend-runtime-ui` | done | a2fabbf | 1469354 | `docs/plans/acceleration/reports/AL06-F5.1.md` | Backend-contract frontend fixtures and backend Pydantic serialization proof confirm real `code_generation` / `test_generation_execution` tool, diff, result, and MetricSet payload display in Feed, StageNode, and Inspector. |
 | AL06-F5.2a | F5.2a | AL06 | `feat/al-frontend-runtime-ui` | done | b81a53b | d9ada79 | `docs/plans/acceleration/reports/AL06-F5.2a.md` | Real backend `demo_delivery` `delivery_result` and `DeliveryResultDetailProjection` payload proof integrated; Feed, shared delivery block, and Inspector verification passed on integration. |
+| AL06-QA-E2E-V6.3-RERUN | F4.4a | AL06 | `feat/al-frontend-runtime-ui` | done | 0e8062c | ebda75a | `docs/plans/acceleration/reports/AL06-QA-E2E-V6.3-RERUN.md` | RerunAction now consumes backend-shaped `system_status.retry_action = retry:<run_id>` for current failed / terminated runs; focused RerunAction and FeedEntryRenderer tests, full frontend suite, and frontend build passed on integration branch. |
 | AL01-R3.7 | R3.7 | AL01 | `feat/al-run-core-events` | done | 5707ce3 | 3313a4a | `docs/plans/acceleration/reports/AL01-R3.7.md` | - |
 | AL01-C2.9a | C2.9a | AL01 | `feat/al-run-core-events` | done | 874161e | d06be5c | `docs/plans/acceleration/reports/AL01-C2.9a.md` | - |
 | AL01-C2.9b | C2.9b | AL01 | `feat/al-run-core-events` | done | f03d52b | eeb54a3 | `docs/plans/acceleration/reports/AL01-C2.9b.md` | - |
@@ -232,7 +233,7 @@ Lane queue 记录任务归属和 lane 内执行顺序。任务资格仍必须由
 | AL03 | A4.0 -> L4.1 -> H4.1 -> H4.3 -> D4.0 -> H4.4 -> H4.4a -> H4.4b -> H4.5 -> H4.6 -> H4.7 |
 | AL04 | A4.1 -> W5.0 -> W5.0a -> W5.0b -> W5.0c -> W5.0d -> W5.1 -> W5.2 -> W5.3 -> W5.4 -> W5.5 -> W5.6 -> A4.2 -> A4.3 -> A4.3a -> A4.4 -> D4.1 -> D4.2 -> D4.3 -> D5.1 -> D5.2 -> D5.3 -> D5.4 |
 | AL05 | A4.8 -> A4.8a -> A4.8c -> A4.8b -> A4.8d -> A4.9 -> A4.9a -> A4.9e -> A4.9b -> A4.5 -> A4.6 -> A4.7 -> A4.9c -> A4.9d -> A4.10 -> A4.11 |
-| AL06 | F3.1 -> F3.2 -> F3.3 -> F3.4 -> F3.5 -> F3.6 -> F3.7 -> H4.2 -> F4.1 -> F4.2 -> F4.3 -> F4.3a -> F4.4 -> F5.1 -> F5.2a -> F5.2b |
+| AL06 | F3.1 -> F3.2 -> F3.3 -> F3.4 -> F3.5 -> F3.6 -> F3.7 -> H4.2 -> F4.1 -> F4.2 -> F4.3 -> F4.3a -> F4.4 -> F5.1 -> F5.2a -> F5.2b -> F4.4a |
 | QA | V6.1 -> V6.4 -> V6.5 |
 | QA-E2E | V6.2 -> V6.3 |
 | QA-ERROR | V6.6 |

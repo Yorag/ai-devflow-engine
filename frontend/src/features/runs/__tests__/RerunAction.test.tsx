@@ -35,7 +35,7 @@ function buildSystemStatusEntry(
     status: "failed",
     title: "Run failed",
     reason: "Tests failed after retry limit.",
-    retry_action: "create_rerun",
+    retry_action: "retry:run-failed",
     ...overrides,
   };
 }
@@ -120,6 +120,34 @@ describe("RerunAction", () => {
     });
 
     expect(screen.queryByRole("button", { name: "Retry run" })).toBeNull();
+  });
+
+  it.each([
+    ["missing retry action", { retry_action: null }],
+    ["legacy mock-only marker", { retry_action: ["create", "rerun"].join("_") }],
+    ["unknown action", { retry_action: "resume:run-failed" }],
+    ["malformed retry action", { retry_action: "retry" }],
+    ["mismatched target run", { retry_action: "retry:run-other" }],
+  ] satisfies Array<[string, Partial<SystemStatusFeedEntry>]>)(
+    "does not render rerun for %s",
+    (_label, overrides) => {
+      renderRerunAction(buildSystemStatusEntry(overrides));
+
+      expect(screen.queryByRole("button", { name: "Retry run" })).toBeNull();
+    },
+  );
+
+  it("renders rerun for a terminated current run with a matching retry action", () => {
+    renderRerunAction(
+      buildSystemStatusEntry({
+        status: "terminated",
+        title: "Run terminated",
+        reason: "The run was terminated by the user.",
+        retry_action: "retry:run-failed",
+      }),
+    );
+
+    expect(screen.getByRole("button", { name: "Retry run" })).toBeTruthy();
   });
 
   it("shows the rerun warning copy and surfaces API errors inline", async () => {
