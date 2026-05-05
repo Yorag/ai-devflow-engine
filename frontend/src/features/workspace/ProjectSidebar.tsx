@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 import type { ApiRequestOptions } from "../../api/client";
 import {
@@ -8,6 +8,7 @@ import {
   useProjectSessionsQuery,
   useProjectsQuery,
 } from "../../api/hooks";
+import { createProject } from "../../api/projects";
 import { createSession } from "../../api/sessions";
 import type { ProjectRead, SessionRead } from "../../api/types";
 import { ErrorState } from "../errors/ErrorState";
@@ -31,6 +32,10 @@ export function ProjectSidebar({
   onCurrentProjectChange,
 }: ProjectSidebarProps): JSX.Element {
   const queryClient = useQueryClient();
+  const [isLoadProjectOpen, setLoadProjectOpen] = useState(false);
+  const [projectRootPath, setProjectRootPath] = useState("");
+  const [isLoadingProject, setLoadingProject] = useState(false);
+  const [loadProjectError, setLoadProjectError] = useState<unknown | null>(null);
   const [isCreatingSession, setCreatingSession] = useState(false);
   const [createSessionError, setCreateSessionError] = useState<unknown | null>(
     null,
@@ -59,10 +64,52 @@ export function ProjectSidebar({
 
   function handleProjectChange(projectId: string) {
     setCreateSessionError(null);
+    setLoadProjectError(null);
     onProjectChange(projectId);
     onCurrentProjectChange(
       projects.find((project) => project.project_id === projectId) ?? null,
     );
+  }
+
+  async function handleLoadProject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const rootPath = projectRootPath.trim();
+    if (!rootPath || isLoadingProject) {
+      return;
+    }
+
+    setLoadingProject(true);
+    setLoadProjectError(null);
+    try {
+      const project = await createProject(
+        { root_path: rootPath },
+        request ?? {},
+      );
+      queryClient.setQueryData<ProjectRead[]>(
+        apiQueryKeys.projects,
+        (current) => upsertLoadedProject(current ?? [], project),
+      );
+      onProjectChange(project.project_id);
+      onCurrentProjectChange(project);
+      setProjectRootPath("");
+      setLoadProjectOpen(false);
+      await queryClient.invalidateQueries({
+        queryKey: apiQueryKeys.projects,
+        refetchType: "all",
+      });
+      await queryClient.invalidateQueries({
+        queryKey: apiQueryKeys.projectSessions(project.project_id),
+        refetchType: "all",
+      });
+      await queryClient.invalidateQueries({
+        queryKey: apiQueryKeys.projectDeliveryChannel(project.project_id),
+        refetchType: "all",
+      });
+    } catch (error) {
+      setLoadProjectError(error);
+    } finally {
+      setLoadingProject(false);
+    }
   }
 
   async function handleCreateSession() {
@@ -103,8 +150,16 @@ export function ProjectSidebar({
       />
 
       <div className="workspace-sidebar__actions">
-        <button className="workspace-button workspace-button--secondary" type="button">
-          Load project
+        <button
+          className="workspace-button workspace-button--secondary"
+          type="button"
+          disabled={isLoadingProject}
+          onClick={() => {
+            setLoadProjectOpen((current) => !current);
+            setLoadProjectError(null);
+          }}
+        >
+          {isLoadingProject ? "Loading project" : "Load project"}
         </button>
         <button
           className="workspace-button"
@@ -116,6 +171,47 @@ export function ProjectSidebar({
         </button>
       </div>
 
+      {isLoadProjectOpen ? (
+        <form
+          className="project-load-form"
+          aria-label="Load local project"
+          onSubmit={handleLoadProject}
+        >
+          <label>
+            <span>Project root path</span>
+            <input
+              type="text"
+              value={projectRootPath}
+              onChange={(event) => setProjectRootPath(event.target.value)}
+              disabled={isLoadingProject}
+              placeholder="C:/work/project"
+            />
+          </label>
+          <div className="project-load-form__actions">
+            <button
+              className="workspace-button"
+              type="submit"
+              disabled={!projectRootPath.trim() || isLoadingProject}
+            >
+              {isLoadingProject ? "Loading" : "Load local project"}
+            </button>
+            <button
+              className="workspace-button workspace-button--secondary"
+              type="button"
+              disabled={isLoadingProject}
+              onClick={() => {
+                setLoadProjectOpen(false);
+                setProjectRootPath("");
+                setLoadProjectError(null);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : null}
+
+      {loadProjectError ? <ErrorState error={loadProjectError} /> : null}
       {createSessionError ? <ErrorState error={createSessionError} /> : null}
 
       {currentProject ? (
@@ -157,6 +253,16 @@ export function ProjectSidebar({
       />
     </aside>
   );
+}
+
+function upsertLoadedProject(
+  projects: ProjectRead[],
+  loadedProject: ProjectRead,
+): ProjectRead[] {
+  return [
+    loadedProject,
+    ...projects.filter((project) => project.project_id !== loadedProject.project_id),
+  ];
 }
 
 function upsertCreatedSession(

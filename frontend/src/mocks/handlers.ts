@@ -1,6 +1,8 @@
 import type { ApiRequestOptions } from "../api/client";
 import type {
   MessageFeedEntry,
+  ProjectDeliveryChannelDetailProjection,
+  ProjectRead,
   SessionRead,
   SessionWorkspaceProjection,
 } from "../api/types";
@@ -58,22 +60,46 @@ export function createMockApiFetcher(
 }
 
 export const mockApiRequestOptions: ApiRequestOptions = {
-  fetcher: async (input, init) => createMockApiFetcher()(input, init),
+  fetcher: createMockApiFetcher(),
 };
+
+export function resetMockApiRequestOptions(): void {
+  mockApiRequestOptions.fetcher = createMockApiFetcher();
+}
 
 function createMockRoutes(
   options: MockApiFetcherOptions,
   workspaces: Record<string, SessionWorkspaceProjection>,
 ): MockRoute[] {
+  const projects = mockProjectList.map((project) => ({ ...project }));
   const sessions = mockSessionList.map((session) => ({ ...session }));
 
   return [
-    route("GET", /^\/api\/projects$/u, () => jsonResponse(mockProjectList)),
+    route("GET", /^\/api\/projects$/u, () => jsonResponse(projects)),
+    route("POST", /^\/api\/projects$/u, (_match, init) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+      const rootPath =
+        body && typeof body.root_path === "string" ? body.root_path.trim() : "";
+      if (!rootPath) {
+        return jsonResponse(mockApiError("validation_error"), 422);
+      }
+
+      const existingProject = projects.find(
+        (project) => project.root_path === rootPath,
+      );
+      if (existingProject) {
+        return jsonResponse(existingProject, 201);
+      }
+
+      const project = createMockProject(rootPath, projects.length + 1);
+      projects.unshift(project);
+      return jsonResponse(project, 201);
+    }),
     route("GET", /^\/api\/projects\/([^/]+)\/sessions$/u, ([, projectId]) =>
       jsonResponse(sessions.filter((session) => session.project_id === projectId)),
     ),
     route("POST", /^\/api\/projects\/([^/]+)\/sessions$/u, ([, projectId]) => {
-      const project = mockProjectList.find(
+      const project = projects.find(
         (candidate) => candidate.project_id === projectId,
       );
       if (!project) {
@@ -84,6 +110,7 @@ function createMockRoutes(
       sessions.unshift(createdSession);
       workspaces[createdSession.session_id] = createMockDraftWorkspace(
         createdSession,
+        projects,
       );
       return jsonResponse(createdSession);
     }),
@@ -134,12 +161,13 @@ function createMockRoutes(
     route("GET", /^\/api\/delivery-records\/delivery-record-git-1$/u, () =>
       jsonResponse(mockGitDeliveryResultDetailProjection),
     ),
-    route("GET", /^\/api\/projects\/project-default\/delivery-channel$/u, () =>
-      jsonResponse(mockProjectDeliveryChannel),
-    ),
-    route("GET", /^\/api\/projects\/project-loaded\/delivery-channel$/u, () =>
-      jsonResponse(mockGitProjectDeliveryChannel),
-    ),
+    route("GET", /^\/api\/projects\/([^/]+)\/delivery-channel$/u, ([, projectId]) => {
+      if (!projects.some((project) => project.project_id === projectId)) {
+        return jsonResponse(mockApiError("not_found"), 404);
+      }
+
+      return jsonResponse(createMockDeliveryChannel(projectId));
+    }),
     route(
       "GET",
       /^\/api\/projects\/[^/]+\/configuration-package\/export$/u,
@@ -160,6 +188,38 @@ function createMockRoutes(
       return workspace
         ? jsonResponse(workspace)
         : jsonResponse(mockApiError("not_found"), 404);
+    }),
+    route("PUT", /^\/api\/sessions\/([^/]+)\/template$/u, ([, sessionId], init) => {
+      const session = sessions.find((candidate) => candidate.session_id === sessionId);
+      const workspace = workspaces[sessionId];
+      if (!session || !workspace) {
+        return jsonResponse(mockApiError("not_found"), 404);
+      }
+      if (session.status !== "draft" || session.current_run_id) {
+        return jsonResponse(mockApiError("validation_error"), 409);
+      }
+
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+      const templateId =
+        body && typeof body.template_id === "string" ? body.template_id : "";
+      if (
+        !mockPipelineTemplates.some((template) => template.template_id === templateId)
+      ) {
+        return jsonResponse(mockApiError("validation_error"), 422);
+      }
+
+      const updatedSession = {
+        ...session,
+        selected_template_id: templateId,
+        updated_at: "2026-05-05T08:10:00.000Z",
+      };
+      Object.assign(session, updatedSession);
+      workspaces[sessionId] = {
+        ...workspace,
+        session: updatedSession,
+      };
+
+      return jsonResponse(updatedSession);
     }),
     route("POST", /^\/api\/sessions\/([^/]+)\/runs$/u, ([, sessionId]) => {
       const workspace = workspaces[sessionId];
@@ -284,6 +344,50 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function createMockProject(rootPath: string, index: number): ProjectRead {
+  const timestamp = "2026-05-05T08:00:00.000Z";
+  return {
+    project_id: `project-loaded-${index}`,
+    name: projectNameFromRoot(rootPath),
+    root_path: rootPath,
+    default_delivery_channel_id: `delivery-loaded-${index}`,
+    is_default: false,
+    created_at: timestamp,
+    updated_at: timestamp,
+  };
+}
+
+function projectNameFromRoot(rootPath: string): string {
+  const leaf = rootPath.split(/[\\/]/u).filter(Boolean).pop() ?? rootPath;
+  const normalized = leaf.trim();
+  if (!normalized) {
+    return "Loaded project";
+  }
+
+  return normalized
+    .split(/[-_\s]+/u)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function createMockDeliveryChannel(
+  projectId: string,
+): ProjectDeliveryChannelDetailProjection {
+  if (projectId === "project-loaded") {
+    return { ...mockGitProjectDeliveryChannel };
+  }
+
+  return {
+    ...mockProjectDeliveryChannel,
+    project_id: projectId,
+    delivery_channel_id:
+      projectId === "project-default"
+        ? mockProjectDeliveryChannel.delivery_channel_id
+        : `delivery-${projectId}`,
+  };
+}
+
 function createMockDraftSession(projectId: string, index: number): SessionRead {
   const timestamp = "2026-05-05T07:30:00.000Z";
   return {
@@ -301,15 +405,14 @@ function createMockDraftSession(projectId: string, index: number): SessionRead {
 
 function createMockDraftWorkspace(
   session: SessionRead,
+  projects: ProjectRead[] = mockProjectList,
 ): SessionWorkspaceProjection {
   const draftWorkspace = mockSessionWorkspaces["session-draft"];
   const project =
-    mockProjectList.find((candidate) => candidate.project_id === session.project_id) ??
+    projects.find((candidate) => candidate.project_id === session.project_id) ??
     draftWorkspace.project;
   const deliveryChannel =
-    session.project_id === "project-loaded"
-      ? mockGitProjectDeliveryChannel
-      : mockProjectDeliveryChannel;
+    createMockDeliveryChannel(session.project_id);
 
   return {
     ...draftWorkspace,

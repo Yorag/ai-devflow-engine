@@ -4,6 +4,7 @@ type TemplateSelectorProps = {
   templates: PipelineTemplateRead[];
   selectedTemplateId: string;
   onTemplateChange: (templateId: string) => void;
+  disabledTemplateIds?: string[];
   disabled?: boolean;
 };
 
@@ -11,8 +12,11 @@ export function TemplateSelector({
   templates,
   selectedTemplateId,
   onTemplateChange,
+  disabledTemplateIds = [],
   disabled = false,
 }: TemplateSelectorProps): JSX.Element {
+  const disabledIds = new Set(disabledTemplateIds);
+
   return (
     <fieldset className="template-selector" aria-label="Pipeline templates">
       <legend>Templates</legend>
@@ -27,7 +31,7 @@ export function TemplateSelector({
                 name="pipeline-template"
                 value={template.template_id}
                 checked={template.template_id === selectedTemplateId}
-                disabled={disabled}
+                disabled={disabled || disabledIds.has(template.template_id)}
                 onChange={() => onTemplateChange(template.template_id)}
               />
               <span>
