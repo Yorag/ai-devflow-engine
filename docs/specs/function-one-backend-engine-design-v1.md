@@ -140,7 +140,7 @@
 
 ### 2.2.1 EnvironmentSettings
 
-`EnvironmentSettings` 表示服务启动前必须确定的环境变量或等价启动配置，由 `pydantic-settings` 加载。它只服务本地服务启动、路径落点、前后端连接和密钥引用解析，不承载用户业务配置或平台运行策略。
+`EnvironmentSettings` 表示服务启动前必须确定的环境变量或等价启动配置，由 `pydantic-settings` 加载。它只服务本地服务启动、路径落点、前后端连接和交付凭据引用解析，不承载用户业务配置或平台运行策略。
 
 `EnvironmentSettings` 至少覆盖：
 - `platform_runtime_root`
@@ -154,13 +154,13 @@
 - `frontend_api_base_url`
   前端访问后端服务的 API base URL；该值服务前端构建或本地开发，不作为后端业务对象
 - `credential_env_prefixes` 或等价规则
-  用于限制 `credential_ref` 与 `api_key_ref` 解析环境变量密钥的命名范围
+  用于限制 `credential_ref` 解析环境变量交付凭据的命名范围
 
 `EnvironmentSettings` 必须满足以下规则：
 - 不得包含 Provider 的 `base_url`、`model_id`、能力声明、模板角色绑定、`system_prompt`、系统内置提示词正文或版本切换、交付仓库、目标分支、代码评审请求类型、交付模式、Agent 循环上限、日志保留策略、`compression_prompt` 或 `compression_threshold_ratio`
 - 多 SQLite 职责库路径不得逐个暴露为用户或前端配置；后端必须从 `platform_runtime_root` 默认派生 `control.db`、`runtime.db`、`graph.db`、`event.db` 与 `log.db` 的路径
 - 测试环境如需替换数据库路径或运行目录，必须通过测试 fixture、settings override 或等价测试机制完成，不进入正式产品配置面
-- `credential_ref = env:<NAME>` 与 `api_key_ref = env:<NAME>` 只表示后端从受允许的环境变量名解析密钥；前端、日志、投影和审计记录不得展示解析后的真实值
+- `credential_ref = env:<NAME>` 表示后端从受允许的环境变量名解析交付凭据；Provider API key 由用户配置写入后端 Provider 配置，前端读投影、日志、配置导出包和审计记录不得展示真实值
 - 环境变量变更不要求热重载；需要改变环境变量时必须重启服务或重新创建测试 settings
 
 ### 2.2.2 正式配置存储
@@ -182,7 +182,7 @@
 - 保存成功的配置版本只影响后续新建 Session、后续新启动 run、尚未启动 run 的模板选择，或尚未固化交付通道快照的交付就绪校验
 - 已启动 run 必须继续使用自身快照中的运行上限、Provider 与模型绑定、模板配置、交付通道快照和阶段契约；不得读取最新配置来改变当前 run
 - 内置 Provider 的默认记录必须由初始化种子或数据库迁移写入正式配置存储；初始化后，Provider adapter、Context Management、Stage Agent Runtime、投影查询和历史回放不得直接读取硬编码 Provider 业务字段绕过 `LLMProvider`
-- 配置存储中涉及密钥的字段只能保存引用，如 `credential_ref` 或 `api_key_ref`，不得保存真实密钥明文
+- `DeliveryChannel.credential_ref` 只能保存凭据引用；`LLMProvider.api_key_ref` 在 V1 承载用户配置的 Provider API key 值或兼容期引用值，读投影、配置导出包、日志和审计必须遮蔽该字段
 
 ### 2.2.3 PlatformRuntimeSettings
 
@@ -218,7 +218,7 @@
 `ConfigurationPackage` 表示前端导入导出的用户可见配置包，用于备份、迁移和环境复制。它不是服务启动配置文件，不是运行时真源，也不是平台隐性运行设置的普通用户入口。配置包导入导出必须在明确 `Project` 作用域下执行；包内全局 Provider 与模板配置写入控制面全局配置，项目级 `DeliveryChannel` 写入当前导入目标项目。配置包可以使用 JSON、YAML、TOML 或等价结构化格式；具体文件格式属于实现细节，但字段语义必须映射到本规格定义的正式配置对象。配置包字段必须来自 V1 前端已暴露编辑入口且后端正式消费的配置字段，不得为迁移完整性臆造未使用字段。
 
 `ConfigurationPackage` 允许表达以下用户可见配置：
-- `LLMProvider` 配置，包括 `provider_id`、`display_name`、`provider_source`、`protocol_type`、`base_url`、`api_key_ref`、`default_model_id`、`supported_model_ids` 和按模型粒度声明的高级能力字段
+- `LLMProvider` 配置，包括 `provider_id`、`display_name`、`provider_source`、`protocol_type`、`base_url`、Provider API key 配置状态、`default_model_id`、`supported_model_ids` 和按模型粒度声明的高级能力字段
 - `DeliveryChannel` 配置，包括项目级默认交付模式、仓库目标、代码评审请求类型和 `credential_ref`
 - `PipelineTemplate` 的用户可编辑运行配置，包括模板内阶段槽位绑定的 `role_id`、槽位内最终生效的用户可编辑 `system_prompt`、Provider 绑定、自动回归开关和最大自动回归重试次数
 
@@ -233,8 +233,9 @@
 - `context_window_tokens` 必须为正整数，缺省时默认 `128000`
 - `max_output_tokens` 必须为正整数，缺省时默认使用该 Provider adapter 的 V1 默认输出 token 上限；实现不得在缺省时要求用户补填
 - `supports_tool_calling`、`supports_structured_output`、`supports_native_reasoning` 必须为布尔值；缺省时由 Provider adapter 默认能力或内置 Provider 种子填充，仍不可解析时默认为 `false`
-- 导入 `builtin` Provider 配置时，`provider_id`、`provider_source` 与协议归属不得改变；允许更新连接字段、默认模型、模型列表、凭据引用和模型高级能力字段
-- 导出 Provider 配置时必须保留 `api_key_ref`，不得导出真实密钥值或解析后的环境变量值
+- 导入 `builtin` Provider 配置时，`provider_id`、`provider_source` 与协议归属不得改变；允许更新显示名称、连接字段、Provider API key、默认模型、模型列表和模型高级能力字段
+- 导入 `custom` Provider 配置时，允许使用 `volcengine_native` 或 `openai_completions_compatible` 协议；同一协议和同一展示名称不构成唯一性约束
+- 导出 Provider 配置时不得导出真实 API key 值；`api_key_ref` 在导出包中必须为空或等价遮蔽状态，导入包可以携带用户显式提供的新 Provider API key
 - 配置包必须包含 `package_schema_version` 与 `scope` 元数据；导入时后端必须校验包版本兼容性和目标 `Project` 作用域
 
 配置包示例：
@@ -249,7 +250,7 @@ providers:
     provider_source: builtin
     protocol_type: openai_completions_compatible
     base_url: https://api.deepseek.com
-    api_key_ref: env:DEEPSEEK_API_KEY
+    api_key_ref: null
     default_model_id: deepseek-chat
     supported_model_ids:
       - deepseek-chat
@@ -277,7 +278,7 @@ providers:
 - `LLMProvider` 和 `PipelineTemplate` 的保存或导入结果只影响后续新建 Session、后续新启动 run 或尚未启动 run 的模板选择
 - `DeliveryChannel` 的保存结果至少影响后续新启动 run；对尚未进入 `Delivery Integration` 且尚未固化交付通道快照的当前活动 run，只能用于后续交付就绪校验和交付快照固化
 - 一旦 run 已固化模板快照、Provider 与模型绑定快照、运行上限快照或交付通道快照，后续业务配置变更不得回写该 run 或历史 run
-- 业务配置中涉及密钥的字段只能保存引用，如 `credential_ref` 或 `api_key_ref`，不得保存真实密钥明文
+- `DeliveryChannel.credential_ref` 只能保存凭据引用；`LLMProvider.api_key_ref` 保存用户配置的 Provider API key 值或兼容期引用值，任何读投影、配置导出包、日志和审计记录都不得回显真实值
 
 ### 2.2.6 系统提示词资产
 
@@ -644,17 +645,20 @@ V1 运行环境必须满足以下约束：
 - `provider_source` 在 V1 至少支持：`builtin`、`custom`
 - `protocol_type` 在 V1 至少支持：`volcengine_native`、`openai_completions_compatible`
 - `display_name` 是前端展示和模板配置时使用的 Provider 名称
+- `provider_id` 是后端唯一标识；`display_name` 允许用户编辑，不承担唯一索引语义
 - 协议类型是接入实现细节，不作为产品层 Provider 名称直接对外呈现
 - V1 默认内置两个 `builtin` Provider：
   - `火山引擎`
   - `DeepSeek`
-- 内置 Provider 必须作为 `LLMProvider` 记录存在于控制面数据库；初始化后，运行时只能通过正式 Provider 查询与快照流程读取其连接字段、默认模型、模型列表、凭据引用和能力声明
-- V1 允许用户新增 `custom` Provider
-- `custom` Provider 在 V1 统一使用 `openai_completions_compatible` 协议接入
-- `OpenAI Completions compatible` 是自定义 Provider 的接入协议，不是独立 Provider 名称
+- 内置 Provider 必须作为 `LLMProvider` 记录存在于控制面数据库；初始化后，运行时只能通过正式 Provider 查询与快照流程读取其连接字段、默认模型、模型列表、API key 配置状态和能力声明
+- V1 允许用户新增 `custom` Provider；同一种协议允许存在多个 `custom` Provider 实例
+- `custom` Provider 在 V1 允许使用 `volcengine_native` 或 `openai_completions_compatible` 协议接入
+- `OpenAI Completions compatible` 是自定义 Provider 的一种接入协议，不是独立 Provider 名称
 - 后端运行时模型对象必须由 `LLMProviderAdapter` 通过 LangChain `ChatOpenAI` 兼容接口创建
 - 内置 Provider 与自定义 Provider 的协议差异只能存在于 `LLMProviderAdapter` 内部，不得泄漏到阶段编排、上下文管理、工具调用或查询投影
-- `builtin` Provider 的 `provider_id`、`provider_source` 与协议归属不得由普通前端设置修改；其连接字段、默认模型、模型列表、凭据引用和模型能力声明允许通过 Provider API、前端设置弹窗或配置包导入更新
+- `builtin` Provider 的 `provider_id`、`provider_source` 与协议归属不得由普通前端设置修改；其显示名称、连接字段、Provider API key、默认模型、模型列表和模型能力声明允许通过 Provider API、前端设置弹窗或配置包导入更新
+- 删除 `custom` Provider 必须删除该配置记录；删除 `builtin` Provider 必须将其标记为未配置并从普通 Provider 列表隐藏，后端不得删除内置种子定义
+- 模板保存和 run 启动必须只接受已经配置且启用的 Provider；未配置或已禁用的 Provider 不得作为 `AgentRole` 的有效绑定
 - `LLMProvider` 运行时能力快照必须至少表达 `context_window_tokens`、`max_output_tokens`、`supports_tool_calling`、`supports_structured_output`、`supports_native_reasoning`
 - `context_window_tokens` 表示指定模型的最大上下文窗口 token 数，主要用于 Context Management 判断上下文压缩触发阈值；缺省值为 `128000`
 - `max_output_tokens` 表示指定模型的输出 token 上限，用于输出预算、日志裁剪解释和 Provider 请求参数上限；缺省值由 Provider adapter 或内置 Provider 种子提供
@@ -667,9 +671,10 @@ V1 运行环境必须满足以下约束：
 - 上下文压缩、结构化输出修复与 validation pass 使用同一 Provider 接入抽象，并通过 `model_call_type` 区分调用目的
 
 运行时 Provider 与模型绑定快照必须满足以下规则：
-- `ProviderSnapshot` 或等价结构化快照必须在 run 启动前固化当前实际使用的 `provider_id`、`provider_source`、`protocol_type`、`base_url`、`model_id`、凭据引用、能力声明和 schema 版本
+- `ProviderSnapshot` 或等价结构化快照必须在 run 启动前固化当前实际使用的 `provider_id`、`provider_source`、`protocol_type`、`base_url`、`model_id`、Provider API key 配置值、能力声明和 schema 版本；该快照属于运行时密钥边界，不进入前端投影或配置导出包
 - `ModelBindingSnapshot` 或等价结构化快照必须记录每个 `AgentRole`、上下文压缩、结构化输出修复和 validation pass 实际绑定的 Provider、模型、参数与能力声明
 - `ProviderSnapshot` 与 `ModelBindingSnapshot` 中的能力声明必须固化实际模型的 `context_window_tokens`、`max_output_tokens`、`supports_tool_calling`、`supports_structured_output`、`supports_native_reasoning`；run 启动后不得因配置包导入、Provider API 或默认模型能力变更而改变
+- 当平台内部模型绑定的默认 Provider 不可用，但当前模板已经绑定了可用 Provider 时，run 启动必须将上下文压缩、结构化输出修复和 validation pass 的有效绑定解析到当前模板可用 Provider 的默认模型；若模板绑定本身也不可用，则启动必须返回配置不可用错误
 - run 启动后，Provider 修改、凭据轮换、默认模型调整或能力声明变化只影响后续 run，不得改变当前 run 已固化的模型调用语义
 - `ContextManifest` 与 `model_call_trace` 必须记录本次模型调用使用的 Provider 与模型绑定快照引用，使阶段产物能够解释当时的模型环境
 
@@ -778,7 +783,7 @@ V1 运行环境必须满足以下约束：
 - 每次运行开始前都必须固化一份模板快照
 - 每次运行开始前都必须固化一份运行上限快照
 - 每次运行开始前都必须从模板快照编译出一份 `GraphDefinition`
-- 每次运行开始前都必须固化本次运行会使用的 Provider 与模型绑定快照；运行期间不得读取最新 Provider 配置来改变已启动 run 的模型、协议、base URL、能力声明或凭据引用
+- 每次运行开始前都必须固化本次运行会使用的 Provider 与模型绑定快照；运行期间不得读取最新 Provider 配置来改变已启动 run 的模型、协议、base URL、能力声明或 Provider API key 配置值
 - 交付通道快照不在 run 启动时固化，而是在最终人工审批通过后、进入 `Delivery Integration` 前固化
 - 运行期间实际读取的角色绑定、`system_prompt`、Provider 绑定、模型绑定、Provider 能力声明和自动回归配置必须来自运行快照
 - 运行期间实际读取的系统内置提示词资产必须来自本次 run 固化或稳定可解析的 `prompt_id` / `prompt_version`，不得读取未版本化的最新提示词正文来改变已启动 run 的执行语义
@@ -1121,7 +1126,7 @@ V1 运行环境必须满足以下约束：
 - run 创建、暂停、恢复、终止、重新尝试与运维重启
 - 审批提交、审批拒绝、审批因暂停或状态不匹配被拒绝
 - 模板创建、覆盖、另存、删除与运行快照固化
-- Provider 创建、修改与凭据引用变更
+- Provider 创建、修改与 API key 配置变更
 - 项目级 `DeliveryChannel` 修改、校验与运行交付快照固化
 - 工作区写入、文件编辑、命令执行、测试执行、Git 分支创建、提交创建与 MR/PR 创建
 - 权限、凭据、路径、外部服务与交付相关的安全敏感失败
@@ -1464,8 +1469,8 @@ Agent 内部工具调用必须使用模型原生 tool/function calling。LangCha
 
 5. `模型供应商可切换`
 - V1 默认内置两个 `builtin` Provider：`火山引擎`、`DeepSeek`
-- V1 允许用户新增 `custom` Provider
-- `custom` Provider 的接入协议统一采用 `OpenAI Completions compatible`
+- V1 允许用户新增多个 `custom` Provider
+- `custom` Provider 的接入协议允许采用 `volcengine_native` 或 `OpenAI Completions compatible`
 - 后端运行时通过 LangChain `ChatOpenAI` 兼容接口创建模型对象
 - Provider 绑定单位是 `AgentRole`
 - Provider 差异不得泄漏到上层业务流程逻辑
@@ -2093,13 +2098,14 @@ Inspector 投影必须满足以下总规则：
 - `DELETE /api/pipeline-templates/{templateId}`
 - `POST /api/providers`
 - `PATCH /api/providers/{providerId}`
+- `DELETE /api/providers/{providerId}`
 - `POST /api/projects/{projectId}/configuration-package/import`
 
 `POST /api/sessions/{sessionId}/messages` 只允许两类语义：
 - 新需求输入
 - 澄清回复
 
-当消息语义为 `new_requirement` 时，只允许在 `Session.status = draft` 且 `current_run_id = null` 时调用；后端必须在同一服务事务中基于当前 `selected_template_id` 创建 `PipelineRun`、模板快照、`ProviderSnapshot`、`ModelBindingSnapshot`、`RuntimeLimitSnapshot`、`GraphDefinition`、首个 `GraphThread`、首个 `workspace_ref`、首条消息事件与初始 `requirement_analysis` StageRun。
+当消息语义为 `new_requirement` 时，只允许在 `Session.status = draft` 且 `current_run_id = null` 时调用；后端必须在同一服务事务中基于当前 `selected_template_id` 创建 `PipelineRun`、模板快照、`ProviderSnapshot`、`ModelBindingSnapshot`、`RuntimeLimitSnapshot`、`GraphDefinition`、首个 `GraphThread`、首个 `workspace_ref`、首条消息事件与初始 `requirement_analysis` StageRun。若当前模板或有效内部模型绑定引用未配置或已禁用的 Provider，后端必须拒绝启动并返回配置不可用错误。
 
 当消息语义为 `clarification_reply` 时，只允许在当前会话处于 `waiting_clarification` 且当前阶段为 `requirement_analysis` 时调用；后端必须把补充信息回写到当前澄清中断并恢复同一个 `GraphThread`。
 

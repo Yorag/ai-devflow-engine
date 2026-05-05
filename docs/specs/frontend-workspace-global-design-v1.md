@@ -292,21 +292,25 @@
 `模型提供商` 页面用于管理前端可见的 Provider 配置。
 
 该页面必须满足以下规则：
-- 展示内置 Provider 与用户新增的 `custom Provider`
-- 允许新增和编辑 `custom Provider`
-- 内置 Provider 必须展示其名称、连接状态、默认模型、模型列表、凭据引用状态和模型能力摘要
+- 只展示已经配置的 Provider；未配置的内置 Provider 不在初始页面显示为默认卡片
+- `Add custom provider` 入口提供 `火山引擎`、`DeepSeek`、`OpenAI Completions` 三个并列接入模板，用户选择后才在页面中创建 Provider 卡片
+- 同一个接入模板允许添加多个 Provider；前端不得把模板名称当成唯一 Provider 实例
+- Provider 卡片展示和编辑字段限于显示名称、`base_url`、API key、`supported_model_ids`、`default_model_id`、启用状态和折叠的模型能力高级设置
+- Provider 显示名称可由用户点击卡片名称编辑；`provider_id` 不展示也不作为用户可编辑字段
 - 内置 Provider 的 `provider_id`、`provider_source` 和协议归属只读，不提供供应商类型修改入口
-- 内置 Provider 允许编辑连接字段、默认模型、模型列表、凭据引用和模型能力字段；这些字段保存到后端正式 Provider 配置对象，不作为环境变量或本地配置文件字段保存
-- `custom Provider` 允许编辑显示名称、连接字段、默认模型、模型列表、凭据引用和模型能力字段
-- Provider 连接字段至少覆盖后端 API 要求的 `base_url`、`default_model_id`、`supported_model_ids` 与 `api_key_ref`
+- 内置 Provider 允许编辑显示名称、连接字段、默认模型、模型列表、API key 和模型能力字段；这些字段保存到后端正式 Provider 配置对象，不作为环境变量或本地配置文件字段保存
+- `custom Provider` 允许编辑显示名称、连接字段、默认模型、模型列表、API key 和模型能力字段
+- 每个 Provider 卡片必须提供启用或禁用控件，并提供删除 Provider 的入口
+- Provider 连接字段至少覆盖后端 API 要求的 `base_url`、`default_model_id`、`supported_model_ids` 与 API key 输入
 - Provider 模型能力字段必须放在折叠的 `高级设置` 区域中，不作为新增或编辑 Provider 的首屏必填项
 - `高级设置` 允许按模型编辑 `context_window_tokens`、`max_output_tokens`、`supports_tool_calling`、`supports_structured_output`、`supports_native_reasoning`
 - `context_window_tokens` 用于后端上下文压缩阈值计算，`max_output_tokens` 用于模型输出预算和请求参数上限，三个 `supports_*` 字段用于后端能力校验和调用路径选择；这些字段都不属于平台运行设置
 - `高级设置` 中的字段都有后端默认值；前端不得暗示用户必须填写这些字段才能保存 Provider
-- 该页面管理的是 Provider 自身配置，不直接承担模板绑定语义
-- 模板编辑区若发现缺少所需 Provider，必须提供跳转或唤起该页面的路径
+- 该页面管理的是 Provider 自身配置；模板绑定区只能选择当前已配置且启用的 Provider
+- 模板编辑区若发现缺少所需 Provider 或 Provider 已禁用，必须明确阻止保存或启动 run，并提供跳转或唤起该页面的路径
 - Provider 配置变更只影响后续 run 或尚未启动 run 的模板选择；已经启动的 run 必须继续展示其已固化的 Provider 与模型绑定快照
-- Provider 密钥只以 `api_key_ref` 或等价引用形式展示和提交，不展示真实密钥内容
+- Provider API key 由用户在前端直接输入并提交；读投影不得回显真实 key，前端只显示空的密码输入框并在未触碰该字段时保留后端已配置状态
+- 删除 `custom Provider` 后该 Provider 从页面中移除；删除内置 Provider 后该 Provider 取消配置并从普通列表隐藏
 
 #### 7.4.3 导入导出
 
@@ -320,7 +324,7 @@
 - 导入动作必须调用项目作用域配置包导入接口，并展示后端返回的变更摘要、受影响配置对象和字段级校验错误
 - 导入成功后，前端必须刷新当前项目交付配置、Provider 列表和模板列表
 - 导入 Provider、DeliveryChannel 或模板运行配置只影响后续新启动 run、尚未启动 run 的模板选择，或尚未固化交付通道快照的交付就绪校验；前端不得暗示导入会修改已启动 run 或历史 run
-- 导入包中的 `api_key_ref` 只作为密钥引用显示和提交，前端不得解析或展示真实密钥值
+- 导入包中的 Provider API key 不在导出结果中回显；导入时用户显式提供的 key 只提交给后端，前端不得解析或展示已保存真实值
 
 ## 8. 中栏设计
 
@@ -411,11 +415,11 @@
 - 后端平台运行上限不进入模板配置 UI；模板编辑区只展示当前模板允许用户编辑的自动回归开关和最大自动回归次数
 
 Provider 选择区域必须满足以下规则：
-- 默认显示两个内置 Provider：`火山引擎`、`DeepSeek`
-- 允许用户通过统一设置弹窗中的 `模型提供商` 页面新增 `custom Provider`
+- 只显示当前已配置且启用的 Provider，不把未配置或已禁用的 Provider 当作默认可选项
+- 允许用户通过统一设置弹窗中的 `模型提供商` 页面新增一个或多个 `custom Provider`
 - 新增后的 `custom Provider` 以用户自定义名称出现在 Provider 选择列表中
-- `OpenAI Completions compatible` 只作为自定义 Provider 的接入协议存在，不作为前端可选 Provider 名称直接展示
-- 模板编辑区若发现缺少所需 Provider，必须提供打开设置弹窗并定位到 `模型提供商` 页面的入口
+- `OpenAI Completions compatible` 只作为自定义 Provider 的接入协议存在；`OpenAI Completions` 可以作为新增 Provider 的接入模板名称展示
+- 模板编辑区若发现缺少所需 Provider 或 Provider 已禁用，必须展示不可用原因，阻止保存或启动 run，并提供打开设置弹窗并定位到 `模型提供商` 页面的入口
 
 以下内容在 V1 中不进入模板配置 UI：
 - 核心业务阶段的存在性
@@ -1292,9 +1296,9 @@ Narrative Feed 中的条目应遵循以下规则：
 6. 前端将模板允许字段视为运行配置，并在 run 启动后冻结为只读快照
 7. 系统启动时至少提供 `Bug 修复流程`、`新功能开发流程`、`重构流程` 三个可选系统模板
 8. 新建会话默认预选 `新功能开发流程`
-9. 前端默认显示两个内置 Provider：`火山引擎`、`DeepSeek`
-10. 前端允许用户新增自定义 Provider，并在模板配置中按用户自定义名称选择
-11. `OpenAI Completions compatible` 只作为自定义 Provider 的接入协议存在，不作为前端可选 Provider 名称直接展示
+9. 前端只在模型选择区域显示已经配置且可用的 Provider，不把未配置的内置 Provider 当作默认可选项
+10. 前端允许用户新增多个自定义 Provider，并在模板配置中按用户自定义名称选择
+11. `OpenAI Completions compatible` 只作为自定义 Provider 的接入协议存在；`OpenAI Completions` 可以作为新增 Provider 的接入模板名称展示
 12. 三个系统模板共享固定核心阶段骨架，其差异只体现在 `AgentRole`、`system_prompt`、`AgentRole` 到 `Provider` 绑定和自动回归默认策略
 13. 前端不允许用户删除、禁用或重排功能一 V1 的核心业务阶段，也不允许关闭两个必需审批检查点
 14. 系统模板只允许一键使用和修改后另存；用户模板修改后支持覆盖、另存或删除
@@ -1335,11 +1339,11 @@ Narrative Feed 中的条目应遵循以下规则：
 49. 设置弹窗至少包含 `通用配置`、`模型提供商` 与 `导入导出` 三个子页面
 50. 项目级 `DeliveryChannel` 配置只出现在设置弹窗的 `通用配置` 页面，不出现在模板配置区
 51. 保存项目级默认 `DeliveryChannel` 配置至少影响后续新启动的 run；对尚未进入 `Delivery Integration` 的当前活动 run，可用于后续交付就绪校验
-52. 设置弹窗中的 `模型提供商` 页面允许新增和编辑 `custom Provider`，并允许编辑内置 Provider 的连接字段、默认模型、模型列表、凭据引用和折叠 `高级设置` 中的 Provider 模型能力字段，但不允许修改内置 Provider 的身份和协议归属
+52. 设置弹窗中的 `模型提供商` 页面允许通过 `火山引擎`、`DeepSeek`、`OpenAI Completions` 三个接入模板新增多个 Provider，允许编辑 Provider 显示名称、启用状态、连接字段、API key、默认模型、模型列表和折叠 `高级设置` 中的 Provider 模型能力字段，并允许删除 Provider；内置 Provider 不允许修改 `provider_id`、`provider_source` 和协议归属
 53. Provider 模型能力配置必须允许在 `高级设置` 中填写 `context_window_tokens`、`max_output_tokens`、`supports_tool_calling`、`supports_structured_output`、`supports_native_reasoning`，并明确这些字段不属于平台运行设置且都有后端默认值
 54. 设置弹窗中的 `导入导出` 页面支持当前项目作用域下用户可见配置包的导出和导入，且不导出真实密钥、平台隐性运行设置、系统内置提示词正文、运行快照、历史 run 或审计正文
 55. 设置弹窗不展示或编辑环境变量、平台运行数据目录、SQLite 文件路径、平台运行上限、日志策略、`compression_threshold_ratio`、后端系统内置提示词资产或 `deterministic test runtime`
-56. Provider 配置变更只影响后续 run 或尚未启动 run 的模板选择，不改变已经启动 run 的 Provider 与模型绑定快照
+56. Provider 配置变更只影响后续 run 或尚未启动 run 的模板选择；模板 Provider 下拉框只允许选择当前已配置且启用的 Provider，已启动 run 的 Provider 与模型绑定快照不被改变
 57. Provider 调用失败重试、指数退避和熔断状态必须能在对应阶段结点或 Inspector 中被用户看见
 58. 当 `Code Review` 相关审批块对应 `git_auto_delivery` 且当前项目交付配置状态不是 `ready` 时，前端在审批块内阻止 `Approve` 提交，并提供打开 `通用配置` 页面的入口
 59. 高风险工具确认块不使用 Approval Request 交互，不计入两个人工审批检查点，且拒绝后不得展示为审批拒绝回归
