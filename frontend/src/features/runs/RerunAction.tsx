@@ -115,10 +115,12 @@ export function resolveRerunActionState(
   currentRunId: string | null,
 ): RerunActionState {
   const isCurrentRun = Boolean(currentRunId) && entry.run_id === currentRunId;
+  const targetsEntryRun = entry.retry_action === `retry:${entry.run_id}`;
+
   return {
     canRender:
       isCurrentRun &&
-      entry.retry_action === "create_rerun" &&
+      targetsEntryRun &&
       (entry.status === "failed" || entry.status === "terminated"),
   };
 }
