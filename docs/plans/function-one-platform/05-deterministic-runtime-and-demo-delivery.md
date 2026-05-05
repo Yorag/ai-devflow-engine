@@ -106,6 +106,39 @@
 **测试方法**：
 - `pytest backend/tests/runtime/test_deterministic_interrupts.py -v`
 
+<a id="a43a"></a>
+
+## A4.3a deterministic runtime E2E 推进 harness
+
+**计划周期**：Week 11
+**状态**：`[x]`
+**目标**：提供后端测试所有的 deterministic runtime 推进 harness，使浏览器 E2E 可以通过正常 API、持久化投影和 SSE 观察真实 `PipelineRun` 进入 `waiting_approval` 与 `waiting_tool_confirmation`，解除 V6.3 live Playwright 的 owner blocker。
+**实施计划**：`docs/plans/implementation/a4.3a-deterministic-e2e-advancement-harness.md`
+**验证摘要**：实施计划 `docs/plans/implementation/a4.3a-deterministic-e2e-advancement-harness.md` 已在 integration checkpoint 合入 `836a164`。Worker verification 中 focused harness、full API flow、OpenAPI、human-loop command regression 和 full backend suite 通过，full backend suite 记录为 `1329 passed, 3 warnings`。本次 integration verification 在 `integration/function-one-acceleration` 上重复运行 focused harness、full API flow、OpenAPI、pause/resume、approval 和 tool confirmation API regression；`backend/tests/e2e/test_deterministic_runtime_advancement_harness.py` 通过 4 个 tests，impacted regression 命令通过 34 个 tests。
+
+**修改文件列表**：
+- Create: `backend/app/testing/`
+- Create: `backend/tests/e2e/test_deterministic_runtime_advancement_harness.py`
+- Modify: `backend/app/main.py`
+- Modify: `backend/tests/e2e/test_full_api_flow.py` only if shared test helper extraction is required
+
+**实现类/函数**：
+- `create_e2e_test_app()` 或等价测试专用 app factory
+- deterministic runtime advancement helper that wraps `DeterministicRuntimeEngine.run_next()`
+- test-only command surface that is excluded from the normal production OpenAPI route set
+
+**验收标准**：
+- harness 只在测试专用 app 或显式测试配置下注册，不进入默认 `create_app()` 的用户可见 API，不暴露 `deterministic test runtime` 为用户可选运行模式。
+- harness 可在真实 `POST /api/sessions/{sessionId}/messages` 创建 run 后推进同一个 persisted run 到 solution approval 等待状态。
+- harness 可继续推进同一个 run 到高风险工具确认等待状态，并保持同一个 run、stage、GraphThreadRef、checkpoint、EventStore 和投影来源。
+- browser E2E 可通过正常 workspace query 与 `/api/sessions/{sessionId}/events/stream` 观察 approval request、approval result、tool confirmation request/result、pause/resume、terminate 和 rerun 的真实输出，不再依赖 route-level projection fixtures。
+- harness 复用 AL03 runtime control command semantics 和 AL04 `DeterministicRuntimeEngine`，不得复制或伪造 projection payload、SSE payload、run state 或 event payload。
+- harness 写入运行日志摘要和审计记录的行为与现有 deterministic backend E2E 保持一致；失败时返回稳定错误，不留下部分提交状态。
+
+**测试方法**：
+- `pytest backend/tests/e2e/test_deterministic_runtime_advancement_harness.py -v`
+- `pytest backend/tests/e2e/test_full_api_flow.py -v`
+
 <a id="a44"></a>
 
 ## A4.4 deterministic test runtime 终态控制
