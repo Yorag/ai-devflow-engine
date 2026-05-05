@@ -72,6 +72,11 @@ class RunControlRecordType(ContractEnum):
     TOOL_CONFIRMATION = "tool_confirmation"
 
 
+class ClarificationStatus(ContractEnum):
+    PENDING = "pending"
+    ANSWERED = "answered"
+
+
 class ApprovalType(ContractEnum):
     SOLUTION_DESIGN_APPROVAL = "solution_design_approval"
     CODE_REVIEW_APPROVAL = "code_review_approval"
@@ -202,6 +207,7 @@ __all__ = [
     "ApprovalStatus",
     "ApprovalType",
     "CodeReviewRequestType",
+    "ClarificationStatus",
     "ContractEnum",
     "ControlItemType",
     "CredentialStatus",

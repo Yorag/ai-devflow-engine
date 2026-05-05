@@ -9,6 +9,7 @@ from backend.app.domain.enums import (
     ApprovalStatus,
     ApprovalType,
     CodeReviewRequestType,
+    ClarificationStatus,
     CredentialStatus,
     DeliveryMode,
     DeliveryReadinessStatus,
@@ -344,6 +345,41 @@ def test_stage_and_control_enums_keep_product_semantics() -> None:
     assert tool_status.enums == enum_values(ToolConfirmationStatus)
     assert "approved" not in tool_status.enums
     assert "rejected" not in tool_status.enums
+
+
+def test_clarification_record_exposes_derived_status_without_schema_column() -> None:
+    from backend.app.db.models.runtime import ClarificationRecordModel
+
+    pending = ClarificationRecordModel(
+        clarification_id="clarification-pending",
+        run_id="run-1",
+        stage_run_id="stage-run-1",
+        question="Which package should be changed?",
+        answer=None,
+        payload_ref="payload-clarification-pending",
+        graph_interrupt_ref="interrupt-pending",
+        requested_at=NOW,
+        answered_at=None,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    answered = ClarificationRecordModel(
+        clarification_id="clarification-answered",
+        run_id="run-1",
+        stage_run_id="stage-run-1",
+        question="Which package should be changed?",
+        answer="Change backend only.",
+        payload_ref="payload-clarification-answered",
+        graph_interrupt_ref="interrupt-answered",
+        requested_at=NOW,
+        answered_at=NOW,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+
+    assert pending.status is ClarificationStatus.PENDING
+    assert answered.status is ClarificationStatus.ANSWERED
+    assert "status" not in ClarificationRecordModel.__table__.columns
 
 
 def test_approval_tool_confirmation_and_delivery_boundaries_are_separate(tmp_path) -> None:

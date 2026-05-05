@@ -10,6 +10,7 @@ from backend.app.db.base import ROLE_METADATA, DatabaseRole
 from backend.app.domain.enums import (
     ApprovalStatus,
     ApprovalType,
+    ClarificationStatus,
     CodeReviewRequestType,
     CredentialStatus,
     DeliveryMode,
@@ -263,6 +264,12 @@ class ClarificationRecordModel(RuntimeBase, TimestampMixin):
     graph_interrupt_ref: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    @property
+    def status(self) -> ClarificationStatus:
+        if self.answer is not None and self.answered_at is not None:
+            return ClarificationStatus.ANSWERED
+        return ClarificationStatus.PENDING
 
 
 class ApprovalRequestModel(RuntimeBase, TimestampMixin):
