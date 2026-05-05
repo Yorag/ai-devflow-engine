@@ -74,7 +74,7 @@
 | QA-ERROR | `test/qa-error-regression` | V6.6 | planned | backend error-code regression、frontend ErrorState、error presentation and recovery actions | error contract and UI regression |
 | QA-CONFIG | `test/qa-config-snapshot-regression` | V6.8 | planned | config boundary、runtime snapshot、prompt asset boundary、project/session history regression | configuration and snapshot regression |
 | QA-OBS | `test/qa-observability-regression` | L6.1, L6.2 | planned | log retention、rotation、redaction、audit failure and degraded log query regression | observability regression |
-| QA-RELEASE | `test/qa-release-candidate` | V6.7 | complete | regression scenario consolidation、release candidate checklist、final acceptance evidence | release candidate checklist |
+| QA-RELEASE | `test/qa-release-candidate` | V6.7 | complete | regression scenario consolidation、release candidate evidence、final acceptance evidence | release evidence |
 
 ## 4. Shared Ownership
 
@@ -95,7 +95,7 @@
 | Error contract and frontend error-state regression harness | QA-ERROR | AL03, AL04, AL05, AL06, QA-RELEASE |
 | Configuration boundary, runtime snapshot, prompt asset and project/session history regression | QA-CONFIG | AL01, AL05, AL06, QA-RELEASE |
 | Log retention, redaction, audit and degraded log-query regression | QA-OBS | AL02, AL04, QA-RELEASE |
-| Release candidate checklist and final acceptance evidence | QA-RELEASE | all lanes |
+| Release candidate evidence and final acceptance evidence | QA-RELEASE | all lanes |
 
 `R3.2a` owner decision：AL01 被授权直接修改 `backend/app/services/projections/workspace.py`、`backend/app/services/projections/timeline.py`、`backend/app/api/routes/events.py`，但仅限于 enforce publication boundary 的 reader visibility filter。该例外不转移 AL02 对通用 projection payload、SSE payload、query route 和 projection contract 演进的 owner scope。
 
@@ -221,7 +221,7 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | QA-CONFIG-V6.8 | V6.8 | QA-CONFIG | `test/qa-config-snapshot-regression` | done | 2e682ec | 74d7860 | `docs/plans/acceleration/reports/QA-CONFIG-V6.8.md` | Configuration boundary, runtime snapshot immutability, prompt asset boundary, project/session history, Settings/Inspector UI boundary tests, full backend suite, full frontend suite, and frontend build passed on integration branch. |
 | QA-OBS-L6.1 | L6.1 | QA-OBS | `test/qa-observability-regression` | done | 2e682ec | 4a7eefb | `docs/plans/acceleration/reports/QA-OBS-L6.1.md` | Log retention checkpoint integrated on `integration/function-one-acceleration`; observability regression covering retention, JSONL writer, and log query service passed. |
 | QA-OBS-L6.2 | L6.2 | QA-OBS | `test/qa-observability-regression` | done | a48ea61 | 23e04b0 | `docs/plans/acceleration/reports/QA-OBS-L6.2.md` | Observability redaction, audit degraded-state, runtime-log exclusion, workspace / ChangeSet / delivery exclusion, and full backend regression passed on integration branch. |
-| QA-RELEASE-V6.7 | V6.7 | QA-RELEASE | `test/qa-release-candidate` | done | 73a00b8 | 5591217 | `docs/plans/acceleration/reports/QA-RELEASE-V6.7.md` | Release candidate lifecycle/projection regression, deterministic delivery completion fix, acceptance checklist, Playwright release regression, full backend suite, full frontend suite, and frontend build passed on integration branch. |
+| QA-RELEASE-V6.7 | V6.7 | QA-RELEASE | `test/qa-release-candidate` | done | 73a00b8 | 5591217 | `docs/plans/acceleration/reports/QA-RELEASE-V6.7.md` | Release candidate lifecycle/projection regression, deterministic delivery completion fix, acceptance evidence, Playwright release regression, full backend suite, full frontend suite, and frontend build passed on integration branch. |
 
 本文档不预置新的 live claim。主协调会话在认领 ready task 时写入共享 coordination store，并记录当时的 Coordination Base。未提交的本地草稿不是 live claim 状态；只有在对应 QA lane 被正式 claim、迁移到该 lane branch、写入 evidence report 并通过 commit gate 后，才能进入 Progress Ingest。
 
@@ -276,7 +276,7 @@ checkpoint 前必须确认待集成 lane 的 Coordination Base、Worker HEAD、d
 | IC2 | AL03 + AL04 deterministic runtime 和 human-loop skeleton | runtime command tests、tool registry tests、demo delivery tests |
 | IC3 | AL05 provider/langgraph/context 接入 | provider/context/langgraph focused tests、LangChain/LangGraph API docs check when API usage is unclear |
 | IC4 | AL06 前端真实 API/SSE 切换 | `npm --prefix frontend test`, `npm --prefix frontend build` |
-| IC5 | QA contract、E2E、error、config、observability 和 release-candidate 回归 | backend regression、OpenAPI、frontend client compatibility、Playwright、frontend error regression、config snapshot regression、log audit regression、release checklist |
+| IC5 | QA contract、E2E、error、config、observability 和 release-candidate 回归 | backend regression、OpenAPI、frontend client compatibility、Playwright、frontend error regression、config snapshot regression、log audit regression、release evidence |
 
 每个 checkpoint 通过后，主协调会话统一执行以下状态收敛：
 

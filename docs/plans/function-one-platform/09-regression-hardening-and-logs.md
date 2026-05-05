@@ -318,17 +318,16 @@
 
 <a id="v67"></a>
 
-## V6.7 回归场景与发布候选清单
+## V6.7 回归场景与发布候选证据
 
 **计划周期**：Week 12
 **状态**：`[x]`
-**目标**：补齐系统回归场景和发布候选验收清单，使平台级 V1 达到可评审发布状态。
+**目标**：补齐系统回归场景和发布候选验收证据，使平台级 V1 达到可评审发布状态。
 **实施计划**：`docs/plans/implementation/v6.7-regression-release-candidate.md`
 
 **修改文件列表**：
 - Create: `backend/tests/regression/test_run_lifecycle_regression.py`
 - Create: `backend/tests/regression/test_projection_regression.py`
-- Create: `docs/plans/function-one-platform-acceptance-checklist.md`
 
 **实现类/函数**：
 - `runRegressionScenario()`
@@ -338,18 +337,17 @@
 **验收标准**：
 - 历史会话回放稳定。
 - 投影和 SSE 不出现重复条目或状态倒退。
-- 回归清单覆盖产品、前端、后端三份规格的核心验收项。
-- 发布候选验收清单完成。
-- 发布候选验收清单覆盖日志审计基础能力：JSONL 写入、`log.db` 索引、审计记录、TraceContext、日志查询、审计查询、轮转、保留、裁剪、`.runtime/logs` 排除和审计失败回滚。
+- 回归证据覆盖产品、前端、后端三份规格的核心验收项。
+- 发布候选证据覆盖日志审计基础能力：JSONL 写入、`log.db` 索引、审计记录、TraceContext、日志查询、审计查询、轮转、保留、裁剪、`.runtime/logs` 排除和审计失败回滚。
 
 **前端设计质量门**：
 - 不新增风格输入；只允许修正一致性、状态覆盖和可用性问题。
 - 发布候选必须检查空态、错误态、历史回放、响应式、长文本、焦点态和可访问性。
 - 必要时修正视觉一致性，但不得引入新的业务语义或重排已验收流程。
-- 发布候选清单必须记录设计质量门发现项、修复项、保留风险和对应验证命令。
+- 发布候选证据必须记录设计质量门发现项、修复项、保留风险和对应验证命令。
 
 **测试方法**：
 - `pytest backend/tests/regression -v`
 - `npm --prefix e2e run test`
 
-**Integration checkpoint note**：`QA-RELEASE-V6.7` 已集成到 `integration/function-one-acceleration`，并通过 V6.7 focused backend regression、full backend regression directory、Playwright release regression、full backend suite、full frontend suite 和 frontend build 验证。发布候选清单已生成并记录剩余风险。
+**Integration checkpoint note**：`QA-RELEASE-V6.7` 已集成到 `integration/function-one-acceleration`，并通过 V6.7 focused backend regression、full backend regression directory、Playwright release regression、full backend suite、full frontend suite 和 frontend build 验证。发布候选证据已记录剩余风险。

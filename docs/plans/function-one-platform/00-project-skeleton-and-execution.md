@@ -82,7 +82,6 @@ e2e/
   tests/
 docs/
   api/
-  architecture/
   archive/
   plans/
     implementation/
@@ -140,7 +139,6 @@ README.md
 | `e2e/` | Playwright 工程配置、脚本与跨端浏览器测试项目 |
 | `e2e/tests/` | Playwright 跨端测试 |
 | `docs/api/` | API 文档补充说明和 OpenAPI 相关说明 |
-| `docs/architecture/` | 结构性架构说明，如目录结构、存储分层和运行拓扑 |
 | `docs/archive/` | 历史规格和历史设计参考，不作为当前实现依据 |
 | `docs/plans/implementation/` | 单个子任务的 Superpowers 实施计划 |
 | `docs/plans/function-one-platform/` | 功能一平台级分卷计划与子任务列表 |
@@ -157,7 +155,7 @@ README.md
 **并行性**：串行起点
 **状态**：`[x]`
 **实施计划**：`docs/plans/implementation/b0.0-project-structure-boundary.md`
-**验证摘要**：`Test-Path backend/app/context/.gitkeep, frontend/src/app/.gitkeep, e2e/tests/.gitkeep, docs/api/.gitkeep` 通过；`rg -n "backend/|frontend/|docs/plans/implementation|\\.gitkeep" docs/architecture/project-structure.md README.md` 通过；人工核对 B0.1、B0.2、F0.1、C1.10a、A4.8b-A4.8d 与 A4.9a-A4.9b 的文件落点与骨架一致。
+**验证摘要**：`Test-Path backend/app/context/.gitkeep, frontend/src/app/.gitkeep, e2e/tests/.gitkeep, docs/api/.gitkeep` 通过；`rg -n "backend/|frontend/|docs/plans/implementation|\\.gitkeep" README.md docs/plans/function-one-platform/00-project-skeleton-and-execution.md` 通过；人工核对 B0.1、B0.2、F0.1、C1.10a、A4.8b-A4.8d 与 A4.9a-A4.9b 的文件落点与骨架一致。
 **目标**：在实施前固定仓库目录骨架、文件责任边界和后续实施计划落点。
 
 **修改文件列表**：
@@ -165,7 +163,6 @@ README.md
 - Create: `frontend/src/**/.gitkeep`
 - Create: `e2e/tests/.gitkeep`
 - Create: `docs/api/.gitkeep`
-- Create: `docs/architecture/project-structure.md`
 - Modify: `README.md`
 - Modify: `docs/plans/function-one-platform-plan.md`
 - Modify: `docs/archive/function-one-delivery-branch-plan-legacy.md`
@@ -184,7 +181,7 @@ README.md
 
 **测试方法**：
 - `Test-Path backend/app/context/.gitkeep, frontend/src/app/.gitkeep, e2e/tests/.gitkeep, docs/api/.gitkeep`
-- `rg -n "backend/|frontend/|docs/plans/implementation|\\.gitkeep" docs/architecture/project-structure.md README.md`
+- `rg -n "backend/|frontend/|docs/plans/implementation|\\.gitkeep" README.md docs/plans/function-one-platform/00-project-skeleton-and-execution.md`
 - 人工核对 B0.1、B0.2、F0.1、C1.10a、A4.8b-A4.8d 与 A4.9a-A4.9b 的文件列表与骨架一致。
 
 ## 4. Superpowers 执行规则
