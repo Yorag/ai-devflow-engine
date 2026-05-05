@@ -753,6 +753,8 @@ class TemplateService:
             provider_id
             for (provider_id,) in self._session.query(ProviderModel.provider_id)
             .filter(ProviderModel.provider_id.in_(provider_ids))
+            .filter(ProviderModel.is_configured.is_(True))
+            .filter(ProviderModel.is_enabled.is_(True))
             .all()
         }
         if provider_ids - existing_provider_ids:

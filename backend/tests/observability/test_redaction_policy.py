@@ -249,31 +249,42 @@ def test_redact_mapping_blocks_auth_header_equivalent_field_names() -> None:
         assert raw_value not in result.excerpt
 
 
-def test_redact_mapping_preserves_api_key_refs_but_blocks_api_key_values() -> None:
+def test_redact_mapping_blocks_provider_api_key_fields_but_preserves_delivery_refs() -> None:
     from backend.app.observability.redaction import RedactionPolicy
 
     policy = RedactionPolicy(max_text_length=64)
 
     result = policy.redact_mapping(
         {
-            "api_key_ref": "env:OPENAI_API_KEY",
-            "apiKeyRef": "env:ANTHROPIC_API_KEY",
+            "api_key_ref": "sk-provider-secret",
+            "apiKeyRef": "provider-secret-value",
+            "credential_ref": "env:AI_DEVFLOW_CREDENTIAL_DELIVERY_TOKEN",
             "api_key": "raw-api-key",
             "apiKey": "raw-camel-api-key",
         }
     )
 
     assert result.redaction_status is RedactionStatus.REDACTED
-    assert result.redacted_payload["api_key_ref"] == "env:OPENAI_API_KEY"
-    assert result.redacted_payload["apiKeyRef"] == "env:ANTHROPIC_API_KEY"
+    assert result.redacted_payload["api_key_ref"] == "[blocked:sensitive_field]"
+    assert result.redacted_payload["apiKeyRef"] == "[blocked:sensitive_field]"
+    assert result.redacted_payload["credential_ref"] == (
+        "env:AI_DEVFLOW_CREDENTIAL_DELIVERY_TOKEN"
+    )
     assert result.redacted_payload["api_key"] == "[blocked:sensitive_field]"
     assert result.redacted_payload["apiKey"] == "[blocked:sensitive_field]"
     assert result.summary["blocked_fields"] == [
+        "api_key_ref",
+        "apiKeyRef",
         "api_key",
         "apiKey",
     ]
-    assert "raw-api-key" not in result.excerpt
-    assert "raw-camel-api-key" not in result.excerpt
+    for forbidden in [
+        "sk-provider-secret",
+        "provider-secret-value",
+        "raw-api-key",
+        "raw-camel-api-key",
+    ]:
+        assert forbidden not in result.excerpt
 
 
 def test_summarize_payload_bounds_large_text_before_log_or_audit_storage() -> None:

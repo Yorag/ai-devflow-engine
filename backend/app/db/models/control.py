@@ -166,6 +166,8 @@ class ProviderModel(ControlBase, TimestampMixin):
     api_key_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
     default_model_id: Mapped[str] = mapped_column(String(120), nullable=False)
     supported_model_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    is_configured: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     runtime_capabilities: Mapped[list[JsonObject]] = mapped_column(JSON, nullable=False)
 
 

@@ -22,6 +22,7 @@ from backend.app.db.models.control import (
 from backend.app.db.models.event import DomainEventModel, EventBase
 from backend.app.db.models.graph import GraphBase, GraphDefinitionModel, GraphThreadModel
 from backend.app.db.models.runtime import (
+    ModelBindingSnapshotModel,
     PipelineRunModel,
     ProviderSnapshotModel,
     RuntimeBase,
@@ -218,6 +219,24 @@ def seed_control_plane(
         now=lambda: NOW,
         credential_env_prefixes=settings.credential_env_prefixes,
     ).seed_builtin_providers(trace_context=build_trace())
+    providers = (
+        session.query(ProviderModel)
+        .filter(
+            ProviderModel.provider_id.in_(
+                ["provider-volcengine", "provider-deepseek"]
+            )
+        )
+        .all()
+    )
+    assert {provider.provider_id for provider in providers} == {
+        "provider-volcengine",
+        "provider-deepseek",
+    }
+    for provider in providers:
+        provider.is_configured = True
+        provider.is_enabled = True
+        session.add(provider)
+    session.commit()
     TemplateService(
         session,
         audit_service=audit,
@@ -241,6 +260,8 @@ def _build_team_provider() -> ProviderModel:
         api_key_ref="env:TEAM_PROVIDER_API_KEY",
         default_model_id="team-chat",
         supported_model_ids=["team-chat"],
+        is_configured=True,
+        is_enabled=True,
         runtime_capabilities=[
             {
                 "model_id": "team-chat",
@@ -645,6 +666,170 @@ def test_session_service_start_run_from_new_requirement_respects_injected_creden
         )
 
     assert any(snapshot.provider_id == "provider-team" for snapshot in snapshots)
+
+
+def test_session_service_start_run_uses_template_provider_for_internal_bindings(
+    tmp_path: Path,
+) -> None:
+    from backend.app.services.sessions import SessionService
+
+    settings = build_settings(tmp_path)
+    manager = build_manager(settings)
+    audit = RecordingAuditService()
+    log_writer = RecordingLogWriter()
+
+    with manager.session(DatabaseRole.CONTROL) as control_session:
+        seed_control_plane(
+            control_session,
+            settings=settings,
+            audit=audit,
+            log_writer=log_writer,
+        )
+        for provider in control_session.query(ProviderModel).all():
+            provider.is_configured = False
+            provider.is_enabled = False
+            control_session.add(provider)
+        team_provider = _build_team_provider()
+        team_provider.api_key_ref = "sk-team-provider"
+        control_session.add(team_provider)
+        team_template = _create_user_template_with_provider(
+            control_session,
+            template_id="template-team-only-provider",
+            provider_id="provider-team",
+        )
+        control_session.add(team_template)
+        control_session.commit()
+
+        draft = SessionService(
+            control_session,
+            audit_service=audit,
+            now=lambda: NOW,
+        ).create_session(
+            project_id="project-default",
+            trace_context=build_trace(),
+        )
+        draft.selected_template_id = team_template.template_id
+        draft.updated_at = NOW
+        control_session.add(draft)
+        control_session.commit()
+
+        runtime_session = manager.session(DatabaseRole.RUNTIME)
+        event_session = manager.session(DatabaseRole.EVENT)
+        graph_session = manager.session(DatabaseRole.GRAPH)
+        try:
+            result = SessionService(
+                control_session,
+                runtime_session=runtime_session,
+                event_session=event_session,
+                graph_session=graph_session,
+                audit_service=audit,
+                log_writer=log_writer,
+                environment_settings=settings,
+                now=lambda: NOW,
+            ).start_run_from_new_requirement(
+                session_id=draft.session_id,
+                content="Use the configured team provider only.",
+                trace_context=build_trace(),
+            )
+        finally:
+            runtime_session.close()
+            event_session.close()
+            graph_session.close()
+
+    with manager.session(DatabaseRole.RUNTIME) as session:
+        provider_snapshots = (
+            session.query(ProviderSnapshotModel)
+            .filter(ProviderSnapshotModel.run_id == result.run.run_id)
+            .all()
+        )
+        model_bindings = (
+            session.query(ModelBindingSnapshotModel)
+            .filter(ModelBindingSnapshotModel.run_id == result.run.run_id)
+            .all()
+        )
+
+    assert {snapshot.provider_id for snapshot in provider_snapshots} == {
+        "provider-team"
+    }
+    assert {binding.provider_id for binding in model_bindings} == {"provider-team"}
+    assert {binding.model_id for binding in model_bindings} == {"team-chat"}
+
+
+def test_session_service_start_run_replaces_stale_template_providers_with_configured_provider(
+    tmp_path: Path,
+) -> None:
+    from backend.app.services.sessions import SessionService
+
+    settings = build_settings(tmp_path)
+    manager = build_manager(settings)
+    audit = RecordingAuditService()
+    log_writer = RecordingLogWriter()
+
+    with manager.session(DatabaseRole.CONTROL) as control_session:
+        seed_control_plane(
+            control_session,
+            settings=settings,
+            audit=audit,
+            log_writer=log_writer,
+        )
+        for provider in control_session.query(ProviderModel).all():
+            provider.is_configured = False
+            provider.is_enabled = False
+            control_session.add(provider)
+        team_provider = _build_team_provider()
+        team_provider.api_key_ref = "sk-team-provider"
+        control_session.add(team_provider)
+        control_session.commit()
+
+        draft = SessionService(
+            control_session,
+            audit_service=audit,
+            now=lambda: NOW,
+        ).create_session(
+            project_id="project-default",
+            trace_context=build_trace(),
+        )
+
+        runtime_session = manager.session(DatabaseRole.RUNTIME)
+        event_session = manager.session(DatabaseRole.EVENT)
+        graph_session = manager.session(DatabaseRole.GRAPH)
+        try:
+            result = SessionService(
+                control_session,
+                runtime_session=runtime_session,
+                event_session=event_session,
+                graph_session=graph_session,
+                audit_service=audit,
+                log_writer=log_writer,
+                environment_settings=settings,
+                now=lambda: NOW,
+            ).start_run_from_new_requirement(
+                session_id=draft.session_id,
+                content="Use the only configured provider.",
+                trace_context=build_trace(),
+            )
+        finally:
+            runtime_session.close()
+            event_session.close()
+            graph_session.close()
+
+    with manager.session(DatabaseRole.RUNTIME) as session:
+        provider_snapshots = (
+            session.query(ProviderSnapshotModel)
+            .filter(ProviderSnapshotModel.run_id == result.run.run_id)
+            .all()
+        )
+        model_bindings = (
+            session.query(ModelBindingSnapshotModel)
+            .filter(ModelBindingSnapshotModel.run_id == result.run.run_id)
+            .all()
+        )
+
+    assert {snapshot.provider_id for snapshot in provider_snapshots} == {
+        "provider-team"
+    }
+    assert {binding.provider_id for binding in model_bindings} == {"provider-team"}
+    assert {binding.model_id for binding in model_bindings} == {"team-chat"}
 
 
 def test_session_service_start_run_from_new_requirement_calls_prompt_validation_hook_once(

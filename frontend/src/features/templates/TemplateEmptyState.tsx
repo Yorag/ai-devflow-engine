@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type {
   PipelineTemplateRead,
@@ -10,6 +10,8 @@ import { TemplateEditor } from "./TemplateEditor";
 import { TemplateSelector } from "./TemplateSelector";
 import {
   createTemplateDraft,
+  resolveTemplateProviderBindings,
+  resolveTemplateDraftProviders,
   useTemplateDraftState,
   type TemplateDraftState,
 } from "./template-state";
@@ -57,9 +59,16 @@ export function TemplateEmptyState({
     localTemplates.find((template) => template.template_id === selectedTemplateId) ??
     localTemplates[0] ??
     null;
+  const selectedTemplateDraftSource = useMemo(
+    () =>
+      selectedTemplate
+        ? resolveTemplateProviderBindings(selectedTemplate, providers)
+        : null,
+    [selectedTemplate, providers],
+  );
   const isDraft = session.status === "draft";
   const { draft, setDraft, resetDraft } = useTemplateDraftState(
-    selectedTemplate,
+    selectedTemplateDraftSource,
     session.session_id,
   );
 
@@ -68,6 +77,17 @@ export function TemplateEmptyState({
       mergeIncomingTemplates(templates, current, localCreatedTemplateIds),
     );
   }, [templates, localCreatedTemplateIds]);
+
+  useEffect(() => {
+    if (!draft) {
+      return;
+    }
+
+    const resolvedDraft = resolveTemplateDraftProviders(draft, providers);
+    if (resolvedDraft !== draft) {
+      setDraft(resolvedDraft);
+    }
+  }, [draft, providers, setDraft]);
 
   function handleSaveAs() {
     if (!selectedTemplate || !draft) {
@@ -175,7 +195,7 @@ export function TemplateEmptyState({
 
       {selectedTemplate && draft && isDraft ? (
         <TemplateEditor
-          template={selectedTemplate}
+          template={selectedTemplateDraftSource ?? selectedTemplate}
           providers={providers}
           draft={draft}
           onDraftChange={setDraft}

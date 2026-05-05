@@ -97,6 +97,11 @@ def seed_templates_and_custom_provider(
     ProviderService(session, audit_service=audit, now=lambda: NOW).seed_builtin_providers(
         trace_context=build_trace()
     )
+    deepseek = session.get(ProviderModel, "provider-deepseek")
+    assert deepseek is not None
+    deepseek.is_configured = True
+    deepseek.is_enabled = True
+    session.add(deepseek)
     session.add(
         ProviderModel(
             provider_id="provider-custom",
@@ -107,6 +112,8 @@ def seed_templates_and_custom_provider(
             api_key_ref="env:CUSTOM_PROVIDER_API_KEY",
             default_model_id="custom-chat",
             supported_model_ids=["custom-chat"],
+            is_configured=True,
+            is_enabled=True,
             runtime_capabilities=[
                 {
                     "model_id": "custom-chat",

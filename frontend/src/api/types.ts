@@ -287,6 +287,7 @@ export type ProviderRead = {
   api_key_ref: string | null;
   default_model_id: string;
   supported_model_ids: string[];
+  is_enabled: boolean;
   runtime_capabilities: ModelRuntimeCapabilities[];
   created_at: string;
   updated_at: string;
@@ -299,6 +300,7 @@ export type ProviderWriteRequest = {
   api_key_ref: string | null;
   default_model_id: string;
   supported_model_ids: string[];
+  is_enabled: boolean;
   runtime_capabilities: ModelRuntimeCapabilities[];
 };
 

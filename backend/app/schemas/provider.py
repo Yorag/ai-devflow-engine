@@ -45,6 +45,7 @@ class ProviderWriteRequest(_StrictBaseModel):
     api_key_ref: str | None = None
     default_model_id: str = Field(min_length=1)
     supported_model_ids: list[NonEmptyString] = Field(min_length=1)
+    is_enabled: StrictBool = True
     runtime_capabilities: list[ProviderModelRuntimeCapabilitiesWrite] = Field(
         min_length=1
     )
@@ -59,6 +60,7 @@ class ProviderRead(_StrictBaseModel):
     api_key_ref: str | None = None
     default_model_id: str = Field(min_length=1)
     supported_model_ids: list[NonEmptyString] = Field(min_length=1)
+    is_enabled: bool = True
     runtime_capabilities: list[ModelRuntimeCapabilities] = Field(min_length=1)
     created_at: datetime
     updated_at: datetime

@@ -7,6 +7,7 @@ import type { ApiRequestOptions } from "../../../api/client";
 import { terminateRun } from "../../../api/runs";
 import type {
   ExecutionNodeProjection,
+  ProviderRead,
   ProjectRead,
   SessionRead,
   SessionStatus,
@@ -16,6 +17,7 @@ import { createQueryClient } from "../../../app/query-client";
 import { renderWithAppProviders } from "../../../app/test-utils";
 import {
   mockFeedEntriesByType,
+  mockProviderList,
   mockSessionWorkspaces,
   mockStageInspectorProjection,
 } from "../../../mocks/fixtures";
@@ -1103,6 +1105,88 @@ describe("WorkspaceShell", () => {
     expect(await screen.findByRole("form", { name: "Composer" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
     expect(screen.getByLabelText("当前输入")).toBeTruthy();
+  });
+
+  it("blocks first requirement input when the selected template has unavailable providers", async () => {
+    const baseFetcher = createMockApiFetcher();
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const path = normalizeTestPath(input);
+        const method = init?.method ?? "GET";
+
+        if (method === "GET" && path === "/api/providers") {
+          return jsonTestResponse([]);
+        }
+
+        return baseFetcher(input, init);
+      },
+    };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByText(
+          "This template references unavailable providers: provider-deepseek.",
+        ),
+      ).toHaveLength(2);
+    });
+    expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "发送" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+  });
+
+  it("keeps first requirement input enabled when a configured provider replaces stale template bindings", async () => {
+    const baseFetcher = createMockApiFetcher();
+    const mimoProvider: ProviderRead = {
+      ...mockProviderList[2],
+      provider_id: "provider-mimo",
+      display_name: "MiMo",
+      default_model_id: "mimo-chat",
+      supported_model_ids: ["mimo-chat"],
+      runtime_capabilities: [
+        {
+          ...mockProviderList[2].runtime_capabilities[0],
+          model_id: "mimo-chat",
+        },
+      ],
+    };
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const path = normalizeTestPath(input);
+        const method = init?.method ?? "GET";
+
+        if (method === "GET" && path === "/api/providers") {
+          return jsonTestResponse([mimoProvider]);
+        }
+
+        return baseFetcher(input, init);
+      },
+    };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    const editor = await screen.findByRole("region", { name: "Template editor" });
+    const providerSelect = within(editor).getByLabelText("requirement_analysis provider");
+    await waitFor(() => {
+      expect(providerSelect).toHaveProperty("value", "provider-mimo");
+    });
+    expect(
+      screen.queryByText(/This template references unavailable providers/u),
+    ).toBeNull();
+
+    const input = screen.getByLabelText("当前输入");
+    fireEvent.change(input, {
+      target: { value: "Start with the configured provider." },
+    });
+
+    expect(input).toHaveProperty("disabled", false);
+    expect(screen.getByRole("button", { name: "发送" })).toHaveProperty(
+      "disabled",
+      false,
+    );
   });
 
   it("keeps Composer send-enabled for waiting clarification sessions", async () => {

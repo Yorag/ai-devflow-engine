@@ -21,7 +21,7 @@ EXPECTED_CORE_ROUTE_METHODS: dict[str, set[str]] = {
     "/api/projects/{projectId}/delivery-channel/validate": {"post"},
     "/api/projects/{projectId}/sessions": {"get", "post"},
     "/api/providers": {"get", "post"},
-    "/api/providers/{providerId}": {"get", "patch"},
+    "/api/providers/{providerId}": {"delete", "get", "patch"},
     "/api/pipeline-templates": {"get", "post"},
     "/api/pipeline-templates/{templateId}": {"delete", "get", "patch"},
     "/api/pipeline-templates/{templateId}/save-as": {"post"},

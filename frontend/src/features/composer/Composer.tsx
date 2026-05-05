@@ -21,6 +21,7 @@ type ComposerProps = {
   isBusy?: boolean;
   onBusyChange?: (busy: boolean) => void;
   request?: ApiRequestOptions;
+  startBlockedReason?: string | null;
 };
 
 export function Composer({
@@ -30,6 +31,7 @@ export function Composer({
   isBusy = false,
   onBusyChange,
   request,
+  startBlockedReason = null,
 }: ComposerProps): JSX.Element {
   const queryClient = useQueryClient();
   const [value, setValue] = useState("");
@@ -38,7 +40,10 @@ export function Composer({
   const resolved = resolveComposerState(composerState, currentStageType);
   const isSharedBusy = isBusy;
   const isActionBusy = isSubmitting || isSharedBusy || isNestedActionBusy;
-  const canSend = Boolean(session) && resolved.canSend;
+  const isStartBlocked = Boolean(
+    startBlockedReason && resolved.messageType === "new_requirement",
+  );
+  const canSend = Boolean(session) && resolved.canSend && !isStartBlocked;
 
   useEffect(() => {
     setValue("");
@@ -117,7 +122,7 @@ export function Composer({
 
   const primaryButtonDisabled =
     resolved.lifecycle === "send"
-      ? !value.trim() || isActionBusy
+      ? !value.trim() || isStartBlocked || isActionBusy
       : resolved.lifecycle === "disabled" ||
         !composerState?.bound_run_id ||
         isActionBusy;
@@ -141,7 +146,7 @@ export function Composer({
             aria-label="当前输入"
             value={value}
             onChange={(event) => setValue(event.target.value)}
-            disabled={!resolved.inputEnabled || isActionBusy}
+            disabled={!resolved.inputEnabled || isStartBlocked || isActionBusy}
             placeholder={
               resolved.mode === "waiting_clarification" ? "补充澄清信息" : "输入需求"
             }
@@ -149,7 +154,9 @@ export function Composer({
           />
         </label>
         <p className="composer__helper">
-          {getComposerHelperText(composerState, currentStageType)}
+          {isStartBlocked
+            ? startBlockedReason
+            : getComposerHelperText(composerState, currentStageType)}
         </p>
       </div>
       <div className="composer__actions">

@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -94,7 +94,10 @@ class DatabaseManager:
     def initialize_schema(self) -> None:
         _load_model_metadata()
         for role in DatabaseRole:
-            ROLE_METADATA[role].create_all(self.engine(role))
+            engine = self.engine(role)
+            ROLE_METADATA[role].create_all(engine)
+            if role is DatabaseRole.CONTROL:
+                _upgrade_control_schema(engine)
 
 
 _default_database_manager: DatabaseManager | None = None
@@ -137,3 +140,39 @@ def _load_model_metadata() -> None:
     import backend.app.db.models.graph  # noqa: F401
     import backend.app.db.models.log  # noqa: F401
     import backend.app.db.models.runtime  # noqa: F401
+
+
+def _upgrade_control_schema(engine: Engine) -> None:
+    if engine.url.get_backend_name() != "sqlite":
+        return
+
+    with engine.begin() as connection:
+        inspector = inspect(connection)
+        if "providers" not in inspector.get_table_names():
+            return
+        provider_columns = {
+            column["name"] for column in inspector.get_columns("providers")
+        }
+
+        if "is_configured" not in provider_columns:
+            connection.execute(
+                text(
+                    "ALTER TABLE providers "
+                    "ADD COLUMN is_configured BOOLEAN NOT NULL DEFAULT 1"
+                )
+            )
+            connection.execute(
+                text(
+                    "UPDATE providers "
+                    "SET is_configured = 0 "
+                    "WHERE provider_source = 'builtin' "
+                    "AND provider_id IN ('provider-volcengine', 'provider-deepseek')"
+                )
+            )
+        if "is_enabled" not in provider_columns:
+            connection.execute(
+                text(
+                    "ALTER TABLE providers "
+                    "ADD COLUMN is_enabled BOOLEAN NOT NULL DEFAULT 1"
+                )
+            )

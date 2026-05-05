@@ -70,7 +70,7 @@ describe("SettingsBoundary", () => {
     expectTextToExclude(dialog, forbiddenTerms);
   });
 
-  it("keeps provider capabilities collapsed under advanced settings and out of platform settings", async () => {
+  it("keeps provider identity fields out of user visible settings", async () => {
     const dialog = await openSettings();
 
     expect(await within(dialog).findByDisplayValue("demo_delivery")).toBeTruthy();
@@ -86,19 +86,17 @@ describe("SettingsBoundary", () => {
     const providerPanel = within(dialog).getByRole("tabpanel", {
       name: "模型提供商",
     });
-    expect(within(providerPanel).getAllByLabelText("Provider id").length).toBeGreaterThan(
-      0,
+    fireEvent.click(
+      within(providerPanel)
+        .getAllByRole("button", { name: "Configure" })[0],
     );
-    expect(within(providerPanel).getAllByLabelText("Provider source").length).toBeGreaterThan(
-      0,
-    );
-    expect(within(providerPanel).getAllByLabelText("Protocol type").length).toBeGreaterThan(
-      0,
-    );
+    expect(within(providerPanel).queryByLabelText("Provider id")).toBeNull();
+    expect(within(providerPanel).queryByLabelText("Provider source")).toBeNull();
+    expect(within(providerPanel).queryByLabelText("Protocol type")).toBeNull();
     expect(within(providerPanel).getAllByLabelText("Base URL").length).toBeGreaterThan(
       0,
     );
-    expect(within(providerPanel).getAllByLabelText("API key reference").length).toBeGreaterThan(
+    expect(within(providerPanel).getAllByLabelText("API key").length).toBeGreaterThan(
       0,
     );
     expect(within(providerPanel).getAllByLabelText("Supported models").length).toBeGreaterThan(
@@ -107,25 +105,18 @@ describe("SettingsBoundary", () => {
     expect(within(providerPanel).getAllByLabelText("Default model").length).toBeGreaterThan(
       0,
     );
-    expect(within(providerPanel).getAllByText("高级设置").length).toBeGreaterThan(
-      0,
-    );
+    fireEvent.click(within(providerPanel).getByText("高级设置"));
+    expect(within(providerPanel).getByLabelText("Context window")).toBeTruthy();
+    expect(within(providerPanel).getByLabelText("Max output tokens")).toBeTruthy();
+    expect(within(providerPanel).getByLabelText("Tool calling")).toBeTruthy();
+    expect(within(providerPanel).getByLabelText("Structured output")).toBeTruthy();
+    expect(within(providerPanel).getByLabelText("Native reasoning")).toBeTruthy();
     expect(within(providerPanel).queryByText("context_window_tokens")).toBeNull();
     expect(within(providerPanel).queryByText("max_output_tokens")).toBeNull();
     expect(within(providerPanel).queryByText("supports_tool_calling")).toBeNull();
     expect(within(providerPanel).queryByText("supports_structured_output")).toBeNull();
     expect(within(providerPanel).queryByText("supports_native_reasoning")).toBeNull();
-
-    fireEvent.click(within(providerPanel).getAllByText("高级设置")[0]);
-
-    expect(within(providerPanel).getByLabelText("model_id")).toBeTruthy();
-    expect(within(providerPanel).getByLabelText("context_window_tokens")).toBeTruthy();
-    expect(within(providerPanel).getByLabelText("max_output_tokens")).toBeTruthy();
-    expect(within(providerPanel).getByLabelText("supports_tool_calling")).toBeTruthy();
-    expect(
-      within(providerPanel).getByLabelText("supports_structured_output"),
-    ).toBeTruthy();
-    expect(within(providerPanel).getByLabelText("supports_native_reasoning")).toBeTruthy();
+    expect(within(providerPanel).queryByLabelText("model_id")).toBeNull();
 
     fireEvent.click(within(dialog).getByRole("tab", { name: "通用配置" }));
     const refreshedGeneralPanel = within(dialog).getByRole("tabpanel", {
@@ -285,9 +276,10 @@ function createBoundaryPackageRequest(): ApiRequestOptions {
               provider_source: "custom",
               protocol_type: "openai_completions_compatible",
               base_url: "https://provider.example.test/v1",
-              api_key_ref: "env:VISIBLE_PROVIDER_KEY",
+              api_key_ref: null,
               default_model_id: "visible-model",
               supported_model_ids: ["visible-model"],
+              is_enabled: true,
               runtime_capabilities: [
                 {
                   model_id: "visible-model",

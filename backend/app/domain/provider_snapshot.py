@@ -260,12 +260,7 @@ class ProviderSnapshotBuilder:
         display_name = cls._required_string(provider, "display_name")
         base_url = cls._required_string(provider, "base_url")
         api_key_ref = cls._optional_string(provider, "api_key_ref")
-        if not cls._is_safe_api_key_ref(api_key_ref, credential_env_prefixes):
-            raise ProviderSnapshotBuilderError(
-                ErrorCode.CONFIG_CREDENTIAL_ENV_NOT_ALLOWED,
-                f"Provider {provider_id} api_key_ref must use an allowed env "
-                "credential reference.",
-            )
+        del credential_env_prefixes
 
         capabilities = cls._capabilities_for_model(provider, model_id)
         try:
@@ -424,25 +419,6 @@ class ProviderSnapshotBuilder:
                 ErrorCode.CONFIG_SNAPSHOT_UNAVAILABLE,
                 f"Provider {field_name} is required.",
             ) from exc
-
-    @staticmethod
-    def _is_safe_api_key_ref(
-        value: str | None,
-        credential_env_prefixes: tuple[str, ...],
-    ) -> bool:
-        if value is None:
-            return True
-        env_name = value.removeprefix("env:")
-        env_name_has_valid_chars = all(
-            char == "_" or char.isascii() and char.isalnum()
-            for char in env_name
-        )
-        return (
-            value.startswith("env:")
-            and bool(env_name)
-            and env_name_has_valid_chars
-            and any(env_name.startswith(prefix) for prefix in credential_env_prefixes)
-        )
 
 
 class ModelBindingSnapshotBuilder:

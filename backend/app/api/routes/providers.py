@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.orm import Session
 
 from backend.app.api.error_codes import ErrorCode
@@ -32,6 +32,7 @@ def _provider_read(provider: Any, *, service: ProviderService) -> ProviderRead:
             "api_key_ref": service.api_key_ref_for_projection(provider.api_key_ref),
             "default_model_id": provider.default_model_id,
             "supported_model_ids": provider.supported_model_ids,
+            "is_enabled": provider.is_enabled,
             "runtime_capabilities": provider.runtime_capabilities,
             "created_at": provider.created_at,
             "updated_at": provider.updated_at,
@@ -150,3 +151,23 @@ def patch_provider(
     except ProviderServiceError as exc:
         _raise_api_error(exc)
     return _provider_read(provider, service=service)
+
+
+@router.delete(
+    "/providers/{providerId}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+def delete_provider(
+    providerId: str,
+    service: ProviderService = Depends(get_provider_service),
+) -> Response:
+    try:
+        service.delete_provider(providerId, trace_context=get_trace_context())
+    except ProviderServiceError as exc:
+        _raise_api_error(exc)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

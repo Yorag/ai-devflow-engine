@@ -308,25 +308,23 @@ def test_provider_snapshot_builder_rejects_missing_required_provider_with_missin
     assert "provider-missing" in error.value.message
 
 
-def test_provider_snapshot_builder_rejects_unsafe_api_key_ref_without_echoing_secret() -> None:
-    raw_secret = "sk-raw-secret-value"
-    with pytest.raises(ProviderSnapshotBuilderError) as error:
-        ProviderSnapshotBuilder.build_for_run(
-            [
-                provider_model(
-                    "provider-alpha",
-                    api_key_ref=raw_secret,
-                )
-            ],
-            run_id="run-unsafe-credential",
-            required_provider_ids=("provider-alpha",),
-            created_at=SNAPSHOT_AT,
-        )
+def test_provider_snapshot_builder_accepts_direct_api_key_for_runtime_use() -> None:
+    raw_secret = "sk-raw-provider-runtime-key"
 
-    assert error.value.error_code is ErrorCode.CONFIG_CREDENTIAL_ENV_NOT_ALLOWED
-    assert "api_key_ref" in error.value.message
-    assert raw_secret not in error.value.message
-    assert raw_secret not in str(error.value)
+    snapshots = ProviderSnapshotBuilder.build_for_run(
+        [
+            provider_model(
+                "provider-alpha",
+                api_key_ref=raw_secret,
+            )
+        ],
+        run_id="run-direct-provider-key",
+        required_provider_ids=("provider-alpha",),
+        created_at=SNAPSHOT_AT,
+    )
+
+    assert len(snapshots) == 1
+    assert snapshots[0].api_key_ref == raw_secret
 
 
 def test_builders_bind_internal_selection_to_non_default_model_on_same_provider() -> None:

@@ -103,14 +103,14 @@ def test_l62_redaction_blocks_provider_tool_and_exception_secret_shapes() -> Non
         assert "AKIA1234567890ABCDEF" not in dumped
 
 
-def test_l62_redaction_keeps_safe_reference_names_and_usage_metrics() -> None:
+def test_l62_redaction_blocks_provider_api_key_fields_and_keeps_delivery_refs() -> None:
     from backend.app.observability.redaction import RedactionPolicy
 
     policy = RedactionPolicy(max_text_length=256, excerpt_length=256)
 
     result = policy.summarize_payload(
         {
-            "api_key_ref": "env:OPENAI_API_KEY",
+            "api_key_ref": "sk-provider-secret",
             "credential_ref": "env:GITHUB_TOKEN",
             "token_count": 128,
             "token_usage": {
@@ -119,13 +119,13 @@ def test_l62_redaction_keeps_safe_reference_names_and_usage_metrics() -> None:
                 "total_tokens": 23,
             },
             "max_output_tokens": 4096,
-            "context": "api_key_ref=env:OPENAI_API_KEY token_count=128",
+            "context": "provider token_count=128",
         },
         payload_type="model_call_trace",
     )
 
-    assert result.redaction_status is RedactionStatus.NOT_REQUIRED
-    assert result.redacted_payload["api_key_ref"] == "env:OPENAI_API_KEY"
+    assert result.redaction_status is RedactionStatus.REDACTED
+    assert result.redacted_payload["api_key_ref"] == "[blocked:sensitive_field]"
     assert result.redacted_payload["credential_ref"] == "env:GITHUB_TOKEN"
     assert result.redacted_payload["token_count"] == 128
     assert result.redacted_payload["token_usage"] == {
@@ -134,4 +134,4 @@ def test_l62_redaction_keeps_safe_reference_names_and_usage_metrics() -> None:
         "total_tokens": 23,
     }
     assert result.redacted_payload["max_output_tokens"] == 4096
-    assert "api_key_ref=env:OPENAI_API_KEY" in result.excerpt
+    assert "sk-provider-secret" not in result.excerpt

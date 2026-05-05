@@ -36,8 +36,6 @@ class _SanitizedPayload:
 
 class RedactionPolicy:
     _safe_field_names = {
-        "api_key_ref",
-        "apikeyref",
         "credential_ref",
         "credentialref",
         "credential_status",
