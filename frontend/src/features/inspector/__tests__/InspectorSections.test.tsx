@@ -6,6 +6,7 @@ import { renderWithAppProviders } from "../../../app/test-utils";
 import {
   mockCodeGenerationStageNode,
   mockFeedEntriesByType,
+  mockGitDeliveryResultFeedEntry,
 } from "../../../mocks/fixtures";
 import {
   createMockApiFetcher,
@@ -167,6 +168,38 @@ describe("InspectorSections detail states", () => {
     expect(within(inspector).queryByText("feat/runtime-inspector")).toBeNull();
     expect(within(inspector).queryByText("abc1234")).toBeNull();
     expect(within(inspector).queryByText("https://example.test/pr/17")).toBeNull();
+  });
+
+  it("renders real backend-shaped git delivery result detail", async () => {
+    renderWithAppProviders(
+      <InspectorHarness
+        entries={[mockGitDeliveryResultFeedEntry]}
+        request={mockApiRequestOptions}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open git_auto_delivery details" }));
+
+    const inspector = screen.getByRole("complementary", { name: "Inspector" });
+    expect(
+      await within(inspector).findByText("Delivery Channel Snapshot"),
+    ).toBeTruthy();
+    expect(inspector.textContent).toContain("example/workspace-project");
+    expect(
+      within(inspector).getAllByText("git-delivery-process:run-delivery").length,
+    ).toBeGreaterThan(0);
+    expect(
+      within(inspector).getAllByText("feature/run-delivery").length,
+    ).toBeGreaterThan(0);
+    expect(within(inspector).getAllByText("abc123def456").length).toBeGreaterThan(
+      0,
+    );
+    expect(inspector.textContent).toContain("https://github.example/pulls/1");
+    expect(within(inspector).getByText("No Git Actions")).toBeTruthy();
+    expect(within(inspector).getByText("false")).toBeTruthy();
+    expect(
+      within(inspector).getByText("Resolved upstream review summary from stage."),
+    ).toBeTruthy();
   });
 
   it("renders the unified API error state when detail loading fails", async () => {
