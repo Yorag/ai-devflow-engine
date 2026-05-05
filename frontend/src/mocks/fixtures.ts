@@ -625,6 +625,108 @@ export const mockTestGenerationExecutionStageNode: ExecutionNodeProjection = {
   },
 };
 
+export const backendContractCodeGenerationStageNode: ExecutionNodeProjection = {
+  entry_id: "entry-backend-contract-code-generation",
+  run_id: "run-backend-contract",
+  type: "stage_node",
+  occurred_at: "2026-05-05T02:10:00.000Z",
+  stage_run_id: "stage-backend-contract-code-generation",
+  stage_type: "code_generation",
+  status: "completed",
+  attempt_index: 1,
+  started_at: "2026-05-05T02:06:00.000Z",
+  ended_at: "2026-05-05T02:10:00.000Z",
+  summary:
+    "Backend StageItemProjection payload for code generation includes tool and diff previews.",
+  items: [
+    {
+      item_id: "backend-contract-tool-call-codegen",
+      type: "tool_call",
+      occurred_at: "2026-05-05T02:07:00.000Z",
+      title: "edit_file apply implementation patch",
+      summary: "Applied the generated implementation through the workspace tool boundary.",
+      content:
+        "edit_file apply implementation patch\nTarget: backend/app/schemas/feed.py\nStatus: succeeded\nOutput summary: patch applied, 1 file changed\n\nTrace ref: tool-call-ref-codegen",
+      artifact_refs: ["tool-call-ref-codegen"],
+      metrics: {
+        duration_ms: 1260,
+      },
+    },
+    {
+      item_id: "backend-contract-diff-codegen",
+      type: "diff_preview",
+      occurred_at: "2026-05-05T02:08:00.000Z",
+      title: "ChangeSet diff preview",
+      summary: "1 file changed, 8 additions, 1 removal.",
+      content:
+        "Files:\nbackend/app/schemas/feed.py\n\n@@ StageItemProjection\n+ artifact_refs: list[str] = Field(default_factory=list)\n+ metrics: JsonObject = Field(default_factory=dict)\n\nFull diff ref: changeset-ref-codegen",
+      artifact_refs: ["changeset-ref-codegen"],
+      metrics: {
+        changed_file_count: 1,
+        added_line_count: 8,
+        removed_line_count: 1,
+      },
+    },
+  ],
+  metrics: {
+    duration_ms: 240000,
+    tool_call_count: 1,
+    changed_file_count: 1,
+    added_line_count: 8,
+    removed_line_count: 1,
+  },
+};
+
+export const backendContractTestGenerationExecutionStageNode: ExecutionNodeProjection = {
+  entry_id: "entry-backend-contract-test-generation",
+  run_id: "run-backend-contract",
+  type: "stage_node",
+  occurred_at: "2026-05-05T02:18:00.000Z",
+  stage_run_id: "stage-backend-contract-test-generation",
+  stage_type: "test_generation_execution",
+  status: "completed",
+  attempt_index: 1,
+  started_at: "2026-05-05T02:12:00.000Z",
+  ended_at: "2026-05-05T02:18:00.000Z",
+  summary:
+    "Backend MetricSet payload for test generation execution omits inapplicable metrics.",
+  items: [
+    {
+      item_id: "backend-contract-tool-call-test",
+      type: "tool_call",
+      occurred_at: "2026-05-05T02:14:00.000Z",
+      title: "bash pytest backend/tests/schemas/test_run_feed_event_schemas.py",
+      summary: "Ran backend schema contract tests for feed payload shape.",
+      content:
+        "bash pytest backend/tests/schemas/test_run_feed_event_schemas.py\nTarget: backend/tests/schemas/test_run_feed_event_schemas.py\nStatus: succeeded\nOutput summary: 1 file passed, 17 tests passed",
+      artifact_refs: ["tool-call-ref-test"],
+      metrics: {
+        duration_ms: 4100,
+      },
+    },
+    {
+      item_id: "backend-contract-result-test",
+      type: "result",
+      occurred_at: "2026-05-05T02:18:00.000Z",
+      title: "Backend contract test result",
+      summary: "Contract payload passed schema validation.",
+      content:
+        "MetricSet serialized only applicable values; skipped_test_count was omitted.",
+      artifact_refs: ["test-result-ref-contract"],
+      metrics: {},
+    },
+  ],
+  metrics: {
+    duration_ms: 360000,
+    tool_call_count: 1,
+    generated_test_count: 3,
+    executed_test_count: 17,
+    passed_test_count: 17,
+    failed_test_count: 0,
+    test_gap_count: 0,
+  },
+};
+
 export const mockCodeGenerationInspectorProjection: StageInspectorProjection = {
   ...mockStageInspectorProjection,
   stage_run_id: "stage-code-generation-running",

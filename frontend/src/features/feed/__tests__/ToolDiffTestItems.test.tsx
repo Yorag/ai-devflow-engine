@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { ExecutionNodeProjection, StageItemProjection } from "../../../api/types";
 import {
+  backendContractCodeGenerationStageNode,
+  backendContractTestGenerationExecutionStageNode,
   mockCodeGenerationStageNode,
   mockTestGenerationExecutionStageNode,
 } from "../../../mocks/fixtures";
@@ -157,5 +159,43 @@ describe("TestResultSummary", () => {
     render(<TestResultSummary metrics={{}} resultItem={null} />);
 
     expect(screen.queryByRole("region", { name: "Test result summary" })).toBeNull();
+  });
+});
+
+describe("real backend code and test generation payload contract", () => {
+  it("renders backend StageItemProjection payloads for code_generation without a mock-only field shape", () => {
+    render(
+      <StageNodeItems
+        items={backendContractCodeGenerationStageNode.items}
+        stageType={backendContractCodeGenerationStageNode.stage_type}
+        stageMetrics={backendContractCodeGenerationStageNode.metrics}
+      />,
+    );
+
+    const toolItem = screen.getByRole("listitem", { name: "Tool Call stage item" });
+    expect(within(toolItem).getByText("edit_file apply implementation patch")).toBeTruthy();
+    expect(within(toolItem).getByText("backend/app/schemas/feed.py")).toBeTruthy();
+    expect(within(toolItem).getByText("Succeeded")).toBeTruthy();
+
+    const diffItem = screen.getByRole("listitem", { name: "Diff Preview stage item" });
+    expect(within(diffItem).getByText("backend/app/schemas/feed.py")).toBeTruthy();
+    expect(within(diffItem).getByText("@@ StageItemProjection")).toBeTruthy();
+  });
+
+  it("renders backend MetricSet-style test_generation_execution payloads and hides omitted metrics", () => {
+    render(
+      <StageNodeItems
+        items={backendContractTestGenerationExecutionStageNode.items}
+        stageType={backendContractTestGenerationExecutionStageNode.stage_type}
+        stageMetrics={backendContractTestGenerationExecutionStageNode.metrics}
+      />,
+    );
+
+    const summary = screen.getByRole("region", { name: "Test result summary" });
+    expect(within(summary).getByText("Generated Tests")).toBeTruthy();
+    expect(within(summary).getByText("Executed Tests")).toBeTruthy();
+    expect(within(summary).getByText("Failed Tests")).toBeTruthy();
+    expect(within(summary).getByText("Contract payload passed schema validation.")).toBeTruthy();
+    expect(within(summary).queryByText("Skipped Tests")).toBeNull();
   });
 });
