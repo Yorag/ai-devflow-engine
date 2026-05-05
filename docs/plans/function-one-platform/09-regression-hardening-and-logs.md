@@ -104,7 +104,7 @@
 ## V6.4 OpenAPI 核心路由覆盖
 
 **计划周期**：Week 11-12
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：验证 OpenAPI 覆盖功能一全部核心 REST 接口、SSE 端点和事件载荷说明。
 **实施计划**：`docs/plans/implementation/v6.4-openapi-route-coverage.md`
 

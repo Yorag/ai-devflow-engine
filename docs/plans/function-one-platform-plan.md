@@ -309,7 +309,7 @@
 | V6.1 | 后端完整 API flow 测试 | Week 11 | [x] | 跨端 | [09](function-one-platform/09-regression-hardening-and-logs.md#v61) |
 | V6.2 | Playwright 成功路径 | Week 11 | [/] | 跨端 | [09](function-one-platform/09-regression-hardening-and-logs.md#v62) |
 | V6.3 | Playwright 人工介入路径 | Week 11 | [ ] | 跨端 | [09](function-one-platform/09-regression-hardening-and-logs.md#v63) |
-| V6.4 | OpenAPI 核心路由覆盖 | Week 11-12 | [ ] | 跨端 | [09](function-one-platform/09-regression-hardening-and-logs.md#v64) |
+| V6.4 | OpenAPI 核心路由覆盖 | Week 11-12 | [x] | 跨端 | [09](function-one-platform/09-regression-hardening-and-logs.md#v64) |
 | V6.5 | 前端 client 与 OpenAPI 一致性 | Week 11-12 | [ ] | 跨端 | [09](function-one-platform/09-regression-hardening-and-logs.md#v65) |
 | V6.6 | 前端错误态与后端错误回归 | Week 12 | [ ] | 跨端 | [09](function-one-platform/09-regression-hardening-and-logs.md#v66) |
 | V6.8 | 配置边界与运行快照回归 | Week 12 | [ ] | 跨端 | [09](function-one-platform/09-regression-hardening-and-logs.md#v68) |
