@@ -220,10 +220,15 @@ describe("FeedEntryRenderer", () => {
     expect(screen.queryByText("approval rollback")).toBeNull();
   });
 
-  it("renders rerun only for the current terminal run", () => {
+  it("keeps the system status fixture aligned to the backend retry contract", () => {
+    expect(mockFeedEntriesByType.system_status.retry_action).toBe("retry:run-failed");
+  });
+
+  it("renders rerun only for the current terminal run with a matching retry action", () => {
     const currentStatus = {
       ...mockFeedEntriesByType.system_status,
       run_id: "run-failed",
+      retry_action: "retry:run-failed",
     };
 
     const { rerender } = renderWithAppProviders(
@@ -235,6 +240,21 @@ describe("FeedEntryRenderer", () => {
     );
 
     expect(screen.getByRole("button", { name: "Retry run" })).toBeTruthy();
+
+    rerender(
+      <QueryClientProvider client={createQueryClient()}>
+        {renderFeedEntryByType(
+          { ...currentStatus, retry_action: "retry:run-previous" },
+          {
+            currentRunId: "run-failed",
+            sessionId: "session-failed",
+            projectId: "project-default",
+          },
+        )}
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Retry run" })).toBeNull();
 
     rerender(
       <QueryClientProvider client={createQueryClient()}>
