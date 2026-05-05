@@ -198,7 +198,9 @@ describe("Feed Inspector opening", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Open demo_delivery details" }));
     expect(screen.getByRole("heading", { name: "Delivery result details" })).toBeTruthy();
-    expect(await screen.findByText("delivery-record-1")).toBeTruthy();
+    expect(
+      (await within(inspector).findAllByText("delivery-record-1")).length,
+    ).toBeGreaterThan(0);
   });
 
   it("does not expose approval_result as an independent Inspector target", () => {
