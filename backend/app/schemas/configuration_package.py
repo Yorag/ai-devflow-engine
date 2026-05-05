@@ -36,6 +36,7 @@ class ConfigurationPackageProvider(_StrictBaseModel):
     api_key_ref: str | None = None
     default_model_id: str = Field(min_length=1)
     supported_model_ids: list[NonEmptyString] = Field(min_length=1)
+    is_enabled: bool = True
     runtime_capabilities: list[ConfigurationPackageModelRuntimeCapabilities] = Field(
         min_length=1
     )

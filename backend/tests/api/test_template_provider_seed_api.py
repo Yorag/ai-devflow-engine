@@ -164,7 +164,7 @@ def test_get_pipeline_template_missing_returns_unified_not_found_error(
     }
 
 
-def test_get_providers_returns_builtin_provider_records_without_secret_values(
+def test_get_providers_starts_empty_until_user_adds_provider(
     tmp_path: Path,
 ) -> None:
     app = build_seed_api_app(tmp_path)
@@ -173,24 +173,7 @@ def test_get_providers_returns_builtin_provider_records_without_secret_values(
         response = client.get("/api/providers")
 
     assert response.status_code == 200
-    body = response.json()
-    assert [provider["provider_id"] for provider in body] == [
-        "provider-volcengine",
-        "provider-deepseek",
-    ]
-    assert [provider["display_name"] for provider in body] == ["火山引擎", "DeepSeek"]
-    assert "OpenAI Completions compatible" not in {
-        provider["display_name"] for provider in body
-    }
-    for provider in body:
-        assert provider["api_key_ref"].startswith("env:")
-        assert "api_key" not in provider
-        assert "secret" not in provider
-        assert provider["default_model_id"] in provider["supported_model_ids"]
-        assert provider["runtime_capabilities"]
-        for capability in provider["runtime_capabilities"]:
-            assert capability["context_window_tokens"] == 128000
-            assert capability["max_output_tokens"] > 0
+    assert response.json() == []
 
 
 def test_template_provider_routes_are_documented_in_openapi(tmp_path: Path) -> None:

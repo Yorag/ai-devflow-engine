@@ -218,6 +218,24 @@ def seed_control_plane(
         now=lambda: NOW,
         credential_env_prefixes=settings.credential_env_prefixes,
     ).seed_builtin_providers(trace_context=build_trace())
+    providers = (
+        session.query(ProviderModel)
+        .filter(
+            ProviderModel.provider_id.in_(
+                ["provider-volcengine", "provider-deepseek"]
+            )
+        )
+        .all()
+    )
+    assert {provider.provider_id for provider in providers} == {
+        "provider-volcengine",
+        "provider-deepseek",
+    }
+    for provider in providers:
+        provider.is_configured = True
+        provider.is_enabled = True
+        session.add(provider)
+    session.commit()
     TemplateService(
         session,
         audit_service=audit,
@@ -241,6 +259,8 @@ def _build_team_provider() -> ProviderModel:
         api_key_ref="env:TEAM_PROVIDER_API_KEY",
         default_model_id="team-chat",
         supported_model_ids=["team-chat"],
+        is_configured=True,
+        is_enabled=True,
         runtime_capabilities=[
             {
                 "model_id": "team-chat",

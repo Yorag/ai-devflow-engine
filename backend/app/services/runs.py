@@ -2718,6 +2718,9 @@ class RunLifecycleService:
             if provider is None:
                 missing.append(provider_id)
                 continue
+            if not provider.is_configured or not provider.is_enabled:
+                missing.append(provider_id)
+                continue
             providers.append(provider)
         if missing:
             raise ProviderSnapshotBuilderError(

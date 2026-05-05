@@ -113,6 +113,8 @@ def test_seed_builtin_providers_creates_formal_provider_rows_and_audit(
     assert providers[0].api_key_ref == "env:VOLCENGINE_API_KEY"
     assert providers[0].default_model_id == "doubao-seed-1-6"
     assert providers[0].supported_model_ids == ["doubao-seed-1-6"]
+    assert providers[0].is_configured is False
+    assert providers[0].is_enabled is True
     assert providers[1].provider_source is ProviderSource.BUILTIN
     assert providers[1].protocol_type is ProviderProtocolType.OPENAI_COMPLETIONS_COMPATIBLE
     assert providers[1].base_url == "https://api.deepseek.com"
@@ -122,6 +124,8 @@ def test_seed_builtin_providers_creates_formal_provider_rows_and_audit(
         "deepseek-chat",
         "deepseek-reasoner",
     ]
+    assert providers[1].is_configured is False
+    assert providers[1].is_enabled is True
     assert "OpenAI Completions compatible" not in {
         provider.display_name for provider in providers
     }
@@ -207,7 +211,7 @@ def test_seed_builtin_providers_is_idempotent_and_returns_ordered_rows(
     assert len(audit.records) == 1
 
 
-def test_list_providers_returns_builtin_rows_first_then_existing_custom_rows(
+def test_list_providers_returns_configured_rows_without_unadded_builtin_rows(
     tmp_path: Path,
 ) -> None:
     from backend.app.services.providers import ProviderService
@@ -225,6 +229,8 @@ def test_list_providers_returns_builtin_rows_first_then_existing_custom_rows(
                 api_key_ref="env:CUSTOM_PROVIDER_API_KEY",
                 default_model_id="custom-chat",
                 supported_model_ids=["custom-chat"],
+                is_configured=True,
+                is_enabled=True,
                 runtime_capabilities=[
                     {
                         "model_id": "custom-chat",
@@ -247,11 +253,7 @@ def test_list_providers_returns_builtin_rows_first_then_existing_custom_rows(
             now=lambda: NOW,
         ).list_providers(trace_context=build_trace())
 
-    assert [provider.provider_id for provider in providers] == [
-        "provider-volcengine",
-        "provider-deepseek",
-        "provider-custom",
-    ]
+    assert [provider.provider_id for provider in providers] == ["provider-custom"]
 
 
 def test_provider_seed_uses_single_batch_audit_to_avoid_partial_success(

@@ -2170,6 +2170,78 @@ a {
   gap: 10px;
 }
 
+.settings-empty-state {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  border: 1px dashed oklch(82% 0.025 248);
+  border-radius: 8px;
+  background: oklch(97.8% 0.006 248);
+  padding: 16px;
+  color: var(--text-muted);
+}
+
+.settings-empty-state strong {
+  color: oklch(31% 0.025 248);
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.provider-add {
+  position: relative;
+  display: flex;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.provider-add > .workspace-button {
+  width: auto;
+}
+
+.provider-add__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 5;
+  display: grid;
+  min-width: min(260px, 100%);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 14px 32px oklch(23% 0.018 248 / 12%);
+}
+
+.provider-add__menu button {
+  min-width: 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: oklch(29% 0.024 248);
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 650;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.provider-add__menu button:last-child {
+  border-bottom: 0;
+}
+
+.provider-add__menu button:hover:not(:disabled),
+.provider-add__menu button:focus-visible {
+  background: var(--surface-muted);
+}
+
+.provider-add__menu button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
 .provider-list {
   display: grid;
   gap: 12px;
@@ -2212,6 +2284,43 @@ a {
   font-size: 0.78rem;
   line-height: 1.4;
   overflow-wrap: anywhere;
+}
+
+.provider-row__controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.provider-row__controls .workspace-button {
+  width: auto;
+}
+
+.provider-toggle {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+  color: oklch(33% 0.02 248);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.provider-toggle input {
+  width: 34px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.provider-toggle span {
+  min-width: 58px;
 }
 
 .provider-row__summary > span {
@@ -2625,5 +2734,19 @@ a {
 
   .project-summary strong {
     text-align: left;
+  }
+
+  .settings-form-grid,
+  .settings-form-grid--compact {
+    grid-template-columns: 1fr;
+  }
+
+  .provider-row__summary {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .provider-row__controls {
+    justify-content: space-between;
   }
 }

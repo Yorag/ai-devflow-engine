@@ -190,6 +190,8 @@ class ProviderService:
                 api_key_ref=seed["api_key_ref"],
                 default_model_id=seed["default_model_id"],
                 supported_model_ids=list(seed["supported_model_ids"]),
+                is_configured=False,
+                is_enabled=True,
                 runtime_capabilities=self.apply_model_capability_defaults(
                     seed["runtime_capabilities"]
                 ),
@@ -217,11 +219,11 @@ class ProviderService:
         builtin_providers = self.seed_builtin_providers(trace_context=trace_context)
         custom_providers = (
             self._session.query(ProviderModel)
-            .filter(ProviderModel.provider_id.notin_(BUILTIN_PROVIDER_IDS))
+            .filter(ProviderModel.is_configured.is_(True))
             .order_by(ProviderModel.created_at.asc(), ProviderModel.provider_id.asc())
             .all()
         )
-        return [*builtin_providers, *custom_providers]
+        return custom_providers
 
     def get_provider(
         self,
@@ -264,6 +266,8 @@ class ProviderService:
             api_key_ref=payload["api_key_ref"],
             default_model_id=payload["default_model_id"],
             supported_model_ids=payload["supported_model_ids"],
+            is_configured=True,
+            is_enabled=payload["is_enabled"],
             runtime_capabilities=payload["runtime_capabilities"],
             created_at=timestamp,
             updated_at=timestamp,
@@ -350,6 +354,7 @@ class ProviderService:
         old_api_key_ref = provider.api_key_ref
         self._apply_runtime_payload(provider, payload)
         provider.display_name = payload["display_name"]
+        provider.is_configured = True
         provider.updated_at = self._now()
         self._session.add(provider)
         self._session.flush()
@@ -403,6 +408,7 @@ class ProviderService:
 
         old_api_key_ref = provider.api_key_ref
         self._apply_runtime_payload(provider, payload)
+        provider.is_configured = True
         provider.updated_at = self._now()
         self._session.add(provider)
         self._session.flush()
@@ -585,6 +591,7 @@ class ProviderService:
             "api_key_ref": body.api_key_ref,
             "default_model_id": body.default_model_id,
             "supported_model_ids": list(body.supported_model_ids),
+            "is_enabled": body.is_enabled,
             "runtime_capabilities": self.apply_model_capability_defaults(capabilities),
         }
 
@@ -715,6 +722,7 @@ class ProviderService:
         provider.api_key_ref = payload["api_key_ref"]
         provider.default_model_id = payload["default_model_id"]
         provider.supported_model_ids = payload["supported_model_ids"]
+        provider.is_enabled = payload["is_enabled"]
         provider.runtime_capabilities = payload["runtime_capabilities"]
 
     def _record_success(
@@ -796,6 +804,7 @@ class ProviderService:
             },
             "default_model_id": provider.default_model_id,
             "supported_model_ids": list(provider.supported_model_ids),
+            "is_enabled": provider.is_enabled,
             "runtime_capability_model_ids": capability_model_ids,
             "runtime_capability_flags": capability_flags,
             "runtime_capability_count": len(provider.runtime_capabilities),

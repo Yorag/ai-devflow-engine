@@ -32,6 +32,16 @@ def build_configuration_package_api_app(tmp_path: Path):
     return app
 
 
+def configure_builtin_provider(app, provider_id: str = "provider-deepseek") -> None:
+    with app.state.database_manager.session(DatabaseRole.CONTROL) as session:
+        provider = session.get(ProviderModel, provider_id)
+        assert provider is not None
+        provider.is_configured = True
+        provider.is_enabled = True
+        session.add(provider)
+        session.commit()
+
+
 def template_payload(
     template_id: str = "template-user-package",
     *,
@@ -164,6 +174,7 @@ def test_configuration_package_export_returns_user_visible_scope_and_audits(
     app = build_configuration_package_api_app(tmp_path)
 
     with TestClient(app) as client:
+        configure_builtin_provider(app)
         create_template = client.post(
             "/api/pipeline-templates",
             json=write_template_payload(),
@@ -191,7 +202,6 @@ def test_configuration_package_export_returns_user_visible_scope_and_audits(
     assert body["package_schema_version"] == "function-one-config-v1"
     assert body["scope"] == {"scope_type": "project", "project_id": "project-default"}
     assert [provider["provider_id"] for provider in body["providers"]] == [
-        "provider-volcengine",
         "provider-deepseek",
     ]
     assert body["delivery_channels"][0]["credential_ref"] == "[blocked:credential_ref]"

@@ -32,6 +32,7 @@ def _provider_read(provider: Any, *, service: ProviderService) -> ProviderRead:
             "api_key_ref": service.api_key_ref_for_projection(provider.api_key_ref),
             "default_model_id": provider.default_model_id,
             "supported_model_ids": provider.supported_model_ids,
+            "is_enabled": provider.is_enabled,
             "runtime_capabilities": provider.runtime_capabilities,
             "created_at": provider.created_at,
             "updated_at": provider.updated_at,

@@ -234,3 +234,96 @@ def test_alembic_configuration_declares_each_database_role() -> None:
         section = config.get_section(f"alembic:{role.value}")
         assert section is not None
         assert section["sqlalchemy.url"].endswith(DATABASE_FILE_NAMES[role])
+
+
+def test_initialize_schema_upgrades_legacy_provider_flags(tmp_path: Path) -> None:
+    manager = DatabaseManager.from_environment_settings(
+        EnvironmentSettings(platform_runtime_root=tmp_path / "runtime")
+    )
+    control_engine = manager.engine(DatabaseRole.CONTROL)
+    with control_engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE providers (
+                    provider_id VARCHAR(80) NOT NULL PRIMARY KEY,
+                    display_name VARCHAR(200) NOT NULL,
+                    provider_source VARCHAR(7) NOT NULL,
+                    protocol_type VARCHAR(29) NOT NULL,
+                    base_url TEXT NOT NULL,
+                    api_key_ref VARCHAR(200),
+                    default_model_id VARCHAR(120) NOT NULL,
+                    supported_model_ids JSON NOT NULL,
+                    runtime_capabilities JSON NOT NULL,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO providers (
+                    provider_id,
+                    display_name,
+                    provider_source,
+                    protocol_type,
+                    base_url,
+                    api_key_ref,
+                    default_model_id,
+                    supported_model_ids,
+                    runtime_capabilities,
+                    created_at,
+                    updated_at
+                )
+                VALUES
+                    (
+                        'provider-deepseek',
+                        'DeepSeek',
+                        'builtin',
+                        'openai_completions_compatible',
+                        'https://api.deepseek.com',
+                        'env:DEEPSEEK_API_KEY',
+                        'deepseek-chat',
+                        '["deepseek-chat"]',
+                        '[{"model_id":"deepseek-chat"}]',
+                        '2026-01-02 03:04:05',
+                        '2026-01-02 03:04:05'
+                    ),
+                    (
+                        'provider-custom-legacy',
+                        'Legacy Custom',
+                        'custom',
+                        'openai_completions_compatible',
+                        'https://provider.example.test/v1',
+                        'env:AI_DEVFLOW_TEST_KEY',
+                        'custom-model',
+                        '["custom-model"]',
+                        '[{"model_id":"custom-model"}]',
+                        '2026-01-02 03:04:05',
+                        '2026-01-02 03:04:05'
+                    )
+                """
+            )
+        )
+
+    manager.initialize_schema()
+
+    with manager.session(DatabaseRole.CONTROL) as session:
+        columns = {column["name"] for column in inspect(session.bind).get_columns("providers")}
+        rows = session.execute(
+            text(
+                """
+                SELECT provider_id, is_configured, is_enabled
+                FROM providers
+                ORDER BY provider_id
+                """
+            )
+        ).all()
+
+    assert {"is_configured", "is_enabled"}.issubset(columns)
+    assert rows == [
+        ("provider-custom-legacy", 1, 1),
+        ("provider-deepseek", 0, 1),
+    ]

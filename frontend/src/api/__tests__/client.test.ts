@@ -308,6 +308,7 @@ describe("resource clients", () => {
         api_key_ref: "env:MODEL_KEY",
         default_model_id: "model-a",
         supported_model_ids: ["model-a"],
+        is_enabled: true,
         runtime_capabilities: [
           {
             model_id: "model-a",
@@ -328,6 +329,7 @@ describe("resource clients", () => {
         api_key_ref: null,
         default_model_id: "model-a",
         supported_model_ids: ["model-a"],
+        is_enabled: true,
         runtime_capabilities: [
           {
             model_id: "model-a",

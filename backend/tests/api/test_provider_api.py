@@ -35,6 +35,7 @@ def provider_payload(
     default_model_id: str = "team-chat",
     supported_model_ids: list[str] | None = None,
     runtime_capabilities: list[dict] | None = None,
+    is_enabled: bool = True,
 ) -> dict:
     return {
         "display_name": display_name,
@@ -44,6 +45,7 @@ def provider_payload(
         "default_model_id": default_model_id,
         "supported_model_ids": supported_model_ids or ["team-chat"],
         "runtime_capabilities": runtime_capabilities or [{"model_id": "team-chat"}],
+        "is_enabled": is_enabled,
     }
 
 
@@ -96,12 +98,14 @@ def test_provider_routes_create_get_patch_custom_and_audit(tmp_path: Path) -> No
     assert created["provider_id"].startswith("provider-custom-")
     assert created["provider_source"] == "custom"
     assert created["protocol_type"] == "openai_completions_compatible"
+    assert created["is_enabled"] is True
     assert created["runtime_capabilities"][0]["max_output_tokens"] == 4096
     assert "api_key" not in created
     assert get_response.status_code == 200
     assert get_response.json()["provider_id"] == created["provider_id"]
     assert patch_response.status_code == 200
     assert patch_response.json()["display_name"] == "Renamed team provider"
+    assert patch_response.json()["is_enabled"] is True
 
     with app.state.database_manager.session(DatabaseRole.LOG) as session:
         audits = {
@@ -161,6 +165,7 @@ def test_provider_routes_patch_builtin_runtime_config_and_preserve_identity(
     assert body["display_name"] == "DeepSeek"
     assert body["provider_source"] == "builtin"
     assert body["protocol_type"] == "openai_completions_compatible"
+    assert body["is_enabled"] is True
     assert body["base_url"] == "https://api.deepseek.example/v1"
     assert body["api_key_ref"] == "env:DEEPSEEK_ROTATED_API_KEY"
     assert body["default_model_id"] == "deepseek-reasoner"
@@ -181,6 +186,55 @@ def test_provider_routes_patch_builtin_runtime_config_and_preserve_identity(
     assert "blocked:sensitive_field" not in audit.metadata_excerpt
     assert "https://api.deepseek.example/v1" not in audit.metadata_excerpt
     assert "DeepSeek" not in audit.metadata_excerpt
+
+
+def test_provider_routes_list_only_configured_providers_and_toggle_enabled(
+    tmp_path: Path,
+) -> None:
+    app = build_provider_api_app(tmp_path)
+
+    with TestClient(app) as client:
+        initial_list = client.get("/api/providers")
+        activate_response = client.patch(
+            "/api/providers/provider-deepseek",
+            json=provider_payload(
+                display_name=None,
+                base_url="https://api.deepseek.com",
+                api_key_ref="env:DEEPSEEK_API_KEY",
+                default_model_id="deepseek-chat",
+                supported_model_ids=["deepseek-chat", "deepseek-reasoner"],
+                runtime_capabilities=[
+                    {"model_id": "deepseek-chat"},
+                    {"model_id": "deepseek-reasoner", "supports_native_reasoning": True},
+                ],
+            ),
+        )
+        configured_list = client.get("/api/providers")
+        disable_response = client.patch(
+            "/api/providers/provider-deepseek",
+            json=provider_payload(
+                display_name=None,
+                base_url="https://api.deepseek.com",
+                api_key_ref="env:DEEPSEEK_API_KEY",
+                default_model_id="deepseek-chat",
+                supported_model_ids=["deepseek-chat", "deepseek-reasoner"],
+                runtime_capabilities=[
+                    {"model_id": "deepseek-chat"},
+                    {"model_id": "deepseek-reasoner", "supports_native_reasoning": True},
+                ],
+                is_enabled=False,
+            ),
+        )
+
+    assert initial_list.status_code == 200
+    assert initial_list.json() == []
+    assert activate_response.status_code == 200
+    assert activate_response.json()["is_enabled"] is True
+    assert [provider["provider_id"] for provider in configured_list.json()] == [
+        "provider-deepseek"
+    ]
+    assert disable_response.status_code == 200
+    assert disable_response.json()["is_enabled"] is False
 
 
 def test_provider_routes_block_legacy_raw_api_key_ref_in_read_projection(
@@ -413,3 +467,5 @@ def test_provider_command_routes_are_documented_in_openapi(tmp_path: Path) -> No
     assert "provider_source" not in schemas["ProviderWriteRequest"]["properties"]
     assert "api_key" not in schemas["ProviderWriteRequest"]["properties"]
     assert "api_key" not in schemas["ProviderRead"]["properties"]
+    assert "is_enabled" in schemas["ProviderWriteRequest"]["properties"]
+    assert "is_enabled" in schemas["ProviderRead"]["properties"]

@@ -368,7 +368,9 @@ class ConfigurationPackageService:
         for index, channel in enumerate(package.delivery_channels[:1]):
             errors.extend(self._validate_delivery_channel(project, channel, index=index))
         import_provider_ids = {
-            provider.provider_id for provider in package.providers
+            provider.provider_id
+            for provider in package.providers
+            if provider.is_enabled
         }
         for index, template in enumerate(package.pipeline_templates):
             errors.extend(
@@ -598,6 +600,8 @@ class ConfigurationPackageService:
             provider_id
             for (provider_id,) in self._session.query(ProviderModel.provider_id)
             .filter(ProviderModel.provider_id.in_(provider_ids))
+            .filter(ProviderModel.is_configured.is_(True))
+            .filter(ProviderModel.is_enabled.is_(True))
             .all()
         }
         missing_provider_ids = provider_ids - existing_provider_ids - import_provider_ids
@@ -655,6 +659,7 @@ class ConfigurationPackageService:
             "api_key_ref": body.api_key_ref,
             "default_model_id": body.default_model_id,
             "supported_model_ids": list(body.supported_model_ids),
+            "is_enabled": body.is_enabled,
             "runtime_capabilities": ProviderService.apply_model_capability_defaults(
                 [
                     capability.model_dump(mode="python", exclude_none=True)
@@ -669,6 +674,7 @@ class ConfigurationPackageService:
                 display_name=provider.display_name,
                 provider_source=ProviderSource.CUSTOM,
                 protocol_type=ProviderProtocolType.OPENAI_COMPLETIONS_COMPATIBLE,
+                is_configured=True,
                 created_at=timestamp,
                 updated_at=timestamp,
                 **payload,
@@ -688,6 +694,8 @@ class ConfigurationPackageService:
             and existing.api_key_ref == payload["api_key_ref"]
             and existing.default_model_id == payload["default_model_id"]
             and existing.supported_model_ids == payload["supported_model_ids"]
+            and existing.is_configured is True
+            and existing.is_enabled == payload["is_enabled"]
             and existing.runtime_capabilities == payload["runtime_capabilities"]
         )
         provider_id_map[provider.provider_id] = existing.provider_id
@@ -698,6 +706,8 @@ class ConfigurationPackageService:
             existing.api_key_ref = payload["api_key_ref"]
             existing.default_model_id = payload["default_model_id"]
             existing.supported_model_ids = payload["supported_model_ids"]
+            existing.is_configured = True
+            existing.is_enabled = payload["is_enabled"]
             existing.runtime_capabilities = payload["runtime_capabilities"]
             existing.updated_at = timestamp
             self._session.add(existing)
@@ -812,6 +822,7 @@ class ConfigurationPackageService:
             api_key_ref=self._api_key_ref_for_export(provider.api_key_ref),
             default_model_id=provider.default_model_id,
             supported_model_ids=list(provider.supported_model_ids),
+            is_enabled=provider.is_enabled,
             runtime_capabilities=[
                 ConfigurationPackageModelRuntimeCapabilities.model_validate(item)
                 for item in provider.runtime_capabilities
@@ -864,7 +875,11 @@ class ConfigurationPackageService:
         ]
 
     def _ordered_providers(self) -> list[ProviderModel]:
-        providers = self._session.query(ProviderModel).all()
+        providers = (
+            self._session.query(ProviderModel)
+            .filter(ProviderModel.is_configured.is_(True))
+            .all()
+        )
         by_id = {provider.provider_id: provider for provider in providers}
         builtins = [
             by_id[provider_id]
@@ -1032,6 +1047,7 @@ class ConfigurationPackageService:
             api_key_ref=provider.api_key_ref,
             default_model_id=provider.default_model_id,
             supported_model_ids=list(provider.supported_model_ids),
+            is_enabled=provider.is_enabled,
             runtime_capabilities=[
                 capability.model_dump(mode="python", exclude_none=True)
                 for capability in provider.runtime_capabilities

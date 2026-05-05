@@ -174,6 +174,23 @@ def seed_project_with_channel(
     return project
 
 
+def configure_builtin_providers(
+    session: Any,
+    provider_ids: tuple[str, ...] = ("provider-volcengine", "provider-deepseek"),
+) -> None:
+    providers = (
+        session.query(ProviderModel)
+        .filter(ProviderModel.provider_id.in_(provider_ids))
+        .all()
+    )
+    assert {provider.provider_id for provider in providers} == set(provider_ids)
+    for provider in providers:
+        provider.is_configured = True
+        provider.is_enabled = True
+        session.add(provider)
+    session.commit()
+
+
 def template_write_request(
     *,
     name: str = "Team feature flow",
@@ -215,6 +232,7 @@ def seed_user_visible_config(session: Any, audit: RecordingAuditService) -> str:
     ProviderService(session, audit_service=audit, now=lambda: NOW).seed_builtin_providers(
         trace_context=build_trace()
     )
+    configure_builtin_providers(session, ("provider-deepseek",))
     TemplateService(session, audit_service=audit, now=lambda: NOW).seed_system_templates(
         trace_context=build_trace()
     )
@@ -360,7 +378,6 @@ def test_export_project_package_contains_user_visible_config_only(tmp_path: Path
     assert package.package_schema_version == "function-one-config-v1"
     assert package.scope.project_id == DEFAULT_PROJECT_ID
     assert [provider.provider_id for provider in package.providers] == [
-        "provider-volcengine",
         "provider-deepseek",
     ]
     exported_deepseek = next(
@@ -397,6 +414,34 @@ def test_export_project_package_contains_user_visible_config_only(tmp_path: Path
     assert len(log_writer.records) == 1
     assert log_writer.records[0].category is LogCategory.API
     assert log_writer.records[0].source == "services.configuration_packages"
+
+
+def test_export_project_package_omits_unconfigured_builtin_providers(
+    tmp_path: Path,
+) -> None:
+    from backend.app.services.configuration_packages import ConfigurationPackageService
+    from backend.app.services.providers import ProviderService
+
+    manager = build_manager(tmp_path)
+    audit = RecordingAuditService()
+
+    with manager.session(DatabaseRole.CONTROL) as session:
+        seed_project_with_channel(session)
+        ProviderService(session, audit_service=audit, now=lambda: NOW).seed_builtin_providers(
+            trace_context=build_trace()
+        )
+        configure_builtin_providers(session, ("provider-deepseek",))
+
+        package = ConfigurationPackageService(
+            session,
+            audit_service=audit,
+            log_writer=RecordingLogWriter(),
+            now=lambda: LATER,
+        ).export_project_package(DEFAULT_PROJECT_ID, trace_context=build_trace())
+
+    assert [provider.provider_id for provider in package.providers] == [
+        "provider-deepseek"
+    ]
 
 
 def test_import_package_updates_provider_delivery_channel_and_template_runtime_config(
@@ -457,6 +502,71 @@ def test_import_package_updates_provider_delivery_channel_and_template_runtime_c
     assert log_writer.records[0].message == "Configuration package import processed."
 
 
+def test_import_package_configures_builtin_provider_when_values_match_seed(
+    tmp_path: Path,
+) -> None:
+    from backend.app.services.configuration_packages import ConfigurationPackageService
+    from backend.app.services.providers import ProviderService
+
+    manager = build_manager(tmp_path)
+    audit = RecordingAuditService()
+    matching_seed_provider = provider_package_entry(
+        base_url="https://api.deepseek.com",
+        api_key_ref="env:DEEPSEEK_API_KEY",
+        default_model_id="deepseek-chat",
+        runtime_capabilities=[
+            {
+                "model_id": "deepseek-chat",
+                "context_window_tokens": 128000,
+                "max_output_tokens": 8192,
+                "supports_tool_calling": True,
+                "supports_structured_output": False,
+                "supports_native_reasoning": False,
+            },
+            {
+                "model_id": "deepseek-reasoner",
+                "context_window_tokens": 128000,
+                "max_output_tokens": 8192,
+                "supports_tool_calling": False,
+                "supports_structured_output": False,
+                "supports_native_reasoning": True,
+            },
+        ],
+    )
+
+    with manager.session(DatabaseRole.CONTROL) as session:
+        seed_project_with_channel(session)
+        ProviderService(session, audit_service=audit, now=lambda: NOW).seed_builtin_providers(
+            trace_context=build_trace()
+        )
+
+        result = ConfigurationPackageService(
+            session,
+            audit_service=audit,
+            log_writer=RecordingLogWriter(),
+            now=lambda: LATER,
+        ).import_project_package(
+            DEFAULT_PROJECT_ID,
+            package_request(
+                "template-unused",
+                providers=[matching_seed_provider],
+                delivery_channels=[],
+                pipeline_templates=[],
+            ),
+            trace_context=build_trace(),
+        )
+        provider = session.get(ProviderModel, "provider-deepseek")
+
+    assert result.field_errors == []
+    assert [
+        (item.object_type, item.object_id, item.action)
+        for item in result.changed_objects
+    ] == [("provider", "provider-deepseek", "updated")]
+    assert provider is not None
+    assert provider.is_configured is True
+    assert provider.is_enabled is True
+
+
 def test_import_package_preserves_new_custom_provider_ids_in_templates(
     tmp_path: Path,
 ) -> None:
@@ -515,6 +625,46 @@ def test_import_package_preserves_new_custom_provider_ids_in_templates(
     assert {
         binding["provider_id"] for binding in saved_template.stage_role_bindings
     } == {"provider-custom-package"}
+
+
+def test_import_package_rejects_template_referencing_unconfigured_provider(
+    tmp_path: Path,
+) -> None:
+    from backend.app.services.configuration_packages import ConfigurationPackageService
+    from backend.app.services.providers import ProviderService
+
+    manager = build_manager(tmp_path)
+    audit = RecordingAuditService()
+
+    with manager.session(DatabaseRole.CONTROL) as session:
+        seed_project_with_channel(session)
+        ProviderService(session, audit_service=audit, now=lambda: NOW).seed_builtin_providers(
+            trace_context=build_trace()
+        )
+
+        result = ConfigurationPackageService(
+            session,
+            audit_service=audit,
+            log_writer=RecordingLogWriter(),
+            now=lambda: LATER,
+        ).import_project_package(
+            DEFAULT_PROJECT_ID,
+            package_request(
+                "template-unconfigured-provider",
+                providers=[],
+                delivery_channels=[],
+                pipeline_templates=[
+                    template_package_entry("template-unconfigured-provider")
+                ],
+            ),
+            trace_context=build_trace(),
+        )
+
+    assert result.changed_objects == []
+    assert result.field_errors[0].field == "pipeline_templates[0].stage_role_bindings"
+    assert result.field_errors[0].message == (
+        "Pipeline template references an unknown Provider."
+    )
 
 
 def test_import_package_returns_field_errors_and_rolls_back_invalid_provider(
