@@ -26,7 +26,7 @@ from backend.app.schemas.observability import (
     LogLevel,
     RunLogQueryResponse,
 )
-from backend.app.schemas.run import RunTimelineProjection
+from backend.app.schemas.run import RunStatusSummaryProjection, RunTimelineProjection
 from backend.app.schemas.workspace import SessionWorkspaceProjection
 from backend.app.services.projections.inspector import (
     InspectorProjectionService,
@@ -178,6 +178,25 @@ def get_session_workspace(
     try:
         return service.get_session_workspace(sessionId)
     except WorkspaceProjectionServiceError as exc:
+        _raise_api_error(exc)
+
+
+@router.get(
+    "/runs/{runId}",
+    response_model=RunStatusSummaryProjection,
+    responses={
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+def get_run_summary(
+    runId: str,
+    service: TimelineProjectionService = Depends(get_timeline_projection_service),
+) -> RunStatusSummaryProjection:
+    try:
+        return service.get_run_summary(runId)
+    except TimelineProjectionServiceError as exc:
         _raise_api_error(exc)
 
 

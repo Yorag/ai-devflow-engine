@@ -15,7 +15,7 @@ from backend.app.db.models.runtime import (
 )
 from backend.app.domain.enums import RunStatus
 from backend.app.schemas.feed import ApprovalResultFeedEntry, TopLevelFeedEntry
-from backend.app.schemas.run import RunTimelineProjection
+from backend.app.schemas.run import RunStatusSummaryProjection, RunTimelineProjection
 from backend.app.services.events import DomainEvent, EventStore
 from backend.app.services.publication_boundary import (
     PublicationBoundaryService,
@@ -24,6 +24,7 @@ from backend.app.services.publication_boundary import (
 
 
 TOP_LEVEL_FEED_ENTRY_ADAPTER = TypeAdapter(TopLevelFeedEntry)
+RUN_SUMMARY_NOT_FOUND_MESSAGE = "Run summary was not found."
 RUN_TIMELINE_NOT_FOUND_MESSAGE = "Run timeline was not found."
 
 
@@ -78,6 +79,37 @@ class TimelineProjectionService:
             entries=self.build_timeline_entries(run.run_id, run.session_id),
         )
 
+    def get_run_summary(self, run_id: str) -> RunStatusSummaryProjection:
+        try:
+            self._publication_boundary.assert_run_visible(
+                run_id=run_id,
+                not_found_message=RUN_SUMMARY_NOT_FOUND_MESSAGE,
+            )
+        except PublicationBoundaryServiceError:
+            self._raise_not_found(RUN_SUMMARY_NOT_FOUND_MESSAGE)
+        run = self._get_visible_run(
+            run_id,
+            not_found_message=RUN_SUMMARY_NOT_FOUND_MESSAGE,
+        )
+        session = self._get_visible_session_for_run(
+            run,
+            not_found_message=RUN_SUMMARY_NOT_FOUND_MESSAGE,
+        )
+        return RunStatusSummaryProjection(
+            run_id=run.run_id,
+            attempt_index=run.attempt_index,
+            status=run.status,
+            trigger_source=run.trigger_source,
+            started_at=self._projection_datetime(run.started_at),
+            ended_at=self._projection_datetime(run.ended_at),
+            current_stage_type=self._stage_type_for_run_summary(
+                run,
+                session=session,
+            ),
+            is_active=self._is_active_run(run, session=session),
+            current_stage_run_id=self._current_stage_run_id_for_summary(run),
+        )
+
     def build_timeline_entries(
         self,
         run_id: str,
@@ -98,22 +130,35 @@ class TimelineProjectionService:
             entries = self._upsert_feed_entry(entries, entry)
         return sorted(entries, key=lambda entry: entry.occurred_at)
 
-    def _get_visible_run(self, run_id: str) -> PipelineRunModel:
+    def _get_visible_run(
+        self,
+        run_id: str,
+        *,
+        not_found_message: str = RUN_TIMELINE_NOT_FOUND_MESSAGE,
+    ) -> PipelineRunModel:
         run = self._runtime_session.get(PipelineRunModel, run_id)
         if run is None:
-            self._raise_not_found()
-        session = self._get_visible_session_for_run(run)
+            self._raise_not_found(not_found_message)
+        session = self._get_visible_session_for_run(
+            run,
+            not_found_message=not_found_message,
+        )
         project = self._control_session.get(ProjectModel, run.project_id)
         if project is None or not project.is_visible:
-            self._raise_not_found()
+            self._raise_not_found(not_found_message)
         if session.project_id != project.project_id:
-            self._raise_not_found()
+            self._raise_not_found(not_found_message)
         return run
 
-    def _get_visible_session_for_run(self, run: PipelineRunModel) -> SessionModel:
+    def _get_visible_session_for_run(
+        self,
+        run: PipelineRunModel,
+        *,
+        not_found_message: str = RUN_TIMELINE_NOT_FOUND_MESSAGE,
+    ) -> SessionModel:
         session = self._control_session.get(SessionModel, run.session_id)
         if session is None or not session.is_visible:
-            self._raise_not_found()
+            self._raise_not_found(not_found_message)
         return session
 
     def _entry_from_event(self, event: DomainEvent) -> TopLevelFeedEntry | None:
@@ -245,6 +290,22 @@ class TimelineProjectionService:
             return session.latest_stage_type
         return None
 
+    def _current_stage_run_id_for_summary(self, run: PipelineRunModel) -> str | None:
+        if run.current_stage_run_id is None:
+            return None
+        stage = self._runtime_session.get(StageRunModel, run.current_stage_run_id)
+        if stage is None or stage.run_id != run.run_id:
+            return None
+        return stage.stage_run_id
+
+    @staticmethod
+    def _is_active_run(run: PipelineRunModel, *, session: SessionModel) -> bool:
+        return run.run_id == session.current_run_id and run.status not in {
+            RunStatus.COMPLETED,
+            RunStatus.FAILED,
+            RunStatus.TERMINATED,
+        }
+
     @staticmethod
     def _projection_datetime(value: datetime | None) -> datetime | None:
         if value is None or value.tzinfo is not None:
@@ -252,10 +313,10 @@ class TimelineProjectionService:
         return value.replace(tzinfo=UTC)
 
     @staticmethod
-    def _raise_not_found() -> None:
+    def _raise_not_found(message: str = RUN_TIMELINE_NOT_FOUND_MESSAGE) -> None:
         raise TimelineProjectionServiceError(
             ErrorCode.NOT_FOUND,
-            RUN_TIMELINE_NOT_FOUND_MESSAGE,
+            message,
             404,
         )
 

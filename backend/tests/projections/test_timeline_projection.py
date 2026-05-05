@@ -394,6 +394,110 @@ def test_timeline_projection_does_not_leak_current_stage_from_another_run(
     assert timeline.current_stage_type is None
 
 
+def test_run_summary_projection_returns_domain_summary_without_raw_graph_details(
+    tmp_path,
+) -> None:
+    from backend.app.services.projections.timeline import TimelineProjectionService
+
+    manager = _manager(tmp_path)
+    _seed_workspace(manager)
+
+    with (
+        manager.session(DatabaseRole.CONTROL) as control_session,
+        manager.session(DatabaseRole.RUNTIME) as runtime_session,
+        manager.session(DatabaseRole.EVENT) as event_session,
+    ):
+        summary = TimelineProjectionService(
+            control_session,
+            runtime_session,
+            event_session,
+        ).get_run_summary("run-active")
+
+    dumped = summary.model_dump(mode="json")
+    assert dumped == {
+        "run_id": "run-active",
+        "attempt_index": 2,
+        "status": "waiting_tool_confirmation",
+        "trigger_source": "retry",
+        "started_at": "2026-05-01T09:01:00Z",
+        "ended_at": None,
+        "current_stage_type": "code_generation",
+        "is_active": True,
+        "current_stage_run_id": "stage-active",
+    }
+    assert "graph_thread_ref" not in dumped
+    assert "graph_thread_id" not in dumped
+    assert "workspace_ref" not in dumped
+    assert "checkpoint" not in str(dumped)
+
+
+def test_run_summary_projection_rejects_hidden_or_missing_run(tmp_path) -> None:
+    from backend.app.services.projections.timeline import (
+        TimelineProjectionService,
+        TimelineProjectionServiceError,
+    )
+
+    manager = _manager(tmp_path)
+    _seed_workspace(manager)
+    with manager.session(DatabaseRole.CONTROL) as session:
+        removed = session.get(SessionModel, "session-1")
+        assert removed is not None
+        removed.is_visible = False
+        removed.visibility_removed_at = NOW
+        session.add(removed)
+        session.commit()
+
+    with (
+        manager.session(DatabaseRole.CONTROL) as control_session,
+        manager.session(DatabaseRole.RUNTIME) as runtime_session,
+        manager.session(DatabaseRole.EVENT) as event_session,
+    ):
+        service = TimelineProjectionService(
+            control_session,
+            runtime_session,
+            event_session,
+        )
+        with pytest.raises(TimelineProjectionServiceError) as hidden_exc:
+            service.get_run_summary("run-active")
+        with pytest.raises(TimelineProjectionServiceError) as missing_exc:
+            service.get_run_summary("run-missing")
+
+    assert hidden_exc.value.status_code == 404
+    assert hidden_exc.value.message == "Run summary was not found."
+    assert missing_exc.value.status_code == 404
+    assert missing_exc.value.message == "Run summary was not found."
+
+
+def test_run_summary_projection_does_not_leak_current_stage_id_from_another_run(
+    tmp_path,
+) -> None:
+    from backend.app.db.models.runtime import PipelineRunModel
+    from backend.app.services.projections.timeline import TimelineProjectionService
+
+    manager = _manager(tmp_path)
+    _seed_workspace(manager)
+    with manager.session(DatabaseRole.RUNTIME) as session:
+        run = session.get(PipelineRunModel, "run-active")
+        assert run is not None
+        run.current_stage_run_id = "stage-old"
+        session.add(run)
+        session.commit()
+
+    with (
+        manager.session(DatabaseRole.CONTROL) as control_session,
+        manager.session(DatabaseRole.RUNTIME) as runtime_session,
+        manager.session(DatabaseRole.EVENT) as event_session,
+    ):
+        summary = TimelineProjectionService(
+            control_session,
+            runtime_session,
+            event_session,
+        ).get_run_summary("run-active")
+
+    assert summary.current_stage_type is None
+    assert summary.current_stage_run_id is None
+
+
 def test_timeline_projection_uses_session_latest_stage_for_active_run_without_stage_row(
     tmp_path,
 ) -> None:

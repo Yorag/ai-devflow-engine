@@ -163,7 +163,7 @@
 | [00 项目骨架与执行规则](function-one-platform/00-project-skeleton-and-execution.md) | 目标目录骨架与 B0.0 子任务细则 | B0.0 |
 | [01 工程基线与契约层](function-one-platform/01-foundation-and-contracts.md) | 工程基线、Schema 契约、数据库职责拆分、Project/Session 历史可见性、EnvironmentSettings、PlatformRuntimeSettings、Provider 调用策略快照、PromptAsset Schema、ToolConfirmation Schema、工具风险枚举、运行数据目录、log.db、TraceContext | B0.1-B0.3, F0.1, C1.1-C1.10, C1.10a, L0.1, L1.1-L1.2 |
 | [02 控制面与工作台外壳](function-one-platform/02-control-plane-and-workspace-shell.md) | Project、Session、历史管理、Template、Provider、DeliveryChannel、ConfigurationPackage、PlatformRuntimeSettings 管理服务、控制面日志审计、Shell、设置、模板空态 | C2.1-C2.8, C2.7a, C2.9a-C2.9b, L2.1-L2.4, F2.1-F2.6 |
-| [03 Run 主链、投影与叙事流](function-one-platform/03-run-projection-and-feed.md) | PipelineRun、模板快照、Provider/模型绑定快照、运行上限快照、GraphDefinition、首个 GraphThread、首个 workspace_ref、StageArtifact、Workspace Projection、ToolConfirmationInspectorProjection、SSE、Run/Stage 日志轻查询、Feed、Provider 调用状态、Inspector | R3.1-R3.4, R3.4a-R3.4b, R3.5-R3.7, Q3.1-Q3.4b, E3.1-E3.2, L3.1, F3.1-F3.7 |
+| [03 Run 主链、投影与叙事流](function-one-platform/03-run-projection-and-feed.md) | PipelineRun、模板快照、Provider/模型绑定快照、运行上限快照、GraphDefinition、首个 GraphThread、首个 workspace_ref、StageArtifact、Workspace Projection、ToolConfirmationInspectorProjection、SSE、Run/Stage 日志轻查询、Feed、Provider 调用状态、Inspector | R3.1-R3.4, R3.4a-R3.4b, R3.5-R3.7, Q3.1-Q3.4b, Q3.2a, E3.1-E3.2, L3.1, F3.1-F3.7 |
 | [04 人工介入、工具确认与运行控制](function-one-platform/04-human-loop-and-runtime.md) | Runtime orchestration boundary、澄清、审批、工具确认、暂停恢复终止、交付快照、命令审计失败语义、审计查询、Composer、Approval Block、Tool Confirmation Block、重新尝试 UI | A4.0, L4.1-L4.2, H4.1-H4.7, H4.4a-H4.4b, D4.0, F4.1-F4.4, F4.3a |
 | [05 deterministic runtime 与 demo_delivery](function-one-platform/05-deterministic-runtime-and-demo-delivery.md) | RuntimeEngine、`deterministic test runtime`、六阶段确定性推进、demo_delivery、DeliveryRecord、DeliveryResultDetailProjection | A4.1-A4.4, D4.1-D4.3 |
 | [06 LangGraph、Provider、Context 与 Stage Agent Runtime](function-one-platform/06-langgraph-provider-context-stage-agent.md) | LangGraph、Provider、Provider retry/circuit breaker、PromptValidation、PromptRegistry、PromptRenderer、ContextEnvelope / ContextManifest、AgentDecision、Stage Agent Runtime、自动回归 | A4.5-A4.11, A4.8a-A4.8d, A4.9a-A4.9e |
@@ -233,6 +233,7 @@
 | R3.7 | StageArtifact 存储 | Week 4-5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#r37) |
 | Q3.1 | SessionWorkspaceProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q31) |
 | Q3.2 | RunTimelineProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q32) |
+| Q3.2a | Run 状态摘要查询 API | Week 5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q32a) |
 | Q3.3 | StageInspectorProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q33) |
 | Q3.4 | ControlItemInspectorProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q34) |
 | Q3.4a | ToolConfirmationInspectorProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q34a) |
