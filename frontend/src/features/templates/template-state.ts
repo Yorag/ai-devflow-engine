@@ -3,6 +3,7 @@ import { useLayoutEffect, useState } from "react";
 import type {
   PipelineTemplateRead,
   PipelineTemplateWriteRequest,
+  ProviderRead,
   StageRoleBinding,
 } from "../../api/types";
 
@@ -103,7 +104,16 @@ export function isTemplateDirty(
 export function resolveTemplateStartGuard(
   template: PipelineTemplateRead,
   dirty: boolean,
+  unavailableProviderIds: string[] = [],
 ): TemplateStartGuard {
+  if (unavailableProviderIds.length > 0) {
+    return {
+      canStart: false,
+      reason: unavailableProviderMessage(unavailableProviderIds),
+      actions: [],
+    };
+  }
+
   if (!dirty) {
     return { canStart: true, reason: null, actions: [] };
   }
@@ -129,6 +139,78 @@ export function cloneStageRoleBindings(
   bindings: StageRoleBinding[],
 ): StageRoleBinding[] {
   return bindings.map((binding) => ({ ...binding }));
+}
+
+export function availableTemplateProviders(providers: ProviderRead[]): ProviderRead[] {
+  return providers.filter((provider) => provider.is_enabled);
+}
+
+export function resolveTemplateProviderBindings(
+  template: PipelineTemplateRead,
+  providers: ProviderRead[],
+): PipelineTemplateRead {
+  const resolvedDraft = resolveTemplateDraftProviders(
+    createTemplateDraft(template),
+    providers,
+  );
+
+  if (serializeDraft(resolvedDraft) === serializeDraft(createTemplateDraft(template))) {
+    return template;
+  }
+
+  return {
+    ...template,
+    stage_role_bindings: resolvedDraft.stage_role_bindings,
+  };
+}
+
+export function resolveTemplateDraftProviders(
+  draft: TemplateDraftState,
+  providers: ProviderRead[],
+): TemplateDraftState {
+  const providerOptions = availableTemplateProviders(providers);
+  const availableProviderIds = new Set(
+    providerOptions.map((provider) => provider.provider_id),
+  );
+  const fallbackProviderId =
+    draft.stage_role_bindings.find((binding) =>
+      availableProviderIds.has(binding.provider_id),
+    )?.provider_id ?? providerOptions[0]?.provider_id;
+
+  if (!fallbackProviderId) {
+    return draft;
+  }
+
+  let changed = false;
+  const stage_role_bindings = draft.stage_role_bindings.map((binding) => {
+    if (availableProviderIds.has(binding.provider_id)) {
+      return binding;
+    }
+    changed = true;
+    return { ...binding, provider_id: fallbackProviderId };
+  });
+
+  return changed ? { ...draft, stage_role_bindings } : draft;
+}
+
+export function unavailableTemplateProviderIds(
+  draft: TemplateDraftState,
+  providers: ProviderRead[],
+): string[] {
+  const availableProviderIds = new Set(
+    availableTemplateProviders(providers).map((provider) => provider.provider_id),
+  );
+  return Array.from(
+    new Set(
+      draft.stage_role_bindings
+        .map((binding) => binding.provider_id)
+        .filter((providerId) => !availableProviderIds.has(providerId)),
+    ),
+  );
+}
+
+export function unavailableProviderMessage(providerIds: string[]): string {
+  return `This template references unavailable providers: ${providerIds.join(", ")}.`;
 }
 
 function createDraftRecord(

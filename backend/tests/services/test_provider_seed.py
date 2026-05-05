@@ -110,7 +110,7 @@ def test_seed_builtin_providers_creates_formal_provider_rows_and_audit(
     assert providers[0].provider_source is ProviderSource.BUILTIN
     assert providers[0].protocol_type is ProviderProtocolType.VOLCENGINE_NATIVE
     assert providers[0].base_url == "https://ark.cn-beijing.volces.com/api/v3"
-    assert providers[0].api_key_ref == "env:VOLCENGINE_API_KEY"
+    assert providers[0].api_key_ref is None
     assert providers[0].default_model_id == "doubao-seed-1-6"
     assert providers[0].supported_model_ids == ["doubao-seed-1-6"]
     assert providers[0].is_configured is False
@@ -118,7 +118,7 @@ def test_seed_builtin_providers_creates_formal_provider_rows_and_audit(
     assert providers[1].provider_source is ProviderSource.BUILTIN
     assert providers[1].protocol_type is ProviderProtocolType.OPENAI_COMPLETIONS_COMPATIBLE
     assert providers[1].base_url == "https://api.deepseek.com"
-    assert providers[1].api_key_ref == "env:DEEPSEEK_API_KEY"
+    assert providers[1].api_key_ref is None
     assert providers[1].default_model_id == "deepseek-chat"
     assert providers[1].supported_model_ids == [
         "deepseek-chat",

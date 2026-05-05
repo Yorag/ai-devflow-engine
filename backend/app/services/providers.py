@@ -24,11 +24,8 @@ API_ACTOR_ID = "api-user"
 
 PROVIDER_NOT_FOUND_MESSAGE = "Provider was not found."
 CUSTOM_DISPLAY_NAME_REQUIRED_MESSAGE = "Custom Provider display_name is required."
-CUSTOM_PROTOCOL_MISMATCH_MESSAGE = (
-    "Custom Provider protocol_type must be openai_completions_compatible."
-)
-BUILTIN_IDENTITY_CHANGE_MESSAGE = (
-    "Built-in Provider identity fields cannot be modified."
+BUILTIN_PROTOCOL_CHANGE_MESSAGE = (
+    "Built-in Provider protocol_type cannot be modified."
 )
 INVALID_MODEL_BINDING_MESSAGE = (
     "Provider default_model_id must be in supported_model_ids."
@@ -42,10 +39,8 @@ EXTRA_MODEL_CAPABILITY_MESSAGE = (
 DUPLICATE_MODEL_CAPABILITY_MESSAGE = (
     "Provider runtime_capabilities must not contain duplicate model ids."
 )
-INVALID_CREDENTIAL_REFERENCE_MESSAGE = (
-    "Provider api_key_ref must use an env: credential reference."
-)
-BLOCKED_API_KEY_REF = "[blocked:api_key_ref]"
+MASKED_API_KEY_REF = "[configured:api_key]"
+BLOCKED_API_KEY_REF = MASKED_API_KEY_REF
 
 BUILTIN_PROVIDER_SEEDS: tuple[dict[str, Any], ...] = (
     {
@@ -54,7 +49,7 @@ BUILTIN_PROVIDER_SEEDS: tuple[dict[str, Any], ...] = (
         "provider_source": ProviderSource.BUILTIN,
         "protocol_type": ProviderProtocolType.VOLCENGINE_NATIVE,
         "base_url": "https://ark.cn-beijing.volces.com/api/v3",
-        "api_key_ref": "env:VOLCENGINE_API_KEY",
+        "api_key_ref": None,
         "default_model_id": "doubao-seed-1-6",
         "supported_model_ids": ["doubao-seed-1-6"],
         "runtime_capabilities": [
@@ -74,7 +69,7 @@ BUILTIN_PROVIDER_SEEDS: tuple[dict[str, Any], ...] = (
         "provider_source": ProviderSource.BUILTIN,
         "protocol_type": ProviderProtocolType.OPENAI_COMPLETIONS_COMPATIBLE,
         "base_url": "https://api.deepseek.com",
-        "api_key_ref": "env:DEEPSEEK_API_KEY",
+        "api_key_ref": None,
         "default_model_id": "deepseek-chat",
         "supported_model_ids": ["deepseek-chat", "deepseek-reasoner"],
         "runtime_capabilities": [
@@ -235,7 +230,7 @@ class ProviderService:
         return self._session.get(ProviderModel, provider_id)
 
     def api_key_ref_for_projection(self, value: str | None) -> str | None:
-        return self._audit_api_key_ref(value)
+        return self._mask_api_key_ref(value)
 
     def create_custom_provider(
         self,
@@ -261,7 +256,7 @@ class ProviderService:
             provider_id=self._new_custom_provider_id(),
             display_name=payload["display_name"],
             provider_source=ProviderSource.CUSTOM,
-            protocol_type=ProviderProtocolType.OPENAI_COMPLETIONS_COMPATIBLE,
+            protocol_type=payload["protocol_type"],
             base_url=payload["base_url"],
             api_key_ref=payload["api_key_ref"],
             default_model_id=payload["default_model_id"],
@@ -408,6 +403,7 @@ class ProviderService:
 
         old_api_key_ref = provider.api_key_ref
         self._apply_runtime_payload(provider, payload)
+        provider.display_name = payload["display_name"]
         provider.is_configured = True
         provider.updated_at = self._now()
         self._session.add(provider)
@@ -424,6 +420,57 @@ class ProviderService:
             self._session.rollback()
             raise
         return provider
+
+    def delete_provider(
+        self,
+        provider_id: str,
+        *,
+        trace_context: TraceContext,
+    ) -> None:
+        provider = self.get_provider(provider_id, trace_context=trace_context)
+        if provider is None:
+            self._record_rejected(
+                action="provider.delete.rejected",
+                target_id=provider_id,
+                reason=PROVIDER_NOT_FOUND_MESSAGE,
+                metadata={"provider_id": provider_id},
+                trace_context=trace_context,
+            )
+            raise ProviderServiceError(
+                ErrorCode.NOT_FOUND,
+                PROVIDER_NOT_FOUND_MESSAGE,
+                404,
+            )
+
+        old_api_key_ref = provider.api_key_ref
+        action = (
+            "provider.deconfigure_builtin"
+            if provider.provider_source is ProviderSource.BUILTIN
+            else "provider.delete_custom"
+        )
+        if provider.provider_source is ProviderSource.BUILTIN:
+            provider.is_configured = False
+            provider.is_enabled = False
+            provider.updated_at = self._now()
+            self._session.add(provider)
+            self._session.flush()
+            audit_provider = provider
+        else:
+            audit_provider = provider
+            self._session.delete(provider)
+            self._session.flush()
+
+        try:
+            self._record_success(
+                action=action,
+                provider=audit_provider,
+                old_api_key_ref=old_api_key_ref,
+                trace_context=trace_context,
+            )
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
 
     def _ordered_builtin_providers(self) -> list[ProviderModel]:
         providers = (
@@ -462,7 +509,7 @@ class ProviderService:
                     for provider in providers
                 ],
                 "api_key_refs": [
-                    provider.api_key_ref
+                    self._mask_api_key_ref(provider.api_key_ref)
                     for provider in providers
                 ],
                 "default_model_ids": [
@@ -510,11 +557,9 @@ class ProviderService:
                 trace_context=trace_context,
             )
 
-        self._validate_api_key_ref(
+        api_key_ref = self._api_key_ref_for_write(
             body.api_key_ref,
-            rejected_action=rejected_action,
-            target_id=target_id,
-            trace_context=trace_context,
+            existing_provider=existing_provider,
         )
         if body.default_model_id not in body.supported_model_ids:
             self._raise_rejected_config(
@@ -585,10 +630,20 @@ class ProviderService:
             if body.display_name is not None
             else existing_provider.display_name if existing_provider is not None else None
         )
+        protocol_type = (
+            body.protocol_type
+            if body.protocol_type is not None
+            else (
+                existing_provider.protocol_type
+                if existing_provider is not None
+                else ProviderProtocolType.OPENAI_COMPLETIONS_COMPATIBLE
+            )
+        )
         return {
             "display_name": display_name,
+            "protocol_type": protocol_type,
             "base_url": body.base_url,
-            "api_key_ref": body.api_key_ref,
+            "api_key_ref": api_key_ref,
             "default_model_id": body.default_model_id,
             "supported_model_ids": list(body.supported_model_ids),
             "is_enabled": body.is_enabled,
@@ -612,23 +667,6 @@ class ProviderService:
                 metadata={"display_name_status": "missing"},
                 trace_context=trace_context,
             )
-        if (
-            body.protocol_type is not None
-            and body.protocol_type
-            is not ProviderProtocolType.OPENAI_COMPLETIONS_COMPATIBLE
-        ):
-            self._raise_rejected_config(
-                action=rejected_action,
-                target_id=target_id,
-                message=CUSTOM_PROTOCOL_MISMATCH_MESSAGE,
-                metadata={
-                    "submitted_protocol_type": body.protocol_type.value,
-                    "required_protocol_type": (
-                        ProviderProtocolType.OPENAI_COMPLETIONS_COMPATIBLE.value
-                    ),
-                },
-                trace_context=trace_context,
-            )
 
     def _validate_builtin_identity(
         self,
@@ -641,52 +679,42 @@ class ProviderService:
     ) -> None:
         if existing_provider is None:
             return
-        display_changed = (
-            body.display_name is not None
-            and body.display_name != existing_provider.display_name
-        )
         protocol_changed = (
             body.protocol_type is not None
             and body.protocol_type is not existing_provider.protocol_type
         )
-        if display_changed or protocol_changed:
+        if protocol_changed:
             self._record_rejected(
                 action=rejected_action,
                 target_id=target_id,
-                reason=BUILTIN_IDENTITY_CHANGE_MESSAGE,
+                reason=BUILTIN_PROTOCOL_CHANGE_MESSAGE,
                 metadata={
                     "provider_id": existing_provider.provider_id,
                     "provider_source": existing_provider.provider_source.value,
-                    "display_name_changed": display_changed,
                     "protocol_type_changed": protocol_changed,
                 },
                 trace_context=trace_context,
             )
             raise ProviderServiceError(
                 ErrorCode.VALIDATION_ERROR,
-                BUILTIN_IDENTITY_CHANGE_MESSAGE,
+                BUILTIN_PROTOCOL_CHANGE_MESSAGE,
                 409,
             )
 
-    def _validate_api_key_ref(
-        self,
+    @staticmethod
+    def _api_key_ref_for_write(
         value: str | None,
         *,
-        rejected_action: str,
-        target_id: str,
-        trace_context: TraceContext,
-    ) -> None:
+        existing_provider: ProviderModel | None,
+    ) -> str | None:
         if value is None:
-            return
-        if self._is_safe_api_key_ref(value):
-            return
-        self._raise_rejected_config(
-            action=rejected_action,
-            target_id=target_id,
-            message=INVALID_CREDENTIAL_REFERENCE_MESSAGE,
-            metadata={"api_key_ref_status": "invalid_reference"},
-            trace_context=trace_context,
-        )
+            return None
+        stripped = value.strip()
+        if not stripped:
+            return None
+        if stripped == MASKED_API_KEY_REF:
+            return existing_provider.api_key_ref if existing_provider is not None else None
+        return stripped
 
     def _raise_rejected_config(
         self,
@@ -719,6 +747,7 @@ class ProviderService:
         payload: dict[str, Any],
     ) -> None:
         provider.base_url = payload["base_url"]
+        provider.protocol_type = payload["protocol_type"]
         provider.api_key_ref = payload["api_key_ref"]
         provider.default_model_id = payload["default_model_id"]
         provider.supported_model_ids = payload["supported_model_ids"]
@@ -796,11 +825,11 @@ class ProviderService:
             "provider_id": provider.provider_id,
             "provider_source": provider.provider_source.value,
             "protocol_type": provider.protocol_type.value,
-            "api_key_ref": self._audit_api_key_ref(provider.api_key_ref),
+            "api_key_ref": self._mask_api_key_ref(provider.api_key_ref),
             "ref_transition": {
                 "changed": old_api_key_ref != provider.api_key_ref,
-                "before_ref": self._audit_api_key_ref(old_api_key_ref),
-                "after_ref": self._audit_api_key_ref(provider.api_key_ref),
+                "before_ref": self._mask_api_key_ref(old_api_key_ref),
+                "after_ref": self._mask_api_key_ref(provider.api_key_ref),
             },
             "default_model_id": provider.default_model_id,
             "supported_model_ids": list(provider.supported_model_ids),
@@ -810,27 +839,11 @@ class ProviderService:
             "runtime_capability_count": len(provider.runtime_capabilities),
         }
 
-    def _is_safe_api_key_ref(self, value: str) -> bool:
-        env_name = value.removeprefix("env:")
-        env_name_has_valid_chars = all(
-            char == "_" or char.isascii() and char.isalnum() for char in env_name
-        )
-        env_name_has_allowed_prefix = any(
-            env_name.startswith(prefix) for prefix in self._credential_env_prefixes
-        )
-        return (
-            value.startswith("env:")
-            and bool(env_name)
-            and env_name_has_valid_chars
-            and env_name_has_allowed_prefix
-        )
-
-    def _audit_api_key_ref(self, value: str | None) -> str | None:
+    @staticmethod
+    def _mask_api_key_ref(value: str | None) -> str | None:
         if value is None:
             return None
-        if self._is_safe_api_key_ref(value):
-            return value
-        return BLOCKED_API_KEY_REF
+        return MASKED_API_KEY_REF
 
 
 __all__ = [
@@ -840,6 +853,7 @@ __all__ = [
     "BUILTIN_PROVIDER_SEEDS",
     "DEFAULT_CONTEXT_WINDOW_TOKENS",
     "DEFAULT_MAX_OUTPUT_TOKENS",
+    "MASKED_API_KEY_REF",
     "ProviderService",
     "ProviderServiceError",
 ]

@@ -239,7 +239,7 @@ describe("SettingsModal", () => {
       provider_source: "builtin",
       protocol_type: "openai_completions_compatible",
       base_url: "https://api.deepseek.com",
-      api_key_ref: "env:DEEPSEEK_API_KEY",
+      api_key_ref: "[configured:api_key]",
       default_model_id: "deepseek-chat",
       supported_model_ids: ["deepseek-chat", "deepseek-reasoner"],
       runtime_capabilities: [
@@ -331,7 +331,7 @@ describe("SettingsModal", () => {
     });
     expect(calls[0].body).toMatchObject({
       base_url: "https://api.deepseek.com",
-      api_key_ref: "env:DEEPSEEK_API_KEY",
+      api_key_ref: null,
       default_model_id: "deepseek-chat",
       supported_model_ids: ["deepseek-chat", "deepseek-reasoner"],
       is_enabled: true,
@@ -417,7 +417,7 @@ describe("SettingsModal", () => {
       target: { value: "https://gateway.example.test/v1" },
     });
     fireEvent.change(within(card).getByLabelText("API key"), {
-      target: { value: "env:OPENAI_TEAM_API_KEY" },
+      target: { value: "sk-openai-team-api-key" },
     });
     fireEvent.change(within(card).getByLabelText("Supported models"), {
       target: { value: "gpt-4.1, gpt-4.1-mini" },
@@ -439,7 +439,7 @@ describe("SettingsModal", () => {
     });
     fireEvent.click(within(miniCapabilities).getByLabelText("Tool calling"));
     fireEvent.click(within(miniCapabilities).getByLabelText("Native reasoning"));
-    fireEvent.click(within(card).getByRole("button", { name: "Save provider" }));
+    fireEvent.click(within(card).getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
       expect(calls).toHaveLength(1);
@@ -451,7 +451,7 @@ describe("SettingsModal", () => {
     expect(calls[0].body).toMatchObject({
       display_name: "OpenAI Completions",
       base_url: "https://gateway.example.test/v1",
-      api_key_ref: "env:OPENAI_TEAM_API_KEY",
+      api_key_ref: "sk-openai-team-api-key",
       default_model_id: "gpt-4.1-mini",
       supported_model_ids: ["gpt-4.1", "gpt-4.1-mini"],
       is_enabled: false,
@@ -472,6 +472,207 @@ describe("SettingsModal", () => {
     });
   });
 
+  it("allows adding multiple providers from the same template with unique ids", async () => {
+    const project = createSettingsProject();
+    const calls: Array<{
+      path: string;
+      method: string;
+      body: ProviderWriteRequest | null;
+    }> = [];
+    let customIndex = 0;
+    let providers: ProviderRead[] = [];
+
+    renderSettingsModalWithRequest(project, async (input, init) => {
+      const path = normalizePath(input);
+
+      if (path.endsWith("/providers") && (init?.method ?? "GET") === "GET") {
+        return jsonResponse(providers);
+      }
+
+      if (path.endsWith("/providers/provider-volcengine") && init?.method === "PATCH") {
+        const body = JSON.parse(String(init.body)) as ProviderWriteRequest;
+        calls.push({ path, method: "PATCH", body });
+        providers = [
+          createProvider({
+            ...body,
+            provider_id: "provider-volcengine",
+            display_name: "火山引擎",
+            provider_source: "builtin",
+            protocol_type: "volcengine_native",
+            runtime_capabilities: body.runtime_capabilities.map((capability) =>
+              createCapabilities(capability),
+            ),
+          }),
+        ];
+        return jsonResponse(providers[0]);
+      }
+
+      if (path.endsWith("/providers") && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as ProviderWriteRequest;
+        calls.push({ path, method: "POST", body });
+        customIndex += 1;
+        const provider = createProvider({
+          ...body,
+          provider_id: `provider-custom-volcengine-${customIndex}`,
+          display_name: body.display_name ?? "火山引擎",
+          provider_source: "custom",
+          protocol_type: "volcengine_native",
+          runtime_capabilities: body.runtime_capabilities.map((capability) =>
+            createCapabilities(capability),
+          ),
+        });
+        providers = [...providers, provider];
+        return jsonResponse(provider);
+      }
+
+      if (path.endsWith("/delivery-channel")) {
+        return jsonResponse(createDeliveryChannel(project.project_id));
+      }
+
+      return jsonResponse([]);
+    });
+
+    const dialog = screen.getByRole("dialog", { name: "Settings" });
+    fireEvent.click(within(dialog).getByRole("tab", { name: "模型提供商" }));
+
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: "Add custom provider" }),
+    );
+    fireEvent.click(within(dialog).getByRole("menuitem", { name: "Add 火山引擎" }));
+    expect(await within(dialog).findByRole("article", { name: "火山引擎" })).toBeTruthy();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add custom provider" }));
+    fireEvent.click(within(dialog).getByRole("menuitem", { name: "Add 火山引擎" }));
+    const customCard = await within(dialog).findByRole("article", {
+      name: "火山引擎 2",
+    });
+    fireEvent.click(within(customCard).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(calls).toHaveLength(2);
+    });
+    expect(calls[0]).toMatchObject({
+      method: "PATCH",
+      path: "/api/providers/provider-volcengine",
+    });
+    expect(calls[1]).toMatchObject({
+      method: "POST",
+      path: "/api/providers",
+    });
+    expect(calls[1].body).toMatchObject({
+      display_name: "火山引擎 2",
+      protocol_type: "volcengine_native",
+      default_model_id: "doubao-seed-1-6",
+    });
+  });
+
+  it("edits provider names from the card title and deletes providers", async () => {
+    const project = createSettingsProject();
+    const calls: Array<{
+      path: string;
+      method: string;
+      body: ProviderWriteRequest | null;
+    }> = [];
+    let providers: ProviderRead[] = [
+      createProvider({
+        provider_id: "provider-custom-openai",
+        display_name: "OpenAI Completions",
+        provider_source: "custom",
+        protocol_type: "openai_completions_compatible",
+        base_url: "https://api.openai.com/v1",
+        api_key_ref: "[configured:api_key]",
+        default_model_id: "gpt-4.1",
+        supported_model_ids: ["gpt-4.1"],
+        runtime_capabilities: [createCapabilities({ model_id: "gpt-4.1" })],
+      }),
+    ];
+
+    renderSettingsModalWithRequest(project, async (input, init) => {
+      const path = normalizePath(input);
+
+      if (path.endsWith("/providers") && (init?.method ?? "GET") === "GET") {
+        return jsonResponse(providers);
+      }
+
+      if (
+        path.endsWith("/providers/provider-custom-openai") &&
+        init?.method === "PATCH"
+      ) {
+        const body = JSON.parse(String(init.body)) as ProviderWriteRequest;
+        calls.push({ path, method: "PATCH", body });
+        providers = [
+          {
+            ...providers[0],
+            ...body,
+            display_name: body.display_name ?? providers[0].display_name,
+            runtime_capabilities: body.runtime_capabilities.map((capability) =>
+              createCapabilities(capability),
+            ),
+          },
+        ];
+        return jsonResponse(providers[0]);
+      }
+
+      if (
+        path.endsWith("/providers/provider-custom-openai") &&
+        init?.method === "DELETE"
+      ) {
+        calls.push({ path, method: "DELETE", body: null });
+        providers = [];
+        return new Response(null, { status: 204 });
+      }
+
+      if (path.endsWith("/delivery-channel")) {
+        return jsonResponse(createDeliveryChannel(project.project_id));
+      }
+
+      return jsonResponse([]);
+    });
+
+    const dialog = screen.getByRole("dialog", { name: "Settings" });
+    fireEvent.click(within(dialog).getByRole("tab", { name: "模型提供商" }));
+    const card = await within(dialog).findByRole("article", {
+      name: "OpenAI Completions",
+    });
+
+    fireEvent.click(within(card).getByRole("button", { name: "OpenAI Completions" }));
+    fireEvent.change(within(card).getByLabelText("Provider name"), {
+      target: { value: "Team OpenAI Gateway" },
+    });
+    fireEvent.click(within(card).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    expect(calls[0]).toMatchObject({
+      method: "PATCH",
+      path: "/api/providers/provider-custom-openai",
+    });
+    expect(calls[0].body).toMatchObject({
+      display_name: "Team OpenAI Gateway",
+    });
+    expect(
+      await within(dialog).findByRole("article", { name: "Team OpenAI Gateway" }),
+    ).toBeTruthy();
+
+    const renamedCard = within(dialog).getByRole("article", {
+      name: "Team OpenAI Gateway",
+    });
+    fireEvent.click(within(renamedCard).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(calls).toHaveLength(2);
+    });
+    expect(calls[1]).toMatchObject({
+      method: "DELETE",
+      path: "/api/providers/provider-custom-openai",
+    });
+    expect(
+      within(dialog).queryByRole("article", { name: "Team OpenAI Gateway" }),
+    ).toBeNull();
+    expect(within(dialog).getByText("No providers added")).toBeTruthy();
+  });
+
   it("shows provider configuration with only user-visible fields", async () => {
     renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
@@ -485,7 +686,7 @@ describe("SettingsModal", () => {
     expect(within(dialog).queryByText("Provider id")).toBeNull();
     expect(within(dialog).queryByText("Provider source")).toBeNull();
     expect(within(dialog).queryByText("Protocol type")).toBeNull();
-    expect(within(dialog).queryByText("env:VOLCENGINE_API_KEY")).toBeNull();
+    expect(within(dialog).queryByText("[configured:api_key]")).toBeNull();
     const providerCard = within(dialog).getByRole("article", { name: "火山引擎" });
     fireEvent.click(within(providerCard).getByRole("button", { name: "Configure" }));
     fireEvent.change(
@@ -558,7 +759,7 @@ describe("SettingsModal", () => {
     let providers = [
       createProvider({
         base_url: "https://provider.initial.test/v1",
-        api_key_ref: "env:INITIAL_PROVIDER_KEY",
+        api_key_ref: "[configured:api_key]",
         default_model_id: "initial-model",
         supported_model_ids: ["initial-model"],
         runtime_capabilities: [
@@ -601,7 +802,7 @@ describe("SettingsModal", () => {
       await within(dialog).findByDisplayValue("https://provider.initial.test/v1"),
     ).toBeTruthy();
     expect(within(dialog).getByLabelText("API key")).toHaveProperty("value", "");
-    expect(within(dialog).queryByText("env:INITIAL_PROVIDER_KEY")).toBeNull();
+    expect(within(dialog).queryByText("[configured:api_key]")).toBeNull();
     expect(within(dialog).getByLabelText("Default model")).toHaveProperty(
       "value",
       "initial-model",
@@ -610,7 +811,7 @@ describe("SettingsModal", () => {
     providers = [
       createProvider({
         base_url: "https://provider.fresh.test/v1",
-        api_key_ref: "env:FRESH_PROVIDER_KEY",
+        api_key_ref: "[configured:api_key]",
         default_model_id: "fresh-default",
         supported_model_ids: ["fresh-default", "fresh-alt"],
         runtime_capabilities: [
@@ -639,7 +840,7 @@ describe("SettingsModal", () => {
       );
     });
     expect(within(dialog).getByLabelText("API key")).toHaveProperty("value", "");
-    expect(within(dialog).queryByText("env:FRESH_PROVIDER_KEY")).toBeNull();
+    expect(within(dialog).queryByText("[configured:api_key]")).toBeNull();
     expect(within(dialog).getByLabelText("Default model")).toHaveProperty(
       "value",
       "fresh-default",
@@ -964,7 +1165,7 @@ function createProvider(overrides: Partial<ProviderRead> = {}): ProviderRead {
     provider_source: "custom",
     protocol_type: "openai_completions_compatible",
     base_url: "https://provider.initial.test/v1",
-    api_key_ref: "env:INITIAL_PROVIDER_KEY",
+    api_key_ref: "[configured:api_key]",
     default_model_id: modelId,
     supported_model_ids: [modelId],
     is_enabled: true,

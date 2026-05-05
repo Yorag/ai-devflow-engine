@@ -732,6 +732,7 @@ def test_configuration_package_and_settings_override_do_not_cross_runtime_snapsh
         deepseek = session.get(ProviderModel, "provider-deepseek")
         assert deepseek is not None
         deepseek.api_key_ref = RAW_SECRET_VALUE
+        deepseek.is_configured = True
         session.add(deepseek)
         session.commit()
 
@@ -744,7 +745,7 @@ def test_configuration_package_and_settings_override_do_not_cross_runtime_snapsh
 
     serialized = package.model_dump_json()
     assert RAW_SECRET_VALUE not in serialized
-    assert "[blocked:api_key_ref]" in serialized
+    assert '"api_key_ref":null' in serialized
     assert "[blocked:credential_ref]" in serialized
     assert "compression_threshold_ratio" not in serialized
     assert "runtime_snapshot" not in serialized

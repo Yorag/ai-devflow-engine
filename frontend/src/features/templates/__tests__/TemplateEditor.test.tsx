@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -8,6 +8,7 @@ import {
   mockProviderList,
   mockSessionWorkspaces,
 } from "../../../mocks/fixtures";
+import type { ProviderRead } from "../../../api/types";
 import { TemplateEmptyState } from "../TemplateEmptyState";
 import {
   createTemplateDraft,
@@ -74,6 +75,51 @@ describe("template-state", () => {
 });
 
 describe("TemplateEditor", () => {
+  it("uses the configured provider when a system template references an unavailable provider", async () => {
+    const workspace = mockSessionWorkspaces["session-draft"];
+    const providers: ProviderRead[] = [
+      {
+        ...mockProviderList[2],
+        provider_id: "provider-mimo",
+        display_name: "MiMo",
+        default_model_id: "mimo-chat",
+        supported_model_ids: ["mimo-chat"],
+        runtime_capabilities: [
+          {
+            ...mockProviderList[2].runtime_capabilities[0],
+            model_id: "mimo-chat",
+          },
+        ],
+      },
+    ];
+
+    renderWithAppProviders(
+      <TemplateEmptyState
+        session={workspace.session}
+        templates={mockPipelineTemplates}
+        providers={providers}
+        selectedTemplateId="template-feature"
+        onTemplateChange={() => undefined}
+      />,
+    );
+
+    const editor = screen.getByRole("region", { name: "Template editor" });
+    const providerSelect = within(editor).getByLabelText("requirement_analysis provider");
+
+    await waitFor(() => {
+      expect(providerSelect).toHaveProperty("value", "provider-mimo");
+    });
+    expect(
+      within(providerSelect).getByRole("option", { name: "MiMo" }),
+    ).toBeTruthy();
+    expect(
+      within(providerSelect).queryByRole("option", { name: "Unavailable provider" }),
+    ).toBeNull();
+    expect(
+      within(editor).queryByText(/This template references unavailable providers/u),
+    ).toBeNull();
+  });
+
   it("edits only allowed runtime configuration fields for a system template", () => {
     const workspace = mockSessionWorkspaces["session-draft"];
     const savedAsTemplateIds: string[] = [];

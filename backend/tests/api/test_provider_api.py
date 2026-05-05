@@ -13,6 +13,10 @@ from backend.app.main import create_app
 from backend.app.schemas.observability import AuditResult
 
 
+MASKED_API_KEY_REF = "[configured:api_key]"
+RAW_PROVIDER_API_KEY = "sk-team-provider-api-key"
+
+
 def build_provider_api_app(tmp_path: Path):
     default_root = tmp_path / "ai-devflow-engine"
     default_root.mkdir()
@@ -31,7 +35,7 @@ def provider_payload(
     display_name: str | None = "Team compatible model",
     protocol_type: str | None = None,
     base_url: str = "https://provider.example.test/v1",
-    api_key_ref: str | None = "env:AI_DEVFLOW_CREDENTIAL_TEAM_PROVIDER_API_KEY",
+    api_key_ref: str | None = RAW_PROVIDER_API_KEY,
     default_model_id: str = "team-chat",
     supported_model_ids: list[str] | None = None,
     runtime_capabilities: list[dict] | None = None,
@@ -98,14 +102,22 @@ def test_provider_routes_create_get_patch_custom_and_audit(tmp_path: Path) -> No
     assert created["provider_id"].startswith("provider-custom-")
     assert created["provider_source"] == "custom"
     assert created["protocol_type"] == "openai_completions_compatible"
+    assert created["api_key_ref"] == MASKED_API_KEY_REF
     assert created["is_enabled"] is True
     assert created["runtime_capabilities"][0]["max_output_tokens"] == 4096
     assert "api_key" not in created
     assert get_response.status_code == 200
     assert get_response.json()["provider_id"] == created["provider_id"]
+    assert get_response.json()["api_key_ref"] == MASKED_API_KEY_REF
     assert patch_response.status_code == 200
     assert patch_response.json()["display_name"] == "Renamed team provider"
+    assert patch_response.json()["api_key_ref"] == MASKED_API_KEY_REF
     assert patch_response.json()["is_enabled"] is True
+
+    with app.state.database_manager.session(DatabaseRole.CONTROL) as session:
+        saved = session.get(ProviderModel, created["provider_id"])
+    assert saved is not None
+    assert saved.api_key_ref == RAW_PROVIDER_API_KEY
 
     with app.state.database_manager.session(DatabaseRole.LOG) as session:
         audits = {
@@ -128,10 +140,39 @@ def test_provider_routes_create_get_patch_custom_and_audit(tmp_path: Path) -> No
     assert audits[
         ("provider.patch_custom", "req-provider-patch-custom")
     ].correlation_id == "corr-provider-patch-custom"
-    assert "raw-secret" not in (
+    assert RAW_PROVIDER_API_KEY not in (
         audits[("provider.create_custom", "req-provider-create")].metadata_excerpt
         or ""
     )
+    assert MASKED_API_KEY_REF in (
+        audits[("provider.create_custom", "req-provider-create")].metadata_excerpt
+        or ""
+    )
+
+
+def test_provider_routes_create_custom_volcengine_provider(tmp_path: Path) -> None:
+    app = build_provider_api_app(tmp_path)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/providers",
+            json=provider_payload(
+                display_name="Team Volcengine",
+                protocol_type="volcengine_native",
+                base_url="https://ark.example.test/api/v3",
+                api_key_ref="sk-volcengine-team-api-key",
+                default_model_id="doubao-team",
+                supported_model_ids=["doubao-team"],
+                runtime_capabilities=[{"model_id": "doubao-team"}],
+            ),
+        )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["provider_id"].startswith("provider-custom-")
+    assert body["provider_source"] == "custom"
+    assert body["display_name"] == "Team Volcengine"
+    assert body["protocol_type"] == "volcengine_native"
 
 
 def test_provider_routes_patch_builtin_runtime_config_and_preserve_identity(
@@ -145,7 +186,7 @@ def test_provider_routes_patch_builtin_runtime_config_and_preserve_identity(
             json=provider_payload(
                 display_name=None,
                 base_url="https://api.deepseek.example/v1",
-                api_key_ref="env:DEEPSEEK_ROTATED_API_KEY",
+                api_key_ref="sk-deepseek-rotated-api-key",
                 default_model_id="deepseek-reasoner",
                 supported_model_ids=["deepseek-chat", "deepseek-reasoner"],
                 runtime_capabilities=[
@@ -167,7 +208,7 @@ def test_provider_routes_patch_builtin_runtime_config_and_preserve_identity(
     assert body["protocol_type"] == "openai_completions_compatible"
     assert body["is_enabled"] is True
     assert body["base_url"] == "https://api.deepseek.example/v1"
-    assert body["api_key_ref"] == "env:DEEPSEEK_ROTATED_API_KEY"
+    assert body["api_key_ref"] == MASKED_API_KEY_REF
     assert body["default_model_id"] == "deepseek-reasoner"
 
     with app.state.database_manager.session(DatabaseRole.LOG) as session:
@@ -182,10 +223,34 @@ def test_provider_routes_patch_builtin_runtime_config_and_preserve_identity(
     assert audit is not None
     assert audit.result is AuditResult.SUCCEEDED
     assert audit.metadata_excerpt is not None
-    assert "env:DEEPSEEK_ROTATED_API_KEY" in audit.metadata_excerpt
-    assert "blocked:sensitive_field" not in audit.metadata_excerpt
+    assert "sk-deepseek-rotated-api-key" not in audit.metadata_excerpt
+    assert MASKED_API_KEY_REF in audit.metadata_excerpt
+    assert "[blocked:sensitive_field]" in audit.metadata_excerpt
     assert "https://api.deepseek.example/v1" not in audit.metadata_excerpt
     assert "DeepSeek" not in audit.metadata_excerpt
+
+
+def test_provider_routes_patch_builtin_display_name(tmp_path: Path) -> None:
+    app = build_provider_api_app(tmp_path)
+
+    with TestClient(app) as client:
+        response = client.patch(
+            "/api/providers/provider-deepseek",
+            json=provider_payload(
+                display_name="Team DeepSeek Gateway",
+                base_url="https://api.deepseek.example/v1",
+                api_key_ref="sk-deepseek-display-name-api-key",
+                default_model_id="deepseek-chat",
+                supported_model_ids=["deepseek-chat"],
+                runtime_capabilities=[{"model_id": "deepseek-chat"}],
+            ),
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider_id"] == "provider-deepseek"
+    assert body["display_name"] == "Team DeepSeek Gateway"
+    assert body["protocol_type"] == "openai_completions_compatible"
 
 
 def test_provider_routes_list_only_configured_providers_and_toggle_enabled(
@@ -200,7 +265,7 @@ def test_provider_routes_list_only_configured_providers_and_toggle_enabled(
             json=provider_payload(
                 display_name=None,
                 base_url="https://api.deepseek.com",
-                api_key_ref="env:DEEPSEEK_API_KEY",
+                api_key_ref="sk-deepseek-provider-api-key",
                 default_model_id="deepseek-chat",
                 supported_model_ids=["deepseek-chat", "deepseek-reasoner"],
                 runtime_capabilities=[
@@ -215,7 +280,7 @@ def test_provider_routes_list_only_configured_providers_and_toggle_enabled(
             json=provider_payload(
                 display_name=None,
                 base_url="https://api.deepseek.com",
-                api_key_ref="env:DEEPSEEK_API_KEY",
+                api_key_ref="sk-deepseek-provider-api-key",
                 default_model_id="deepseek-chat",
                 supported_model_ids=["deepseek-chat", "deepseek-reasoner"],
                 runtime_capabilities=[
@@ -237,7 +302,86 @@ def test_provider_routes_list_only_configured_providers_and_toggle_enabled(
     assert disable_response.json()["is_enabled"] is False
 
 
-def test_provider_routes_block_legacy_raw_api_key_ref_in_read_projection(
+def test_provider_routes_delete_custom_and_deconfigure_builtin(tmp_path: Path) -> None:
+    app = build_provider_api_app(tmp_path)
+
+    with TestClient(app) as client:
+        created_response = client.post(
+            "/api/providers",
+            json=provider_payload(),
+            headers={
+                "X-Request-ID": "req-provider-create-delete",
+                "X-Correlation-ID": "corr-provider-create-delete",
+            },
+        )
+        created = created_response.json()
+        delete_custom_response = client.delete(
+            f"/api/providers/{created['provider_id']}",
+            headers={
+                "X-Request-ID": "req-provider-delete-custom",
+                "X-Correlation-ID": "corr-provider-delete-custom",
+            },
+        )
+        get_deleted_custom_response = client.get(
+            f"/api/providers/{created['provider_id']}",
+        )
+
+        activate_builtin_response = client.patch(
+            "/api/providers/provider-deepseek",
+            json=provider_payload(
+                display_name=None,
+                base_url="https://api.deepseek.com",
+                api_key_ref="sk-deepseek-provider-api-key",
+                default_model_id="deepseek-chat",
+                supported_model_ids=["deepseek-chat"],
+                runtime_capabilities=[{"model_id": "deepseek-chat"}],
+            ),
+        )
+        delete_builtin_response = client.delete(
+            "/api/providers/provider-deepseek",
+            headers={
+                "X-Request-ID": "req-provider-delete-builtin",
+                "X-Correlation-ID": "corr-provider-delete-builtin",
+            },
+        )
+        list_after_builtin_delete = client.get("/api/providers")
+        get_deconfigured_builtin = client.get("/api/providers/provider-deepseek")
+
+    assert created_response.status_code == 201
+    assert delete_custom_response.status_code == 204
+    assert delete_custom_response.text == ""
+    assert get_deleted_custom_response.status_code == 404
+    assert activate_builtin_response.status_code == 200
+    assert delete_builtin_response.status_code == 204
+    assert list_after_builtin_delete.status_code == 200
+    assert [
+        provider["provider_id"] for provider in list_after_builtin_delete.json()
+    ] == []
+    assert get_deconfigured_builtin.status_code == 200
+    assert get_deconfigured_builtin.json()["provider_id"] == "provider-deepseek"
+    assert get_deconfigured_builtin.json()["is_enabled"] is False
+
+    with app.state.database_manager.session(DatabaseRole.LOG) as session:
+        audits = {
+            (row.action, row.request_id): row
+            for row in session.query(AuditLogEntryModel)
+            .filter(
+                AuditLogEntryModel.action.in_(
+                    ["provider.delete_custom", "provider.deconfigure_builtin"]
+                )
+            )
+            .all()
+        }
+
+    assert audits[("provider.delete_custom", "req-provider-delete-custom")].result is (
+        AuditResult.SUCCEEDED
+    )
+    assert audits[
+        ("provider.deconfigure_builtin", "req-provider-delete-builtin")
+    ].result is AuditResult.SUCCEEDED
+
+
+def test_provider_routes_mask_direct_api_key_in_read_projection(
     tmp_path: Path,
 ) -> None:
     from datetime import UTC, datetime
@@ -252,7 +396,7 @@ def test_provider_routes_block_legacy_raw_api_key_ref_in_read_projection(
                 provider_source=ProviderSource.CUSTOM,
                 protocol_type=ProviderProtocolType.OPENAI_COMPLETIONS_COMPATIBLE,
                 base_url="https://provider.example.test/v1",
-                api_key_ref="raw-legacy-secret",
+                api_key_ref="sk-legacy-provider-secret",
                 default_model_id="legacy-chat",
                 supported_model_ids=["legacy-chat"],
                 runtime_capabilities=[
@@ -277,8 +421,8 @@ def test_provider_routes_block_legacy_raw_api_key_ref_in_read_projection(
 
     assert detail_response.status_code == 200
     detail_body = detail_response.json()
-    assert detail_body["api_key_ref"] == "[blocked:api_key_ref]"
-    assert "raw-legacy-secret" not in str(detail_body)
+    assert detail_body["api_key_ref"] == MASKED_API_KEY_REF
+    assert "sk-legacy-provider-secret" not in str(detail_body)
 
     assert list_response.status_code == 200
     legacy_provider = next(
@@ -286,8 +430,38 @@ def test_provider_routes_block_legacy_raw_api_key_ref_in_read_projection(
         for item in list_response.json()
         if item["provider_id"] == "provider-custom-legacy"
     )
-    assert legacy_provider["api_key_ref"] == "[blocked:api_key_ref]"
-    assert "raw-legacy-secret" not in str(list_response.json())
+    assert legacy_provider["api_key_ref"] == MASKED_API_KEY_REF
+    assert "sk-legacy-provider-secret" not in str(list_response.json())
+
+
+def test_provider_routes_preserve_existing_api_key_when_projection_mask_is_submitted(
+    tmp_path: Path,
+) -> None:
+    app = build_provider_api_app(tmp_path)
+
+    with TestClient(app) as client:
+        create_response = client.post(
+            "/api/providers",
+            json=provider_payload(api_key_ref="sk-existing-provider-secret"),
+        )
+        created = create_response.json()
+        patch_response = client.patch(
+            f"/api/providers/{created['provider_id']}",
+            json=provider_payload(
+                display_name="Provider renamed without key edit",
+                base_url="https://provider.example.test/renamed",
+                api_key_ref=created["api_key_ref"],
+            ),
+        )
+
+    assert create_response.status_code == 201
+    assert created["api_key_ref"] == MASKED_API_KEY_REF
+    assert patch_response.status_code == 200
+    assert patch_response.json()["api_key_ref"] == MASKED_API_KEY_REF
+    with app.state.database_manager.session(DatabaseRole.CONTROL) as session:
+        saved = session.get(ProviderModel, created["provider_id"])
+    assert saved is not None
+    assert saved.api_key_ref == "sk-existing-provider-secret"
 
 
 def test_provider_routes_return_unified_errors_for_invalid_commands(
@@ -306,28 +480,11 @@ def test_provider_routes_return_unified_errors_for_invalid_commands(
         identity_change = client.patch(
             "/api/providers/provider-deepseek",
             json=provider_payload(
-                display_name="Renamed DeepSeek",
                 protocol_type="volcengine_native",
             ),
             headers={
                 "X-Request-ID": "req-provider-identity",
                 "X-Correlation-ID": "corr-provider-identity",
-            },
-        )
-        raw_key = client.post(
-            "/api/providers",
-            json=provider_payload(api_key_ref="raw-secret-value"),
-            headers={
-                "X-Request-ID": "req-provider-raw-key",
-                "X-Correlation-ID": "corr-provider-raw-key",
-            },
-        )
-        disallowed_env = client.post(
-            "/api/providers",
-            json=provider_payload(api_key_ref="env:PATH"),
-            headers={
-                "X-Request-ID": "req-provider-path-key",
-                "X-Correlation-ID": "corr-provider-path-key",
             },
         )
         strict_bool = client.post(
@@ -358,25 +515,9 @@ def test_provider_routes_return_unified_errors_for_invalid_commands(
         identity_change,
         status_code=409,
         error_code="validation_error",
-        message="Built-in Provider identity fields cannot be modified.",
+        message="Built-in Provider protocol_type cannot be modified.",
         request_id="req-provider-identity",
         correlation_id="corr-provider-identity",
-    )
-    assert_error(
-        raw_key,
-        status_code=422,
-        error_code="config_invalid_value",
-        message="Provider api_key_ref must use an env: credential reference.",
-        request_id="req-provider-raw-key",
-        correlation_id="corr-provider-raw-key",
-    )
-    assert_error(
-        disallowed_env,
-        status_code=422,
-        error_code="config_invalid_value",
-        message="Provider api_key_ref must use an env: credential reference.",
-        request_id="req-provider-path-key",
-        correlation_id="corr-provider-path-key",
     )
     assert_error(
         strict_bool,
@@ -396,8 +537,6 @@ def test_provider_routes_return_unified_errors_for_invalid_commands(
         ]
     actions = {row.action for row in rejected}
     assert "provider.patch_builtin_runtime_config.rejected" in actions
-    assert "provider.create_custom.rejected" in actions
-    assert all("raw-secret-value" not in (row.metadata_excerpt or "") for row in rejected)
 
 
 def test_provider_command_routes_are_documented_in_openapi(tmp_path: Path) -> None:
@@ -416,10 +555,12 @@ def test_provider_command_routes_are_documented_in_openapi(tmp_path: Path) -> No
     create_provider = paths["/api/providers"]["post"]
     get_provider = paths["/api/providers/{providerId}"]["get"]
     patch_provider = paths["/api/providers/{providerId}"]["patch"]
+    delete_provider = paths["/api/providers/{providerId}"]["delete"]
 
     assert set(create_provider["responses"]) == {"201", "422", "500"}
     assert set(get_provider["responses"]) == {"200", "404", "422", "500"}
     assert set(patch_provider["responses"]) == {"200", "404", "409", "422", "500"}
+    assert set(delete_provider["responses"]) == {"204", "404", "422", "500"}
     assert get_provider["parameters"] == [
         {
             "name": "providerId",
@@ -448,12 +589,13 @@ def test_provider_command_routes_are_documented_in_openapi(tmp_path: Path) -> No
         patch_provider["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
         == "#/components/schemas/ProviderRead"
     )
-    for operation in [create_provider, get_provider, patch_provider]:
+    assert delete_provider["responses"]["204"]["description"] == "Successful Response"
+    for operation in [create_provider, get_provider, patch_provider, delete_provider]:
         assert (
             operation["responses"]["422"]["content"]["application/json"]["schema"]["$ref"]
             == "#/components/schemas/ErrorResponse"
         )
-    for operation in [get_provider, patch_provider]:
+    for operation in [get_provider, patch_provider, delete_provider]:
         assert (
             operation["responses"]["404"]["content"]["application/json"]["schema"]["$ref"]
             == "#/components/schemas/ErrorResponse"

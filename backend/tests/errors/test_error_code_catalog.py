@@ -94,14 +94,12 @@ def test_api_error_response_rejects_unregistered_or_sensitive_error_contract() -
 def test_api_error_response_allows_safe_public_field_names() -> None:
     response = ApiErrorResponse(
         error_code=ErrorCode.CONFIG_INVALID_VALUE,
-        message="Provider api_key_ref must use an env: credential reference.",
+        message="Provider api_key_ref is preserved as a configured secret.",
         request_id="request-1",
         correlation_id="correlation-1",
     )
 
-    assert response.message == (
-        "Provider api_key_ref must use an env: credential reference."
-    )
+    assert response.message == "Provider api_key_ref is preserved as a configured secret."
 
 
 def test_api_errors_use_registered_code_and_optional_detail_ref() -> None:

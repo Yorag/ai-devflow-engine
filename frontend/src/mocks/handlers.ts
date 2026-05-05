@@ -66,6 +66,7 @@ function createMockRoutes(
   workspaces: Record<string, SessionWorkspaceProjection>,
 ): MockRoute[] {
   const sessions = mockSessionList.map((session) => ({ ...session }));
+  let providers = mockProviderList.map((provider) => ({ ...provider }));
 
   return [
     route("GET", /^\/api\/projects$/u, () => jsonResponse(mockProjectList)),
@@ -90,7 +91,50 @@ function createMockRoutes(
     route("GET", /^\/api\/pipeline-templates$/u, () =>
       jsonResponse(mockPipelineTemplates),
     ),
-    route("GET", /^\/api\/providers$/u, () => jsonResponse(mockProviderList)),
+    route("GET", /^\/api\/providers$/u, () => jsonResponse(providers)),
+    route("POST", /^\/api\/providers$/u, (_match, init) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
+      const createdProvider = {
+        ...body,
+        provider_id: `provider-custom-${providers.length + 1}`,
+        display_name: body.display_name ?? "Custom provider",
+        provider_source: "custom",
+        protocol_type: body.protocol_type ?? "openai_completions_compatible",
+        api_key_ref: mockProviderApiKeyProjection(body.api_key_ref, null),
+        created_at: "2026-05-05T07:30:00.000Z",
+        updated_at: "2026-05-05T07:30:00.000Z",
+      };
+      providers = [...providers, createdProvider];
+      return jsonResponse(createdProvider, 201);
+    }),
+    route("PATCH", /^\/api\/providers\/([^/]+)$/u, ([, providerId], init) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
+      const existing = providers.find((provider) => provider.provider_id === providerId);
+      if (!existing) {
+        return jsonResponse(mockApiError("not_found"), 404);
+      }
+      const updatedProvider = {
+        ...existing,
+        ...body,
+        display_name: body.display_name ?? existing.display_name,
+        api_key_ref: mockProviderApiKeyProjection(
+          body.api_key_ref,
+          existing.api_key_ref,
+        ),
+        provider_id: existing.provider_id,
+        provider_source: existing.provider_source,
+        protocol_type: body.protocol_type ?? existing.protocol_type,
+        updated_at: "2026-05-05T07:35:00.000Z",
+      };
+      providers = providers.map((provider) =>
+        provider.provider_id === providerId ? updatedProvider : provider,
+      );
+      return jsonResponse(updatedProvider);
+    }),
+    route("DELETE", /^\/api\/providers\/([^/]+)$/u, ([, providerId]) => {
+      providers = providers.filter((provider) => provider.provider_id !== providerId);
+      return new Response(null, { status: 204 });
+    }),
     route("GET", /^\/api\/stages\/stage-solution-design-running\/inspector$/u, () =>
       jsonResponse(mockStageInspectorProjection),
     ),
@@ -275,6 +319,16 @@ function route(
   respond: MockRoute["respond"],
 ): MockRoute {
   return { method, pattern, respond };
+}
+
+function mockProviderApiKeyProjection(
+  value: unknown,
+  existingValue: string | null,
+): string | null {
+  if (value === "[configured:api_key]") {
+    return existingValue;
+  }
+  return typeof value === "string" && value.trim() ? "[configured:api_key]" : null;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {

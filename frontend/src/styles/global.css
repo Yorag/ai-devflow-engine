@@ -2279,6 +2279,44 @@ a {
   overflow-wrap: anywhere;
 }
 
+.provider-name-button {
+  display: inline;
+  max-width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: oklch(29% 0.024 248);
+  padding: 0;
+  font: inherit;
+  font-size: 0.94rem;
+  font-weight: 750;
+  line-height: 1.3;
+  text-align: left;
+  cursor: text;
+  overflow-wrap: anywhere;
+}
+
+.provider-name-button:hover,
+.provider-name-button:focus-visible {
+  color: var(--accent);
+  outline: none;
+}
+
+.provider-name-input {
+  width: min(320px, 100%);
+  min-width: 0;
+  min-height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: oklch(27% 0.022 248);
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
 .provider-row__summary p {
   margin: 4px 0 0;
   color: var(--text-muted);

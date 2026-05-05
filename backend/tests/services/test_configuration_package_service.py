@@ -48,6 +48,7 @@ DEFAULT_PROJECT_ID = "project-default"
 DEFAULT_DELIVERY_CHANNEL_ID = "delivery-default"
 SAFE_DELIVERY_CREDENTIAL_REF = "env:AI_DEVFLOW_CREDENTIAL_DELIVERY_TOKEN"
 RAW_SECRET_VALUE = "raw-secret-value"
+DIRECT_PROVIDER_API_KEY = "sk-deepseek-package-key"
 PROVIDER_BASE_URL = "https://api.deepseek.example/v1"
 PROMPT_BODY = "# Prompt body for stage runtime config"
 
@@ -255,7 +256,7 @@ def provider_package_entry(
     provider_source: str = "builtin",
     protocol_type: str = "openai_completions_compatible",
     base_url: str = PROVIDER_BASE_URL,
-    api_key_ref: str | None = "env:DEEPSEEK_ROTATED_API_KEY",
+    api_key_ref: str | None = DIRECT_PROVIDER_API_KEY,
     default_model_id: str = "deepseek-reasoner",
     supported_model_ids: list[str] | None = None,
     runtime_capabilities: list[dict[str, Any]] | None = None,
@@ -393,7 +394,7 @@ def test_export_project_package_contains_user_visible_config_only(tmp_path: Path
         "deepseek-chat",
         "deepseek-reasoner",
     }
-    assert exported_deepseek.api_key_ref == "[blocked:api_key_ref]"
+    assert exported_deepseek.api_key_ref is None
     assert len(package.delivery_channels) == 1
     assert package.delivery_channels[0].credential_ref == "[blocked:credential_ref]"
     assert [template.template_id for template in package.pipeline_templates] == [template_id]
@@ -488,6 +489,7 @@ def test_import_package_updates_provider_delivery_channel_and_template_runtime_c
     assert saved_provider is not None
     assert saved_provider.default_model_id == "deepseek-reasoner"
     assert saved_provider.base_url == PROVIDER_BASE_URL
+    assert saved_provider.api_key_ref == DIRECT_PROVIDER_API_KEY
     by_model = {
         capability["model_id"]: capability
         for capability in saved_provider.runtime_capabilities
@@ -512,7 +514,7 @@ def test_import_package_configures_builtin_provider_when_values_match_seed(
     audit = RecordingAuditService()
     matching_seed_provider = provider_package_entry(
         base_url="https://api.deepseek.com",
-        api_key_ref="env:DEEPSEEK_API_KEY",
+        api_key_ref="sk-deepseek-seed-compatible-key",
         default_model_id="deepseek-chat",
         runtime_capabilities=[
             {
@@ -583,7 +585,7 @@ def test_import_package_preserves_new_custom_provider_ids_in_templates(
             display_name="Imported custom provider",
             provider_source="custom",
             base_url="https://custom-provider.example/v1",
-            api_key_ref="env:AI_DEVFLOW_CREDENTIAL_CUSTOM_PROVIDER",
+            api_key_ref="sk-custom-provider-package-key",
             default_model_id="custom-chat",
             supported_model_ids=["custom-chat"],
             runtime_capabilities=[{"model_id": "custom-chat"}],
@@ -625,6 +627,50 @@ def test_import_package_preserves_new_custom_provider_ids_in_templates(
     assert {
         binding["provider_id"] for binding in saved_template.stage_role_bindings
     } == {"provider-custom-package"}
+
+
+def test_import_package_preserves_custom_provider_protocol_type(
+    tmp_path: Path,
+) -> None:
+    from backend.app.services.configuration_packages import ConfigurationPackageService
+
+    manager = build_manager(tmp_path)
+    audit = RecordingAuditService()
+
+    with manager.session(DatabaseRole.CONTROL) as session:
+        seed_user_visible_config(session, audit)
+        custom_provider = provider_package_entry(
+            provider_id="provider-custom-volcengine",
+            display_name="Imported Volcengine provider",
+            provider_source="custom",
+            protocol_type="volcengine_native",
+            base_url="https://ark.example.test/api/v3",
+            api_key_ref="sk-volcengine-package-key",
+            default_model_id="doubao-package",
+            supported_model_ids=["doubao-package"],
+            runtime_capabilities=[{"model_id": "doubao-package"}],
+        )
+        result = ConfigurationPackageService(
+            session,
+            audit_service=audit,
+            log_writer=RecordingLogWriter(),
+            now=lambda: LATER,
+        ).import_project_package(
+            DEFAULT_PROJECT_ID,
+            package_request(
+                "template-volcengine-package",
+                providers=[custom_provider],
+                delivery_channels=[],
+                pipeline_templates=[],
+            ),
+            trace_context=build_trace(),
+        )
+        saved_custom = session.get(ProviderModel, "provider-custom-volcengine")
+
+    assert result.field_errors == []
+    assert saved_custom is not None
+    assert saved_custom.provider_source == ProviderSource.CUSTOM
+    assert saved_custom.protocol_type == ProviderProtocolType.VOLCENGINE_NATIVE
 
 
 def test_import_package_rejects_template_referencing_unconfigured_provider(
@@ -709,7 +755,7 @@ def test_import_package_returns_field_errors_and_rolls_back_invalid_provider(
     assert action_records(audit, "configuration_package.import.rejected")
 
 
-def test_import_rejects_non_ascii_provider_api_key_ref_without_changes(
+def test_import_accepts_direct_provider_api_key_without_env_reference(
     tmp_path: Path,
 ) -> None:
     from backend.app.services.configuration_packages import ConfigurationPackageService
@@ -720,8 +766,8 @@ def test_import_rejects_non_ascii_provider_api_key_ref_without_changes(
 
     with manager.session(DatabaseRole.CONTROL) as session:
         template_id = seed_user_visible_config(session, audit)
-        invalid_package = package_request(template_id)
-        invalid_package.providers[0].api_key_ref = "env:AI_DEVFLOW_CREDENTIAL_密钥"
+        package = package_request(template_id)
+        package.providers[0].api_key_ref = "sk-package-provider-secret"
         result = ConfigurationPackageService(
             session,
             audit_service=audit,
@@ -729,21 +775,15 @@ def test_import_rejects_non_ascii_provider_api_key_ref_without_changes(
             now=lambda: LATER,
         ).import_project_package(
             DEFAULT_PROJECT_ID,
-            invalid_package,
+            package,
             trace_context=build_trace(),
         )
         provider = session.get(ProviderModel, "provider-deepseek")
 
-    assert result.changed_objects == []
-    assert [error.model_dump() for error in result.field_errors] == [
-        {
-            "field": "providers[0].api_key_ref",
-            "message": "Provider api_key_ref must use an env: credential reference.",
-        }
-    ]
+    assert result.field_errors == []
     assert provider is not None
-    assert provider.api_key_ref == "env:DEEPSEEK_API_KEY"
-    assert action_records(audit, "configuration_package.import.rejected")
+    assert provider.api_key_ref == "sk-package-provider-secret"
+    assert action_records(audit, "configuration_package.import")
 
 
 def test_import_rejects_unsupported_version_and_scope_mismatch_without_changes(

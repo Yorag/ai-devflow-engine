@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import type { ApiRequestError, ApiRequestOptions } from "../../api/client";
 import { apiQueryKeys, useProvidersQuery } from "../../api/hooks";
-import { createProvider, patchProvider } from "../../api/providers";
+import { createProvider, deleteProvider, patchProvider } from "../../api/providers";
 import type {
   ModelRuntimeCapabilities,
   ProviderProtocolType,
@@ -21,13 +21,14 @@ type ProviderTemplate = {
   displayName: string;
   protocolType: ProviderProtocolType;
   baseUrl: string;
-  apiKeyRef: string;
+  apiKeyRef: string | null;
   defaultModelId: string;
   supportedModelIds: string[];
   capabilities: ModelRuntimeCapabilities[];
 };
 
 type ProviderDraft = {
+  displayName: string;
   baseUrl: string;
   apiKeyInput: string;
   apiKeyTouched: boolean;
@@ -52,7 +53,7 @@ const providerTemplates: ProviderTemplate[] = [
     displayName: "火山引擎",
     protocolType: "volcengine_native",
     baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
-    apiKeyRef: "env:VOLCENGINE_API_KEY",
+    apiKeyRef: null,
     defaultModelId: "doubao-seed-1-6",
     supportedModelIds: ["doubao-seed-1-6"],
     capabilities: [
@@ -69,7 +70,7 @@ const providerTemplates: ProviderTemplate[] = [
     displayName: "DeepSeek",
     protocolType: "openai_completions_compatible",
     baseUrl: "https://api.deepseek.com",
-    apiKeyRef: "env:DEEPSEEK_API_KEY",
+    apiKeyRef: null,
     defaultModelId: "deepseek-chat",
     supportedModelIds: ["deepseek-chat", "deepseek-reasoner"],
     capabilities: [
@@ -88,7 +89,7 @@ const providerTemplates: ProviderTemplate[] = [
     displayName: "OpenAI Completions",
     protocolType: "openai_completions_compatible",
     baseUrl: "https://api.openai.com/v1",
-    apiKeyRef: "env:OPENAI_API_KEY",
+    apiKeyRef: null,
     defaultModelId: "gpt-4.1",
     supportedModelIds: ["gpt-4.1"],
     capabilities: [createDefaultCapability("gpt-4.1")],
@@ -101,11 +102,6 @@ export function ProviderSettings({ request }: ProviderSettingsProps): JSX.Elemen
   const providers = providersQuery.data ?? [];
   const [isAddMenuOpen, setAddMenuOpen] = useState(false);
   const [openProviderIds, setOpenProviderIds] = useState<Record<string, boolean>>({});
-  const visibleTemplateOptions = providerTemplates.filter(
-    (template) =>
-      !template.providerId ||
-      !providers.some((provider) => provider.provider_id === template.providerId),
-  );
 
   const addProviderMutation = useMutation<
     ProviderRead,
@@ -114,7 +110,7 @@ export function ProviderSettings({ request }: ProviderSettingsProps): JSX.Elemen
   >({
     mutationFn: (template) => {
       const body = providerTemplateToWriteRequest(template);
-      return template.providerId
+      return template.providerId && !isTemplateBuiltInConfigured(template, providers)
         ? patchProvider(template.providerId, body, request)
         : createProvider(body, request);
     },
@@ -131,8 +127,8 @@ export function ProviderSettings({ request }: ProviderSettingsProps): JSX.Elemen
   });
 
   function addProvider(template: ProviderTemplate) {
-    if (!template.providerId) {
-      const draftProvider = providerTemplateToDraftProvider(template);
+    if (!template.providerId || isTemplateBuiltInConfigured(template, providers)) {
+      const draftProvider = providerTemplateToDraftProvider(template, providers);
       queryClient.setQueryData<ProviderRead[]>(apiQueryKeys.providers, (current) =>
         upsertProvider(current ?? [], draftProvider),
       );
@@ -171,7 +167,7 @@ export function ProviderSettings({ request }: ProviderSettingsProps): JSX.Elemen
         </button>
         {isAddMenuOpen ? (
           <div className="provider-add__menu" role="menu">
-            {visibleTemplateOptions.map((template) => (
+            {providerTemplates.map((template) => (
               <button
                 key={template.templateId}
                 type="button"
@@ -214,6 +210,13 @@ export function ProviderSettings({ request }: ProviderSettingsProps): JSX.Elemen
                 return next;
               });
             }}
+            onDeleted={(providerId) => {
+              setOpenProviderIds((current) => {
+                const next = { ...current };
+                delete next[providerId];
+                return next;
+              });
+            }}
           />
         ))}
       </div>
@@ -227,18 +230,21 @@ function ProviderCard({
   isOpen,
   onToggle,
   onSaved,
+  onDeleted,
 }: {
   provider: ProviderRead;
   request?: ApiRequestOptions;
   isOpen: boolean;
   onToggle: () => void;
   onSaved: (previousProviderId: string, updatedProvider: ProviderRead) => void;
+  onDeleted: (providerId: string) => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState(() => createProviderDraft(provider));
+  const [isEditingName, setEditingName] = useState(false);
   const mutation = useMutation<ProviderRead, ApiRequestError, ProviderWriteRequest>({
     mutationFn: (body) => {
-      if (provider.provider_id.startsWith("provider-custom-draft-")) {
+      if (isDraftProvider(provider)) {
         return createProvider(body, request);
       }
       return patchProvider(provider.provider_id, body, request);
@@ -250,10 +256,31 @@ function ProviderCard({
       onSaved(provider.provider_id, updatedProvider);
     },
   });
+  const deleteMutation = useMutation<void, ApiRequestError, void>({
+    mutationFn: () => {
+      if (isDraftProvider(provider)) {
+        return Promise.resolve();
+      }
+      return deleteProvider(provider.provider_id, request);
+    },
+    onSuccess: () => {
+      queryClient.setQueryData<ProviderRead[]>(apiQueryKeys.providers, (current) =>
+        (current ?? []).filter(
+          (candidate) => candidate.provider_id !== provider.provider_id,
+        ),
+      );
+      onDeleted(provider.provider_id);
+    },
+  });
   const modelIds = useMemo(
     () => parseModelList(draft.supportedModels),
     [draft.supportedModels],
   );
+  const hasCollapsedSummaryChanges =
+    !isOpen &&
+    (draft.displayName.trim() !== provider.display_name ||
+      draft.isEnabled !== provider.is_enabled);
+  const visibleDisplayName = draft.displayName.trim() || provider.display_name;
 
   useEffect(() => {
     setDraft(createProviderDraft(provider));
@@ -281,16 +308,45 @@ function ProviderCard({
     mutation.mutate(providerToWriteRequest(provider, draft));
   }
 
+  function removeProvider() {
+    deleteMutation.mutate();
+  }
+
+  function closeNameEditor() {
+    setEditingName(false);
+  }
+
   return (
     <article
       className="provider-row"
-      aria-label={provider.display_name}
+      aria-label={visibleDisplayName}
       role="article"
     >
       <div className="provider-row__summary">
         <div>
-          <h4>{provider.display_name}</h4>
-          <p>{provider.default_model_id}</p>
+          {isEditingName ? (
+            <input
+              aria-label="Provider name"
+              className="provider-name-input"
+              value={draft.displayName}
+              onBlur={closeNameEditor}
+              onChange={(event) => updateDraft({ displayName: event.target.value })}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === "Escape") {
+                  closeNameEditor();
+                }
+              }}
+            />
+          ) : (
+            <button
+              type="button"
+              className="provider-name-button"
+              onClick={() => setEditingName(true)}
+            >
+              {visibleDisplayName}
+            </button>
+          )}
+          <p>{draft.defaultModel}</p>
         </div>
         <div className="provider-row__controls">
           <label className="provider-toggle">
@@ -310,8 +366,31 @@ function ProviderCard({
           >
             {isOpen ? "Collapse" : "Configure"}
           </button>
+          {hasCollapsedSummaryChanges ? (
+            <button
+              type="button"
+              className="workspace-button"
+              disabled={mutation.isPending || deleteMutation.isPending}
+              onClick={saveProvider}
+            >
+              Save
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="workspace-button workspace-button--danger"
+            disabled={mutation.isPending || deleteMutation.isPending}
+            onClick={removeProvider}
+          >
+            Delete
+          </button>
         </div>
       </div>
+      {!isOpen && (mutation.error || deleteMutation.error) ? (
+        <p className="settings-form-error" role="alert">
+          {(mutation.error ?? deleteMutation.error)?.message}
+        </p>
+      ) : null}
       {isOpen ? (
         <>
           <div className="settings-form-grid settings-form-grid--compact">
@@ -325,6 +404,8 @@ function ProviderCard({
             <label>
               <span>API key</span>
               <input
+                autoComplete="new-password"
+                type="password"
                 value={draft.apiKeyInput}
                 onChange={(event) =>
                   updateDraft({
@@ -454,18 +535,18 @@ function ProviderCard({
             </div>
           </details>
           <div className="settings-actions">
-            {mutation.error ? (
+            {mutation.error || deleteMutation.error ? (
               <p className="settings-form-error" role="alert">
-                {mutation.error.message}
+                {(mutation.error ?? deleteMutation.error)?.message}
               </p>
             ) : null}
             <button
               type="button"
               className="workspace-button"
-              disabled={mutation.isPending}
+              disabled={mutation.isPending || deleteMutation.isPending}
               onClick={saveProvider}
             >
-              Save provider
+              Save
             </button>
           </div>
         </>
@@ -489,11 +570,14 @@ function providerTemplateToWriteRequest(
   };
 }
 
-function providerTemplateToDraftProvider(template: ProviderTemplate): ProviderRead {
+function providerTemplateToDraftProvider(
+  template: ProviderTemplate,
+  providers: ProviderRead[],
+): ProviderRead {
   const timestamp = new Date(0).toISOString();
   return {
-    provider_id: `provider-custom-draft-${template.templateId}`,
-    display_name: template.displayName,
+    provider_id: `provider-custom-draft-${template.templateId}-${newDraftId()}`,
+    display_name: nextProviderDisplayName(template.displayName, providers),
     provider_source: "custom",
     protocol_type: template.protocolType,
     base_url: template.baseUrl,
@@ -519,7 +603,7 @@ function providerToWriteRequest(
   const defaultModel = draft.defaultModel.trim() || models[0] || provider.default_model_id;
 
   return {
-    display_name: provider.display_name,
+    display_name: draft.displayName.trim() || provider.display_name,
     protocol_type: provider.protocol_type,
     base_url: draft.baseUrl.trim(),
     api_key_ref: draft.apiKeyTouched
@@ -540,6 +624,7 @@ function providerToWriteRequest(
 
 function createProviderDraft(provider: ProviderRead): ProviderDraft {
   return {
+    displayName: provider.display_name,
     baseUrl: provider.base_url,
     apiKeyInput: "",
     apiKeyTouched: false,
@@ -623,6 +708,40 @@ function parsePositiveInt(value: string, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function isTemplateBuiltInConfigured(
+  template: ProviderTemplate,
+  providers: ProviderRead[],
+): boolean {
+  return Boolean(
+    template.providerId &&
+      providers.some((provider) => provider.provider_id === template.providerId),
+  );
+}
+
+function nextProviderDisplayName(baseName: string, providers: ProviderRead[]): string {
+  const usedNames = new Set(providers.map((provider) => provider.display_name));
+  if (!usedNames.has(baseName)) {
+    return baseName;
+  }
+
+  let index = 2;
+  while (usedNames.has(`${baseName} ${index}`)) {
+    index += 1;
+  }
+  return `${baseName} ${index}`;
+}
+
+function newDraftId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function isDraftProvider(provider: ProviderRead): boolean {
+  return provider.provider_id.startsWith("provider-custom-draft-");
+}
+
 function upsertProvider(
   providers: ProviderRead[],
   nextProvider: ProviderRead,
@@ -668,6 +787,7 @@ function replaceOrUpsertProvider(
 function getProviderFormKey(provider: ProviderRead): string {
   return [
     provider.provider_id,
+    provider.display_name,
     provider.updated_at,
     provider.base_url,
     provider.api_key_ref ?? "",

@@ -20,7 +20,6 @@ from backend.app.domain.enums import (
     CredentialStatus,
     DeliveryMode,
     DeliveryReadinessStatus,
-    ProviderProtocolType,
     ProviderSource,
     TemplateSource,
 )
@@ -63,12 +62,10 @@ from backend.app.services.delivery_channels import (
 from backend.app.services.providers import (
     BUILTIN_PROVIDER_IDS,
     BUILTIN_PROVIDER_SEEDS,
-    BUILTIN_IDENTITY_CHANGE_MESSAGE,
+    BUILTIN_PROTOCOL_CHANGE_MESSAGE,
     CUSTOM_DISPLAY_NAME_REQUIRED_MESSAGE,
-    CUSTOM_PROTOCOL_MISMATCH_MESSAGE,
     DUPLICATE_MODEL_CAPABILITY_MESSAGE,
     EXTRA_MODEL_CAPABILITY_MESSAGE,
-    INVALID_CREDENTIAL_REFERENCE_MESSAGE as INVALID_PROVIDER_CREDENTIAL_REFERENCE_MESSAGE,
     INVALID_MODEL_BINDING_MESSAGE,
     MISSING_MODEL_CAPABILITY_MESSAGE,
     ProviderService,
@@ -95,7 +92,6 @@ TOO_MANY_DELIVERY_CHANNELS_MESSAGE = (
 SYSTEM_TEMPLATE_IMPORT_MESSAGE = (
     "System templates cannot be overwritten by configuration package import."
 )
-BLOCKED_API_KEY_REF = "[blocked:api_key_ref]"
 
 
 class ConfigurationPackageServiceError(RuntimeError):
@@ -403,14 +399,11 @@ class ConfigurationPackageService:
                         "Built-in Provider was not found.",
                     )
                 ]
-            if (
-                provider.display_name != existing.display_name
-                or provider.protocol_type is not existing.protocol_type
-            ):
+            if provider.protocol_type is not existing.protocol_type:
                 return [
                     self._field_error(
                         f"providers[{index}].provider_id",
-                        BUILTIN_IDENTITY_CHANGE_MESSAGE,
+                        BUILTIN_PROTOCOL_CHANGE_MESSAGE,
                     )
                 ]
         else:
@@ -418,14 +411,7 @@ class ConfigurationPackageService:
                 return [
                     self._field_error(
                         f"providers[{index}].provider_id",
-                        BUILTIN_IDENTITY_CHANGE_MESSAGE,
-                    )
-                ]
-            if provider.protocol_type is not ProviderProtocolType.OPENAI_COMPLETIONS_COMPATIBLE:
-                return [
-                    self._field_error(
-                        f"providers[{index}].protocol_type",
-                        CUSTOM_PROTOCOL_MISMATCH_MESSAGE,
+                        BUILTIN_PROTOCOL_CHANGE_MESSAGE,
                     )
                 ]
             if not provider.display_name:
@@ -445,13 +431,6 @@ class ConfigurationPackageService:
         *,
         index: int,
     ) -> list[ConfigurationPackageFieldError]:
-        if not self._is_safe_provider_api_key_ref(body.api_key_ref):
-            return [
-                self._field_error(
-                    f"providers[{index}].api_key_ref",
-                    INVALID_PROVIDER_CREDENTIAL_REFERENCE_MESSAGE,
-                )
-            ]
         if body.default_model_id not in body.supported_model_ids:
             return [
                 self._field_error(
@@ -673,7 +652,7 @@ class ConfigurationPackageService:
                 provider_id=provider.provider_id,
                 display_name=provider.display_name,
                 provider_source=ProviderSource.CUSTOM,
-                protocol_type=ProviderProtocolType.OPENAI_COMPLETIONS_COMPATIBLE,
+                protocol_type=provider.protocol_type,
                 is_configured=True,
                 created_at=timestamp,
                 updated_at=timestamp,
@@ -690,6 +669,7 @@ class ConfigurationPackageService:
 
         unchanged = (
             existing.display_name == provider.display_name
+            and existing.protocol_type == provider.protocol_type
             and existing.base_url == payload["base_url"]
             and existing.api_key_ref == payload["api_key_ref"]
             and existing.default_model_id == payload["default_model_id"]
@@ -700,8 +680,9 @@ class ConfigurationPackageService:
         )
         provider_id_map[provider.provider_id] = existing.provider_id
         if not unchanged:
+            existing.display_name = provider.display_name
             if existing.provider_source is ProviderSource.CUSTOM:
-                existing.display_name = provider.display_name
+                existing.protocol_type = provider.protocol_type
             existing.base_url = payload["base_url"]
             existing.api_key_ref = payload["api_key_ref"]
             existing.default_model_id = payload["default_model_id"]
@@ -1222,29 +1203,9 @@ class ConfigurationPackageService:
             return not value.strip()
         return False
 
-    def _is_safe_provider_api_key_ref(self, value: str | None) -> bool:
-        if value is None:
-            return True
-        env_name = value.removeprefix("env:")
-        env_name_has_valid_chars = all(
-            char == "_" or char.isascii() and char.isalnum() for char in env_name
-        )
-        env_name_has_allowed_prefix = any(
-            env_name.startswith(prefix) for prefix in self._credential_env_prefixes
-        )
-        return (
-            value.startswith("env:")
-            and bool(env_name)
-            and env_name_has_valid_chars
-            and env_name_has_allowed_prefix
-        )
-
     def _api_key_ref_for_export(self, value: str | None) -> str | None:
-        if value is None:
-            return None
-        if self._is_safe_provider_api_key_ref(value):
-            return value
-        return BLOCKED_API_KEY_REF
+        del value
+        return None
 
     def _is_safe_delivery_credential_ref(self, value: str | None) -> bool:
         if value is None:

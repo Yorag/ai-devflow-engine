@@ -93,7 +93,7 @@ def package_payload(
                 "provider_source": "builtin",
                 "protocol_type": "openai_completions_compatible",
                 "base_url": "https://api.deepseek.example/v1",
-                "api_key_ref": "env:DEEPSEEK_ROTATED_API_KEY",
+                "api_key_ref": "sk-deepseek-package-api-key",
                 "default_model_id": "deepseek-reasoner",
                 "supported_model_ids": ["deepseek-chat", "deepseek-reasoner"],
                 "runtime_capabilities": [

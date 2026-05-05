@@ -1,7 +1,9 @@
 import type { PipelineTemplateRead, ProviderRead, StageType } from "../../api/types";
 import {
+  availableTemplateProviders,
   isTemplateDirty,
   resolveTemplateStartGuard,
+  unavailableTemplateProviderIds,
   type TemplateDraftState,
 } from "./template-state";
 
@@ -27,13 +29,14 @@ export function TemplateEditor({
   onDiscard,
 }: TemplateEditorProps): JSX.Element {
   const dirty = isTemplateDirty(template, draft);
-  const guard = resolveTemplateStartGuard(template, dirty);
+  const unavailableProviderIds = unavailableTemplateProviderIds(draft, providers);
+  const guard = resolveTemplateStartGuard(template, dirty, unavailableProviderIds);
   const retryError = getRetryValidationError(draft.max_auto_regression_retries);
-  const canSave = !retryError;
+  const canSave = !retryError && unavailableProviderIds.length === 0;
   const roleOptions = Array.from(
     new Set(template.stage_role_bindings.map((binding) => binding.role_id)),
   );
-  const providerOptions = withCurrentProviders(providers, draft);
+  const providerOptions = availableTemplateProviders(providers);
 
   function updateDraft(next: Partial<TemplateDraftState>) {
     onDraftChange({ ...draft, ...next });
@@ -132,13 +135,18 @@ export function TemplateEditor({
                 <span>Provider</span>
                 <select
                   aria-label={`${binding.stage_type} provider`}
-                  value={binding.provider_id}
+                  value={providerSelectValue(binding.provider_id, providerOptions)}
                   onChange={(event) =>
                     updateBinding(binding.stage_type, {
                       provider_id: event.target.value,
                     })
                   }
                 >
+                  {providerOptions.length === 0 ? (
+                    <option value="" disabled>
+                      No provider configured
+                    </option>
+                  ) : null}
                   {providerOptions.map((provider) => (
                     <option key={provider.provider_id} value={provider.provider_id}>
                       {provider.display_name}
@@ -212,26 +220,14 @@ export function TemplateEditor({
   );
 }
 
-function withCurrentProviders(
-  providers: ProviderRead[],
-  draft: TemplateDraftState,
-): Array<Pick<ProviderRead, "provider_id" | "display_name">> {
-  const providerOptions: Array<Pick<ProviderRead, "provider_id" | "display_name">> = [
-    ...providers,
-  ];
-  const knownProviderIds = new Set(providerOptions.map((provider) => provider.provider_id));
-
-  for (const binding of draft.stage_role_bindings) {
-    if (!knownProviderIds.has(binding.provider_id)) {
-      providerOptions.push({
-        provider_id: binding.provider_id,
-        display_name: binding.provider_id,
-      });
-      knownProviderIds.add(binding.provider_id);
-    }
+function providerSelectValue(
+  providerId: string,
+  providerOptions: ProviderRead[],
+): string {
+  if (providerOptions.some((provider) => provider.provider_id === providerId)) {
+    return providerId;
   }
-
-  return providerOptions;
+  return providerOptions[0]?.provider_id ?? "";
 }
 
 function getRetryValidationError(value: number): string | null {

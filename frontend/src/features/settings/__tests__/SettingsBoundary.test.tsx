@@ -276,7 +276,7 @@ function createBoundaryPackageRequest(): ApiRequestOptions {
               provider_source: "custom",
               protocol_type: "openai_completions_compatible",
               base_url: "https://provider.example.test/v1",
-              api_key_ref: "env:VISIBLE_PROVIDER_KEY",
+              api_key_ref: null,
               default_model_id: "visible-model",
               supported_model_ids: ["visible-model"],
               is_enabled: true,

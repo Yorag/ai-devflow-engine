@@ -30,3 +30,13 @@ export function patchProvider(
     body,
   });
 }
+
+export function deleteProvider(
+  providerId: string,
+  options?: ApiRequestOptions,
+): Promise<void> {
+  return apiRequest(`/api/providers/${providerId}`, {
+    ...options,
+    method: "DELETE",
+  });
+}
