@@ -88,6 +88,8 @@ test.describe("function one success path", () => {
 
     await page.goto("/console");
 
+    await page.getByRole("button", { name: "New session" }).click();
+    await expect.poll(() => api.createdSessionCount()).toBe(1);
     await expect(page.getByRole("region", { name: "Template empty state" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "新功能开发流程" })).toBeVisible();
     await expect(page.getByLabel("Current project summary")).toContainText(
@@ -230,8 +232,10 @@ function createSuccessFlowApi() {
     created_at: timestamp,
     updated_at: timestamp,
   };
+  const sessions: Array<typeof session> = [];
   const runs: Array<Record<string, unknown>> = [];
   const feed: Array<Record<string, unknown>> = [];
+  let createdSessionCount = 0;
   let currentRunId: string | null = null;
   let currentStageType: string | null = null;
 
@@ -453,6 +457,7 @@ function createSuccessFlowApi() {
   }
 
   return {
+    createdSessionCount: () => createdSessionCount,
     async handle(route: Route): Promise<void> {
       const request = route.request();
       const url = new URL(request.url());
@@ -463,7 +468,12 @@ function createSuccessFlowApi() {
         return fulfillJson(route, [project]);
       }
       if (method === "GET" && path === `/api/projects/${project.project_id}/sessions`) {
-        return fulfillJson(route, [session]);
+        return fulfillJson(route, sessions);
+      }
+      if (method === "POST" && path === `/api/projects/${project.project_id}/sessions`) {
+        createdSessionCount += 1;
+        sessions.splice(0, sessions.length, session);
+        return fulfillJson(route, session, 201);
       }
       if (
         method === "GET" &&
