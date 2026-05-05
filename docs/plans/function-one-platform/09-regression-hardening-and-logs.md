@@ -321,7 +321,7 @@
 ## V6.7 回归场景与发布候选清单
 
 **计划周期**：Week 12
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：补齐系统回归场景和发布候选验收清单，使平台级 V1 达到可评审发布状态。
 **实施计划**：`docs/plans/implementation/v6.7-regression-release-candidate.md`
 
@@ -351,3 +351,5 @@
 **测试方法**：
 - `pytest backend/tests/regression -v`
 - `npm --prefix e2e run test`
+
+**Integration checkpoint note**：`QA-RELEASE-V6.7` 已集成到 `integration/function-one-acceleration`，并通过 V6.7 focused backend regression、full backend regression directory、Playwright release regression、full backend suite、full frontend suite 和 frontend build 验证。发布候选清单已生成并记录剩余风险。

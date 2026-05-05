@@ -11,10 +11,11 @@ This Release Candidate Acceptance Checklist consolidates feature-one platform V1
 | Field | Value |
 | --- | --- |
 | Release candidate branch | `test/qa-release-candidate` |
-| Current HEAD | `73a00b8` |
+| Worker HEAD | `5591217` |
+| Integration checkpoint | `integration/function-one-acceleration` merge `0852082` |
 | Scope | Feature-one V1 regression, projection, E2E, error, configuration, observability, and acceptance evidence consolidation |
 | Prerequisite gate | Contract, E2E, error, configuration, and observability QA evidence exists; any retained risk is recorded below |
-| Sign-off status | Pending V6.7 worker verification and reviewer acceptance |
+| Sign-off status | Integrated after V6.7 worker verification, checkpoint verification, and release-candidate checklist review |
 
 ## Scope And Sources
 
@@ -85,22 +86,22 @@ This checklist records acceptance coverage only. It does not introduce new stage
 
 ## Regression Evidence Matrix
 
-| Evidence | Status Recorded By Worker | Acceptance Role |
+| Evidence | Integration Status | Acceptance Role |
 | --- | --- | --- |
-| `QA-V6.1` | `reported`, expected ingest `implemented` | Backend full API flow and delivery result coverage |
-| `QA-E2E-V6.2-FINAL` | `reported`, expected ingest `implemented` | Playwright success path and frontend workspace acceptance |
-| `QA-E2E-V6.3-LIVE` | `reported`, expected ingest `implemented` | Live backend-backed manual intervention, SSE, rerun, tool confirmation |
-| `QA-V6.4` | `reported`, expected ingest `implemented` | OpenAPI route coverage |
-| `QA-V6.5` | `reported`, expected ingest `implemented` | Frontend client/OpenAPI compatibility |
-| `QA-ERROR-V6.6` | `reported`, expected ingest `implemented` | Backend and frontend error-state contract regression |
-| `QA-CONFIG-V6.8` | `reported`, expected ingest `implemented` | Configuration, snapshot, prompt, settings, and history regression |
-| `QA-OBS-L6.1` | `reported`, expected ingest `implemented` | Log rotation, retention, cleanup |
-| `QA-OBS-L6.2` | `reported`, expected ingest `implemented` | Log redaction, audit query, runtime log exclusion, audit failure rollback |
-| `QA-RELEASE-V6.7` | `reported`, expected ingest `implemented` | Release-candidate lifecycle/projection regression and checklist |
+| `QA-V6.1` | `done` | Backend full API flow and delivery result coverage |
+| `QA-E2E-V6.2-FINAL` | `done` | Playwright success path and frontend workspace acceptance |
+| `QA-E2E-V6.3-LIVE` | `done` | Live backend-backed manual intervention, SSE, rerun, tool confirmation |
+| `QA-V6.4` | `done` | OpenAPI route coverage |
+| `QA-V6.5` | `done` | Frontend client/OpenAPI compatibility |
+| `QA-ERROR-V6.6` | `done` | Backend and frontend error-state contract regression |
+| `QA-CONFIG-V6.8` | `done` | Configuration, snapshot, prompt, settings, and history regression |
+| `QA-OBS-L6.1` | `done` | Log rotation, retention, cleanup |
+| `QA-OBS-L6.2` | `done` | Log redaction, audit query, runtime log exclusion, audit failure rollback |
+| `QA-RELEASE-V6.7` | `done` | Release-candidate lifecycle/projection regression and checklist |
 
 ## Full Regression Scenario Coverage
 
-V6.7 local evidence placeholders are commands to be filled by `docs/plans/acceleration/reports/QA-RELEASE-V6.7.md` after verification:
+V6.7 verification is recorded by `docs/plans/acceleration/reports/QA-RELEASE-V6.7.md` and the integration checkpoint:
 
 ```powershell
 uv run --no-sync python -m pytest backend/tests/regression/test_run_lifecycle_regression.py -v
@@ -195,8 +196,7 @@ rg -n "Release Candidate Acceptance Checklist|Frontend Design Gate|Log And Audit
 
 | Risk | Review Item |
 | --- | --- |
-| Several prerequisite evidence reports are local `reported` records until checkpoint commits are ingested | Main coordination session must confirm checkpoint commits and shared coordination-store status before marking platform/split-plan tasks complete |
 | V6.7 introduced a narrow runtime lifecycle fix for completed demo delivery | Reviewer must confirm it does not add `system_status` to completed runs and does not change failed/terminated terminal semantics |
 | SSE regression validates replay payload keys and monotonic ids, not browser rendering of those replay frames | E2E command remains required for frontend rendering confidence |
-| Full release commands can be environment-sensitive and long running | Evidence report must record exact exit codes and outputs, and must not mark V6.7 `reported` if required suites are blocked |
+| Full release commands can be environment-sensitive and long running | Integration checkpoint must preserve exact exit codes and outputs for required suites |
 | Frontend design gate has no repo `PRODUCT.md` or `DESIGN.md` baseline | Review uses current specs and product-register defaults; no semantic or visual redesign is accepted under V6.7 without separate scope |
