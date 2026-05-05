@@ -134,7 +134,7 @@
 ## V6.5 前端 client 与 OpenAPI 一致性
 
 **计划周期**：Week 11-12
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：验证前端 API client 与 OpenAPI 路径一致，避免前后端接口漂移。
 **实施计划**：`docs/plans/implementation/v6.5-frontend-openapi-compat.md`
 

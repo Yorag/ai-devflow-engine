@@ -59,7 +59,7 @@
 
 ## 3. Lane Registry
 
-六条 AL lane 是功能一剩余实现的长期并行分支。QA lane 是 integration-owned 验证队列，不作为产品实现 lane。现有 `QA` lane 保留已经进入 coordination store 的 `QA-V6.1` / `QA-V6.4` 状态；剩余未 claim 的回归和硬化任务拆入独立 QA 子 lane，以便在不共享工作区的情况下并行开发。所有 lane 从当前基线开始 claim，不从旧分支表或旧收尾分支继承 active 状态。
+六条 AL lane 是功能一剩余实现的长期并行分支。QA lane 是 integration-owned 验证队列，不作为产品实现 lane。现有 `QA` lane 保留已经进入 coordination store 的 `QA-V6.1` / `QA-V6.4` / `QA-V6.5` 状态；剩余未 claim 的回归和硬化任务拆入独立 QA 子 lane，以便在不共享工作区的情况下并行开发。所有 lane 从当前基线开始 claim，不从旧分支表或旧收尾分支继承 active 状态。
 
 | Lane | Branch | Coverage | Status | Owner Scope | Review Boundary |
 | --- | --- | --- | --- | --- | --- |
@@ -206,6 +206,7 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | AL05-A4.11 | A4.11 | AL05 | `feat/al-provider-langgraph-context` | done | a405c40 | 30088c8 | `docs/plans/acceleration/reports/AL05-A4.11.md` | Automatic regression retry control items and retry-exhausted runtime output integrated with control record persistence, retry trace metrics, stable-review approval creation, and impacted auto-regression / projection verification. |
 | QA-V6.1 | V6.1 | QA | `test/al-regression-hardening` | done | a2fabbf | b1b6817 | `docs/plans/acceleration/reports/QA-V6.1.md` | Backend full API flow regression integrated on `integration/function-one-acceleration`; focused V6.1 and impacted API/projection/runtime verification passed on integration branch. |
 | QA-V6.4 | V6.4 | QA | `test/al-regression-hardening` | done | 2e682ec | 38fa4ce | `docs/plans/acceleration/reports/QA-V6.4.md` | OpenAPI core route coverage integrated on `integration/function-one-acceleration`; focused OpenAPI/API regression and full backend API suite passed on integration branch. |
+| QA-V6.5 | V6.5 | QA | `test/al-regression-hardening` | done | 2271a4e | cd24cd2 | `docs/plans/acceleration/reports/QA-V6.5.md` | Frontend client/OpenAPI compatibility regression integrated on `integration/function-one-acceleration`; focused API client compatibility, full frontend suite, and frontend build passed on integration branch. |
 | QA-E2E-V6.2 | V6.2 | QA-E2E | `test/qa-e2e-regression` | integrated | 2e682ec | ed7c8d9 | `docs/plans/acceleration/reports/QA-E2E-V6.2.md` | Mock-ready Playwright success-path checkpoint integrated on `integration/function-one-acceleration`; `npm --prefix e2e run test -- function-one-full-flow.spec.ts` passed. Platform and split status remain `[/]` because full UI-created session coverage still depends on wiring `New session` to the session create API. |
 | QA-OBS-L6.1 | L6.1 | QA-OBS | `test/qa-observability-regression` | done | 2e682ec | 4a7eefb | `docs/plans/acceleration/reports/QA-OBS-L6.1.md` | Log retention checkpoint integrated on `integration/function-one-acceleration`; observability regression covering retention, JSONL writer, and log query service passed. |
 
