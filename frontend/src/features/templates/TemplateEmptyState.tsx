@@ -20,6 +20,7 @@ type TemplateEmptyStateProps = {
   providers?: ProviderRead[];
   selectedTemplateId: string;
   onTemplateChange: (templateId: string) => void;
+  isTemplateChangeBusy?: boolean;
   onTemplateSaveAs?: (template: PipelineTemplateRead) => void;
   onTemplateOverwrite?: (template: PipelineTemplateRead) => void;
   onTemplateDelete?: (templateId: string) => void;
@@ -45,6 +46,7 @@ export function TemplateEmptyState({
   providers = [],
   selectedTemplateId,
   onTemplateChange,
+  isTemplateChangeBusy = false,
   onTemplateSaveAs,
   onTemplateOverwrite,
   onTemplateDelete,
@@ -77,7 +79,6 @@ export function TemplateEmptyState({
     setLocalCreatedTemplateIds((current) => [...current, savedTemplate.template_id]);
     setDraft(createTemplateDraft(savedTemplate));
     onTemplateSaveAs?.(savedTemplate);
-    onTemplateChange(savedTemplate.template_id);
   }
 
   function handleOverwrite() {
@@ -145,7 +146,8 @@ export function TemplateEmptyState({
         templates={localTemplates}
         selectedTemplateId={selectedTemplate?.template_id ?? ""}
         onTemplateChange={onTemplateChange}
-        disabled={!isDraft}
+        disabledTemplateIds={localCreatedTemplateIds}
+        disabled={!isDraft || isTemplateChangeBusy}
       />
 
       {selectedTemplate ? (

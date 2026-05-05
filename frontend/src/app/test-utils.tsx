@@ -4,7 +4,10 @@ import type { ReactElement } from "react";
 import { RouterProvider, createMemoryRouter } from "react-router-dom";
 
 import type { ApiRequestOptions } from "../api/client";
-import { mockApiRequestOptions } from "../mocks/handlers";
+import {
+  mockApiRequestOptions,
+  resetMockApiRequestOptions,
+} from "../mocks/handlers";
 import { createQueryClient } from "./query-client";
 import { createTestRouter } from "./router";
 
@@ -17,6 +20,9 @@ export function renderWithAppProviders(
   ui: ReactElement | null,
   options: RenderWithAppProvidersOptions = {},
 ): RenderResult {
+  if (!options.request) {
+    resetMockApiRequestOptions();
+  }
   const queryClient = createQueryClient();
   const initialEntries = [options.route ?? "/"];
   const request = options.request ?? mockApiRequestOptions;

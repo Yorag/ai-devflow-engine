@@ -222,6 +222,38 @@ a {
   gap: 8px;
 }
 
+.project-load-form {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.project-load-form label {
+  display: grid;
+  gap: 6px;
+  color: oklch(33% 0.02 248);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.project-load-form input {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  padding: 0 10px;
+}
+
+.project-load-form__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .workspace-button,
 .session-list-item__actions button {
   width: 100%;
