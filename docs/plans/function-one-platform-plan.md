@@ -302,9 +302,9 @@
 | D5.2 | prepare_branch 与 create_commit | Week 10 | [x] | 后端 | [08](function-one-platform/08-git-delivery-and-result-display.md#d52) |
 | D5.3 | push_branch 与 create_code_review_request | Week 10 | [x] | 后端 | [08](function-one-platform/08-git-delivery-and-result-display.md#d53) |
 | D5.4 | git_auto_delivery 编排与 snapshot readiness 测试 | Week 10 | [x] | 后端 | [08](function-one-platform/08-git-delivery-and-result-display.md#d54) |
-| F5.1 | 工具调用、Diff 与测试结果展示 | Week 9-10 | [/] | 前端 | [08](function-one-platform/08-git-delivery-and-result-display.md#f51) |
-| F5.2a | demo_delivery 结果展示 | Week 9 | [/] | 前端 | [08](function-one-platform/08-git-delivery-and-result-display.md#f52a) |
-| F5.2b | git_auto_delivery 结果展示 | Week 10 | [/] | 前端 | [08](function-one-platform/08-git-delivery-and-result-display.md#f52b) |
+| F5.1 | 工具调用、Diff 与测试结果展示 | Week 9-10 | [x] | 前端 | [08](function-one-platform/08-git-delivery-and-result-display.md#f51) |
+| F5.2a | demo_delivery 结果展示 | Week 9 | [x] | 前端 | [08](function-one-platform/08-git-delivery-and-result-display.md#f52a) |
+| F5.2b | git_auto_delivery 结果展示 | Week 10 | [x] | 前端 | [08](function-one-platform/08-git-delivery-and-result-display.md#f52b) |
 | V6.1 | 后端完整 API flow 测试 | Week 11 | [x] | 跨端 | [09](function-one-platform/09-regression-hardening-and-logs.md#v61) |
 | V6.2 | Playwright 成功路径 | Week 11 | [ ] | 跨端 | [09](function-one-platform/09-regression-hardening-and-logs.md#v62) |
 | V6.3 | Playwright 人工介入路径 | Week 11 | [ ] | 跨端 | [09](function-one-platform/09-regression-hardening-and-logs.md#v63) |
