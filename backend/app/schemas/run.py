@@ -31,6 +31,10 @@ class RunSummaryProjection(_StrictBaseModel):
     is_active: bool
 
 
+class RunStatusSummaryProjection(RunSummaryProjection):
+    current_stage_run_id: str | None = Field(default=None, min_length=1)
+
+
 class RunPauseRequest(_StrictBaseModel):
     pass
 
@@ -147,6 +151,7 @@ __all__ = [
     "RunConfigurationSnapshotRead",
     "RunPauseRequest",
     "RunResumeRequest",
+    "RunStatusSummaryProjection",
     "RunTerminateRequest",
     "RunSummaryProjection",
     "RunTimelineProjection",

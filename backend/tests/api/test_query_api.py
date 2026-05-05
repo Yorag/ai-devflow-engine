@@ -405,6 +405,53 @@ def test_get_run_timeline_returns_projection_and_unified_not_found(
     }
 
 
+def test_get_run_summary_returns_projection_and_unified_not_found(
+    tmp_path: Path,
+) -> None:
+    app = build_query_api_app(tmp_path)
+
+    with TestClient(app) as client:
+        ok_response = client.get(
+            "/api/runs/run-active",
+            headers={
+                "X-Request-ID": "req-run-summary",
+                "X-Correlation-ID": "corr-run-summary",
+            },
+        )
+        missing_response = client.get(
+            "/api/runs/run-missing",
+            headers={
+                "X-Request-ID": "req-run-summary-missing",
+                "X-Correlation-ID": "corr-run-summary-missing",
+            },
+        )
+
+    assert ok_response.status_code == 200
+    payload = ok_response.json()
+    assert payload == {
+        "run_id": "run-active",
+        "attempt_index": 2,
+        "status": "waiting_tool_confirmation",
+        "trigger_source": "retry",
+        "started_at": "2026-05-01T09:01:00Z",
+        "ended_at": None,
+        "current_stage_type": "code_generation",
+        "is_active": True,
+        "current_stage_run_id": "stage-active",
+    }
+    assert "graph_thread_ref" not in payload
+    assert "graph_thread_id" not in payload
+    assert "workspace_ref" not in payload
+
+    assert missing_response.status_code == 404
+    assert missing_response.json() == {
+        "error_code": "not_found",
+        "message": "Run summary was not found.",
+        "request_id": "req-run-summary-missing",
+        "correlation_id": "corr-run-summary-missing",
+    }
+
+
 def test_query_read_surfaces_hydrate_tool_confirmation_deny_followup(
     tmp_path: Path,
 ) -> None:
@@ -1031,6 +1078,32 @@ def test_query_workspace_route_is_documented_in_openapi(tmp_path: Path) -> None:
     assert "SessionWorkspaceProjection" in schemas
     assert "ComposerStateProjection" in schemas
     assert "RunSummaryProjection" in schemas
+
+    run_summary_route = paths["/api/runs/{runId}"]["get"]
+    assert set(run_summary_route["responses"]) == {"200", "404", "422", "500"}
+    assert (
+        run_summary_route["responses"]["200"]["content"]["application/json"][
+            "schema"
+        ]["$ref"]
+        == "#/components/schemas/RunStatusSummaryProjection"
+    )
+    run_summary_run_id_parameter = next(
+        parameter
+        for parameter in run_summary_route["parameters"]
+        if parameter["name"] == "runId"
+    )
+    assert run_summary_run_id_parameter["in"] == "path"
+    assert run_summary_run_id_parameter["required"] is True
+    assert run_summary_run_id_parameter["schema"]["type"] == "string"
+    for status_code in ("404", "422", "500"):
+        assert (
+            run_summary_route["responses"][status_code]["content"][
+                "application/json"
+            ]["schema"]["$ref"]
+            == "#/components/schemas/ErrorResponse"
+        )
+
+    assert "RunStatusSummaryProjection" in schemas
 
     timeline_route = paths["/api/runs/{runId}/timeline"]["get"]
     assert set(timeline_route["responses"]) == {"200", "404", "422", "500"}
