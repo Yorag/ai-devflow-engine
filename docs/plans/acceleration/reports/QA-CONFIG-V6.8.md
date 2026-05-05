@@ -6,6 +6,7 @@
 - Lane id: `QA-CONFIG`
 - Task id: `V6.8`
 - Branch: `test/qa-config-snapshot-regression`
+- Coordination Base: `2e682ec`
 - Implementation plan: `docs/plans/implementation/v6.8-config-snapshot-regression.md`
 - Local result: `reported`
 - Expected ingest result after user-approved checkpoint commit: `implemented`
