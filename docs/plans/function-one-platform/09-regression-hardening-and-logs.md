@@ -66,7 +66,7 @@
 **测试方法**：
 - `npm --prefix e2e run test -- function-one-full-flow.spec.ts`
 
-**Integration checkpoint note**：`QA-E2E-V6.2` 已作为 `mock_ready` checkpoint 集成到 `integration/function-one-acceleration`。当前 Playwright 成功路径通过 API 预置 draft session 验证 Narrative Feed、Composer、Approval Block、Inspector、Delivery Result、Run Switcher、焦点恢复、全局 overflow 和窄屏可用性；完整 `[x]` 仍等待前端 `New session` 接入真实 `POST /api/projects/{projectId}/sessions` 创建会话流程。
+**Integration checkpoint note**：`QA-E2E-V6.2` 已作为 `mock_ready` checkpoint 集成到 `integration/function-one-acceleration`。当前 Playwright 成功路径通过 API 预置 draft session 验证 Narrative Feed、Composer、Approval Block、Inspector、Delivery Result、Run Switcher、焦点恢复、全局 overflow 和窄屏可用性；`AL06-QA-E2E-V6.2` 已接入前端 `New session` 到真实 `POST /api/projects/{projectId}/sessions` 创建会话流程。完整 `[x]` 仍等待 QA-E2E 在 integration 分支上把成功路径改为 UI 创建 session 并重新验证。
 
 <a id="v63"></a>
 
