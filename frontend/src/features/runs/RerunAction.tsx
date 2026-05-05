@@ -79,9 +79,9 @@ function RenderableRerunAction({
     setSubmitting(true);
     setApiError(null);
     try {
-      const run = await createRerun(sessionId, request ?? {});
+      const response = await createRerun(sessionId, request ?? {});
       await invalidateWorkspaceQueries();
-      focusRunBoundaryWhenAvailable(run.run_id);
+      focusRunBoundaryWhenAvailable(response.run.run_id);
     } catch (error) {
       setApiError(error);
     } finally {

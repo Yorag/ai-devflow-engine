@@ -485,7 +485,7 @@ function createControlFlowApi(options: { initialMode?: ControlFlowMode } = {}) {
           title: "Run terminated",
           reason:
             "The current run was terminated by the operator. Retry is available from the terminal status.",
-          retryAction: "create_rerun",
+          retryAction: `retry:${runId}`,
         }),
       );
     }
@@ -593,7 +593,7 @@ function createControlFlowApi(options: { initialMode?: ControlFlowMode } = {}) {
           title: "Tool confirmation denied",
           reason:
             "The high-risk tool confirmation was denied, so the current run failed without approval rollback semantics.",
-          retryAction: "create_rerun",
+          retryAction: `retry:${entry.run_id as string}`,
         }),
       );
     }
@@ -743,7 +743,10 @@ function createControlFlowApi(options: { initialMode?: ControlFlowMode } = {}) {
         return fulfillJson(route, terminateRun(activeRunId));
       }
       if (method === "POST" && path === `/api/sessions/${session.session_id}/runs`) {
-        return fulfillJson(route, createRerun());
+        return fulfillJson(route, {
+          session,
+          run: createRerun(),
+        });
       }
       if (
         method === "POST" &&

@@ -69,14 +69,27 @@ describe("RerunAction", () => {
   it("submits rerun for the current terminal run, invalidates workspace queries, and focuses the new run boundary", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     vi.mocked(createRerun).mockResolvedValue({
-      run_id: "run-failed-retry-2",
-      attempt_index: 2,
-      status: "running",
-      trigger_source: "retry",
-      started_at: "2026-05-01T10:16:00.000Z",
-      ended_at: null,
-      current_stage_type: "requirement_analysis",
-      is_active: true,
+      session: {
+        session_id: "session-failed",
+        project_id: "project-default",
+        display_name: "Investigate failing run",
+        status: "running",
+        selected_template_id: "template-feature",
+        current_run_id: "run-failed-retry-2",
+        latest_stage_type: "requirement_analysis",
+        created_at: "2026-05-01T10:00:00.000Z",
+        updated_at: "2026-05-01T10:16:00.000Z",
+      },
+      run: {
+        run_id: "run-failed-retry-2",
+        attempt_index: 2,
+        status: "running",
+        trigger_source: "retry",
+        started_at: "2026-05-01T10:16:00.000Z",
+        ended_at: null,
+        current_stage_type: "requirement_analysis",
+        is_active: true,
+      },
     });
 
     const target = document.createElement("section");

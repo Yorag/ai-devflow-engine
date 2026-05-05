@@ -221,7 +221,10 @@ function createMockRoutes(
         },
       };
 
-      return jsonResponse(nextRun);
+      return jsonResponse({
+        session: workspaces[sessionId].session,
+        run: nextRun,
+      });
     }),
     route("POST", /^\/api\/sessions\/([^/]+)\/messages$/u, ([, sessionId], init) => {
       const workspace = workspaces[sessionId];

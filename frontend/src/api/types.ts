@@ -406,6 +406,11 @@ export type RunSummaryProjection = {
   is_active: boolean;
 };
 
+export type RunCommandResponse = {
+  session: SessionRead;
+  run: RunSummaryProjection;
+};
+
 export type ComposerStateProjection = {
   mode:
     | "draft"
