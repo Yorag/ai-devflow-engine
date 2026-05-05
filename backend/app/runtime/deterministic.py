@@ -459,6 +459,12 @@ class DeterministicRuntimeEngine:
                 trace_context=stage_trace,
             )
         )
+        terminal_event_refs = self._maybe_complete_successful_delivery_run(
+            context=context,
+            stage=completed_stage,
+            delivery_event_refs=delivery_event_refs,
+            trace_context=stage_trace,
+        )
         checkpoint = checkpoint_port.save_checkpoint(
             thread=context.thread,
             purpose=CheckpointPurpose.RUNNING_SAFE_POINT,
@@ -472,6 +478,7 @@ class DeterministicRuntimeEngine:
             *([start_event.event_id] if start_event is not None else []),
             *[event.event_id for event in update_events],
             *delivery_event_refs,
+            *terminal_event_refs,
         ]
         log_summary_ref = self._write_stage_log(
             context=context,
@@ -503,6 +510,56 @@ class DeterministicRuntimeEngine:
             audit_refs=delivery_audit_refs,
             checkpoint_ref=checkpoint,
         )
+
+    def _maybe_complete_successful_delivery_run(
+        self,
+        *,
+        context: RuntimeExecutionContext,
+        stage: StageRunModel,
+        delivery_event_refs: list[str],
+        trace_context: TraceContext,
+    ) -> list[str]:
+        if stage.stage_type is not StageType.DELIVERY_INTEGRATION:
+            return []
+        if not delivery_event_refs:
+            return []
+        if self._control_session is None:
+            return []
+        control_session = self._control_session.get(SessionModel, context.session_id)
+        if control_session is None:
+            raise ValueError("deterministic completion control session was not found")
+        run = self._load_run(context.run_id)
+        if run.status is not RunStatus.RUNNING:
+            return []
+        occurred_at = self._now()
+        run.status = RunStatus.COMPLETED
+        run.ended_at = occurred_at
+        run.updated_at = occurred_at
+        control_session.status = SessionStatus.COMPLETED
+        control_session.latest_stage_type = stage.stage_type
+        control_session.updated_at = occurred_at
+        self._runtime_session.add(run)
+        self._control_session.add(control_session)
+        event = self._event_store.append(
+            DomainEventType.RUN_COMPLETED,
+            payload={
+                "session_id": context.session_id,
+                "status": SessionStatus.COMPLETED.value,
+                "current_run_id": context.run_id,
+                "current_stage_type": stage.stage_type.value,
+            },
+            trace_context=trace_context.child_span(
+                span_id=f"deterministic-delivery-completed-{context.run_id}",
+                created_at=occurred_at,
+                run_id=context.run_id,
+                stage_run_id=stage.stage_run_id,
+                graph_thread_id=context.thread.thread_id,
+            ),
+            session_id=context.session_id,
+            run_id=context.run_id,
+            stage_run_id=stage.stage_run_id,
+        )
+        return [event.event_id]
 
     def resume(
         self,
