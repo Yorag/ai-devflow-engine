@@ -74,9 +74,11 @@
 ## V6.3 Playwright 人工介入路径
 
 **计划周期**：Week 11
-**状态**：`[/]`
+**状态**：`[x]`
 **目标**：建立跨端人工介入与工具确认 E2E，覆盖拒绝回退、高风险工具确认、暂停恢复、终止和重新尝试。
 **实施计划**：`docs/plans/implementation/v6.3-playwright-control-flow.md`
+**实施计划（live recovery）**：`docs/plans/implementation/v6.3-playwright-control-flow-live.md`
+**验证摘要**：`QA-E2E-V6.3-LIVE` 已完成并在 integration checkpoint 合入 `583e6f5`。`npm --prefix e2e run test -- function-one-control-flow.spec.ts` 通过 2 个 route-fixture manual-intervention tests；`$env:E2E_LIVE_BACKEND='1'; npm --prefix e2e run test -- function-one-control-flow-live.spec.ts; Remove-Item Env:E2E_LIVE_BACKEND` 通过 2 个 live backend-backed manual-intervention tests；`npm --prefix e2e run test -- function-one-full-flow.spec.ts` 通过 1 个 success-path regression test。
 
 **修改文件列表**：
 - Create: `e2e/tests/function-one-control-flow.spec.ts`
@@ -100,7 +102,7 @@
 **测试方法**：
 - `npm --prefix e2e run test -- function-one-control-flow.spec.ts`
 
-**Integration checkpoint note**：`QA-E2E-V6.3` 已作为 `mock_ready` checkpoint 集成到 `integration/function-one-acceleration`。当前 Playwright 人工介入路径通过 route-level projection fixtures 验证审批拒绝、暂停 / 恢复、终止、重新尝试、工具确认允许 / 拒绝、历史禁用态和窄屏布局；完整 `[x]` 仍等待真实后端编排、事件持久化和 SSE 交付进入 live E2E。
+**Integration checkpoint note**：`QA-E2E-V6.3` 先作为 `mock_ready` checkpoint 集成到 `integration/function-one-acceleration`，覆盖 route-level projection fixtures。`QA-E2E-V6.3-LIVE` 后续完成 live backend-backed Playwright 验证，覆盖真实后端编排、事件持久化、SSE、重新尝试焦点恢复、人工介入禁用态、工具确认 allow / deny follow-up、窄屏和 overflow 检查。
 
 <a id="v64"></a>
 
