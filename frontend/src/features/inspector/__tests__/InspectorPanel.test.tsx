@@ -202,6 +202,9 @@ describe("Feed Inspector opening", () => {
     expect(deliveryRecordLabel.parentElement?.textContent).toContain(
       "delivery-record-1",
     );
+    expect(
+      (await within(inspector).findAllByText("delivery-record-1")).length,
+    ).toBeGreaterThan(0);
   });
 
   it("does not expose approval_result as an independent Inspector target", () => {
