@@ -1,12 +1,16 @@
-import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 
 import type { ApiRequestOptions } from "../../api/client";
 import {
+  apiQueryKeys,
   useProjectDeliveryChannelQuery,
   useProjectSessionsQuery,
   useProjectsQuery,
 } from "../../api/hooks";
-import type { ProjectRead } from "../../api/types";
+import { createSession } from "../../api/sessions";
+import type { ProjectRead, SessionRead } from "../../api/types";
+import { ErrorState } from "../errors/ErrorState";
 import { SessionList } from "./SessionList";
 
 type ProjectSidebarProps = {
@@ -26,6 +30,11 @@ export function ProjectSidebar({
   onSessionChange,
   onCurrentProjectChange,
 }: ProjectSidebarProps): JSX.Element {
+  const queryClient = useQueryClient();
+  const [isCreatingSession, setCreatingSession] = useState(false);
+  const [createSessionError, setCreateSessionError] = useState<unknown | null>(
+    null,
+  );
   const projectsQuery = useProjectsQuery({ request });
   const projects = projectsQuery.data ?? [];
   const currentProject =
@@ -49,10 +58,40 @@ export function ProjectSidebar({
   }, [currentProject, onCurrentProjectChange]);
 
   function handleProjectChange(projectId: string) {
+    setCreateSessionError(null);
     onProjectChange(projectId);
     onCurrentProjectChange(
       projects.find((project) => project.project_id === projectId) ?? null,
     );
+  }
+
+  async function handleCreateSession() {
+    if (!projectId || isCreatingSession) {
+      return;
+    }
+
+    setCreatingSession(true);
+    setCreateSessionError(null);
+    try {
+      const session = await createSession(projectId, request ?? {});
+      queryClient.setQueryData<SessionRead[]>(
+        apiQueryKeys.projectSessions(projectId),
+        (current) => upsertCreatedSession(current ?? [], session),
+      );
+      onSessionChange(session.session_id);
+      await queryClient.invalidateQueries({
+        queryKey: apiQueryKeys.projectSessions(projectId),
+        refetchType: "all",
+      });
+      await queryClient.invalidateQueries({
+        queryKey: apiQueryKeys.sessionWorkspace(session.session_id),
+        refetchType: "all",
+      });
+    } catch (error) {
+      setCreateSessionError(error);
+    } finally {
+      setCreatingSession(false);
+    }
   }
 
   return (
@@ -67,10 +106,17 @@ export function ProjectSidebar({
         <button className="workspace-button workspace-button--secondary" type="button">
           Load project
         </button>
-        <button className="workspace-button" type="button">
-          New session
+        <button
+          className="workspace-button"
+          type="button"
+          disabled={!projectId || isCreatingSession}
+          onClick={handleCreateSession}
+        >
+          {isCreatingSession ? "Creating session" : "New session"}
         </button>
       </div>
+
+      {createSessionError ? <ErrorState error={createSessionError} /> : null}
 
       {currentProject ? (
         <section className="project-summary" aria-label="Current project summary">
@@ -111,6 +157,18 @@ export function ProjectSidebar({
       />
     </aside>
   );
+}
+
+function upsertCreatedSession(
+  sessions: SessionRead[],
+  createdSession: SessionRead,
+): SessionRead[] {
+  return [
+    createdSession,
+    ...sessions.filter(
+      (session) => session.session_id !== createdSession.session_id,
+    ),
+  ];
 }
 
 type ProjectSidebarLatestSession = {
