@@ -42,6 +42,10 @@ class RedactionPolicy:
         "credentialref",
         "credential_status",
         "credentialstatus",
+        "token_count",
+        "tokencount",
+        "token_usage",
+        "tokenusage",
     }
     _sensitive_field_names = {
         "api_key",
@@ -77,6 +81,18 @@ class RedactionPolicy:
         re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
         re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE),
         re.compile(r"\bsk-[A-Za-z0-9][A-Za-z0-9_-]*", re.IGNORECASE),
+        re.compile(r"\b(?:Authorization|Cookie)\s*:\s*[^\s,;]+", re.IGNORECASE),
+        re.compile(
+            r"\b(?:api[_-]?key|token|secret|password|private[_-]?key|credential)"
+            r"(?![_-]?ref)\s*[:=]\s*[^\s,;]+",
+            re.IGNORECASE,
+        ),
+        re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{10,}\b"),
+        re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    )
+    _assignment_pattern = re.compile(
+        r"\b([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*[^\s,;]+",
+        re.IGNORECASE,
     )
 
     def __init__(self, max_text_length: int = 4096, excerpt_length: int = 512) -> None:
@@ -310,8 +326,7 @@ class RedactionPolicy:
         return summary
 
     def _is_sensitive_field(self, field_name: str) -> bool:
-        camel_split = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", field_name)
-        normalized = re.sub(r"[^a-z0-9]+", "_", camel_split.lower()).strip("_")
+        normalized = self._normalize_field_name(field_name)
         compact = normalized.replace("_", "")
         if normalized in self._safe_field_names or compact in self._safe_field_names:
             return False
@@ -321,7 +336,16 @@ class RedactionPolicy:
         return any(token in self._sensitive_field_tokens for token in tokens)
 
     def _contains_sensitive_text(self, text: str) -> bool:
-        return any(pattern.search(text) is not None for pattern in self._sensitive_text_patterns)
+        if any(pattern.search(text) is not None for pattern in self._sensitive_text_patterns):
+            return True
+        return any(
+            self._is_sensitive_field(match.group(1))
+            for match in self._assignment_pattern.finditer(text)
+        )
+
+    def _normalize_field_name(self, field_name: str) -> str:
+        camel_split = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", field_name)
+        return re.sub(r"[^a-z0-9]+", "_", camel_split.lower()).strip("_")
 
     def _truncate_text(self, text: str) -> str:
         if len(text) <= self.max_text_length:
