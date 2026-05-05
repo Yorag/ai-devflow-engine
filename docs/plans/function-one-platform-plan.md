@@ -223,8 +223,8 @@
 | C2.9b | Project 移除命令与级联历史可见性 | Week 4 | [x] | 后端 | [02](function-one-platform/02-control-plane-and-workspace-shell.md#c29b) |
 | E3.1 | 领域事件 Schema 与 EventStore | Week 4 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#e31) |
 | R3.2a | 首个 run 启动多库可见性边界 | Week 4 | [x] | 后端核心 | [03](function-one-platform/03-run-projection-and-feed.md#r32a) |
-| R3.2 | 首条需求启动首个 run | Week 4 | [ ] | 后端核心 | [03](function-one-platform/03-run-projection-and-feed.md#r32) |
-| R3.3 | 重新尝试领域规则与内部创建基础 | Week 4 | [ ] | 后端核心 | [03](function-one-platform/03-run-projection-and-feed.md#r33) |
+| R3.2 | 首条需求启动首个 run | Week 4 | [x] | 后端核心 | [03](function-one-platform/03-run-projection-and-feed.md#r32) |
+| R3.3 | 重新尝试领域规则与内部创建基础 | Week 4 | [x] | 后端核心 | [03](function-one-platform/03-run-projection-and-feed.md#r33) |
 | R3.4 | 模板快照固化 | Week 4 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#r34) |
 | R3.4a | Provider 与模型绑定快照固化 | Week 4 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#r34a) |
 | R3.4b | RuntimeLimitSnapshot 与 ProviderCallPolicySnapshot 固化 | Week 4 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#r34b) |

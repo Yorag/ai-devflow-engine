@@ -135,6 +135,8 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | AL01-R3.4 | R3.4 | AL01 | `feat/al-run-core-events` | done | 67f5290 | d1fcb14 | `docs/plans/acceleration/reports/AL01-R3.4.md` | - |
 | AL01-R3.4a | R3.4a | AL01 | `feat/al-run-core-events` | done | 74578b0 | ec0b023 | `docs/plans/acceleration/reports/AL01-R3.4a.md` | - |
 | AL01-R3.2a | R3.2a | AL01 | `feat/al-run-core-events` | done | 60cc934 | 3888945 | `docs/plans/acceleration/reports/AL01-R3.2a.md` | - |
+| AL01-R3.2 | R3.2 | AL01 | `feat/al-run-core-events` | done | b56995f | 3888945 | `docs/plans/acceleration/reports/AL01-R3.2.md` | - |
+| AL01-R3.3 | R3.3 | AL01 | `feat/al-run-core-events` | integrated | 874161e | - | - | 已由 R3.1 状态机与 H4.7 rerun 命令吸收；无独立 AL01 worker evidence report。 |
 | AL02-Q3.1 | Q3.1 | AL02 | `feat/al-projections-streams` | done | 67f5290 | d07f094 | `docs/plans/acceleration/reports/AL02-Q3.1.md` | - |
 | AL02-Q3.2 | Q3.2 | AL02 | `feat/al-projections-streams` | done | 74578b0 | 827d4dd | `docs/plans/acceleration/reports/AL02-Q3.2.md` | - |
 | AL02-Q3.2a | Q3.2a | AL02 | `feat/al-projections-streams` | done | 805a0c8 | 2b7bb91 | `docs/plans/acceleration/reports/AL02-Q3.2a.md` | `GET /api/runs/{runId}` run summary query route integrated; focused query/projection and startup/SSE verification passed on integration branch. |
