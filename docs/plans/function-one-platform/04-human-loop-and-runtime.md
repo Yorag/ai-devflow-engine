@@ -712,9 +712,10 @@
 ## F4.4a RerunAction 真实 retry_action 契约重连
 
 **计划周期**：Week 11
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：把已完成的重新尝试 UI 从旧 mock 标记 `create_rerun` 重连到真实后端 `system_status.retry_action = retry:<run_id>` 契约，使 V6.3 live Playwright 可以通过真实投影验证 rerun 入口。
 **实施计划**：`docs/plans/implementation/f4.4a-rerun-action-retry-contract.md`
+**验证摘要**：实施计划 `docs/plans/implementation/f4.4a-rerun-action-retry-contract.md` 已完成并在 integration checkpoint 合入 `ebda75a`。`npm --prefix frontend run test -- RerunAction` 通过 9 个 focused tests；`npm --prefix frontend run test -- FeedEntryRenderer` 通过 12 个 focused tests；`npm --prefix frontend test` 通过 29 个 test files、236 个 tests；`npm --prefix frontend run build` 完成 TypeScript 检查与生产构建。
 
 **依赖关系**：
 - H4.7 已完成 `POST /api/sessions/{sessionId}/runs` 重新尝试命令、多 run 分界、事件和投影语义。
