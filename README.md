@@ -136,7 +136,7 @@ The B0.1 backend baseline does not create a FastAPI app entry. `backend/app/main
 | `backend/` | Tracked backend skeleton for FastAPI, domain, persistence, runtime, observability, tools, workspace, delivery, and tests. |
 | `frontend/` | Tracked frontend skeleton for the Vite React SPA source tree. |
 | `e2e/` | Tracked Playwright end-to-end test skeleton. |
-| `docs/api/` | Tracked API and OpenAPI companion documentation skeleton. |
+| `docs/api/` | Tracked API and OpenAPI companion documentation, including [`function-one-openapi-notes.md`](docs/api/function-one-openapi-notes.md). |
 | `assets/` | README and documentation visuals. |
 | `refs/` | Project working references and development logs. |
 
