@@ -8,94 +8,268 @@
 | lane_id | QA-E2E |
 | task_id | V6.3 |
 | branch | test/qa-e2e-regression |
-| coordination_base | 11a5f19 |
+| coordination_base | cec9bb3 |
 | local_result | blocked |
 | expected_coordination_result | blocked |
 
 ## Scope
 
-This worker claim investigated whether V6.3 can move from the existing route-fixture `mock_ready` checkpoint to full live Playwright coverage. The worker did not write the coordination store, did not update central plan status, did not update platform or split-plan final status, and did not modify backend, frontend, Playwright fixture, package, or lock files.
+This worker claim attempted to replace the existing V6.3 route-fixture `mock_ready` checkpoint with live backend-backed Playwright coverage. The worktree adds an opt-in live backend Playwright mode and a live V6.3 spec that uses real REST projections, SSE event frames, and the A4.3a hidden deterministic advancement route.
 
-## Blocker
-
-Full live V6.3 Playwright coverage is blocked by a missing HTTP/dev-server advancement surface for the deterministic runtime.
-
-The current backend exposes real routes for:
-
-- creating sessions and starting the first run from a requirement
-- querying workspace projection
-- consuming SSE events
-- approval approve/reject commands
-- tool confirmation allow/deny commands
-- pause, resume, terminate, and rerun commands
-
-However, after `POST /api/sessions/{sessionId}/messages`, the normal HTTP path only creates the initial `requirement_analysis` run/stage state. The source-traced path that advances a run into `waiting_approval` and `waiting_tool_confirmation` exists only in backend Python tests, where test helpers construct `DeterministicRuntimeEngine` directly and call `engine.run_next(...)`.
-
-Without a reviewed backend/runtime-owned route, worker harness, or background advancement mechanism, a browser test cannot reach the required approval and tool confirmation states through live backend orchestration, persistence, projections, and SSE. Adding such a route or harness is outside QA-E2E ownership. Adding another route-level projection fixture would duplicate the already integrated `QA-E2E-V6.3` mock-ready checkpoint and would not satisfy this live claim.
-
-## Source Trace Evidence
-
-- `docs/plans/function-one-platform-plan.md` keeps V6.3 at `[/]` for `Playwright 人工介入路径`.
-- `docs/plans/function-one-platform/09-regression-hardening-and-logs.md#v63` states the integrated V6.3 checkpoint is `mock_ready` and that full `[x]` still waits for real backend orchestration, event persistence, and SSE delivery.
-- `docs/plans/function-one-acceleration-execution-plan.md` records `QA-E2E-V6.3` as route-fixture `mock_ready`; platform and split status remain `[/]`.
-- `backend/tests/api/test_session_message_api.py` verifies `POST /api/sessions/{sessionId}/messages` returns a `running` session with `latest_stage_type=requirement_analysis`, and creates only the initial run/startup events.
-- `backend/tests/e2e/test_full_api_flow.py` advances full manual-intervention flow by calling `_advance_until_interrupt_or_stage_result(...)`, which constructs `DeterministicRuntimeEngine` directly and calls `engine.run_next(...)`.
-- `backend/app/api/routes/sessions.py`, `backend/app/api/routes/runs.py`, `backend/app/api/routes/approvals.py`, and `backend/app/api/routes/tool_confirmations.py` expose command routes, but no route that advances the deterministic runtime to the next stage or configured interrupt.
-- `e2e/playwright.config.ts` starts only the Vite frontend server by default and does not start a backend deterministic advancement harness.
-- `e2e/tests/function-one-control-flow.spec.ts` uses route-level projection fixtures and a mocked `EventSource`; it is not live backend coverage.
+The worker did not write the coordination store, did not update central plan status, did not update platform or split-plan final status, did not edit current split specs, did not change backend runtime/API/projection source, did not edit frontend source, and did not modify dependency manifests or lockfiles.
 
 ## Changed Files
 
 - `docs/plans/implementation/v6.3-playwright-control-flow-live.md`
 - `docs/plans/acceleration/reports/QA-E2E-V6.3-LIVE.md`
+- `e2e/playwright.config.ts`
+- `e2e/support/live-backend-server.py`
+- `e2e/tests/function-one-control-flow-live.spec.ts`
+- `e2e/tests/function-one-control-flow.spec.ts`
+
+## Implementation Summary
+
+- Added `E2E_LIVE_BACKEND=1` mode to `e2e/playwright.config.ts`.
+- Added `e2e/support/live-backend-server.py`, which runs `backend.app.testing.create_e2e_test_app()` with isolated runtime root and CORS for the Vite origin.
+- Added `e2e/tests/function-one-control-flow-live.spec.ts`.
+- Added a scoped live-spec reject-submit helper that refills and submits the current approval form instance when live workspace refetch/SSE updates replace the form during the submit window.
+- Kept existing route-fixture tests opt-in default behavior unchanged.
+- Updated existing V6.3 route fixture terminal `system_status.retry_action` values from the legacy mock-only marker to backend-shaped `retry:<run_id>`.
+- Updated the existing V6.3 route fixture rerun API response to match the backend `{ session, run }` response shape, so the fixture no longer masks the live frontend integration defect.
 
 ## TDD Evidence
 
-TDD is not applicable to this blocked checkpoint because no production code, test behavior, fixture behavior, frontend source, backend source, package manifest, or lockfile was changed.
+### RED
 
-The implementation decision was made at the Source Trace Conflict Gate before code changes. The blocker is a missing owner surface, not a defect inside a QA-E2E-owned file.
+Command:
 
-## Review Evidence
+```powershell
+$env:E2E_LIVE_BACKEND='1'; npm --prefix e2e run test -- function-one-control-flow-live.spec.ts; Remove-Item Env:E2E_LIVE_BACKEND
+```
 
-- Spec / source-trace compliance review: no Critical, Important, or Minor findings. The reviewer confirmed the blocked result is justified, no owner boundary is crossed, and the report does not claim `mock_ready`, `implemented`, or live completion.
-- Evidence quality / regression-risk review: no Critical, Important, or Minor findings. The reviewer confirmed the report has required blocked-ingest fields, changed files, owner attribution, and verification evidence that explicitly does not claim live coverage.
+Observed before live backend support:
+
+```text
+2 failed
+ECONNREFUSED 127.0.0.1:8000
+```
+
+This was the expected red result: the live spec existed, but Playwright config did not yet start the backend test app or provide a live API base.
+
+### GREEN / Partial
+
+Command:
+
+```powershell
+$env:E2E_LIVE_BACKEND='1'; npm --prefix e2e run test -- function-one-control-flow-live.spec.ts; Remove-Item Env:E2E_LIVE_BACKEND
+```
+
+Observed after live backend support:
+
+```text
+1 failed, 1 passed
+```
+
+Passing scenario:
+
+```text
+tests\function-one-control-flow-live.spec.ts › covers live tool confirmation allow and deny follow-up on narrow layout
+```
+
+Remaining failure:
+
+```text
+expect(getByLabel('Run 2 boundary')).toBeFocused()
+Expected: focused
+Received: inactive
+```
+
+The failure page snapshot shows:
+
+- Run 2 boundary exists.
+- Run 2 is the current run.
+- Run 2 status is `Running`.
+- Run 2 stage is `Requirement Analysis`.
+- Composer binds to the new Run 2 run id.
+
+This means the backend rerun command succeeds and the workspace projection refreshes, but the frontend does not focus the new run boundary.
+
+## Blocker
+
+Live V6.3 is blocked by a frontend owner contract mismatch in the rerun response consumer.
+
+Backend route:
+
+```text
+POST /api/sessions/{sessionId}/runs
+```
+
+returns `RunCommandResponse`:
+
+```json
+{
+  "session": { "...": "..." },
+  "run": { "run_id": "..." }
+}
+```
+
+Current frontend `RerunAction` calls:
+
+```ts
+const run = await createRerun(sessionId, request ?? {});
+await invalidateWorkspaceQueries();
+focusRunBoundaryWhenAvailable(run.run_id);
+```
+
+The existing frontend API type declares `createRerun()` as returning a bare `RunSummaryProjection`, so live response consumption loses the actual run id. The live test cannot be completed without changing frontend source or weakening the focus assertion. Both are outside this QA-E2E worker claim:
+
+- Frontend source is owned by AL06.
+- V6.3 acceptance requires rerun focus to the new run boundary.
+- Weakening the assertion would hide a real integrated behavior defect.
+
+## Source Trace Evidence
+
+- `docs/plans/function-one-platform/09-regression-hardening-and-logs.md#v63` requires rerun creates a new run and moves focus.
+- `docs/plans/function-one-platform/04-human-loop-and-runtime.md#f44a` states the rerun UI still calls the existing `createRerun(sessionId)` API and must consume true `retry:<run_id>` projections.
+- `backend/tests/api/test_rerun_command_api.py` asserts the backend response shape is `{ session, run }`.
+- `frontend/src/api/runs.ts` currently types `createRerun()` as `Promise<RunSummaryProjection>`.
+- `frontend/src/features/runs/RerunAction.tsx` focuses `run.run_id` after calling `createRerun()`.
+- The live Playwright snapshot shows a correct new current run boundary but failed focus.
 
 ## Verification Commands
+
+### Existing V6.3 Route-Fixture Regression
+
+Command:
 
 ```powershell
 npm --prefix e2e run test -- function-one-control-flow.spec.ts
 ```
 
-Exit code: 0
+Exit code: 1
 
 ```text
 Running 2 tests using 1 worker
-  ok 1 [chromium] tests\function-one-control-flow.spec.ts:83:3 ... covers approval rejection, paused approval, terminate, and rerun focus
-  ok 2 [chromium] tests\function-one-control-flow.spec.ts:144:3 ... covers high-risk tool allow, deny, paused disablement, and narrow layout
-  2 passed (4.8s)
+  failed ... covers approval rejection, paused approval, terminate, and rerun focus
+  ok 2 ... covers high-risk tool allow, deny, paused disablement, and narrow layout
+  1 failed
+  1 passed
 ```
 
-This command verifies the prior mock-ready V6.3 regression remains runnable; it does not unblock or prove live V6.3 coverage.
+Failure:
+
+```text
+Expected getByLabel('Run 2 boundary') to be focused.
+Received: inactive.
+```
+
+### Live V6.3 Focused Regression
+
+Command:
+
+```powershell
+$env:E2E_LIVE_BACKEND='1'; npm --prefix e2e run test -- function-one-control-flow-live.spec.ts; Remove-Item Env:E2E_LIVE_BACKEND
+```
+
+Exit code: 1
+
+```text
+Running 2 tests using 1 worker
+  failed covers approval rejection, pause resume, terminate, rerun, and SSE
+  passed covers live tool confirmation allow and deny follow-up on narrow layout
+  1 failed
+  1 passed
+```
+
+Failure:
+
+```text
+Expected getByLabel('Run 2 boundary') to be focused.
+Received: inactive.
+```
+
+### Existing V6.2 Success-Path Regression
+
+Command:
+
+```powershell
+npm --prefix e2e run test -- function-one-full-flow.spec.ts
+```
+
+Exit code: 0
+
+```text
+Running 1 test using 1 worker
+  ok 1 ... completes requirement, clarification, approvals, and delivery result in the console
+  1 passed (3.6s)
+```
+
+### Backend Harness Regression Attempt
+
+Command:
+
+```powershell
+uv run pytest backend/tests/e2e/test_deterministic_runtime_advancement_harness.py -q
+```
+
+Exit code: 1
+
+```text
+ImportError: cannot import name 'UTC' from 'datetime' (D:\miniconda3\lib\datetime.py)
+```
+
+Follow-up command:
+
+```powershell
+uv run python -m pytest backend/tests/e2e/test_deterministic_runtime_advancement_harness.py -q
+```
+
+Exit code: 1
+
+```text
+.venv\Scripts\python.exe: No module named pytest
+```
+
+The repository-local uv Python is 3.11.13, but pytest is not installed in the local uv environment. Installing or syncing dependencies is outside the worker permission set without approval.
 
 ## Mock-First / Live Status
 
-Existing V6.3 mock-first browser coverage remains in `e2e/tests/function-one-control-flow.spec.ts` under the prior `QA-E2E-V6.3` checkpoint.
+- Existing route-fixture V6.3 coverage now matches the real `retry:<run_id>` projection marker and `{ session, run }` rerun response shape. It therefore exposes the same rerun focus blocker instead of passing through a fixture-only response shape.
+- Live backend-backed V6.3 coverage is partially executable:
+  - Approval request, pause/resume disabled state, rejection, rollback, terminate, visible rerun entry, and SSE are exercised up to the rerun focus failure.
+  - Tool confirmation pause/resume, allow, deny, `continue_current_stage` follow-up, SSE, narrow viewport, and overflow checks pass.
+- Full live V6.3 remains blocked until AL06 fixes frontend rerun response-shape consumption.
 
-This live claim is blocked. It should not be ingested as `implemented` or `mock_ready`.
+## Review Checkpoint
+
+- Spec/source reviewer found no Critical or Important issues. The reviewer confirmed the blocked owner attribution, live-vs-fixture scope, and retry marker repair are consistent with V6.3, F4.4a, and backend rerun API evidence.
+- Code-quality reviewer found two Important issues, both fixed in this checkpoint:
+  - Live Playwright `webServer` entries now use `reuseExistingServer: false`, so live runs do not attach to a stale frontend or backend process.
+  - The V6.3 route fixture rerun response now matches the backend `{ session, run }` shape, so fixture coverage exposes the same frontend response-consumption blocker as live coverage.
+- Code-quality reviewer also noted that `.runtime/e2e-live` can accumulate sessions after interrupted local runs. This is recorded as a remaining risk and is not a blocker for the current blocked checkpoint.
+- Final re-review after the live reject-submit helper found no Critical or Important issues. It confirmed the helper does not mask product behavior because it still uses the visible approval form, asserts the entered reason and enabled submit state, and retries only DOM replacement/timing failures from live refetch/SSE. It also confirmed live `webServer` `reuseExistingServer: false` and unchanged default fixture mode.
 
 ## Owner Conflict
 
-The missing capability belongs to backend/runtime or integration ownership, not QA-E2E:
+Owner: AL06 frontend runtime UI.
 
-- A backend/runtime owner must provide a reviewed way to advance a real run through deterministic approval/tool-confirmation interrupts while preserving normal API, projection, event, and SSE semantics.
-- QA-E2E can then add live Playwright coverage against that surface without route fixtures.
+Required owner fix:
+
+- Update frontend `createRerun()` response typing and `RerunAction` consumption to read `RunCommandResponse.run.run_id`, or otherwise consume the true backend response shape without changing backend API semantics.
+- Keep `RerunAction` visibility tied to `system_status.retry_action = retry:<run_id>`.
+- Keep focus behavior on the new run boundary after successful rerun.
+
+QA-E2E follow-up after AL06 fix:
+
+- Rerun `E2E_LIVE_BACKEND=1 npm --prefix e2e run test -- function-one-control-flow-live.spec.ts`.
+- If green, this claim can be continued or re-claimed to update local result from `blocked` to `reported` with expected `implemented`.
 
 ## Remaining Risks
 
-- V6.3 remains partially covered by route-level projection fixtures only.
-- Browser-level live coverage does not yet prove backend orchestration, event persistence, or SSE delivery for approval rejection, tool confirmation allow/deny, pause/resume, terminate, and rerun.
-- A narrow live smoke test that only creates a session and starts a first requirement would overlap V6.2 success-path startup coverage and would not satisfy V6.3 manual-intervention acceptance criteria.
+- The new live backend server uses `.runtime/e2e-live`, so repeated interrupted runs can leave local test sessions. This path is ignored by Git and does not affect committed source, but test isolation can be improved by adding a unique runtime-root strategy in a future non-blocked checkpoint.
+- Backend harness regression could not be rerun locally because the uv environment lacks pytest and dependency install/sync was not permitted.
+- Full V6.3 live acceptance cannot be claimed while rerun focus fails.
 
 ## Commit Readiness
 
-Local result is `blocked`. The diff is scoped to the live claim's implementation plan and evidence report. A checkpoint commit is useful only to let the main coordination session ingest the blocker; it should not be represented as implementation progress for V6.3.
+Local result is `blocked`. A checkpoint commit is useful only to let the main coordination session ingest the blocker and the reusable live E2E harness work. It must not be represented as implementation progress for final V6.3 completion.
