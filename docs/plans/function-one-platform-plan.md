@@ -314,7 +314,7 @@
 | V6.6 | 前端错误态与后端错误回归 | Week 12 | [x] | 跨端 | [09](function-one-platform/09-regression-hardening-and-logs.md#v66) |
 | V6.8 | 配置边界与运行快照回归 | Week 12 | [ ] | 跨端 | [09](function-one-platform/09-regression-hardening-and-logs.md#v68) |
 | L6.1 | 日志轮转与保留清理 | Week 12 | [x] | 后端 | [09](function-one-platform/09-regression-hardening-and-logs.md#l61) |
-| L6.2 | 日志审计回归包 | Week 12 | [ ] | 后端 | [09](function-one-platform/09-regression-hardening-and-logs.md#l62) |
+| L6.2 | 日志审计回归包 | Week 12 | [x] | 后端 | [09](function-one-platform/09-regression-hardening-and-logs.md#l62) |
 | V6.7 | 回归场景与发布候选清单 | Week 12 | [ ] | 跨端 | [09](function-one-platform/09-regression-hardening-and-logs.md#v67) |
 
 ### 9.1 Acceleration Execution Plan

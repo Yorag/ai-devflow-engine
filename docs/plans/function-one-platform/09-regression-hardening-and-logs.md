@@ -281,7 +281,7 @@
 ## L6.2 日志审计回归包
 
 **计划周期**：Week 12
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：补齐敏感信息裁剪、审计失败回滚、日志查询退化、`.runtime/logs` 排除和跨链路日志审计主路径回归，使日志审计能力达到发布候选要求。
 **实施计划**：`docs/plans/implementation/l6.2-observability-regression-pack.md`
 
@@ -306,6 +306,8 @@
 **测试方法**：
 - `pytest backend/tests/observability/test_log_redaction.py -v`
 - `pytest backend/tests/regression/test_observability_regression.py -v`
+
+**Integration checkpoint note**：`QA-OBS-L6.2` 已集成到 `integration/function-one-acceleration`，并通过 L6.2 focused observability regression、observability impacted suite、workspace / ChangeSet / delivery runtime-log exclusion regression 和 full backend suite 验证。
 
 <a id="v67"></a>
 
