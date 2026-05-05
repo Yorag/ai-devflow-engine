@@ -7,6 +7,7 @@ import type {
   ToolConfirmationFeedEntry,
   TopLevelFeedEntry,
 } from "../../api/types";
+import { ErrorState } from "../errors/ErrorState";
 import {
   submitToolConfirmationDecision,
   type ToolConfirmationDecision,
@@ -40,7 +41,7 @@ export function ToolConfirmationBlock({
     useState<SubmittedToolConfirmationState | null>(null);
   const [pendingDecision, setPendingDecision] =
     useState<ToolConfirmationDecision | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<unknown | null>(null);
   const displayEntry =
     submittedState?.sourceSignature === entrySignature
       ? submittedState.entry
@@ -65,7 +66,7 @@ export function ToolConfirmationBlock({
     }
 
     setPendingDecision(decision);
-    setErrorMessage(null);
+    setApiError(null);
     try {
       const result = await submitToolConfirmationDecision(
         displayEntry,
@@ -89,9 +90,7 @@ export function ToolConfirmationBlock({
         });
       }
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error ? error.message : "Tool confirmation failed.",
-      );
+      setApiError(error);
     } finally {
       setPendingDecision(null);
     }
@@ -143,11 +142,7 @@ export function ToolConfirmationBlock({
       {disabledReason ? (
         <p className="feed-entry__supporting">{disabledReason}</p>
       ) : null}
-      {errorMessage ? (
-        <p className="tool-confirmation-block__error" role="alert">
-          {errorMessage}
-        </p>
-      ) : null}
+      {apiError ? <ErrorState error={apiError} /> : null}
       <div className="feed-entry__actions" aria-label="Tool confirmation actions">
         <button
           type="button"

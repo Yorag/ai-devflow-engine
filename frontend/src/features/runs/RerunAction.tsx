@@ -1,10 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
-import type { ApiRequestError, ApiRequestOptions } from "../../api/client";
+import type { ApiRequestOptions } from "../../api/client";
 import { apiQueryKeys } from "../../api/hooks";
 import { createRerun } from "../../api/runs";
 import type { SystemStatusFeedEntry } from "../../api/types";
+import { ErrorState } from "../errors/ErrorState";
 import { getRunBoundaryId } from "../feed/RunBoundary";
 
 type RerunActionProps = {
@@ -48,7 +49,7 @@ function RenderableRerunAction({
 }: Pick<RerunActionProps, "sessionId" | "projectId" | "request">): JSX.Element {
   const queryClient = useQueryClient();
   const [isSubmitting, setSubmitting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<unknown | null>(null);
 
   async function invalidateWorkspaceQueries() {
     await queryClient.invalidateQueries({
@@ -76,13 +77,13 @@ function RenderableRerunAction({
     }
 
     setSubmitting(true);
-    setErrorMessage(null);
+    setApiError(null);
     try {
       const run = await createRerun(sessionId, request ?? {});
       await invalidateWorkspaceQueries();
       focusRunBoundaryWhenAvailable(run.run_id);
     } catch (error) {
-      setErrorMessage(readApiErrorMessage(error));
+      setApiError(error);
     } finally {
       setSubmitting(false);
     }
@@ -104,7 +105,7 @@ function RenderableRerunAction({
           {isSubmitting ? "Starting rerun" : "Retry run"}
         </button>
       </div>
-      {errorMessage ? <p className="rerun-action__error">{errorMessage}</p> : null}
+      {apiError ? <ErrorState error={apiError} /> : null}
     </div>
   );
 }
@@ -145,11 +146,4 @@ function focusRunBoundaryWhenAvailable(runId: string, remainingAttempts = 8) {
   window.setTimeout(() => {
     focusRunBoundaryWhenAvailable(runId, remainingAttempts - 1);
   }, 16);
-}
-
-function readApiErrorMessage(error: unknown): string {
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as ApiRequestError).message);
-  }
-  return "Rerun request failed.";
 }

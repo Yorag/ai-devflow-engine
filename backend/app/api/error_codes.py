@@ -36,6 +36,8 @@ class ErrorCode(StrEnum):
     DELIVERY_SNAPSHOT_NOT_READY = "delivery_snapshot_not_ready"
     DELIVERY_GIT_CLI_FAILED = "delivery_git_cli_failed"
     DELIVERY_REMOTE_REQUEST_FAILED = "delivery_remote_request_failed"
+    APPROVAL_NOT_ACTIONABLE = "approval_not_actionable"
+    RUN_COMMAND_NOT_ACTIONABLE = "run_command_not_actionable"
     RUNTIME_DATA_DIR_UNAVAILABLE = "runtime_data_dir_unavailable"
     AUDIT_WRITE_FAILED = "audit_write_failed"
     LOG_QUERY_INVALID = "log_query_invalid"
@@ -266,6 +268,22 @@ _ERROR_CATALOG_ROWS: dict[ErrorCode, dict[str, Any]] = {
         "user_visible": True,
         "default_safe_title": "Delivery remote request failed",
         "default_safe_message": "Remote delivery request failed.",
+    },
+    ErrorCode.APPROVAL_NOT_ACTIONABLE: {
+        "category": "runtime",
+        "default_http_status": HTTPStatus.CONFLICT,
+        "retryable": False,
+        "user_visible": True,
+        "default_safe_title": "Approval not actionable",
+        "default_safe_message": "Approval is not actionable in the current run state.",
+    },
+    ErrorCode.RUN_COMMAND_NOT_ACTIONABLE: {
+        "category": "runtime",
+        "default_http_status": HTTPStatus.CONFLICT,
+        "retryable": False,
+        "user_visible": True,
+        "default_safe_title": "Run command not actionable",
+        "default_safe_message": "Run command is not actionable in the current run state.",
     },
     ErrorCode.RUNTIME_DATA_DIR_UNAVAILABLE: {
         "category": "runtime",

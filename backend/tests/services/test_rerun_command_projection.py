@@ -585,7 +585,7 @@ def test_create_rerun_rejects_non_terminal_or_completed_current_run(
             trace_context=build_trace(),
         )
 
-    assert exc_info.value.error_code is ErrorCode.VALIDATION_ERROR
+    assert exc_info.value.error_code is ErrorCode.RUN_COMMAND_NOT_ACTIONABLE
     assert exc_info.value.status_code == 409
     assert runtime_port.calls == []
     assert audit.records[0]["method"] == "record_rejected_command"
@@ -612,7 +612,7 @@ def test_create_rerun_rejects_session_without_current_run_tail(
             trace_context=build_trace(),
         )
 
-    assert exc_info.value.error_code is ErrorCode.VALIDATION_ERROR
+    assert exc_info.value.error_code is ErrorCode.RUN_COMMAND_NOT_ACTIONABLE
     assert exc_info.value.status_code == 409
     assert "existing current run tail" in str(exc_info.value)
     assert audit.records[-1]["method"] == "record_rejected_command"
@@ -682,7 +682,7 @@ def test_create_rerun_rejects_when_runtime_boundary_reports_non_terminal_old_thr
             trace_context=build_trace(),
         )
 
-    assert exc_info.value.error_code is ErrorCode.VALIDATION_ERROR
+    assert exc_info.value.error_code is ErrorCode.RUN_COMMAND_NOT_ACTIONABLE
     assert exc_info.value.status_code == 409
     assert audit.records[-1]["method"] == "record_rejected_command"
     assert audit.records[-1]["action"] == "runtime.rerun.rejected"

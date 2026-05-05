@@ -842,6 +842,50 @@ a {
   line-height: 1.45;
 }
 
+.error-state {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  margin: 0;
+  border: 1px solid oklch(84% 0.035 26);
+  border-radius: 8px;
+  background: oklch(97.5% 0.015 26);
+  color: oklch(35% 0.08 26);
+  padding: 12px;
+}
+
+.error-state__content {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.error-state__content strong,
+.error-state__content p,
+.error-state__request-id {
+  overflow-wrap: anywhere;
+}
+
+.error-state__content strong {
+  font-size: 0.88rem;
+}
+
+.error-state__content p {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.error-state__request-id {
+  color: oklch(43% 0.035 248);
+  font-size: 0.75rem;
+}
+
+.error-state .workspace-button {
+  justify-self: start;
+}
+
 .feed-entry--user-message {
   margin-left: min(88px, 12%);
   border-color: oklch(82% 0.05 252);
@@ -2504,6 +2548,14 @@ a {
 
   .feed-entry__actions button {
     flex: 1 1 160px;
+  }
+
+  .error-state {
+    grid-template-columns: 1fr;
+  }
+
+  .error-state .workspace-button {
+    width: 100%;
   }
 
   .approval-block__reject-actions .workspace-button,

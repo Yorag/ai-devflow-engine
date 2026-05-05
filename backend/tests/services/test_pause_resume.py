@@ -665,7 +665,7 @@ def test_resume_rejects_non_paused_run(tmp_path: Path) -> None:
             trace_context=build_trace(),
         )
 
-    assert exc_info.value.error_code is ErrorCode.VALIDATION_ERROR
+    assert exc_info.value.error_code is ErrorCode.RUN_COMMAND_NOT_ACTIONABLE
     assert exc_info.value.status_code == 409
     assert "paused" in str(exc_info.value)
     assert runtime_port.calls == []
@@ -692,7 +692,7 @@ def test_pause_rejects_invalid_state_without_mutation(tmp_path: Path) -> None:
             trace_context=build_trace(),
         )
 
-    assert exc_info.value.error_code is ErrorCode.VALIDATION_ERROR
+    assert exc_info.value.error_code is ErrorCode.RUN_COMMAND_NOT_ACTIONABLE
     assert exc_info.value.status_code == 409
     assert runtime_port.calls == []
     with manager.session(DatabaseRole.CONTROL) as session:
