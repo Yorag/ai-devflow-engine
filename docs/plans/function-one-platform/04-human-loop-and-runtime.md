@@ -749,3 +749,46 @@
 **测试方法**：
 - `npm --prefix frontend run test -- RerunAction`
 - `npm --prefix frontend run test -- FeedEntryRenderer`
+
+<a id="f44b"></a>
+
+## F4.4b RerunAction 响应形状与焦点修复
+
+**计划周期**：Week 11
+**状态**：`[x]`
+**目标**：修复重新尝试前端对后端 `POST /api/sessions/{sessionId}/runs` 响应形状的消费，使 `RerunAction` 在真实 `{ session, run }` 响应下使用新 run 的 `run_id` 聚焦新 run boundary，并解除 `QA-E2E-V6.3-LIVE` 的 rerun focus blocker。
+**实施计划**：`docs/plans/implementation/f4.4b-rerun-response-focus.md`
+**验证摘要**：实施计划 `docs/plans/implementation/f4.4b-rerun-response-focus.md` 已完成并在 integration checkpoint 合入 `fa64197`。`npm --prefix frontend run test -- RerunAction` 通过 9 个 focused tests；`npm --prefix frontend run test -- client` 通过 7 个 focused tests；`npm --prefix frontend test` 通过 29 个 test files、237 个 tests；`npm --prefix frontend run build` 完成 TypeScript 检查与生产构建；`npm --prefix e2e run test -- function-one-control-flow.spec.ts` 通过 2 个 Playwright route-fixture tests。
+
+**依赖关系**：
+- F4.4a 已完成 `system_status.retry_action = retry:<run_id>` 可见性契约重连。
+- H4.7 后端重新尝试命令返回 `RunCommandResponse`，响应形状为 `{ session, run }`。
+- `QA-E2E-V6.3-LIVE` 在 `test/qa-e2e-regression` 分支记录的 blocker 显示：新 Run 2 boundary 已出现并成为当前 run，但 rerun 后没有获得焦点。
+
+**修改文件列表**：
+- Modify: `frontend/src/api/runs.ts`
+- Modify: `frontend/src/api/__tests__/client.test.ts`
+- Modify: `frontend/src/features/runs/RerunAction.tsx`
+- Modify: `frontend/src/features/runs/__tests__/RerunAction.test.tsx`
+
+**实现类/函数**：
+- `createRerun()`
+- `RerunAction`
+- `focusRunBoundaryWhenAvailable()`
+
+**验收标准**：
+- `createRerun()` 前端 API client 必须匹配后端真实响应形状 `{ session, run }`，不得继续把响应类型声明或消费为裸 `RunSummaryProjection`。
+- `RerunAction` 提交成功后必须使用后端响应中的新 run id 聚焦新 run boundary。
+- `RerunAction` 的可见性仍只由当前 failed / terminated 顶层 `system_status.retry_action = retry:<same run_id>` 决定。
+- 重新尝试按钮仍调用既有 `POST /api/sessions/{sessionId}/runs` 路径，不把 `retry_action` 字符串当作路由、URL 或可执行命令。
+- 本任务不得修改后端 rerun API、`SystemStatusFeedEntry`、`TerminalStatusProjector` 或 QA-E2E Playwright 场景语义。
+- 修复后 `QA-E2E-V6.3-LIVE` 可重新运行 route-fixture 与 live Playwright rerun focus 验证，不应再失败于 `Run 2 boundary` 未获得焦点。
+
+**前端设计质量门**：
+- 继承 F4.4 / F4.4a 的重新尝试入口、新 run 分界提示、历史 run 禁用态和焦点恢复质量门。
+- 修复不得引入额外说明型 UI，不得改变运行控制语义或审批 / 工具确认展示语义。
+
+**测试方法**：
+- `npm --prefix frontend run test -- RerunAction`
+- `npm --prefix frontend run test -- client`
+- `npm --prefix e2e run test -- function-one-control-flow.spec.ts`

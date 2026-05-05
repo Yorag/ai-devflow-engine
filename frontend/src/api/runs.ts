@@ -1,10 +1,14 @@
 import { apiRequest, type ApiRequestOptions } from "./client";
-import type { RunSummaryProjection, RunTimelineProjection } from "./types";
+import type {
+  RunCommandResponse,
+  RunSummaryProjection,
+  RunTimelineProjection,
+} from "./types";
 
 export function createRerun(
   sessionId: string,
   options?: ApiRequestOptions,
-): Promise<RunSummaryProjection> {
+): Promise<RunCommandResponse> {
   return apiRequest(`/api/sessions/${sessionId}/runs`, {
     ...options,
     method: "POST",

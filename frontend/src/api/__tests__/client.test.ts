@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import type { RunCommandResponse } from "../types";
 
 import {
   ApiRequestError,
@@ -118,6 +119,46 @@ describe("createEventSource", () => {
 });
 
 describe("resource clients", () => {
+  it("exposes the backend rerun command response shape", async () => {
+    const responseBody: RunCommandResponse = {
+      session: {
+        session_id: "session-1",
+        project_id: "project-1",
+        display_name: "Failed session",
+        status: "running",
+        selected_template_id: "template-feature",
+        current_run_id: "run-retry-2",
+        latest_stage_type: "requirement_analysis",
+        created_at: "2026-05-01T10:00:00.000Z",
+        updated_at: "2026-05-01T10:16:00.000Z",
+      },
+      run: {
+        run_id: "run-retry-2",
+        attempt_index: 2,
+        status: "running",
+        trigger_source: "retry",
+        started_at: "2026-05-01T10:16:00.000Z",
+        ended_at: null,
+        current_stage_type: "requirement_analysis",
+        is_active: true,
+      },
+    };
+    const fetchMock = vi.fn(async () => jsonResponse(responseBody));
+
+    const { createRerun } = await import("../runs");
+
+    const result = await createRerun("session-1", { fetcher: fetchMock });
+
+    expectTypeOf(result).toEqualTypeOf<RunCommandResponse>();
+    expect(result).toEqual(responseBody);
+    expect(result.run.run_id).toBe("run-retry-2");
+    expect(result.session.current_run_id).toBe("run-retry-2");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/session-1/runs",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("uses canonical control-plane paths for project, session, and template commands", async () => {
     const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
     const fetchMock = vi.fn(

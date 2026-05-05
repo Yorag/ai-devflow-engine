@@ -164,7 +164,7 @@
 | [01 工程基线与契约层](function-one-platform/01-foundation-and-contracts.md) | 工程基线、Schema 契约、数据库职责拆分、Project/Session 历史可见性、EnvironmentSettings、PlatformRuntimeSettings、Provider 调用策略快照、PromptAsset Schema、ToolConfirmation Schema、工具风险枚举、运行数据目录、log.db、TraceContext | B0.1-B0.3, F0.1, C1.1-C1.10, C1.10a, L0.1, L1.1-L1.2 |
 | [02 控制面与工作台外壳](function-one-platform/02-control-plane-and-workspace-shell.md) | Project、Session、历史管理、Template、Provider、DeliveryChannel、ConfigurationPackage、PlatformRuntimeSettings 管理服务、控制面日志审计、Shell、设置、模板空态 | C2.1-C2.8, C2.7a, C2.9a-C2.9b, L2.1-L2.4, F2.1-F2.6 |
 | [03 Run 主链、投影与叙事流](function-one-platform/03-run-projection-and-feed.md) | PipelineRun、模板快照、Provider/模型绑定快照、运行上限快照、GraphDefinition、首个 GraphThread、首个 workspace_ref、StageArtifact、Workspace Projection、ToolConfirmationInspectorProjection、SSE、Run/Stage 日志轻查询、Feed、Provider 调用状态、Inspector | R3.1-R3.4, R3.4a-R3.4b, R3.5-R3.7, Q3.1-Q3.4b, Q3.2a, E3.1-E3.2, L3.1, F3.1-F3.7 |
-| [04 人工介入、工具确认与运行控制](function-one-platform/04-human-loop-and-runtime.md) | Runtime orchestration boundary、澄清、审批、工具确认、暂停恢复终止、交付快照、命令审计失败语义、审计查询、Composer、Approval Block、Tool Confirmation Block、重新尝试 UI | A4.0, L4.1-L4.2, H4.1-H4.7, H4.4a-H4.4b, D4.0, F4.1-F4.4a, F4.3a |
+| [04 人工介入、工具确认与运行控制](function-one-platform/04-human-loop-and-runtime.md) | Runtime orchestration boundary、澄清、审批、工具确认、暂停恢复终止、交付快照、命令审计失败语义、审计查询、Composer、Approval Block、Tool Confirmation Block、重新尝试 UI | A4.0, L4.1-L4.2, H4.1-H4.7, H4.4a-H4.4b, D4.0, F4.1-F4.4b, F4.3a |
 | [05 deterministic runtime 与 demo_delivery](function-one-platform/05-deterministic-runtime-and-demo-delivery.md) | RuntimeEngine、`deterministic test runtime`、六阶段确定性推进、demo_delivery、DeliveryRecord、DeliveryResultDetailProjection | A4.1-A4.4, D4.1-D4.3 |
 | [06 LangGraph、Provider、Context 与 Stage Agent Runtime](function-one-platform/06-langgraph-provider-context-stage-agent.md) | LangGraph、Provider、Provider retry/circuit breaker、PromptValidation、PromptRegistry、PromptRenderer、ContextEnvelope / ContextManifest、AgentDecision、Stage Agent Runtime、自动回归 | A4.5-A4.11, A4.8a-A4.8d, A4.9a-A4.9e |
 | [07 Workspace Tools、风险门禁与变更边界](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md) | ToolProtocol、ToolRegistry execution gate、工具风险确认门禁、统一错误码、后端测试 fixture、Workspace tools、ChangeSet、ContextReference、PreviewTarget | W5.0-W5.6, W5.0a-W5.0d |
@@ -266,6 +266,7 @@
 | F4.3a | Tool Confirmation Block 与确认交互 | Week 6-7 | [x] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f43a) |
 | F4.4 | 重新尝试 UI 与历史审批禁用态 | Week 6 | [x] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f44) |
 | F4.4a | RerunAction 真实 retry_action 契约重连 | Week 11 | [x] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f44a) |
+| F4.4b | RerunAction 响应形状与焦点修复 | Week 11 | [x] | 前端 | [04](function-one-platform/04-human-loop-and-runtime.md#f44b) |
 | A4.1 | RuntimeEngine 接口 | Week 7 | [x] | 后端 | [05](function-one-platform/05-deterministic-runtime-and-demo-delivery.md#a41) |
 | W5.0 | ToolProtocol 与工具注册表 | Week 7 | [x] | 后端 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w50) |
 | W5.0a | 统一错误码字典与错误响应契约 | Week 7 | [x] | 后端契约 | [07](function-one-platform/07-workspace-tools-risk-and-change-boundaries.md#w50a) |
