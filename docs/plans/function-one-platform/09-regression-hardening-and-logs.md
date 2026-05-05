@@ -40,7 +40,7 @@
 ## V6.2 Playwright 成功路径
 
 **计划周期**：Week 11
-**状态**：`[ ]`
+**状态**：`[/]`
 **目标**：建立跨端成功路径 E2E，验证用户可在单一控制台完成输入、审批和交付结果回看。
 **实施计划**：`docs/plans/implementation/v6.2-playwright-success-flow.md`
 
@@ -65,6 +65,8 @@
 
 **测试方法**：
 - `npm --prefix e2e run test -- function-one-full-flow.spec.ts`
+
+**Integration checkpoint note**：`QA-E2E-V6.2` 已作为 `mock_ready` checkpoint 集成到 `integration/function-one-acceleration`。当前 Playwright 成功路径通过 API 预置 draft session 验证 Narrative Feed、Composer、Approval Block、Inspector、Delivery Result、Run Switcher、焦点恢复、全局 overflow 和窄屏可用性；完整 `[x]` 仍等待前端 `New session` 接入真实 `POST /api/projects/{projectId}/sessions` 创建会话流程。
 
 <a id="v63"></a>
 
@@ -245,7 +247,7 @@
 ## L6.1 日志轮转与保留清理
 
 **计划周期**：Week 12
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：补齐平台日志文件轮转、运行日志保留清理和审计保留差异，使运行日志生命周期不会破坏领域对象、投影查询和交付记录。
 **实施计划**：`docs/plans/implementation/l6.1-log-rotation-retention-cleanup.md`
 
@@ -269,6 +271,8 @@
 
 **测试方法**：
 - `pytest backend/tests/observability/test_log_retention.py -v`
+
+**Integration checkpoint note**：`QA-OBS-L6.1` 已集成到 `integration/function-one-acceleration`，并通过日志轮转、运行日志保留清理、JSONL writer 和日志查询服务回归验证。
 
 <a id="l62"></a>
 
