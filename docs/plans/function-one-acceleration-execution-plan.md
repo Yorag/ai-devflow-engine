@@ -59,7 +59,7 @@
 
 ## 3. Lane Registry
 
-六条 AL lane 是功能一剩余实现的长期并行分支。`QA` 是 integration-owned 验证队列，不作为产品实现 lane。所有 lane 从当前基线开始 claim，不从旧分支表或旧收尾分支继承 active 状态。
+六条 AL lane 是功能一剩余实现的长期并行分支。QA lane 是 integration-owned 验证队列，不作为产品实现 lane。现有 `QA` lane 保留已经进入 coordination store 的 `QA-V6.1` / `QA-V6.4` 状态；剩余未 claim 的回归和硬化任务拆入独立 QA 子 lane，以便在不共享工作区的情况下并行开发。所有 lane 从当前基线开始 claim，不从旧分支表或旧收尾分支继承 active 状态。
 
 | Lane | Branch | Coverage | Status | Owner Scope | Review Boundary |
 | --- | --- | --- | --- | --- | --- |
@@ -69,7 +69,12 @@
 | AL04 | `feat/al-tools-deterministic-delivery` | A4.1, W5.0, W5.0a, W5.0b, W5.0c, W5.0d, W5.1, W5.2, W5.3, W5.4, W5.5, W5.6, A4.2, A4.3, A4.4, D4.1, D4.2, D4.3, D5.1, D5.2, D5.3, D5.4 | claimed | RuntimeEngine、ToolProtocol、ToolRegistry、Workspace tools、ChangeSet、PreviewTarget、deterministic runtime、DeliveryRecord、delivery adapters | 工具、deterministic runtime 和交付适配 |
 | AL05 | `feat/al-provider-langgraph-context` | A4.5, A4.6, A4.7, A4.8, A4.8a, A4.8b, A4.8c, A4.8d, A4.9, A4.9a, A4.9e, A4.9b, A4.9c, A4.9d, A4.10, A4.11 | claimed | LangGraph runtime、Provider registry、PromptValidation、PromptRegistry、PromptRenderer、ContextEnvelope、Provider adapter、AgentDecision、StageAgentRuntime | Provider、LangGraph、上下文和 Stage Agent |
 | AL06 | `feat/al-frontend-runtime-ui` | F3.1, F3.2, F3.3, F3.4, F3.5, F3.6, F3.7, H4.2, F4.1, F4.2, F4.3, F4.3a, F4.4, F5.1, F5.2a, F5.2b | claimed | frontend workspace store、SSE reducer、Feed、StageNode、Inspector、Composer、Approval、Tool Confirmation、Delivery UI | 前端运行工作台和交付展示 |
-| QA | `test/al-regression-hardening` | V6.1, V6.2, V6.3, V6.4, V6.5, V6.6, V6.8, L6.1, L6.2, V6.7 | planned | backend API flow、OpenAPI、Playwright、frontend error states、config regression、log hardening、release checklist | integration 回归和发布候选验证 |
+| QA | `test/al-regression-hardening` | V6.1, V6.4, V6.5 | blocked | backend API flow、OpenAPI、frontend client/OpenAPI compatibility | contract regression and compatibility verification |
+| QA-E2E | `test/qa-e2e-regression` | V6.2, V6.3 | planned | Playwright harness、success path、manual intervention path、responsive/focus assertions | browser E2E regression |
+| QA-ERROR | `test/qa-error-regression` | V6.6 | planned | backend error-code regression、frontend ErrorState、error presentation and recovery actions | error contract and UI regression |
+| QA-CONFIG | `test/qa-config-snapshot-regression` | V6.8 | planned | config boundary、runtime snapshot、prompt asset boundary、project/session history regression | configuration and snapshot regression |
+| QA-OBS | `test/qa-observability-regression` | L6.1, L6.2 | planned | log retention、rotation、redaction、audit failure and degraded log query regression | observability regression |
+| QA-RELEASE | `test/qa-release-candidate` | V6.7 | planned | regression scenario consolidation、release candidate checklist、final acceptance evidence | release candidate checklist |
 
 ## 4. Shared Ownership
 
@@ -78,14 +83,19 @@
 | Shared Entry | Owner | Consumers |
 | --- | --- | --- |
 | Provider、DeliveryChannel、ConfigurationPackage、PlatformRuntimeSettings API 与 service | current baseline | AL01, AL03, AL04, AL05, AL06 |
-| Run 状态枚举转换、PipelineRun、StageRun、StageArtifact、GraphDefinition、EventStore | AL01 | AL02, AL03, AL04, AL05, AL06, QA |
-| 高影响多库公开语义 / publication boundary，以及为 enforce 该边界而做的 startup workspace/timeline/SSE visibility filter | AL01 | AL02, AL03, QA |
-| Projection payload、SSE payload、run/stage log query route、audit query route | AL02 | AL06, QA |
-| RuntimeOrchestrationService、clarification、approval、tool confirmation、runtime control command semantics | AL03 | AL04, AL05, AL06, QA |
-| ToolProtocol、ToolRegistry、WorkspaceManager、Workspace tools、ChangeSet、PreviewTarget、DeliveryRecord、delivery adapter | AL04 | AL03, AL05, AL06, QA |
-| Prompt、Context、Provider adapter、LangGraph node/checkpoint、AgentDecision、StageAgentRuntime | AL05 | AL01, AL03, AL04, AL06, QA |
-| frontend API client runtime-facing additions、workspace store、Feed/Inspector/Composer/Approval/Delivery components | AL06 | QA |
-| OpenAPI/e2e/regression harness and release checklist | QA | all lanes |
+| Run 状态枚举转换、PipelineRun、StageRun、StageArtifact、GraphDefinition、EventStore | AL01 | AL02, AL03, AL04, AL05, AL06, QA lanes |
+| 高影响多库公开语义 / publication boundary，以及为 enforce 该边界而做的 startup workspace/timeline/SSE visibility filter | AL01 | AL02, AL03, QA lanes |
+| Projection payload、SSE payload、run/stage log query route、audit query route | AL02 | AL06, QA lanes |
+| RuntimeOrchestrationService、clarification、approval、tool confirmation、runtime control command semantics | AL03 | AL04, AL05, AL06, QA lanes |
+| ToolProtocol、ToolRegistry、WorkspaceManager、Workspace tools、ChangeSet、PreviewTarget、DeliveryRecord、delivery adapter | AL04 | AL03, AL05, AL06, QA lanes |
+| Prompt、Context、Provider adapter、LangGraph node/checkpoint、AgentDecision、StageAgentRuntime | AL05 | AL01, AL03, AL04, AL06, QA lanes |
+| frontend API client runtime-facing additions、workspace store、Feed/Inspector/Composer/Approval/Delivery components | AL06 | QA lanes |
+| OpenAPI contract and frontend client/OpenAPI compatibility | QA | all lanes |
+| Playwright E2E harness and browser regression fixtures | QA-E2E | AL06, QA-RELEASE |
+| Error contract and frontend error-state regression harness | QA-ERROR | AL03, AL04, AL05, AL06, QA-RELEASE |
+| Configuration boundary, runtime snapshot, prompt asset and project/session history regression | QA-CONFIG | AL01, AL05, AL06, QA-RELEASE |
+| Log retention, redaction, audit and degraded log-query regression | QA-OBS | AL02, AL04, QA-RELEASE |
+| Release candidate checklist and final acceptance evidence | QA-RELEASE | all lanes |
 
 `R3.2a` owner decision：AL01 被授权直接修改 `backend/app/services/projections/workspace.py`、`backend/app/services/projections/timeline.py`、`backend/app/api/routes/events.py`，但仅限于 enforce publication boundary 的 reader visibility filter。该例外不转移 AL02 对通用 projection payload、SSE payload、query route 和 projection contract 演进的 owner scope。
 
@@ -102,7 +112,7 @@ Start gate 只允许开始实现或 mock-first；它不等于完成 gate。
 | AL04 gate | AL04 可立即开始 ToolProtocol、错误码、WorkspaceManager、纯工具和 fixture；deterministic runtime 与 delivery adapter 的最终完成必须接入 AL01 run truth、AL03 runtime boundary 和当前基线的 delivery settings。 |
 | AL05 gate | AL05 可立即开始 PromptValidation、PromptRegistry、PromptRenderer、Context schema 和 provider registry；LangGraph 与 StageAgentRuntime 的最终完成必须接入 AL01、AL03、AL04。 |
 | AL06 gate | AL06 可基于冻结 projection/event/mock payload 先行所有 runtime UI；最终完成必须切换到真实 API/SSE、真实 error contract 和真实 delivery/result payload。F4.3a 的最终完成必须读取 Q3.4b 暴露的顶层 `tool_confirmation.deny_followup_action` / `deny_followup_summary`，不得从 Inspector、run terminal status 或 `alternative_path_summary` 私有字段自行推断拒绝后的后续运行语义。 |
-| QA gate | QA 可提前创建测试骨架、fixture 和 checklist；任何回归任务的 `done` 必须基于 integration 分支的真实实现验证。 |
+| QA gate | QA lanes 可提前创建测试骨架、fixture 和 checklist；任何回归任务的 `done` 必须基于 integration 分支的真实实现验证。`QA-V6.4` 已在 coordination store 中阻塞于 `test/al-regression-hardening`，不得通过 lane 拆分隐藏或重置该 blocker。V6.5 依赖 V6.4 unblock 后再进入最终验证。QA-E2E、QA-ERROR、QA-CONFIG、QA-OBS 可在各自 lane 中并行 claim 未完成任务，但不得更新 platform plan 或 split plan 最终状态。QA-RELEASE / V6.7 只能在 contract、E2E、error、config 和 observability 回归均完成或有明确保留风险后启动。 |
 
 ## 6. Coordination Store And Checkpoint Snapshot
 
@@ -194,8 +204,9 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | AL05-A4.10 | A4.10 | AL05 | `feat/al-provider-langgraph-context` | done | 7fff2b7 | 9986192 | `docs/plans/acceleration/reports/AL05-A4.10.md` | Automatic regression policy integrated with frozen retry-limit resolution, Code Review retry decisions, sanitized logging, and focused IC3 verification covering auto regression, graph compiler, and LangGraph runtime tests. |
 | AL05-A4.11 | A4.11 | AL05 | `feat/al-provider-langgraph-context` | done | a405c40 | 30088c8 | `docs/plans/acceleration/reports/AL05-A4.11.md` | Automatic regression retry control items and retry-exhausted runtime output integrated with control record persistence, retry trace metrics, stable-review approval creation, and impacted auto-regression / projection verification. |
 | QA-V6.1 | V6.1 | QA | `test/al-regression-hardening` | done | a2fabbf | b1b6817 | `docs/plans/acceleration/reports/QA-V6.1.md` | Backend full API flow regression integrated on `integration/function-one-acceleration`; focused V6.1 and impacted API/projection/runtime verification passed on integration branch. |
+| QA-V6.4 | V6.4 | QA | `test/al-regression-hardening` | blocked | 5740002 | - | `docs/plans/acceleration/reports/QA-V6.4.md` | OpenAPI regression is blocked because generated FastAPI OpenAPI lacks `GET /api/runs/{runId}`; requires AL02/query owner or bounded backend query owner fix before rerun. |
 
-当前基线不预置 live claim。主协调会话在认领 ready task 时写入共享 coordination store，并记录当时的 Coordination Base。
+本文档不预置新的 live claim。主协调会话在认领 ready task 时写入共享 coordination store，并记录当时的 Coordination Base。`main` 工作区中的 V6.2 和 L6.1 本地草稿不是 live claim 状态；只有在对应 QA lane 被正式 claim、迁移到该 lane branch、写入 evidence report 并通过 commit gate 后，才能进入 Progress Ingest。
 
 ## 7. Lane Queues
 
@@ -209,7 +220,12 @@ Lane queue 记录任务归属和 lane 内执行顺序。任务资格仍必须由
 | AL04 | A4.1 -> W5.0 -> W5.0a -> W5.0b -> W5.0c -> W5.0d -> W5.1 -> W5.2 -> W5.3 -> W5.4 -> W5.5 -> W5.6 -> A4.2 -> A4.3 -> A4.4 -> D4.1 -> D4.2 -> D4.3 -> D5.1 -> D5.2 -> D5.3 -> D5.4 |
 | AL05 | A4.8 -> A4.8a -> A4.8c -> A4.8b -> A4.8d -> A4.9 -> A4.9a -> A4.9e -> A4.9b -> A4.5 -> A4.6 -> A4.7 -> A4.9c -> A4.9d -> A4.10 -> A4.11 |
 | AL06 | F3.1 -> F3.2 -> F3.3 -> F3.4 -> F3.5 -> F3.6 -> F3.7 -> H4.2 -> F4.1 -> F4.2 -> F4.3 -> F4.3a -> F4.4 -> F5.1 -> F5.2a -> F5.2b |
-| QA | V6.1 -> V6.4 -> V6.5 -> V6.6 -> V6.8 -> L6.1 -> L6.2 -> V6.2 -> V6.3 -> V6.7 |
+| QA | V6.1 -> V6.4 -> V6.5 |
+| QA-E2E | V6.2 -> V6.3 |
+| QA-ERROR | V6.6 |
+| QA-CONFIG | V6.8 |
+| QA-OBS | L6.1 -> L6.2 |
+| QA-RELEASE | V6.7 |
 
 ## 8. Worker Evidence
 
@@ -243,7 +259,7 @@ checkpoint 前必须确认待集成 lane 的 Coordination Base、Worker HEAD、d
 | IC2 | AL03 + AL04 deterministic runtime 和 human-loop skeleton | runtime command tests、tool registry tests、demo delivery tests |
 | IC3 | AL05 provider/langgraph/context 接入 | provider/context/langgraph focused tests、LangChain/LangGraph API docs check when API usage is unclear |
 | IC4 | AL06 前端真实 API/SSE 切换 | `npm --prefix frontend test`, `npm --prefix frontend build` |
-| IC5 | QA 回归和发布候选 | backend regression、OpenAPI、Playwright、frontend error regression、log audit regression |
+| IC5 | QA contract、E2E、error、config、observability 和 release-candidate 回归 | backend regression、OpenAPI、frontend client compatibility、Playwright、frontend error regression、config snapshot regression、log audit regression、release checklist |
 
 每个 checkpoint 通过后，主协调会话统一执行以下状态收敛：
 

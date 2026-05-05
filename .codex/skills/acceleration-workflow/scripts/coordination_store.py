@@ -15,7 +15,7 @@ STORE_RELATIVE_PATH = Path("codex-coordination") / "function-one.sqlite"
 ACCELERATION_PLAN_PATH = Path("docs/plans/function-one-acceleration-execution-plan.md")
 PLATFORM_PLAN_PATH = Path("docs/plans/function-one-platform-plan.md")
 INTEGRATION_BRANCH = "integration/function-one-acceleration"
-LANE_ID_PATTERN = r"(?:AL\d+|QA)"
+LANE_ID_PATTERN = r"(?:AL\d+|QA(?:-[A-Z0-9]+)*)"
 
 CLAIM_STATUSES = {
     "claimed",
