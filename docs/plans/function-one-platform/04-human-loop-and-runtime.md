@@ -706,3 +706,45 @@
 **测试方法**：
 - `npm --prefix frontend run test -- RerunAction`
 **验证摘要**：实施计划 `docs/plans/implementation/f4.4-rerun-ui-historical-approval.md` 已完成并在 integration checkpoint 合入 `d58895c`。`npm --prefix frontend run test -- RerunAction`、`npm --prefix frontend run test -- ApprovalBlock`、`npm --prefix frontend run test -- FeedEntryRenderer`、`npm --prefix frontend run test -- WorkspaceShell` 与 `npm --prefix frontend run test -- RunSwitcher` 全部通过对应 focused frontend tests；本次 IC4 integration verification 中 `npm --prefix frontend test` 通过 22 个 test files、183 个 tests，`npm --prefix frontend run build` 成功完成 TypeScript 检查与生产构建。
+
+<a id="f44a"></a>
+
+## F4.4a RerunAction 真实 retry_action 契约重连
+
+**计划周期**：Week 11
+**状态**：`[ ]`
+**目标**：把已完成的重新尝试 UI 从旧 mock 标记 `create_rerun` 重连到真实后端 `system_status.retry_action = retry:<run_id>` 契约，使 V6.3 live Playwright 可以通过真实投影验证 rerun 入口。
+**实施计划**：`docs/plans/implementation/f4.4a-rerun-action-retry-contract.md`
+
+**依赖关系**：
+- H4.7 已完成 `POST /api/sessions/{sessionId}/runs` 重新尝试命令、多 run 分界、事件和投影语义。
+- Q3.1-Q3.4b 已完成 workspace / timeline / SSE 查询投影通路，前端必须消费顶层 `system_status.retry_action` 字段，不从私有 runtime 状态推断。
+- A4.3a 已完成 deterministic runtime E2E advancement harness，V6.3 live Playwright 可通过真实 HTTP/dev-server surface 推进到人工介入状态。
+- 本任务完成并集成后，QA-E2E-V6.3-LIVE 才能继续覆盖真实 rerun UI；本任务不修改 Playwright 场景本身。
+
+**修改文件列表**：
+- Modify: `frontend/src/features/runs/RerunAction.tsx`
+- Modify: `frontend/src/features/runs/__tests__/RerunAction.test.tsx`
+- Modify: `frontend/src/mocks/fixtures.ts`
+- 可按需 Modify: `frontend/src/features/feed/__tests__/FeedEntryRenderer.test.tsx` 或其它直接断言 `system_status.retry_action` 的前端测试。
+
+**实现类/函数**：
+- `RerunAction`
+- `resolveRerunActionState()`
+
+**验收标准**：
+- 当前 run 的 failed / terminated 顶层 `system_status` 在 `retry_action = retry:<same run_id>` 时展示重新尝试入口。
+- `retry_action = null`、未知动作、格式不合法、目标 run id 与该 `system_status.run_id` 不一致、非当前 run、历史 run、completed run 均不展示重新尝试入口。
+- 旧 mock-only 标记 `create_rerun` 不再作为完成标准；保留兼容只允许在测试明确证明真实 `retry:<run_id>` 路径已覆盖时作为过渡，不得让 V6.3 live 验收依赖该值。
+- 前端 mock fixture 中的 terminal `system_status.retry_action` 与后端真实契约一致，使用 `retry:<run_id>`。
+- 重新尝试按钮仍调用既有 `createRerun(sessionId)` API，不把 `retry_action` 字符串当成路由、URL 或可执行命令。
+- UI 文案继续表达新 run 从 Requirement Analysis 重新开始，且不继承旧 run 未交付工作区改动。
+- 本任务不得修改后端 `SystemStatusFeedEntry`、`TerminalStatusProjector`、rerun 命令 API 或 Playwright V6.3 spec；如发现后端契约漂移，停止并回报 owner conflict。
+
+**前端设计质量门**：
+- 继承 F4.4 的重新尝试入口与历史审批只读态质量门。
+- 实现后必须检查失败、终止、历史 run、未知 retry action、API 错误和新 run 分界提示，不引入额外说明型 UI 或改变运行控制语义。
+
+**测试方法**：
+- `npm --prefix frontend run test -- RerunAction`
+- `npm --prefix frontend run test -- FeedEntryRenderer`
