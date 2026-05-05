@@ -13,7 +13,7 @@
 ## V6.1 后端完整 API flow 测试
 
 **计划周期**：Week 11
-**状态**：`[ ]`
+**状态**：`[x]`
 **目标**：建立后端完整 API flow 测试，覆盖从新建会话到交付结果的主要成功路径。
 **实施计划**：`docs/plans/implementation/v6.1-backend-full-api-flow.md`
 
