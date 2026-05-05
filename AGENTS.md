@@ -81,14 +81,13 @@ Existing AI knowledge may reflect LangChain/LangGraph `0.3.x` conventions, while
 
 ## Active Execution Workflow
 
-- The active function one execution coordinator is:
-  `docs/plans/function-one-acceleration-execution-plan.md`
-- The archived delivery branch table is:
-  `docs/archive/function-one-delivery-branch-plan-legacy.md`
-- Do not use the archived Delivery Branch Plan as an active scheduling source.
-- Use the repo-local skill `acceleration-workflow` for main-session lane coordination, ready claim discovery, worker launch prompts, progress ingest, and integration checkpoints.
-- Use `slice-workflow` only for an assigned acceleration claim in a lane worker branch.
-- Live acceleration claim state is stored in the git common dir coordination store at `<git-common-dir>/codex-coordination/function-one.sqlite`, accessed through `.codex/skills/acceleration-workflow/scripts/coordination_store.py`. The Claim Ledger table in `function-one-acceleration-execution-plan.md` is only a checkpoint snapshot or audit excerpt, not the live source of truth.
-- Worker branches must not update the shared coordination store, central checkpoint snapshot, `function-one-platform-plan.md`, or split-plan final task status. Those final status updates happen only in the main coordination session after ingest or an integration checkpoint.
-- Uncommitted worker evidence is only local `reported` progress. A claim becomes `implemented` or `mock_ready` only after a user-approved worker checkpoint commit contains the evidence report, implementation plan, code, and tests.
-- Acceleration lane branches merge to `integration/function-one-acceleration` first. Do not merge an acceleration lane directly to `main` unless the user explicitly abandons acceleration mode and approves a different integration strategy.
+- Function one acceleration lane mode is no longer the active execution workflow.
+- The current active workflow is main-based stabilization and display solidification: technical-debt cleanup, remaining feature-one patches, and documentation/status corrections are handled directly on `main` unless the user explicitly requests a separate branch or PR/MR boundary.
+- `docs/plans/function-one-acceleration-execution-plan.md` and `docs/archive/function-one-delivery-branch-plan-legacy.md` are retained as historical coordination and audit references. Do not use either document as an active scheduling source.
+- Do not use `acceleration-workflow` for routine stabilization work. Do not claim tasks through the coordination store, launch lane workers, update live claim state, or run integration checkpoints unless the user explicitly re-enables acceleration mode.
+- The coordination store at `<git-common-dir>/codex-coordination/function-one.sqlite` is historical for the current stabilization workflow. Do not update it for main-based cleanup or display solidification work.
+- `slice-workflow` may be used as a single-task execution discipline for items in `docs/plans/function-one-platform-plan.md`: read the task specification, read the relevant implementation/evidence documents, write or update an implementation plan when useful, apply TDD or focused regression coverage, update corresponding task documents, and run fresh verification.
+- When using `slice-workflow` during main-based stabilization, treat acceleration-specific claim, lane, worker branch, evidence-report, coordination-store, and integration-checkpoint gates as not applicable. Preserve its source-trace, planning, TDD, review, verification, and narrow-scope rules.
+- Implementation documents under `docs/plans/implementation/` and evidence reports under `docs/plans/acceleration/reports/` are valid sources for identifying technical debt, residual limitations, mock-first gaps, verification gaps, owner-boundary issues, and cleanup steps.
+- Clean technical debt in small batches. Prefer one task slice or one coherent debt class per change, and update the corresponding task document or create a focused patch document when the original implementation document is too long or already closed.
+- Spec documents in the current split specification set still require user review and approval before commit.
