@@ -233,7 +233,7 @@
 | R3.7 | StageArtifact 存储 | Week 4-5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#r37) |
 | Q3.1 | SessionWorkspaceProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q31) |
 | Q3.2 | RunTimelineProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q32) |
-| Q3.2a | Run 状态摘要查询 API | Week 5 | [ ] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q32a) |
+| Q3.2a | Run 状态摘要查询 API | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q32a) |
 | Q3.3 | StageInspectorProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q33) |
 | Q3.4 | ControlItemInspectorProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q34) |
 | Q3.4a | ToolConfirmationInspectorProjection | Week 5 | [x] | 后端 | [03](function-one-platform/03-run-projection-and-feed.md#q34a) |

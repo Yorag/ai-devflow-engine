@@ -137,6 +137,7 @@ uv run python .codex/skills/acceleration-workflow/scripts/coordination_store.py 
 | AL01-R3.2a | R3.2a | AL01 | `feat/al-run-core-events` | done | 60cc934 | 3888945 | `docs/plans/acceleration/reports/AL01-R3.2a.md` | - |
 | AL02-Q3.1 | Q3.1 | AL02 | `feat/al-projections-streams` | done | 67f5290 | d07f094 | `docs/plans/acceleration/reports/AL02-Q3.1.md` | - |
 | AL02-Q3.2 | Q3.2 | AL02 | `feat/al-projections-streams` | done | 74578b0 | 827d4dd | `docs/plans/acceleration/reports/AL02-Q3.2.md` | - |
+| AL02-Q3.2a | Q3.2a | AL02 | `feat/al-projections-streams` | done | 805a0c8 | 2b7bb91 | `docs/plans/acceleration/reports/AL02-Q3.2a.md` | `GET /api/runs/{runId}` run summary query route integrated; focused query/projection and startup/SSE verification passed on integration branch. |
 | AL02-Q3.4b | Q3.4b | AL02 | `feat/al-projections-streams` | done | 5376b2e | 3c1ec4f | `docs/plans/acceleration/reports/AL02-Q3.4b.md` | - |
 | AL03-A4.0 | A4.0 | AL03 | `feat/al-runtime-human-loop` | done | 5d44d4a | ebfcb61 | `docs/plans/acceleration/reports/AL03-A4.0.md` | - |
 | AL03-L4.1 | L4.1 | AL03 | `feat/al-runtime-human-loop` | done | 4ea6251 | c6290f5 | `docs/plans/acceleration/reports/AL03-L4.1.md` | - |
