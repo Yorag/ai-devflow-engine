@@ -44,6 +44,7 @@ from backend.app.services.runtime_settings import (
 
 
 ROLE_ASSET_DIR = Path(__file__).resolve().parents[1] / "prompts" / "assets" / "roles"
+STAGE_ASSET_DIR = ROLE_ASSET_DIR.parent / "stages"
 SYSTEM_TEMPLATE_IDS = ("template-bugfix", "template-feature", "template-refactor")
 DEFAULT_TEMPLATE_ID = "template-feature"
 SEED_ACTOR_ID = "control-plane-seed"
@@ -67,6 +68,15 @@ ROLE_ASSET_FILES = {
     "role-code-generator": "code_generator.md",
     "role-test-runner": "test_runner.md",
     "role-code-reviewer": "code_reviewer.md",
+}
+
+STAGE_ASSET_FILES = {
+    StageType.REQUIREMENT_ANALYSIS: "requirement_analysis.md",
+    StageType.SOLUTION_DESIGN: "solution_design.md",
+    StageType.CODE_GENERATION: "code_generation.md",
+    StageType.TEST_GENERATION_EXECUTION: "test_generation_execution.md",
+    StageType.CODE_REVIEW: "code_review.md",
+    StageType.DELIVERY_INTEGRATION: "delivery_integration.md",
 }
 
 STAGE_ROLE_IDS = {
@@ -243,6 +253,21 @@ def load_default_agent_role_seed_assets() -> dict[str, PromptAssetRead]:
     }
 
 
+def load_stage_work_instruction_seed_asset(path: Path) -> str:
+    metadata, body = parse_front_matter(path.read_text(encoding="utf-8"))
+    expected_ref = expected_source_ref(STAGE_ASSET_DIR.parent, path)
+    if metadata["source_ref"] != expected_ref:
+        raise ValueError("Stage work instruction seed source_ref does not match asset path.")
+    return body
+
+
+def load_default_stage_work_instruction_seed_assets() -> dict[StageType, str]:
+    return {
+        stage_type: load_stage_work_instruction_seed_asset(STAGE_ASSET_DIR / file_name)
+        for stage_type, file_name in STAGE_ASSET_FILES.items()
+    }
+
+
 def resolve_default_agent_role_prompt(role_id: str) -> str:
     assets = load_default_agent_role_seed_assets()
     return assets[role_id].sections[0].body
@@ -287,7 +312,17 @@ class TemplateService:
             if seed["template_id"] not in existing_templates
         ]
 
-        assets = load_default_agent_role_seed_assets() if missing_seeds else {}
+        needs_asset_load = bool(missing_seeds) or any(
+            _system_template_needs_asset_refresh(
+                existing_templates.get(seed["template_id"]),
+                seed=seed,
+            )
+            for seed in TEMPLATE_SEEDS
+        )
+        role_assets = load_default_agent_role_seed_assets() if needs_asset_load else {}
+        stage_work_instructions = (
+            load_default_stage_work_instruction_seed_assets() if needs_asset_load else {}
+        )
         timestamp = self._now()
         changed: list[PipelineTemplateModel] = []
         for seed in missing_seeds:
@@ -299,7 +334,8 @@ class TemplateService:
                 base_template_id=None,
                 fixed_stage_sequence=[stage.value for stage in FIXED_STAGE_SEQUENCE],
                 stage_role_bindings=_stage_role_bindings(
-                    assets=assets,
+                    role_assets=role_assets,
+                    stage_work_instructions=stage_work_instructions,
                     provider_by_stage=seed["provider_by_stage"],
                 ),
                 approval_checkpoints=[
@@ -328,6 +364,8 @@ class TemplateService:
             if self._refresh_existing_system_template(
                 template,
                 seed=seed,
+                role_assets=role_assets,
+                stage_work_instructions=stage_work_instructions,
                 timestamp=timestamp,
             ):
                 changed.append(template)
@@ -350,6 +388,8 @@ class TemplateService:
         template: PipelineTemplateModel,
         *,
         seed: dict[str, Any],
+        role_assets: dict[str, PromptAssetRead],
+        stage_work_instructions: dict[StageType, str],
         timestamp: datetime,
     ) -> bool:
         updates: dict[str, Any] = {
@@ -371,6 +411,15 @@ class TemplateService:
                 "skip_high_risk_tool_confirmations"
             ],
         }
+        if _system_template_needs_asset_refresh(template, seed=seed):
+            if not role_assets or not stage_work_instructions:
+                role_assets = load_default_agent_role_seed_assets()
+                stage_work_instructions = load_default_stage_work_instruction_seed_assets()
+            updates["stage_role_bindings"] = _stage_role_bindings(
+                role_assets=role_assets,
+                stage_work_instructions=stage_work_instructions,
+                provider_by_stage=seed["provider_by_stage"],
+            )
         changed = False
         for field_name, value in updates.items():
             if getattr(template, field_name) == value:
@@ -732,12 +781,14 @@ class TemplateService:
                     ErrorCode.VALIDATION_ERROR,
                     INVALID_TEMPLATE_MESSAGE,
                 )
-            prompt = binding.system_prompt.strip()
+            prompt = binding.stage_work_instruction.strip()
+            legacy_prompt = binding.system_prompt.strip()
             bindings.append(
                 {
                     "stage_type": binding.stage_type.value,
                     "role_id": binding.role_id,
-                    "system_prompt": prompt,
+                    "stage_work_instruction": prompt,
+                    "system_prompt": legacy_prompt,
                     "provider_id": binding.provider_id,
                 }
             )
@@ -940,7 +991,8 @@ class TemplateService:
 
 def _stage_role_bindings(
     *,
-    assets: dict[str, PromptAssetRead],
+    role_assets: dict[str, PromptAssetRead],
+    stage_work_instructions: dict[StageType, str],
     provider_by_stage: dict[StageType, str],
 ) -> list[dict[str, str]]:
     bindings: list[dict[str, str]] = []
@@ -950,11 +1002,42 @@ def _stage_role_bindings(
             {
                 "stage_type": stage_type.value,
                 "role_id": role_id,
-                "system_prompt": assets[role_id].sections[0].body,
+                "stage_work_instruction": stage_work_instructions[stage_type],
+                "system_prompt": role_assets[role_id].sections[0].body,
                 "provider_id": provider_by_stage[stage_type],
             }
         )
     return bindings
+
+
+def _system_template_needs_asset_refresh(
+    template: PipelineTemplateModel | None,
+    *,
+    seed: dict[str, Any],
+) -> bool:
+    if template is None:
+        return False
+    bindings = template.stage_role_bindings
+    if not isinstance(bindings, list) or len(bindings) != len(FIXED_STAGE_SEQUENCE):
+        return True
+    for stage_type, binding in zip(FIXED_STAGE_SEQUENCE, bindings, strict=True):
+        if not isinstance(binding, dict):
+            return True
+        stage_work_instruction = binding.get("stage_work_instruction")
+        system_prompt = binding.get("system_prompt")
+        if binding.get("stage_type") != stage_type.value:
+            return True
+        if binding.get("role_id") != STAGE_ROLE_IDS[stage_type]:
+            return True
+        if binding.get("provider_id") != seed["provider_by_stage"][stage_type]:
+            return True
+        if not isinstance(stage_work_instruction, str) or not stage_work_instruction.strip():
+            return True
+        if not isinstance(system_prompt, str) or not system_prompt.strip():
+            return True
+        if stage_work_instruction.strip() == system_prompt.strip():
+            return True
+    return False
 
 
 def _unique_ordered(values: Iterable[str]) -> list[str]:
@@ -979,6 +1062,8 @@ __all__ = [
     "ROLE_ASSET_DIR",
     "ROLE_ASSET_FILES",
     "STAGE_ROLE_IDS",
+    "STAGE_ASSET_DIR",
+    "STAGE_ASSET_FILES",
     "SYSTEM_TEMPLATE_IDS",
     "TEMPLATE_SEEDS",
     "TemplateService",
@@ -986,6 +1071,8 @@ __all__ = [
     "build_agent_role_seed_asset",
     "load_agent_role_seed_asset",
     "load_default_agent_role_seed_assets",
+    "load_default_stage_work_instruction_seed_assets",
+    "load_stage_work_instruction_seed_asset",
     "parse_front_matter",
     "resolve_default_agent_role_prompt",
 ]

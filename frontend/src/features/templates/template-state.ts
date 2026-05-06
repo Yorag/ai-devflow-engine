@@ -155,7 +155,7 @@ export function resolveTemplateStartGuard(
 export function cloneStageRoleBindings(
   bindings: StageRoleBinding[],
 ): StageRoleBinding[] {
-  return bindings.map((binding) => ({ ...binding }));
+  return bindings.map((binding) => normalizeStageRoleBinding(binding));
 }
 
 export function availableTemplateProviders(providers: ProviderRead[]): ProviderRead[] {
@@ -274,6 +274,7 @@ function serializeDraft(draft: TemplateDraftState): string {
     stage_role_bindings: draft.stage_role_bindings.map((binding) => ({
       stage_type: binding.stage_type,
       role_id: binding.role_id,
+      stage_work_instruction: binding.stage_work_instruction,
       system_prompt: binding.system_prompt,
       provider_id: binding.provider_id,
     })),
@@ -284,4 +285,14 @@ function serializeDraft(draft: TemplateDraftState): string {
     skip_high_risk_tool_confirmations:
       draft.skip_high_risk_tool_confirmations,
   });
+}
+
+function normalizeStageRoleBinding(binding: StageRoleBinding): StageRoleBinding {
+  const stageWorkInstruction =
+    binding.stage_work_instruction || binding.system_prompt;
+  return {
+    ...binding,
+    stage_work_instruction: stageWorkInstruction,
+    system_prompt: binding.system_prompt || stageWorkInstruction,
+  };
 }

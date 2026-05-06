@@ -91,11 +91,25 @@ class PromptValidationService:
     ) -> list[dict[str, str]]:
         validated: list[dict[str, str]] = []
         for binding in bindings:
-            result = self.validate_system_prompt(
-                prompt_text=binding["system_prompt"],
+            legacy_prompt = binding.get("system_prompt", "").strip()
+            role_result = self.validate_system_prompt(
+                prompt_text=legacy_prompt,
                 stage_type=StageType(binding["stage_type"]),
             )
-            validated.append({**binding, "system_prompt": result.normalized_prompt})
+            result = self.validate_system_prompt(
+                prompt_text=binding.get(
+                    "stage_work_instruction",
+                    binding["system_prompt"],
+                ),
+                stage_type=StageType(binding["stage_type"]),
+            )
+            validated.append(
+                {
+                    **binding,
+                    "stage_work_instruction": result.normalized_prompt,
+                    "system_prompt": role_result.normalized_prompt,
+                }
+            )
         return validated
 
     def validate_run_prompt_snapshots(
@@ -106,6 +120,10 @@ class PromptValidationService:
         for binding in template_snapshot.stage_role_bindings:
             self.validate_system_prompt(
                 prompt_text=binding.system_prompt,
+                stage_type=binding.stage_type,
+            )
+            self.validate_system_prompt(
+                prompt_text=binding.stage_work_instruction,
                 stage_type=binding.stage_type,
             )
 
@@ -296,6 +314,9 @@ class PromptValidationService:
                 StageRoleSnapshot(
                     stage_type=stage,
                     role_id=f"role-{stage.value}",
+                    stage_work_instruction=(
+                        f"Prompt validation work instruction for {stage.value}."
+                    ),
                     system_prompt=f"Prompt validation role for {stage.value}.",
                     provider_id="provider-deepseek",
                 )

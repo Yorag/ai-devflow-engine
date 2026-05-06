@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 from pydantic import field_validator
+from pydantic import model_validator
 
 from backend.app.domain.enums import ApprovalType, StageType, TemplateSource
 from backend.app.schemas.template import (
@@ -21,8 +22,16 @@ class StageRoleSnapshot(BaseModel):
 
     stage_type: StageType
     role_id: StrictStr = Field(min_length=1)
+    stage_work_instruction: StrictStr = Field(min_length=1)
     system_prompt: StrictStr = Field(min_length=1)
     provider_id: StrictStr = Field(min_length=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_stage_work_instruction(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "stage_work_instruction" not in value:
+            return {**value, "stage_work_instruction": value.get("system_prompt")}
+        return value
 
 
 class TemplateSnapshot(BaseModel):
@@ -117,6 +126,20 @@ class TemplateSnapshotBuilder:
         return value
 
     @staticmethod
+    def _optional_string(
+        binding: dict[str, Any],
+        *,
+        key: str,
+        index: int,
+    ) -> str | None:
+        value = binding.get(key)
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError(f"stage_role_bindings[{index}].{key} must be a string")
+        return value
+
+    @staticmethod
     def _require_bool(template: Any, field_name: str) -> bool:
         value = getattr(template, field_name)
         if not isinstance(value, bool):
@@ -148,6 +171,18 @@ class TemplateSnapshotBuilder:
                     key="role_id",
                     index=index,
                 ),
+                stage_work_instruction=(
+                    TemplateSnapshotBuilder._optional_string(
+                        TemplateSnapshotBuilder._require_binding(binding, index=index),
+                        key="stage_work_instruction",
+                        index=index,
+                    )
+                    or TemplateSnapshotBuilder._require_string(
+                        TemplateSnapshotBuilder._require_binding(binding, index=index),
+                        key="system_prompt",
+                        index=index,
+                    )
+                ).strip(),
                 system_prompt=TemplateSnapshotBuilder._require_string(
                     TemplateSnapshotBuilder._require_binding(binding, index=index),
                     key="system_prompt",

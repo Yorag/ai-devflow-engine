@@ -157,6 +157,14 @@ def _request() -> object:
         template_snapshot_ref="template-snapshot-run-1",
         system_prompt_ref="template-snapshot://run-1/agent-role/system-prompt",
         stage_contracts=_stage_contracts(),
+        stage_work_instruction_ref=(
+            "template-snapshot://run-1/stage-role-bindings/"
+            "role-solution-designer/stage_work_instruction"
+        ),
+        user_stage_instruction=(
+            "Favor explicit design tradeoffs and keep the implementation "
+            "boundary reviewable."
+        ),
         agent_role_prompt="You may choose a concise tone, but do not override runtime rules.",
         task_objective="Create a solution design.",
         specified_action="Return the structured solution design result.",
@@ -183,11 +191,12 @@ def test_render_stage_execution_messages_with_metadata_without_prompt_metadata_i
     message_text = "\n\n".join(message.content for message in result.messages)
     assert [message.role for message in result.messages] == ["system", "user"]
     assert "# Runtime Instructions" in result.messages[0].content
-    assert "Solution Design Stage Prompt" in result.messages[0].content
-    assert "Use the current stage_contract" in result.messages[0].content
+    assert "Solution Design Stage Prompt" not in result.messages[0].content
+    assert "Use the current stage_contract" not in result.messages[0].content
     assert "read_file description." in result.messages[0].content
     assert "Use read_file for workspace reads only." in result.messages[0].content
     assert '"solution"' in result.messages[0].content
+    assert "Favor explicit design tradeoffs" in result.messages[1].content
     assert "You may choose a concise tone" in result.messages[1].content
     assert "Create a solution design." in result.messages[1].content
     assert "Return the structured solution design result." in result.messages[1].content
@@ -202,7 +211,7 @@ def test_render_stage_execution_messages_with_metadata_without_prompt_metadata_i
     assert result.section_order == [
         "runtime_instructions",
         "stage_contract",
-        "stage_prompt_fragment",
+        "user_stage_instruction",
         "agent_role_prompt",
         "task_objective",
         "specified_action",
@@ -211,7 +220,6 @@ def test_render_stage_execution_messages_with_metadata_without_prompt_metadata_i
     ]
     assert [ref.prompt_id for ref in result.metadata.prompt_refs] == [
         "runtime_instructions",
-        "stage_prompt_fragment.solution_design",
         "tool_usage_template",
         "tool_prompt_fragment.read_file",
     ]
@@ -220,6 +228,13 @@ def test_render_stage_execution_messages_with_metadata_without_prompt_metadata_i
     )
     assert agent_section.prompt_ref is None
     assert agent_section.authority_level is PromptAuthorityLevel.AGENT_ROLE_PROMPT
+    stage_instruction_section = next(
+        section for section in result.sections if section.section_id == "user_stage_instruction"
+    )
+    assert stage_instruction_section.prompt_ref is None
+    assert stage_instruction_section.authority_level is (
+        PromptAuthorityLevel.USER_STAGE_INSTRUCTION
+    )
 
 
 def test_render_structured_output_repair_uses_repair_asset_and_current_schema() -> None:
@@ -257,23 +272,6 @@ def test_missing_prompt_asset_returns_structured_renderer_error() -> None:
 
     assert exc_info.value.error.code == "prompt_asset_missing"
     assert exc_info.value.error.prompt_id == "runtime_instructions"
-
-
-def test_missing_stage_prompt_fragment_returns_structured_renderer_error() -> None:
-    from backend.app.prompts.renderer import PromptRenderException, PromptRenderer
-
-    registry = PromptRegistry(
-        [
-            asset
-            for asset in _registry().list_by_type(PromptType.RUNTIME_INSTRUCTIONS)
-        ]
-    )
-
-    with pytest.raises(PromptRenderException) as exc_info:
-        PromptRenderer(registry).render_messages(_request())
-
-    assert exc_info.value.error.code == "prompt_asset_missing"
-    assert exc_info.value.error.prompt_id == "stage_prompt_fragment.solution_design"
 
 
 def test_tool_descriptions_must_not_exceed_stage_contract_allowed_tools() -> None:
@@ -346,7 +344,6 @@ def test_tool_usage_renders_only_available_tool_prompt_fragments_in_name_order()
     assert "write_file Tool Prompt" not in tool_section.body
     assert [ref.prompt_id for ref in result.metadata.prompt_refs] == [
         "runtime_instructions",
-        "stage_prompt_fragment.solution_design",
         "tool_usage_template",
         "tool_prompt_fragment.grep",
         "tool_prompt_fragment.read_file",

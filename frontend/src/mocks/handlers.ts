@@ -557,6 +557,9 @@ function readTemplateWriteRequest(
         : null,
     stage_role_bindings: candidate.stage_role_bindings.map((binding) => ({
       ...binding,
+      stage_work_instruction:
+        binding.stage_work_instruction || binding.system_prompt,
+      system_prompt: binding.system_prompt || binding.stage_work_instruction,
     })),
     auto_regression_enabled: candidate.auto_regression_enabled,
     max_auto_regression_retries: candidate.max_auto_regression_retries,

@@ -824,7 +824,15 @@ class ConfigurationPackageService:
             name=template.name,
             template_source=template.template_source,
             stage_role_bindings=[
-                ConfigurationPackageTemplateSlotConfig.model_validate(binding)
+                ConfigurationPackageTemplateSlotConfig.model_validate(
+                    {
+                        **binding,
+                        "stage_work_instruction": binding.get(
+                            "stage_work_instruction",
+                            binding.get("system_prompt"),
+                        ),
+                    }
+                )
                 for binding in template.stage_role_bindings
             ],
             auto_regression_enabled=template.auto_regression_enabled,

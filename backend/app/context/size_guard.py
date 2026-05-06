@@ -275,6 +275,7 @@ def _all_blocks(envelope: ContextEnvelope) -> tuple[ContextBlock, ...]:
     return (
         *envelope.runtime_instructions,
         *envelope.stage_contract,
+        *envelope.user_stage_instruction,
         *envelope.agent_role_prompt,
         *envelope.task_objective,
         *envelope.specified_action,
@@ -290,6 +291,7 @@ def _pinned_blocks(envelope: ContextEnvelope) -> tuple[ContextBlock, ...]:
     return (
         *envelope.runtime_instructions,
         *envelope.stage_contract,
+        *envelope.user_stage_instruction,
         *envelope.agent_role_prompt,
         *envelope.task_objective,
         *envelope.specified_action,

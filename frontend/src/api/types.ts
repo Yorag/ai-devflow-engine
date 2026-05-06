@@ -242,6 +242,7 @@ export type SessionDeleteResult = ProjectRemoveResult & {
 export type StageRoleBinding = {
   stage_type: StageType;
   role_id: string;
+  stage_work_instruction: string;
   system_prompt: string;
   provider_id: string;
 };

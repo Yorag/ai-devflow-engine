@@ -675,6 +675,7 @@ def _template_snapshot() -> TemplateSnapshot:
             StageRoleSnapshot(
                 stage_type=stage,
                 role_id=f"role-{stage.value}",
+                stage_work_instruction=f"Stage work instruction for {stage.value}.",
                 system_prompt=f"Role prompt for {stage.value}.",
                 provider_id="provider-openai",
             )

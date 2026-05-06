@@ -33,7 +33,11 @@ describe("template-state", () => {
       ...cleanDraft,
       stage_role_bindings: cleanDraft.stage_role_bindings.map((binding, index) =>
         index === 0
-          ? { ...binding, system_prompt: `${binding.system_prompt} Keep scope bounded.` }
+          ? {
+              ...binding,
+              stage_work_instruction: `${binding.stage_work_instruction} Keep scope bounded.`,
+              system_prompt: `${binding.system_prompt} Keep scope bounded.`,
+            }
           : binding,
       ),
     };
@@ -108,13 +112,17 @@ describe("TemplateEditor", () => {
         .getAttribute("aria-selected"),
     ).toBe("true");
     expect(
-      within(editor).getByLabelText("Requirement Analysis system prompt"),
+      within(editor).getByLabelText("Requirement Analysis stage work instruction"),
     ).toHaveProperty(
       "value",
-      "Analyze the requirement and ask clarifying questions when needed.",
+      [
+        "# Requirement Analysis Stage Prompt",
+        "",
+        "Clarify the incoming requirement into a structured, traceable understanding for the current PipelineRun.",
+      ].join("\n"),
     );
     expect(
-      within(editor).queryByLabelText("Solution Design system prompt"),
+      within(editor).queryByLabelText("Solution Design stage work instruction"),
     ).toBeNull();
 
     fireEvent.click(within(editor).getByRole("tab", { name: "Solution Design" }));
@@ -125,10 +133,17 @@ describe("TemplateEditor", () => {
         .getAttribute("aria-selected"),
     ).toBe("true");
     expect(
-      within(editor).getByLabelText("Solution Design system prompt"),
-    ).toHaveProperty("value", "Design a bounded implementation plan.");
+      within(editor).getByLabelText("Solution Design stage work instruction"),
+    ).toHaveProperty(
+      "value",
+      [
+        "# Solution Design Stage Prompt",
+        "",
+        "Convert accepted requirements into a reviewable, bounded solution design and implementation plan.",
+      ].join("\n"),
+    );
     expect(
-      within(editor).queryByLabelText("Requirement Analysis system prompt"),
+      within(editor).queryByLabelText("Requirement Analysis stage work instruction"),
     ).toBeNull();
   });
 
@@ -247,7 +262,7 @@ describe("TemplateEditor", () => {
     expect(within(editor).queryByText("role-requirement-analyst")).toBeNull();
     expect(within(editor).getByLabelText("Requirement Analysis provider")).toBeTruthy();
     expect(
-      within(editor).getByLabelText("Requirement Analysis system prompt"),
+      within(editor).getByLabelText("Requirement Analysis stage work instruction"),
     ).toBeTruthy();
     const policyRow = editor.querySelector(".template-editor__policy-row");
     expect(policyRow).toBeTruthy();
@@ -273,9 +288,14 @@ describe("TemplateEditor", () => {
     expect(within(editor).queryByLabelText("Template name")).toBeNull();
     expect(within(editor).queryByLabelText("Template description")).toBeNull();
 
-    fireEvent.change(within(editor).getByLabelText("Requirement Analysis system prompt"), {
-      target: { value: "Analyze the requirement and preserve explicit constraints." },
-    });
+    fireEvent.change(
+      within(editor).getByLabelText("Requirement Analysis stage work instruction"),
+      {
+        target: {
+          value: "Analyze the requirement and preserve explicit constraints.",
+        },
+      },
+    );
 
     expect(within(editor).getByText(/Unsaved edits will not affect/u)).toBeTruthy();
     expect(
@@ -369,9 +389,12 @@ describe("TemplateEditor", () => {
     const nameInput = screen.getByLabelText("Template name");
     expect(nameInput).toHaveProperty("value", "Team feature flow");
     fireEvent.change(nameInput, { target: { value: "Checkout feature flow" } });
-    fireEvent.change(screen.getByLabelText("Requirement Analysis system prompt"), {
-      target: { value: "Clarify checkout requirements." },
-    });
+    fireEvent.change(
+      screen.getByLabelText("Requirement Analysis stage work instruction"),
+      {
+        target: { value: "Clarify checkout requirements." },
+      },
+    );
     fireEvent.click(screen.getByRole("button", { name: "Save template" }));
 
     expect(savedTemplates).toEqual(["Checkout feature flow"]);
@@ -397,13 +420,19 @@ describe("TemplateEditor", () => {
     const original = mockPipelineTemplates.find(
       (template) => template.template_id === "template-feature",
     )!;
-    fireEvent.change(screen.getByLabelText("Requirement Analysis system prompt"), {
-      target: { value: "Clarify all checkout constraints before design." },
-    });
+    fireEvent.change(
+      screen.getByLabelText("Requirement Analysis stage work instruction"),
+      {
+        target: { value: "Clarify all checkout constraints before design." },
+      },
+    );
     fireEvent.click(screen.getByRole("tab", { name: "Solution Design" }));
-    fireEvent.change(screen.getByLabelText("Solution Design system prompt"), {
-      target: { value: "Design only the approved checkout solution." },
-    });
+    fireEvent.change(
+      screen.getByLabelText("Solution Design stage work instruction"),
+      {
+        target: { value: "Design only the approved checkout solution." },
+      },
+    );
     fireEvent.click(screen.getByRole("button", { name: "Save template" }));
 
     await waitFor(() => {
@@ -412,16 +441,69 @@ describe("TemplateEditor", () => {
           binding.stage_type === "solution_design"
             ? {
                 ...binding,
-                system_prompt: "Design only the approved checkout solution.",
+                stage_work_instruction: "Design only the approved checkout solution.",
               }
             : binding.stage_type === "requirement_analysis"
               ? {
                   ...binding,
-                  system_prompt: "Clarify all checkout constraints before design.",
+                  stage_work_instruction:
+                    "Clarify all checkout constraints before design.",
                 }
             : binding,
         ),
       );
+    });
+  });
+
+  it("editing stage work instruction preserves the hidden role prompt binding", async () => {
+    const workspace = mockSessionWorkspaces["session-draft"];
+    const sourceTemplate = {
+      ...mockPipelineTemplates.find(
+        (template) => template.template_id === "template-feature",
+      )!,
+      stage_role_bindings: mockPipelineTemplates
+        .find((template) => template.template_id === "template-feature")!
+        .stage_role_bindings.map((binding) =>
+          binding.stage_type === "requirement_analysis"
+            ? {
+                ...binding,
+                stage_work_instruction: "# Requirement Analysis Stage Prompt",
+                system_prompt: "# Requirement Analyst",
+              }
+            : binding,
+        ),
+    };
+    let savedTemplate: PipelineTemplateRead | null = null;
+
+    renderWithAppProviders(
+      <TemplateEmptyState
+        session={workspace.session}
+        templates={[sourceTemplate]}
+        providers={mockProviderList}
+        selectedTemplateId={sourceTemplate.template_id}
+        onTemplateChange={() => undefined}
+        onTemplateSaveAs={(template) => {
+          savedTemplate = template;
+        }}
+      />,
+    );
+
+    fireEvent.change(
+      screen.getByLabelText("Requirement Analysis stage work instruction"),
+      {
+        target: { value: "Clarify all checkout constraints before design." },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
+
+    await waitFor(() => {
+      const savedBinding = savedTemplate?.stage_role_bindings.find(
+        (binding) => binding.stage_type === "requirement_analysis",
+      );
+      expect(savedBinding?.stage_work_instruction).toBe(
+        "Clarify all checkout constraints before design.",
+      );
+      expect(savedBinding?.system_prompt).toBe("# Requirement Analyst");
     });
   });
 
@@ -555,9 +637,12 @@ describe("TemplateEditor", () => {
     );
 
     const editor = screen.getByRole("region", { name: "Template editor" });
-    fireEvent.change(within(editor).getByLabelText("Requirement Analysis system prompt"), {
-      target: { value: "Clarify copied template requirements." },
-    });
+    fireEvent.change(
+      within(editor).getByLabelText("Requirement Analysis stage work instruction"),
+      {
+        target: { value: "Clarify copied template requirements." },
+      },
+    );
     fireEvent.click(
       within(editor).getByRole("button", { name: "Save as new template" }),
     );
@@ -573,7 +658,7 @@ describe("TemplateEditor", () => {
     expect(
       savedAsTemplates[0].stage_role_bindings.find(
         (binding) => binding.stage_type === "requirement_analysis",
-      )?.system_prompt,
+      )?.stage_work_instruction,
     ).toBe("Clarify copied template requirements.");
     expect(overwrittenTemplateIds).toEqual([]);
   });
@@ -780,6 +865,8 @@ describe("TemplateEditor", () => {
                             index === 0
                               ? {
                                   ...binding,
+                                  stage_work_instruction:
+                                    "Server refresh should not replace dirty drafts.",
                                   system_prompt:
                                     "Server refresh should not replace dirty drafts.",
                                 }
@@ -806,17 +893,18 @@ describe("TemplateEditor", () => {
 
     renderWithAppProviders(<RefreshHarness />);
 
-    const prompt = screen.getByLabelText("Requirement Analysis system prompt");
+    const prompt = screen.getByLabelText(
+      "Requirement Analysis stage work instruction",
+    );
     fireEvent.change(prompt, {
       target: { value: "Keep this unsaved local prompt." },
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh selected template" }));
 
-    expect(screen.getByLabelText("Requirement Analysis system prompt")).toHaveProperty(
-      "value",
-      "Keep this unsaved local prompt.",
-    );
+    expect(
+      screen.getByLabelText("Requirement Analysis stage work instruction"),
+    ).toHaveProperty("value", "Keep this unsaved local prompt.");
   });
 
   it("accepts refreshed selected template data when the current draft is clean", async () => {
@@ -842,6 +930,8 @@ describe("TemplateEditor", () => {
                             index === 0
                               ? {
                                   ...binding,
+                                  stage_work_instruction:
+                                    "Use imported configuration prompt.",
                                   system_prompt:
                                     "Use imported configuration prompt.",
                                 }
@@ -915,19 +1005,27 @@ describe("TemplateEditor", () => {
 
     renderWithAppProviders(<SessionHarness />);
 
-    fireEvent.change(screen.getByLabelText("Requirement Analysis system prompt"), {
-      target: { value: "Session one unsaved prompt." },
-    });
-    expect(screen.getByLabelText("Requirement Analysis system prompt")).toHaveProperty(
-      "value",
-      "Session one unsaved prompt.",
+    fireEvent.change(
+      screen.getByLabelText("Requirement Analysis stage work instruction"),
+      {
+        target: { value: "Session one unsaved prompt." },
+      },
     );
+    expect(
+      screen.getByLabelText("Requirement Analysis stage work instruction"),
+    ).toHaveProperty("value", "Session one unsaved prompt.");
 
     fireEvent.click(screen.getByRole("button", { name: "Open second draft session" }));
 
-    expect(screen.getByLabelText("Requirement Analysis system prompt")).toHaveProperty(
+    expect(
+      screen.getByLabelText("Requirement Analysis stage work instruction"),
+    ).toHaveProperty(
       "value",
-      "Analyze the requirement and ask clarifying questions when needed.",
+      [
+        "# Requirement Analysis Stage Prompt",
+        "",
+        "Clarify the incoming requirement into a structured, traceable understanding for the current PipelineRun.",
+      ].join("\n"),
     );
     expect(screen.getByText("Saved")).toBeTruthy();
     expect(screen.queryByText(/Unsaved edits will not affect/u)).toBeNull();
@@ -967,6 +1065,7 @@ describe("TemplateEditor", () => {
       stage_role_bindings: mockPipelineTemplates[1].stage_role_bindings.map(
         (binding) => ({
           ...binding,
+          stage_work_instruction: "Use project facts only. ".repeat(24).trim(),
           system_prompt: "Use project facts only. ".repeat(24).trim(),
         }),
       ),

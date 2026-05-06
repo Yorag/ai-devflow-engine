@@ -162,7 +162,12 @@ class ContextEnvelopeBuilder:
                 model_call_type=request.model_call_type,
                 template_snapshot_ref=request.template_snapshot.snapshot_ref,
                 system_prompt_ref=self._system_prompt_ref(request, stage_role),
+                stage_work_instruction_ref=self._stage_work_instruction_ref(
+                    request,
+                    stage_role,
+                ),
                 stage_contracts={request.stage_type.value: dict(stage_contract)},
+                user_stage_instruction=stage_role.stage_work_instruction,
                 agent_role_prompt=stage_role.system_prompt,
                 task_objective=request.task_objective,
                 specified_action=request.specified_action,
@@ -192,10 +197,11 @@ class ContextEnvelopeBuilder:
                 prompt_render_result=prompt_render,
                 section=ContextEnvelopeSection.STAGE_CONTRACT,
                 trust_level=ContextTrustLevel.STAGE_CONTRACT_TRUSTED,
-                section_ids=(
-                    ContextEnvelopeSection.STAGE_CONTRACT.value,
-                    "stage_prompt_fragment",
-                ),
+            ),
+            user_stage_instruction=self._user_stage_instruction_blocks(
+                request=request,
+                stage_role=stage_role,
+                prompt_render_result=prompt_render,
             ),
             agent_role_prompt=self._agent_role_blocks(
                 request=request,
@@ -756,6 +762,44 @@ class ContextEnvelopeBuilder:
             for index, section in enumerate(sections, start=1)
         )
 
+    def _user_stage_instruction_blocks(
+        self,
+        *,
+        request: ContextBuildRequest,
+        stage_role: StageRoleSnapshot,
+        prompt_render_result: PromptRenderResult,
+    ) -> tuple[ContextBlock, ...]:
+        sections = [
+            section
+            for section in prompt_render_result.sections
+            if section.section_id == ContextEnvelopeSection.USER_STAGE_INSTRUCTION.value
+        ]
+        if not sections:
+            return ()
+        content_ref = self._stage_work_instruction_ref(request, stage_role)
+        return tuple(
+            ContextBlock(
+                block_id=f"prompt-section:{section.section_id}:{index}",
+                section=ContextEnvelopeSection.USER_STAGE_INSTRUCTION,
+                trust_level=ContextTrustLevel.AGENT_ROLE_CONFIG,
+                boundary_action=ContextBoundaryAction.ALLOW,
+                summary=section.body,
+                content_ref=content_ref,
+                sources=(
+                    ContextSourceRef(
+                        source_kind="template_snapshot_stage_work_instruction",
+                        source_ref=content_ref,
+                        source_label=(
+                            f"{request.stage_type.value}.stage_work_instruction"
+                        ),
+                    ),
+                ),
+                prompt_section_refs=self._prompt_section_refs(section),
+                estimated_chars=len(section.body),
+            )
+            for index, section in enumerate(sections, start=1)
+        )
+
     def _prompt_section_block(
         self,
         *,
@@ -860,6 +904,16 @@ class ContextEnvelopeBuilder:
         return (
             f"template-snapshot://{request.template_snapshot.snapshot_ref}/"
             f"stage-role-bindings/{stage_role.role_id}/system_prompt"
+        )
+
+    @staticmethod
+    def _stage_work_instruction_ref(
+        request: ContextBuildRequest,
+        stage_role: StageRoleSnapshot,
+    ) -> str:
+        return (
+            f"template-snapshot://{request.template_snapshot.snapshot_ref}/"
+            f"stage-role-bindings/{stage_role.role_id}/stage_work_instruction"
         )
 
 

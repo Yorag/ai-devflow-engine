@@ -75,6 +75,7 @@ def test_build_for_run_freezes_template_fields_before_later_template_mutation(
             {
                 "stage_type": binding["stage_type"],
                 "role_id": binding["role_id"],
+                "stage_work_instruction": binding["stage_work_instruction"],
                 "system_prompt": binding["system_prompt"],
                 "provider_id": binding["provider_id"],
             }
@@ -87,6 +88,7 @@ def test_build_for_run_freezes_template_fields_before_later_template_mutation(
         )
 
         for index, binding in enumerate(template.stage_role_bindings):
+            binding["stage_work_instruction"] = f"# Mutated prompt {index}"
             binding["system_prompt"] = f"# Mutated prompt {index}"
             binding["provider_id"] = f"provider-mutated-{index}"
         template.auto_regression_enabled = False
@@ -112,12 +114,14 @@ def test_build_for_run_freezes_template_fields_before_later_template_mutation(
     first_binding = snapshot.stage_role_bindings[0]
     assert first_binding.stage_type.value == "requirement_analysis"
     assert first_binding.role_id == "role-requirement-analyst"
+    assert first_binding.stage_work_instruction != "# Mutated prompt"
     assert first_binding.system_prompt != "# Mutated prompt"
     assert first_binding.provider_id == "provider-deepseek"
     assert [
         {
             "stage_type": binding.stage_type.value,
             "role_id": binding.role_id,
+            "stage_work_instruction": binding.stage_work_instruction,
             "system_prompt": binding.system_prompt,
             "provider_id": binding.provider_id,
         }
@@ -150,6 +154,7 @@ def test_build_for_run_freezes_template_fields_before_later_template_mutation(
     assert set(dumped["stage_role_bindings"][0]) == {
         "stage_type",
         "role_id",
+        "stage_work_instruction",
         "system_prompt",
         "provider_id",
     }

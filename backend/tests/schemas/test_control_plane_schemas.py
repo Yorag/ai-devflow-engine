@@ -201,6 +201,7 @@ def test_pipeline_template_and_agent_role_schemas_keep_fixed_stage_contract() ->
     assert dumped["stage_role_bindings"][0] == {
         "stage_type": "requirement_analysis",
         "role_id": "role-requirement-analyst",
+        "stage_work_instruction": "Analyze the requirement and produce structured acceptance criteria.",
         "system_prompt": "Analyze the requirement and produce structured acceptance criteria.",
         "provider_id": "provider-deepseek",
     }
@@ -479,6 +480,7 @@ def test_configuration_package_schemas_allow_user_visible_config_only() -> None:
                     {
                         "stage_type": "requirement_analysis",
                         "role_id": "role-requirement-analyst",
+                        "stage_work_instruction": "Analyze requirements.",
                         "system_prompt": "Analyze requirements.",
                         "provider_id": "provider-deepseek",
                     }
@@ -508,6 +510,12 @@ def test_configuration_package_schemas_allow_user_visible_config_only() -> None:
     assert import_request.providers[0].api_key_ref == "env:DEEPSEEK_API_KEY"
     assert package_export.pipeline_templates[0].stage_role_bindings[0].role_id == (
         "role-requirement-analyst"
+    )
+    assert (
+        package_export.pipeline_templates[0]
+        .stage_role_bindings[0]
+        .stage_work_instruction
+        == "Analyze requirements."
     )
     assert package_export.pipeline_templates[0].max_react_iterations_per_stage == 30
     assert package_export.pipeline_templates[0].max_tool_calls_per_stage == 80

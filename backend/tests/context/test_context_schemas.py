@@ -176,9 +176,10 @@ def test_context_envelope_requires_canonical_section_order() -> None:
     )
 
     assert envelope.section_order == (
-        "runtime_instructions",
-        "stage_contract",
-        "agent_role_prompt",
+            "runtime_instructions",
+            "stage_contract",
+            "user_stage_instruction",
+            "agent_role_prompt",
         "task_objective",
         "specified_action",
         "input_artifact_refs",

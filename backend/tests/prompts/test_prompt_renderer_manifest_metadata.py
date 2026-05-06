@@ -205,6 +205,7 @@ def test_renderer_metadata_round_trips_into_context_manifest_system_prompt_overr
             }
         },
         agent_role_prompt="Use the configured solution designer voice.",
+        user_stage_instruction="Design only from the approved requirement analysis.",
         task_objective="Create a solution design.",
         specified_action="Return the structured solution design result.",
         available_tools=[_tool()],
@@ -261,12 +262,10 @@ def test_renderer_metadata_round_trips_into_context_manifest_system_prompt_overr
     assert dumped["system_prompt_ref"] == rendered.system_prompt_ref
     assert dumped["system_prompt_ref"] == "template-snapshot://run-1/agent-role/system-prompt"
     assert dumped["prompt_refs"][0]["prompt_id"] == "runtime_instructions"
-    assert dumped["prompt_refs"][1]["prompt_id"] == "stage_prompt_fragment.solution_design"
-    assert dumped["prompt_refs"][2]["prompt_id"] == "tool_usage_template"
-    assert dumped["prompt_refs"][3]["prompt_id"] == "tool_prompt_fragment.read_file"
+    assert dumped["prompt_refs"][1]["prompt_id"] == "tool_usage_template"
+    assert dumped["prompt_refs"][2]["prompt_id"] == "tool_prompt_fragment.read_file"
     assert dumped["prompt_asset_sources"] == [
         "backend://prompts/runtime/runtime_instructions.md",
-        "backend://prompts/stages/solution_design.md",
         "backend://prompts/tools/tool_usage_common.md",
         "backend://prompts/tools/read_file.md",
     ]

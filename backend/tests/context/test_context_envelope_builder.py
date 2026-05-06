@@ -296,6 +296,7 @@ def _template_snapshot(*, run_id: str = "run-1") -> TemplateSnapshot:
             StageRoleSnapshot(
                 stage_type=stage,
                 role_id=f"role-{stage.value}",
+                stage_work_instruction=f"Stage work instruction for {stage.value}.",
                 system_prompt=f"Role prompt for {stage.value}.",
                 provider_id="provider-openai",
             )
@@ -494,16 +495,12 @@ def test_stage_execution_builds_envelope_manifest_messages_and_persists_context_
     assert result.envelope.stage_contract[0].trust_level is (
         ContextTrustLevel.STAGE_CONTRACT_TRUSTED
     )
-    stage_fragment_block = result.envelope.stage_contract[1]
-    assert stage_fragment_block.block_id == "prompt-section:stage_prompt_fragment"
-    assert stage_fragment_block.trust_level is ContextTrustLevel.STAGE_CONTRACT_TRUSTED
-    assert stage_fragment_block.summary.startswith("# Code Generation Stage Prompt")
-    assert stage_fragment_block.estimated_chars == len(stage_fragment_block.summary)
-    assert stage_fragment_block.prompt_section_refs[0].section_id == (
-        "stage_prompt_fragment"
+    assert len(result.envelope.stage_contract) == 1
+    assert result.envelope.user_stage_instruction[0].summary == (
+        "Stage work instruction for code_generation."
     )
-    assert stage_fragment_block.prompt_section_refs[0].prompt_ref.prompt_id == (
-        "stage_prompt_fragment.code_generation"
+    assert result.envelope.user_stage_instruction[0].trust_level is (
+        ContextTrustLevel.AGENT_ROLE_CONFIG
     )
     assert result.envelope.agent_role_prompt[0].trust_level is (
         ContextTrustLevel.AGENT_ROLE_CONFIG
@@ -530,24 +527,24 @@ def test_stage_execution_builds_envelope_manifest_messages_and_persists_context_
     )
     assert artifact_store.calls[0]["trace_context"] == result.envelope.trace_context
     assert any(
-        record.block_id == "prompt-section:stage_prompt_fragment"
-        and record.section is ContextEnvelopeSection.STAGE_CONTRACT
-        and record.prompt_section_refs[0].prompt_ref.prompt_id
-        == "stage_prompt_fragment.code_generation"
+        record.section is ContextEnvelopeSection.USER_STAGE_INSTRUCTION
+        and record.source_ref.endswith(
+            "/stage-role-bindings/role-code_generation/stage_work_instruction"
+        )
         for record in result.manifest.records
     )
 
 
-def test_stage_prompt_fragment_is_counted_as_pinned_context() -> None:
+def test_stage_work_instruction_is_counted_as_pinned_context() -> None:
     from backend.app.context.size_guard import (
         ContextOverflowError,
         ContextSizeGuard,
         ContextTokenEstimator,
     )
 
-    class StageFragmentOnlyEstimator(ContextTokenEstimator):
+    class StageInstructionOnlyEstimator(ContextTokenEstimator):
         def estimate_block(self, block: ContextBlock) -> int:
-            if block.block_id == "prompt-section:stage_prompt_fragment":
+            if block.section is ContextEnvelopeSection.USER_STAGE_INSTRUCTION:
                 return 80
             return 0
 
@@ -580,7 +577,7 @@ def test_stage_prompt_fragment_is_counted_as_pinned_context() -> None:
     with pytest.raises(ContextOverflowError) as exc_info:
         _builder(
             context_size_guard=ContextSizeGuard(
-                token_estimator=StageFragmentOnlyEstimator()
+                token_estimator=StageInstructionOnlyEstimator()
             )
         ).build_for_stage_call(request)
 

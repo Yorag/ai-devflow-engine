@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from backend.app.schemas import common
 
@@ -34,6 +34,10 @@ class AgentRoleConfig(_StrictBaseModel):
 class StageRoleBinding(_StrictBaseModel):
     stage_type: common.StageType
     role_id: str = Field(min_length=1)
+    stage_work_instruction: str = Field(
+        min_length=1,
+        validation_alias=AliasChoices("stage_work_instruction", "system_prompt"),
+    )
     system_prompt: str = Field(min_length=1)
     provider_id: str = Field(min_length=1)
 

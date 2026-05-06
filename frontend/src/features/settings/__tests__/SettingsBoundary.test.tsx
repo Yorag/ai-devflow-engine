@@ -212,7 +212,7 @@ describe("SettingsBoundary", () => {
     expect(within(editor).queryByText("role-requirement-analyst")).toBeNull();
     expect(within(editor).getByLabelText("Requirement Analysis provider")).toBeTruthy();
     expect(
-      within(editor).getByLabelText("Requirement Analysis system prompt"),
+      within(editor).getByLabelText("Requirement Analysis stage work instruction"),
     ).toBeTruthy();
     expect(within(editor).getByLabelText("Auto regression")).toBeTruthy();
     expect(

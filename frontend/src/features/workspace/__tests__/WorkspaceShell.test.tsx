@@ -753,13 +753,16 @@ describe("WorkspaceShell", () => {
     const editor = await screen.findByRole("region", { name: "Template editor" });
     expect(within(editor).getByText("Run configuration")).toBeTruthy();
     expect(
-      within(editor).getByLabelText("Requirement Analysis system prompt"),
+      within(editor).getByLabelText("Requirement Analysis stage work instruction"),
     ).toBeTruthy();
     expect(within(editor).getByLabelText("Requirement Analysis provider")).toBeTruthy();
 
-    fireEvent.change(within(editor).getByLabelText("Requirement Analysis system prompt"), {
-      target: { value: "Clarify only when missing facts block implementation." },
-    });
+    fireEvent.change(
+      within(editor).getByLabelText("Requirement Analysis stage work instruction"),
+      {
+        target: { value: "Clarify only when missing facts block implementation." },
+      },
+    );
 
     expect(within(editor).getByText(/Unsaved edits will not affect/u)).toBeTruthy();
     expect(
@@ -823,15 +826,18 @@ describe("WorkspaceShell", () => {
 
     const editor = await screen.findByRole("region", { name: "Template editor" });
     fireEvent.change(
-      within(editor).getByLabelText("Requirement Analysis system prompt"),
+      within(editor).getByLabelText("Requirement Analysis stage work instruction"),
       {
         target: { value: "Clarify the saved requirement before design." },
       },
     );
     fireEvent.click(within(editor).getByRole("tab", { name: "Solution Design" }));
-    fireEvent.change(within(editor).getByLabelText("Solution Design system prompt"), {
-      target: { value: "Design the saved stage only." },
-    });
+    fireEvent.change(
+      within(editor).getByLabelText("Solution Design stage work instruction"),
+      {
+        target: { value: "Design the saved stage only." },
+      },
+    );
     fireEvent.click(within(editor).getByLabelText("Auto regression"));
     fireEvent.change(within(editor).getByLabelText("Maximum auto regression retries"), {
       target: { value: "2" },
@@ -858,11 +864,15 @@ describe("WorkspaceShell", () => {
         .find((template) => template.template_id === "template-feature")!
         .stage_role_bindings.map((binding) =>
           binding.stage_type === "solution_design"
-            ? { ...binding, system_prompt: "Design the saved stage only." }
+            ? {
+                ...binding,
+                stage_work_instruction: "Design the saved stage only.",
+              }
             : binding.stage_type === "requirement_analysis"
               ? {
                   ...binding,
-                  system_prompt: "Clarify the saved requirement before design.",
+                  stage_work_instruction:
+                    "Clarify the saved requirement before design.",
                 }
             : binding,
         ),
@@ -875,9 +885,12 @@ describe("WorkspaceShell", () => {
     );
 
     const editor = await screen.findByRole("region", { name: "Template editor" });
-    fireEvent.change(within(editor).getByLabelText("Requirement Analysis system prompt"), {
-      target: { value: "Clarify saved requirements before implementation." },
-    });
+    fireEvent.change(
+      within(editor).getByLabelText("Requirement Analysis stage work instruction"),
+      {
+        target: { value: "Clarify saved requirements before implementation." },
+      },
+    );
     fireEvent.click(within(editor).getByRole("button", { name: "Save template" }));
 
     await waitFor(() => {
@@ -1621,9 +1634,12 @@ describe("WorkspaceShell", () => {
     renderWithAppProviders(<ConsolePage request={request} />);
 
     const editor = await screen.findByRole("region", { name: "Template editor" });
-    fireEvent.change(within(editor).getByLabelText("Requirement Analysis system prompt"), {
-      target: { value: "This unsaved edit should not be saved before sending." },
-    });
+    fireEvent.change(
+      within(editor).getByLabelText("Requirement Analysis stage work instruction"),
+      {
+        target: { value: "This unsaved edit should not be saved before sending." },
+      },
+    );
     expect(within(editor).getByText(/Unsaved edits will not affect/u)).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText("当前输入"), {

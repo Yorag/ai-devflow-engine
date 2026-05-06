@@ -149,6 +149,7 @@ def test_seed_system_templates_creates_three_templates_from_role_assets(
 def test_template_bindings_use_stripped_prompt_bodies_and_fixed_stage_sequence(
     tmp_path: Path,
 ) -> None:
+    from backend.app.services import templates as template_module
     from backend.app.services.templates import TemplateService
 
     manager = build_manager(tmp_path)
@@ -174,11 +175,37 @@ def test_template_bindings_use_stripped_prompt_bodies_and_fixed_stage_sequence(
         "role-code-reviewer",
     ]
     assert all(binding["provider_id"] for binding in template.stage_role_bindings)
+    _, requirement_stage_body = template_module.parse_front_matter(
+        (
+            template_module.ROLE_ASSET_DIR.parent
+            / "stages"
+            / "requirement_analysis.md"
+        ).read_text(encoding="utf-8")
+    )
+    _, requirement_role_body = template_module.parse_front_matter(
+        (
+            template_module.ROLE_ASSET_DIR
+            / "requirement_analyst.md"
+        ).read_text(encoding="utf-8")
+    )
+    first_binding = template.stage_role_bindings[0]
+    assert first_binding["stage_work_instruction"] == requirement_stage_body
+    assert first_binding["system_prompt"] == requirement_role_body
+    assert first_binding["stage_work_instruction"] != first_binding["system_prompt"]
+    assert first_binding["stage_work_instruction"].startswith(
+        "# Requirement Analysis Stage Prompt"
+    )
+    assert first_binding["system_prompt"].startswith("# Requirement Analyst")
     for binding in template.stage_role_bindings:
+        assert binding["stage_work_instruction"].strip() == binding["stage_work_instruction"]
         assert binding["system_prompt"].strip() == binding["system_prompt"]
+        assert binding["stage_work_instruction"].startswith("# ")
         assert binding["system_prompt"].startswith("# ")
+        assert "prompt_id:" not in binding["stage_work_instruction"]
         assert "prompt_id:" not in binding["system_prompt"]
+        assert "prompt_version:" not in binding["stage_work_instruction"]
         assert "prompt_version:" not in binding["system_prompt"]
+        assert "---" not in binding["stage_work_instruction"]
         assert "---" not in binding["system_prompt"]
 
 
@@ -209,9 +236,7 @@ def test_seed_system_templates_is_idempotent_and_returns_ordered_rows(
 
 def test_seed_system_templates_refreshes_existing_system_template_defaults(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from backend.app.services import templates as template_module
     from backend.app.services.templates import TemplateService
 
     manager = build_manager(tmp_path)
@@ -244,15 +269,6 @@ def test_seed_system_templates_refreshes_existing_system_template_defaults(
                 )
             )
         session.commit()
-
-        def fail_asset_load() -> dict[str, object]:
-            raise RuntimeError("prompt assets should not be loaded")
-
-        monkeypatch.setattr(
-            template_module,
-            "load_default_agent_role_seed_assets",
-            fail_asset_load,
-        )
 
         templates = TemplateService(
             session,
@@ -288,6 +304,12 @@ def test_seed_system_templates_refreshes_existing_system_template_defaults(
         template.skip_high_risk_tool_confirmations
         for template in templates
     ] == [False, False, False]
+    assert all(template.stage_role_bindings for template in templates)
+    assert all(
+        binding["stage_work_instruction"] != binding["system_prompt"]
+        for template in templates
+        for binding in template.stage_role_bindings
+    )
     assert [record["action"] for record in audit.records] == ["template.seed_system"]
 
 

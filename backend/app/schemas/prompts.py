@@ -30,6 +30,7 @@ class PromptType(_PromptContractEnum):
 class PromptAuthorityLevel(_PromptContractEnum):
     SYSTEM_TRUSTED = "system_trusted"
     STAGE_CONTRACT_RENDERED = "stage_contract_rendered"
+    USER_STAGE_INSTRUCTION = "user_stage_instruction"
     AGENT_ROLE_PROMPT = "agent_role_prompt"
     TOOL_DESCRIPTION_RENDERED = "tool_description_rendered"
 

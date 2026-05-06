@@ -333,6 +333,46 @@ def test_validate_system_prompt_rejects_prompt_over_runtime_context_budget() -> 
     assert "prompt_length_exceeded" not in error.value.rule_ids
 
 
+def test_validate_template_prompts_preserves_stage_instruction_and_role_prompt() -> None:
+    from backend.app.runtime.prompt_validation import PromptValidationService
+
+    service = PromptValidationService(settings_read=build_runtime_settings())
+
+    validated = service.validate_template_prompts_before_save(
+        [
+            {
+                "stage_type": StageType.REQUIREMENT_ANALYSIS.value,
+                "role_id": "role-requirement-analyst",
+                "stage_work_instruction": (
+                    "  # Requirement Analysis Stage Prompt\n\n"
+                    "Clarify requirements and preserve unresolved questions.  "
+                ),
+                "system_prompt": (
+                    "  # Requirement Analyst\n\n"
+                    "Use a concise analyst style without changing platform rules.  "
+                ),
+                "provider_id": "provider-deepseek",
+            }
+        ]
+    )
+
+    assert validated == [
+        {
+            "stage_type": StageType.REQUIREMENT_ANALYSIS.value,
+            "role_id": "role-requirement-analyst",
+            "stage_work_instruction": (
+                "# Requirement Analysis Stage Prompt\n\n"
+                "Clarify requirements and preserve unresolved questions."
+            ),
+            "system_prompt": (
+                "# Requirement Analyst\n\n"
+                "Use a concise analyst style without changing platform rules."
+            ),
+            "provider_id": "provider-deepseek",
+        }
+    ]
+
+
 def test_validate_run_prompt_snapshots_rechecks_frozen_prompt_bindings() -> None:
     from backend.app.runtime.prompt_validation import (
         PromptValidationError,

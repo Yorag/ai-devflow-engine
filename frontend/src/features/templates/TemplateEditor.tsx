@@ -288,14 +288,14 @@ export function TemplateEditor({
                 </select>
               </label>
               <label className="template-editor-stage__prompt">
-                <span>System prompt</span>
+                <span>Stage work instruction</span>
                 <textarea
-                  aria-label={`${activeStageLabel} system prompt`}
+                  aria-label={`${activeStageLabel} stage work instruction`}
                   rows={3}
-                  value={activeBinding.system_prompt}
+                  value={activeBinding.stage_work_instruction}
                   onChange={(event) =>
                     updateBinding(activeBinding.stage_type, {
-                      system_prompt: event.target.value,
+                      stage_work_instruction: event.target.value,
                     })
                   }
                 />

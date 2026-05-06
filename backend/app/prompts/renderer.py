@@ -109,7 +109,9 @@ class PromptRenderRequest(_StrictBaseModel):
     model_call_type: ModelCallType
     template_snapshot_ref: str = Field(min_length=1)
     system_prompt_ref: str | None = Field(default=None, min_length=1)
+    stage_work_instruction_ref: str | None = Field(default=None, min_length=1)
     stage_contracts: dict[str, JsonObject]
+    user_stage_instruction: str | None = Field(default=None, min_length=1)
     agent_role_prompt: str | None = Field(default=None, min_length=1)
     task_objective: str = Field(min_length=1)
     specified_action: str = Field(min_length=1)
@@ -380,7 +382,7 @@ class PromptRenderer:
 
         runtime = self.render_runtime_instructions(request)
         stage_contract = self.render_stage_contract(request)
-        stage_prompt_fragment = self.render_stage_prompt_fragment(request)
+        user_stage_instruction = self._user_stage_instruction_section(request)
         agent_role = self._agent_role_section(request)
         task_objective = self._dynamic_section(
             request=request,
@@ -408,14 +410,14 @@ class PromptRenderer:
         sections = [
             runtime,
             stage_contract,
-            stage_prompt_fragment,
+            user_stage_instruction,
             agent_role,
             task_objective,
             specified_action,
             response_schema,
         ]
         if tool_usage is not None:
-            sections.insert(6, tool_usage)
+            sections.insert(len(sections) - 1, tool_usage)
         system_sections = [
             section
             for section in sections
@@ -423,7 +425,6 @@ class PromptRenderer:
             in {
                 "runtime_instructions",
                 "stage_contract",
-                "stage_prompt_fragment",
                 "available_tools",
                 "response_schema",
             }
@@ -434,6 +435,7 @@ class PromptRenderer:
             if section.section_id
             in {
                 "agent_role_prompt",
+                "user_stage_instruction",
                 "task_objective",
                 "specified_action",
             }
@@ -597,6 +599,22 @@ class PromptRenderer:
             title="Agent Role Prompt",
             body=body,
             authority_level=PromptAuthorityLevel.AGENT_ROLE_PROMPT,
+        )
+
+    def _user_stage_instruction_section(
+        self,
+        request: PromptRenderRequest,
+    ) -> PromptRenderedSection:
+        body = (
+            request.user_stage_instruction
+            or "No user-configured stage work instruction."
+        )
+        return self._dynamic_section(
+            request=request,
+            section_id="user_stage_instruction",
+            title="User Stage Work Instruction",
+            body=body,
+            authority_level=PromptAuthorityLevel.USER_STAGE_INSTRUCTION,
         )
 
     def _stage_contract(self, request: PromptRenderRequest) -> JsonObject:

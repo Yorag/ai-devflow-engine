@@ -118,6 +118,7 @@ def _system_prompt_ref_from_blocks(
 class ContextEnvelopeSection(StrEnum):
     RUNTIME_INSTRUCTIONS = "runtime_instructions"
     STAGE_CONTRACT = "stage_contract"
+    USER_STAGE_INSTRUCTION = "user_stage_instruction"
     AGENT_ROLE_PROMPT = "agent_role_prompt"
     TASK_OBJECTIVE = "task_objective"
     SPECIFIED_ACTION = "specified_action"
@@ -203,6 +204,11 @@ class ContextBlock(_StrictFrozenModel):
                 raise ValueError(
                     "stage_contract blocks must use stage_contract_trusted trust level"
                 )
+        if self.section is ContextEnvelopeSection.USER_STAGE_INSTRUCTION:
+            if self.trust_level is not ContextTrustLevel.AGENT_ROLE_CONFIG:
+                raise ValueError(
+                    "user_stage_instruction blocks must use agent_role_config trust level"
+                )
         if self.section is ContextEnvelopeSection.AGENT_ROLE_PROMPT:
             if self.trust_level is not ContextTrustLevel.AGENT_ROLE_CONFIG:
                 raise ValueError(
@@ -241,6 +247,7 @@ class ContextEnvelope(_StrictFrozenModel):
     model_call_type: ModelCallType
     runtime_instructions: tuple[ContextBlock, ...] = Field(default_factory=tuple)
     stage_contract: tuple[ContextBlock, ...] = Field(default_factory=tuple)
+    user_stage_instruction: tuple[ContextBlock, ...] = Field(default_factory=tuple)
     agent_role_prompt: tuple[ContextBlock, ...] = Field(default_factory=tuple)
     task_objective: tuple[ContextBlock, ...] = Field(default_factory=tuple)
     specified_action: tuple[ContextBlock, ...] = Field(default_factory=tuple)
@@ -258,6 +265,7 @@ class ContextEnvelope(_StrictFrozenModel):
     @field_validator(
         "runtime_instructions",
         "stage_contract",
+        "user_stage_instruction",
         "agent_role_prompt",
         "task_objective",
         "specified_action",
@@ -377,6 +385,7 @@ class ContextManifest(_StrictFrozenModel):
         blocks = [
             *envelope.runtime_instructions,
             *envelope.stage_contract,
+            *envelope.user_stage_instruction,
             *envelope.agent_role_prompt,
             *envelope.task_objective,
             *envelope.specified_action,

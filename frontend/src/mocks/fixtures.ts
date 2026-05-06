@@ -1462,38 +1462,55 @@ function createStageRoleBindings() {
     {
       stage_type: "requirement_analysis",
       role_id: "role-requirement-analyst",
+      stage_work_instruction:
+        "# Requirement Analysis Stage Prompt\n\nClarify the incoming requirement into a structured, traceable understanding for the current PipelineRun.",
       system_prompt:
-        "Analyze the requirement and ask clarifying questions when needed.",
+        "# Requirement Analyst\n\nAct as a requirement analyst who preserves user intent, exposes ambiguity, and turns raw requests into traceable product understanding.",
       provider_id: "provider-deepseek",
     },
     {
       stage_type: "solution_design",
       role_id: "role-solution-designer",
-      system_prompt: "Design a bounded implementation plan.",
+      stage_work_instruction:
+        "# Solution Design Stage Prompt\n\nConvert accepted requirements into a reviewable, bounded solution design and implementation plan.",
+      system_prompt:
+        "# Solution Designer\n\nAct as a solution designer who turns validated requirements into practical implementation plans.",
       provider_id: "provider-deepseek",
     },
     {
       stage_type: "code_generation",
       role_id: "role-code-generator",
-      system_prompt: "Implement approved changes.",
+      stage_work_instruction:
+        "# Code Generation Stage Prompt\n\nImplement only the approved solution scope with focused, reviewable code changes.",
+      system_prompt:
+        "# Code Generator\n\nAct as a code generator who applies approved implementation plans with minimal unrelated change.",
       provider_id: "provider-deepseek",
     },
     {
       stage_type: "test_generation_execution",
       role_id: "role-test-runner",
-      system_prompt: "Generate and run tests.",
+      stage_work_instruction:
+        "# Test Generation & Execution Stage Prompt\n\nCreate and run the verification needed to prove the implementation behavior.",
+      system_prompt:
+        "# Test Runner\n\nAct as a test runner who verifies implementation behavior and reports evidence clearly.",
       provider_id: "provider-deepseek",
     },
     {
       stage_type: "code_review",
       role_id: "role-code-reviewer",
-      system_prompt: "Review implementation and tests.",
+      stage_work_instruction:
+        "# Code Review Stage Prompt\n\nReview implementation, tests, risks, and remaining blockers before delivery.",
+      system_prompt:
+        "# Code Reviewer\n\nAct as a code reviewer who prioritizes correctness, risk, and evidence over style-only feedback.",
       provider_id: "provider-deepseek",
     },
     {
       stage_type: "delivery_integration",
       role_id: "role-delivery-integrator",
-      system_prompt: "Prepare delivery output.",
+      stage_work_instruction:
+        "# Delivery Integration Stage Prompt\n\nPrepare the final delivery result from approved code, verification, and delivery-channel state.",
+      system_prompt:
+        "# Delivery Integrator\n\nAct as a delivery integrator who summarizes verified outcomes and preserves delivery boundaries.",
       provider_id: "provider-deepseek",
     },
   ] as PipelineTemplateRead["stage_role_bindings"];

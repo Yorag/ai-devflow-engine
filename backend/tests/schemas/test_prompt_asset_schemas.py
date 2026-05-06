@@ -46,6 +46,7 @@ def test_prompt_asset_read_locks_system_prompt_asset_identity_and_hash() -> None
     assert {authority.value for authority in PromptAuthorityLevel} == {
         "system_trusted",
         "stage_contract_rendered",
+        "user_stage_instruction",
         "agent_role_prompt",
         "tool_description_rendered",
     }
