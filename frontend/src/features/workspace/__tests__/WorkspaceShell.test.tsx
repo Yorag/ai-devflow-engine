@@ -832,11 +832,9 @@ describe("WorkspaceShell", () => {
     fireEvent.change(within(editor).getByLabelText("Solution Design system prompt"), {
       target: { value: "Design the saved stage only." },
     });
-    fireEvent.change(within(editor).getByLabelText("Max ReAct iterations"), {
-      target: { value: "34" },
-    });
-    fireEvent.change(within(editor).getByLabelText("Max tool calls"), {
-      target: { value: "90" },
+    fireEvent.click(within(editor).getByLabelText("Auto regression"));
+    fireEvent.change(within(editor).getByLabelText("Maximum auto regression retries"), {
+      target: { value: "2" },
     });
     fireEvent.click(within(editor).getByLabelText("Skip high-risk confirmations"));
     fireEvent.click(within(editor).getByRole("button", { name: "Save template" }));
@@ -848,8 +846,10 @@ describe("WorkspaceShell", () => {
     });
     expect(saveAsBodies).toHaveLength(1);
     expect(saveAsBodies[0]).toMatchObject({
-      max_react_iterations_per_stage: 34,
-      max_tool_calls_per_stage: 90,
+      auto_regression_enabled: false,
+      max_auto_regression_retries: 2,
+      max_react_iterations_per_stage: 30,
+      max_tool_calls_per_stage: 80,
       skip_high_risk_tool_confirmations: true,
     });
     expect(saveAsBodies[0].stage_role_bindings).toHaveLength(6);

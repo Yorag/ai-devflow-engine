@@ -1716,6 +1716,16 @@ a {
   min-width: 0;
 }
 
+.template-editor__policy-row {
+  display: grid;
+  grid-template-columns:
+    minmax(132px, 0.9fr) minmax(196px, 1.1fr)
+    minmax(180px, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
 .template-editor label {
   display: grid;
   gap: 6px;
@@ -2778,6 +2788,7 @@ a {
   }
 
   .template-editor__global,
+  .template-editor__policy-row,
   .template-editor-stage__fields {
     grid-template-columns: 1fr;
   }

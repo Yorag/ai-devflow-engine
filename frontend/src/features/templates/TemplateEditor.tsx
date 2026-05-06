@@ -54,16 +54,6 @@ export function TemplateEditor({
   const unavailableProviderIds = unavailableTemplateProviderIds(draft, providers);
   const guard = resolveTemplateStartGuard(template, dirty);
   const retryError = getRetryValidationError(draft.max_auto_regression_retries);
-  const reactIterationError = getPositiveLimitValidationError(
-    draft.max_react_iterations_per_stage,
-    "Max ReAct iterations",
-    50,
-  );
-  const toolCallError = getPositiveLimitValidationError(
-    draft.max_tool_calls_per_stage,
-    "Max tool calls",
-    150,
-  );
   const nameError = getTemplateNameValidationError(template, draft.name);
   const providerOptions = availableTemplateProviders(providers);
   const noConfiguredProviders = providerOptions.length === 0;
@@ -80,8 +70,6 @@ export function TemplateEditor({
     Boolean(activeBinding) &&
     !isSaving &&
     !retryError &&
-    !reactIterationError &&
-    !toolCallError &&
     !nameError &&
     !noConfiguredProviders &&
     unavailableProviderIds.length === 0;
@@ -148,8 +136,8 @@ export function TemplateEditor({
         </p>
       ))}
 
-      <div className="template-editor__global">
-        {template.template_source === "user_template" ? (
+      {template.template_source === "user_template" ? (
+        <div className="template-editor__global">
           <label>
             <span>Template name</span>
             <input
@@ -158,7 +146,10 @@ export function TemplateEditor({
               onChange={(event) => updateDraft({ name: event.target.value })}
             />
           </label>
-        ) : null}
+        </div>
+      ) : null}
+
+      <div className="template-editor__policy-row">
         <label className="template-editor__checkbox">
           <input
             type="checkbox"
@@ -168,6 +159,18 @@ export function TemplateEditor({
             }
           />
           <span>Auto regression</span>
+        </label>
+        <label className="template-editor__checkbox">
+          <input
+            type="checkbox"
+            checked={draft.skip_high_risk_tool_confirmations}
+            onChange={(event) =>
+              updateDraft({
+                skip_high_risk_tool_confirmations: event.target.checked,
+              })
+            }
+          />
+          <span>Skip high-risk confirmations</span>
         </label>
         <label>
           <span>Maximum auto regression retries</span>
@@ -189,73 +192,11 @@ export function TemplateEditor({
             }
           />
         </label>
-        <label>
-          <span>Max ReAct iterations</span>
-          <input
-            type="number"
-            min="1"
-            step="1"
-            value={
-              Number.isFinite(draft.max_react_iterations_per_stage)
-                ? draft.max_react_iterations_per_stage
-                : ""
-            }
-            aria-invalid={Boolean(reactIterationError)}
-            onChange={(event) =>
-              updateDraft({
-                max_react_iterations_per_stage:
-                  event.target.value === "" ? Number.NaN : Number(event.target.value),
-              })
-            }
-          />
-        </label>
-        <label>
-          <span>Max tool calls</span>
-          <input
-            type="number"
-            min="1"
-            step="1"
-            value={
-              Number.isFinite(draft.max_tool_calls_per_stage)
-                ? draft.max_tool_calls_per_stage
-                : ""
-            }
-            aria-invalid={Boolean(toolCallError)}
-            onChange={(event) =>
-              updateDraft({
-                max_tool_calls_per_stage:
-                  event.target.value === "" ? Number.NaN : Number(event.target.value),
-              })
-            }
-          />
-        </label>
-        <label className="template-editor__checkbox">
-          <input
-            type="checkbox"
-            checked={draft.skip_high_risk_tool_confirmations}
-            onChange={(event) =>
-              updateDraft({
-                skip_high_risk_tool_confirmations: event.target.checked,
-              })
-            }
-          />
-          <span>Skip high-risk confirmations</span>
-        </label>
       </div>
 
       {retryError ? (
         <p className="template-editor__field-error" role="alert">
           {retryError}
-        </p>
-      ) : null}
-      {reactIterationError ? (
-        <p className="template-editor__field-error" role="alert">
-          {reactIterationError}
-        </p>
-      ) : null}
-      {toolCallError ? (
-        <p className="template-editor__field-error" role="alert">
-          {toolCallError}
         </p>
       ) : null}
       {nameError ? (
@@ -419,22 +360,6 @@ function getRetryValidationError(value: number): string | null {
 
   if (value > 3) {
     return "Cannot save current field: config_hard_limit_exceeded. Maximum auto regression retries exceeds the backend save limit.";
-  }
-
-  return null;
-}
-
-function getPositiveLimitValidationError(
-  value: number,
-  label: string,
-  hardLimit: number,
-): string | null {
-  if (!Number.isFinite(value) || !Number.isInteger(value) || value < 1) {
-    return `Cannot save current field: config_invalid_value. ${label} must be a finite positive number.`;
-  }
-
-  if (value > hardLimit) {
-    return `Cannot save current field: config_hard_limit_exceeded. ${label} exceeds the backend save limit.`;
   }
 
   return null;

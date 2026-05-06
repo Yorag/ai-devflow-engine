@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -246,25 +249,27 @@ describe("TemplateEditor", () => {
     expect(
       within(editor).getByLabelText("Requirement Analysis system prompt"),
     ).toBeTruthy();
-    expect(within(editor).getByLabelText("Auto regression")).toHaveProperty(
+    const policyRow = editor.querySelector(".template-editor__policy-row");
+    expect(policyRow).toBeTruthy();
+    if (!policyRow) {
+      throw new Error("Template policy row was not rendered.");
+    }
+
+    expect(within(policyRow as HTMLElement).getByLabelText("Auto regression")).toHaveProperty(
       "checked",
       true,
     );
     expect(
-      within(editor).getByLabelText("Maximum auto regression retries"),
+      within(policyRow as HTMLElement).getByLabelText("Skip high-risk confirmations"),
+    ).toHaveProperty("checked", false);
+    expect(
+      within(policyRow as HTMLElement).getByLabelText("Maximum auto regression retries"),
     ).toHaveProperty("value", "1");
-    expect(within(editor).getByLabelText("Max ReAct iterations")).toHaveProperty(
-      "value",
-      "30",
+    expect(policyRow.textContent ?? "").toMatch(
+      /Auto regression.*Skip high-risk confirmations.*Maximum auto regression retries/su,
     );
-    expect(within(editor).getByLabelText("Max tool calls")).toHaveProperty(
-      "value",
-      "80",
-    );
-    expect(within(editor).getByLabelText("Skip high-risk confirmations")).toHaveProperty(
-      "checked",
-      false,
-    );
+    expect(within(editor).queryByLabelText("Max ReAct iterations")).toBeNull();
+    expect(within(editor).queryByLabelText("Max tool calls")).toBeNull();
     expect(within(editor).queryByLabelText("Template name")).toBeNull();
     expect(within(editor).queryByLabelText("Template description")).toBeNull();
 
@@ -286,7 +291,7 @@ describe("TemplateEditor", () => {
     expect(savedAsTemplateIds).toEqual(["template-user-template-feature-1"]);
   });
 
-  it("saves template-level run policy fields with the edited template", async () => {
+  it("saves visible template-level run policy fields while retaining hidden backend limits", async () => {
     const workspace = mockSessionWorkspaces["session-draft"];
     let savedTemplate: PipelineTemplateRead | null = null;
 
@@ -304,19 +309,19 @@ describe("TemplateEditor", () => {
     );
 
     const editor = screen.getByRole("region", { name: "Template editor" });
-    fireEvent.change(within(editor).getByLabelText("Max ReAct iterations"), {
-      target: { value: "32" },
-    });
-    fireEvent.change(within(editor).getByLabelText("Max tool calls"), {
-      target: { value: "95" },
+    fireEvent.click(within(editor).getByLabelText("Auto regression"));
+    fireEvent.change(within(editor).getByLabelText("Maximum auto regression retries"), {
+      target: { value: "2" },
     });
     fireEvent.click(within(editor).getByLabelText("Skip high-risk confirmations"));
     fireEvent.click(within(editor).getByRole("button", { name: "Save template" }));
 
     await waitFor(() => {
       expect(savedTemplate).toMatchObject({
-        max_react_iterations_per_stage: 32,
-        max_tool_calls_per_stage: 95,
+        auto_regression_enabled: false,
+        max_auto_regression_retries: 2,
+        max_react_iterations_per_stage: 30,
+        max_tool_calls_per_stage: 80,
         skip_high_risk_tool_confirmations: true,
       });
     });
@@ -674,66 +679,17 @@ describe("TemplateEditor", () => {
     expect(within(editor).queryByRole("button", { name: "Overwrite template" })).toBeNull();
   });
 
-  it("blocks saving invalid template runtime policy limits", () => {
-    const workspace = mockSessionWorkspaces["session-draft"];
-    const userTemplate = {
-      ...mockPipelineTemplates[1],
-      template_id: "template-user-existing",
-      template_source: "user_template" as const,
-      base_template_id: "template-feature",
-    };
+  it("keeps visible run policy controls in one ordered row with responsive CSS", () => {
+    const cwd = process.cwd();
+    const frontendRoot = cwd.endsWith("frontend") ? cwd : join(cwd, "frontend");
+    const css = readFileSync(join(frontendRoot, "src", "styles", "global.css"), "utf8");
 
-    renderWithAppProviders(
-      <TemplateEmptyState
-        session={workspace.session}
-        templates={[...mockPipelineTemplates, userTemplate]}
-        providers={mockProviderList}
-        selectedTemplateId="template-user-existing"
-        onTemplateChange={() => undefined}
-      />,
+    expect(css).toMatch(
+      /\.template-editor__policy-row\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(132px,\s*0\.9fr\)\s+minmax\(196px,\s*1\.1fr\)\s+minmax\(180px,\s*1fr\);[^}]*align-items:\s*center;/su,
     );
-
-    const editor = screen.getByRole("region", { name: "Template editor" });
-    fireEvent.change(within(editor).getByLabelText("Max ReAct iterations"), {
-      target: { value: "" },
-    });
-
-    expect(
-      within(editor).getByText(/Cannot save current field: config_invalid_value/u),
-    ).toBeTruthy();
-    expect(
-      within(editor).getByRole("button", { name: "Save template" }),
-    ).toHaveProperty("disabled", true);
-
-    fireEvent.change(within(editor).getByLabelText("Max ReAct iterations"), {
-      target: { value: "1.5" },
-    });
-
-    expect(
-      within(editor).getByText(/Cannot save current field: config_invalid_value/u),
-    ).toBeTruthy();
-
-    fireEvent.change(within(editor).getByLabelText("Max ReAct iterations"), {
-      target: { value: "51" },
-    });
-
-    expect(
-      within(editor).getByText(/Cannot save current field: config_hard_limit_exceeded/u),
-    ).toBeTruthy();
-
-    fireEvent.change(within(editor).getByLabelText("Max ReAct iterations"), {
-      target: { value: "30" },
-    });
-    fireEvent.change(within(editor).getByLabelText("Max tool calls"), {
-      target: { value: "151" },
-    });
-
-    expect(
-      within(editor).getByText(/Cannot save current field: config_hard_limit_exceeded/u),
-    ).toBeTruthy();
-    expect(
-      within(editor).getByRole("button", { name: "Save template" }),
-    ).toHaveProperty("disabled", true);
+    expect(css).toMatch(
+      /@media\s*\(max-width:\s*720px\)[\s\S]*\.template-editor__global,\s*\.template-editor__policy-row,\s*\.template-editor-stage__fields\s*\{[^}]*grid-template-columns:\s*1fr;/u,
+    );
   });
 
   it("keeps local save-as templates when incoming templates refresh", async () => {
