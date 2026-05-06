@@ -309,6 +309,22 @@ def test_compile_populates_stage_contracts_with_fixed_allowed_tools_and_runtime_
         code_review_contract["runtime_limits"]["skip_high_risk_tool_confirmations"]
         is False
     )
+    assert (
+        definition.stage_contracts[StageType.REQUIREMENT_ANALYSIS.value][
+            "can_request_clarification"
+        ]
+        is True
+    )
+    for stage_type in (
+        StageType.SOLUTION_DESIGN,
+        StageType.CODE_GENERATION,
+        StageType.TEST_GENERATION_EXECUTION,
+        StageType.CODE_REVIEW,
+        StageType.DELIVERY_INTEGRATION,
+    ):
+        assert definition.stage_contracts[stage_type.value][
+            "can_request_clarification"
+        ] is False
     assert definition.stage_contracts[StageType.REQUIREMENT_ANALYSIS.value][
         "stage_responsibility"
     ] == "Understand the requirement, resolve scope ambiguity, and produce the requirement analysis artifact."

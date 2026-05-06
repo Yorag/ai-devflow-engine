@@ -489,6 +489,7 @@ def graph_definition(
     *,
     allowed_tools: Sequence[str] = ("read_file",),
     skip_high_risk_tool_confirmations: bool = False,
+    can_request_clarification: bool = False,
 ) -> GraphDefinition:
     stage_contracts: dict[str, dict[str, Any]] = {
         stage.value: {
@@ -504,6 +505,9 @@ def graph_definition(
             "runtime_limits": {
                 "skip_high_risk_tool_confirmations": skip_high_risk_tool_confirmations
             },
+            "can_request_clarification": (
+                can_request_clarification if stage is StageType.CODE_GENERATION else False
+            ),
         }
         for stage in StageType
     }
@@ -739,6 +743,37 @@ def test_stage_agent_high_risk_tool_result_waits_for_confirmation_without_comple
     assert result.route_key == "waiting_tool_confirmation"
     assert "tool_confirmation_trace" in runtime.artifact_store.append_keys()
     assert "recovery_checkpoint" in runtime.artifact_store.append_keys()
+    assert runtime.artifact_store.complete_calls == []
+
+
+def test_stage_agent_persists_structured_clarification_request_before_waiting() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(
+                structured_output={
+                    "decision_type": "request_clarification",
+                    "question": "Which runtime module should handle dispatch?",
+                    "missing_facts": ["runtime dispatcher owner"],
+                    "impact_scope": "Production run execution",
+                    "related_refs": ["message://run-1/requirement"],
+                    "fields_to_update": ["structured_requirement"],
+                }
+            )
+        ],
+    )
+    runtime._graph_definition = graph_definition(
+        allowed_tools=(),
+        can_request_clarification=True,
+    )
+
+    result = runtime.run_stage(invocation())
+
+    assert result.status is StageStatus.WAITING_CLARIFICATION
+    assert result.route_key == "waiting_clarification"
+    clarification = runtime.artifact_store.process["clarification_request"]
+    assert clarification["question"] == "Which runtime module should handle dispatch?"
+    assert clarification["missing_facts"] == ["runtime dispatcher owner"]
+    assert clarification["decision_trace_ref"].startswith("agent-decision-trace-")
     assert runtime.artifact_store.complete_calls == []
 
 

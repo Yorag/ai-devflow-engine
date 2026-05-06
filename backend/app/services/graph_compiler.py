@@ -199,6 +199,7 @@ class GraphCompiler:
                 "structured_artifact_required": "RequirementAnalysisArtifact",
                 "allowed_tools": list(allowed_tools[fixed_stage_sequence[0]]),
                 "runtime_limits": build_runtime_limits(),
+                "can_request_clarification": True,
             },
             "solution_design": {
                 "stage_responsibility": (
@@ -210,6 +211,7 @@ class GraphCompiler:
                 "structured_artifact_required": "SolutionDesignArtifact",
                 "allowed_tools": list(allowed_tools[fixed_stage_sequence[1]]),
                 "runtime_limits": build_runtime_limits(),
+                "can_request_clarification": False,
                 "validation_pass": {
                     "node_group": "solution_validation",
                     "reenter_node_group": "solution_design_authoring",
@@ -225,6 +227,7 @@ class GraphCompiler:
                 "structured_artifact_required": "CodeGenerationArtifact",
                 "allowed_tools": list(allowed_tools[fixed_stage_sequence[2]]),
                 "runtime_limits": build_runtime_limits(),
+                "can_request_clarification": False,
             },
             "test_generation_execution": {
                 "stage_responsibility": (
@@ -236,6 +239,7 @@ class GraphCompiler:
                 "structured_artifact_required": "TestGenerationExecutionArtifact",
                 "allowed_tools": list(allowed_tools[fixed_stage_sequence[3]]),
                 "runtime_limits": build_runtime_limits(),
+                "can_request_clarification": False,
             },
             "code_review": {
                 "stage_responsibility": (
@@ -247,6 +251,7 @@ class GraphCompiler:
                 "structured_artifact_required": "CodeReviewArtifact",
                 "allowed_tools": list(allowed_tools[fixed_stage_sequence[4]]),
                 "runtime_limits": build_runtime_limits(),
+                "can_request_clarification": False,
             },
             "delivery_integration": {
                 "stage_responsibility": (
@@ -258,6 +263,7 @@ class GraphCompiler:
                 "structured_artifact_required": "DeliveryRecord",
                 "allowed_tools": list(allowed_tools[fixed_stage_sequence[5]]),
                 "runtime_limits": build_runtime_limits(),
+                "can_request_clarification": False,
             },
         }
 
