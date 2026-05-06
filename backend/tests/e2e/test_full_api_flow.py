@@ -60,6 +60,7 @@ from backend.app.schemas.feed import ExecutionNodeProjection, ProviderCallStageI
 from backend.app.services.delivery import DeliveryRecordService, DeliveryService
 from backend.app.services.events import DomainEventType, EventStore
 from backend.app.services.graph_runtime import GraphCheckpointPort, GraphRuntimeCommandPort
+from backend.app.testing import ManualRuntimeExecutionDispatcher
 
 
 NOW = datetime(2026, 5, 5, 9, 0, 0, tzinfo=UTC)
@@ -126,6 +127,7 @@ def seedFullFlowFixture(
             default_project_root=default_root,
         )
     )
+    app.state.runtime_execution_dispatcher = ManualRuntimeExecutionDispatcher()
     ControlBase.metadata.create_all(
         app.state.database_manager.engine(DatabaseRole.CONTROL)
     )

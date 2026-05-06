@@ -1,4 +1,7 @@
-from backend.app.testing.e2e_runtime import create_e2e_test_app
+from backend.app.testing.e2e_runtime import (
+    ManualRuntimeExecutionDispatcher,
+    create_e2e_test_app,
+)
 from backend.app.testing.runtime_ports import (
     InMemoryCheckpointPort,
     InMemoryRuntimeCommandPort,
@@ -7,5 +10,6 @@ from backend.app.testing.runtime_ports import (
 __all__ = [
     "InMemoryCheckpointPort",
     "InMemoryRuntimeCommandPort",
+    "ManualRuntimeExecutionDispatcher",
     "create_e2e_test_app",
 ]

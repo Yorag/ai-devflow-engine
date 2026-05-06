@@ -37,6 +37,7 @@ from backend.app.observability.audit import AuditService
 from backend.app.observability.log_writer import JsonlLogWriter
 from backend.app.observability.runtime_data import RuntimeDataSettings
 from backend.app.runtime.base import (
+    RuntimeEngineResult,
     RuntimeExecutionContext,
     RuntimeInterrupt,
     RuntimeStepResult,
@@ -122,12 +123,39 @@ class _OpenSessions:
 
 def create_e2e_test_app(settings: EnvironmentSettings | None = None) -> FastAPI:
     app = create_app(settings)
+    app.state.runtime_execution_dispatcher = ManualRuntimeExecutionDispatcher()
     app.include_router(
         build_deterministic_runtime_advancement_router(),
         prefix="/__test__/runtime",
         include_in_schema=False,
     )
     return app
+
+
+class ManualRuntimeExecutionDispatcher:
+    """Test-only dispatcher that leaves runs parked for deterministic advancement."""
+
+    def dispatch_started_run(self, command: Any) -> None:
+        del command
+
+    def run_next(
+        self,
+        *,
+        run_id: str,
+        trace_context: TraceContext,
+    ) -> RuntimeEngineResult | None:
+        del run_id, trace_context
+        return None
+
+    def resume(
+        self,
+        *,
+        interrupt: RuntimeInterrupt,
+        resume_payload: Any,
+        trace_context: TraceContext,
+    ) -> RuntimeEngineResult | None:
+        del interrupt, resume_payload, trace_context
+        return None
 
 
 def build_deterministic_runtime_advancement_router() -> APIRouter:
@@ -421,6 +449,7 @@ __all__ = [
     "AdvanceRuntimeRequest",
     "AdvanceRuntimeResponse",
     "DeterministicRuntimeAdvancementHarness",
+    "ManualRuntimeExecutionDispatcher",
     "build_deterministic_runtime_advancement_router",
     "create_e2e_test_app",
 ]
