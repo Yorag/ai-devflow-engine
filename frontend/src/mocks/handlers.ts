@@ -4,6 +4,7 @@ import type {
   ProjectDeliveryChannelDetailProjection,
   ProjectRead,
   SessionRead,
+  SessionStatus,
   SessionWorkspaceProjection,
 } from "../api/types";
 import {
@@ -72,7 +73,7 @@ function createMockRoutes(
   workspaces: Record<string, SessionWorkspaceProjection>,
 ): MockRoute[] {
   const projects = mockProjectList.map((project) => ({ ...project }));
-  const sessions = mockSessionList.map((session) => ({ ...session }));
+  let sessions = mockSessionList.map((session) => ({ ...session }));
   let providers = mockProviderList.map((provider) => ({ ...provider }));
 
   return [
@@ -232,6 +233,51 @@ function createMockRoutes(
       return workspace
         ? jsonResponse(workspace)
         : jsonResponse(mockApiError("not_found"), 404);
+    }),
+    route("DELETE", /^\/api\/sessions\/([^/]+)$/u, ([, sessionId]) => {
+      const session = sessions.find((candidate) => candidate.session_id === sessionId);
+      if (!session) {
+        return jsonResponse(mockApiError("not_found"), 404);
+      }
+
+      if (isActiveMockSessionStatus(session.status)) {
+        return jsonResponse({
+          session_id: session.session_id,
+          project_id: session.project_id,
+          visibility_removed: false,
+          blocked_by_active_run: true,
+          blocking_run_id: session.current_run_id,
+          error_code: "session_active_run_blocks_delete",
+          message: "Session has an active run.",
+          deletes_local_project_folder: false,
+          deletes_target_repository: false,
+          deletes_remote_repository: false,
+          deletes_remote_branch: false,
+          deletes_commits: false,
+          deletes_code_review_requests: false,
+        });
+      }
+
+      sessions = sessions.filter(
+        (candidate) => candidate.session_id !== session.session_id,
+      );
+      delete workspaces[session.session_id];
+
+      return jsonResponse({
+        session_id: session.session_id,
+        project_id: session.project_id,
+        visibility_removed: true,
+        blocked_by_active_run: false,
+        blocking_run_id: null,
+        error_code: null,
+        message: "Session removed from regular product history.",
+        deletes_local_project_folder: false,
+        deletes_target_repository: false,
+        deletes_remote_repository: false,
+        deletes_remote_branch: false,
+        deletes_commits: false,
+        deletes_code_review_requests: false,
+      });
     }),
     route("PATCH", /^\/api\/sessions\/([^/]+)$/u, ([, sessionId], init) => {
       const session = sessions.find((candidate) => candidate.session_id === sessionId);
@@ -418,6 +464,16 @@ function mockProviderApiKeyProjection(
     return existingValue;
   }
   return typeof value === "string" && value.trim() ? "[configured:api_key]" : null;
+}
+
+function isActiveMockSessionStatus(status: SessionStatus): boolean {
+  return [
+    "running",
+    "paused",
+    "waiting_clarification",
+    "waiting_approval",
+    "waiting_tool_confirmation",
+  ].includes(status);
 }
 
 function jsonResponse(body: unknown, status = 200): Response {

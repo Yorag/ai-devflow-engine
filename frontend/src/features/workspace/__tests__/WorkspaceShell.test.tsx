@@ -65,16 +65,24 @@ describe("WorkspaceShell", () => {
     );
     const main = screen.getByRole("region", { name: "Narrative workspace" });
     expect(main).toBeTruthy();
+    const scrollArea = main.querySelector(".workspace-main__scroll");
+    expect(scrollArea).toBeTruthy();
     expect(main.querySelector(".workspace-main__content")).toBeTruthy();
     expect(
       await screen.findByRole("region", { name: "Template empty state" }),
     ).toBeTruthy();
+    const dock = main.querySelector(".workspace-main__composer-dock");
+    expect(dock).toBeTruthy();
+    expect(dock?.parentElement).toBe(main);
     expect(
       main.querySelector(".workspace-main__panel--template .template-empty-state"),
     ).toBeTruthy();
     expect(
-      main.querySelector(".workspace-main__panel--composer .composer"),
+      dock?.querySelector(".workspace-main__composer-inner .composer"),
     ).toBeTruthy();
+    expect(
+      scrollArea?.querySelector(".workspace-main__panel--composer"),
+    ).toBeNull();
     expect(screen.queryByRole("complementary", { name: "Inspector" })).toBeNull();
     expect(screen.queryByText("Inspector closed")).toBeNull();
     expect(screen.queryByText(/workflow surface comes online/i)).toBeNull();
@@ -101,8 +109,9 @@ describe("WorkspaceShell", () => {
     expect(
       main.querySelector(".workspace-main__panel--feed .narrative-feed"),
     ).toBeTruthy();
+    const dock = main.querySelector(".workspace-main__composer-dock");
     expect(
-      main.querySelector(".workspace-main__panel--composer .composer"),
+      dock?.querySelector(".workspace-main__composer-inner .composer"),
     ).toBeTruthy();
     expect(await screen.findByRole("complementary", { name: "Inspector" })).toBeTruthy();
   });
@@ -227,10 +236,8 @@ describe("WorkspaceShell", () => {
       }),
     ).toBeTruthy();
     expect(
-      await screen.findByRole("button", {
-        name: "Delete Blank requirement unavailable",
-      }),
-    ).toHaveProperty("disabled", true);
+      await screen.findByRole("button", { name: "Open Blank requirement" }),
+    ).toHaveProperty("ariaCurrent", "page");
 
     fireEvent.change(await screen.findByLabelText("Switch project"), {
       target: { value: "project-loaded" },

@@ -264,6 +264,27 @@ export function ProjectSidebar({
             refetchType: "all",
           });
         }}
+        onSessionDelete={(session, result) => {
+          if (!result.visibility_removed) {
+            return;
+          }
+
+          const nextSessions = removeDeletedSession(sessions, session.session_id);
+          queryClient.setQueryData<SessionRead[]>(
+            apiQueryKeys.projectSessions(projectId),
+            nextSessions,
+          );
+          queryClient.removeQueries({
+            queryKey: apiQueryKeys.sessionWorkspace(session.session_id),
+          });
+          if (currentSessionId === session.session_id) {
+            onSessionChange(nextSessions[0]?.session_id ?? "");
+          }
+          void queryClient.invalidateQueries({
+            queryKey: apiQueryKeys.projectSessions(projectId),
+            refetchType: "all",
+          });
+        }}
         request={request}
       />
     </aside>
@@ -299,6 +320,13 @@ function updateRenamedSession(
   return sessions.map((session) =>
     session.session_id === renamedSession.session_id ? renamedSession : session,
   );
+}
+
+function removeDeletedSession(
+  sessions: SessionRead[],
+  sessionId: string,
+): SessionRead[] {
+  return sessions.filter((session) => session.session_id !== sessionId);
 }
 
 type ProjectSidebarLatestSession = {

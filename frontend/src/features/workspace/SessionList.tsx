@@ -1,14 +1,20 @@
 import { useState, type FormEvent } from "react";
 
 import type { ApiRequestOptions } from "../../api/client";
-import { renameSession } from "../../api/sessions";
-import type { SessionRead, SessionStatus, StageType } from "../../api/types";
+import { deleteSession, renameSession } from "../../api/sessions";
+import type {
+  SessionDeleteResult,
+  SessionRead,
+  SessionStatus,
+  StageType,
+} from "../../api/types";
 
 type SessionListProps = {
   sessions: SessionRead[];
   currentSessionId: string;
   onSessionChange: (sessionId: string) => void;
   onSessionRename?: (session: SessionRead) => void;
+  onSessionDelete?: (session: SessionRead, result: SessionDeleteResult) => void;
   request?: ApiRequestOptions;
 };
 
@@ -46,12 +52,15 @@ export function SessionList({
   currentSessionId,
   onSessionChange,
   onSessionRename,
+  onSessionDelete,
   request,
 }: SessionListProps): JSX.Element {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [savingSessionId, setSavingSessionId] = useState<string | null>(null);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<SessionListError | null>(null);
   const [displayNameOverrides, setDisplayNameOverrides] = useState<
     Record<string, string>
   >({});
@@ -62,6 +71,7 @@ export function SessionList({
     setEditingSessionId(session.session_id);
     setDraftName(displayName);
     setRenameError(null);
+    setDeleteError(null);
   }
 
   function cancelRename() {
@@ -103,6 +113,44 @@ export function SessionList({
     }
   }
 
+  async function handleDelete(session: SessionRead, displayName: string) {
+    if (isActiveSession(session.status) || deletingSessionId) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Remove this session from the visible history? This does not delete local project files, repositories, commits, branches, or code review requests.",
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingSessionId(session.session_id);
+    setDeleteError(null);
+    try {
+      const result = await deleteSession(session.session_id, request);
+      if (result.visibility_removed && !result.blocked_by_active_run) {
+        onSessionDelete?.(session, result);
+        return;
+      }
+
+      setDeleteError({
+        sessionId: session.session_id,
+        message: result.message || "Session could not be deleted.",
+      });
+    } catch (error) {
+      setDeleteError({
+        sessionId: session.session_id,
+        message: getSessionActionErrorMessage(
+          error,
+          "Session could not be deleted.",
+        ),
+      });
+    } finally {
+      setDeletingSessionId(null);
+    }
+  }
+
   return (
     <section className="session-list" aria-label="Session list">
       <div className="session-list__header">
@@ -120,6 +168,12 @@ export function SessionList({
             !trimmedDraftName ||
             trimmedDraftName === displayName ||
             savingSessionId === session.session_id;
+          const isActive = isActiveSession(session.status);
+          const isDeleting = deletingSessionId === session.session_id;
+          const isDeleteDisabled = isActive || deletingSessionId !== null;
+          const deleteLabel = isActive
+            ? `Delete ${displayName} blocked by active run`
+            : `Delete ${displayName}`;
 
           return (
             <article
@@ -151,14 +205,11 @@ export function SessionList({
                       <button
                         className="session-list-item__delete"
                         type="button"
-                        disabled
-                        aria-label={
-                          isActiveSession(session.status)
-                            ? `Delete ${displayName} blocked by active run`
-                            : `Delete ${displayName} unavailable`
-                        }
+                        disabled={isDeleteDisabled}
+                        onClick={() => void handleDelete(session, displayName)}
+                        aria-label={deleteLabel}
                       >
-                        Delete
+                        {isDeleting ? "Deleting" : "Delete"}
                       </button>
                     </div>
                     <div className="session-list-item__rename-actions">
@@ -198,14 +249,11 @@ export function SessionList({
                       <button
                         className="session-list-item__delete"
                         type="button"
-                        disabled
-                        aria-label={
-                          isActiveSession(session.status)
-                            ? `Delete ${displayName} blocked by active run`
-                            : `Delete ${displayName} unavailable`
-                        }
+                        disabled={isDeleteDisabled}
+                        onClick={() => void handleDelete(session, displayName)}
+                        aria-label={deleteLabel}
                       >
-                        Delete
+                        {isDeleting ? "Deleting" : "Delete"}
                       </button>
                     </div>
                     <button
@@ -223,6 +271,11 @@ export function SessionList({
                     {renameError}
                   </p>
                 ) : null}
+                {deleteError?.sessionId === session.session_id ? (
+                  <p className="session-list-item__action-error" role="alert">
+                    {deleteError.message}
+                  </p>
+                ) : null}
                 <p>{formatStatus(session.status)}</p>
                 <p>Updated {formatTimestamp(session.updated_at)}</p>
                 <p>Current stage {formatStage(session.latest_stage_type)}</p>
@@ -235,10 +288,19 @@ export function SessionList({
   );
 }
 
+type SessionListError = {
+  sessionId: string;
+  message: string;
+};
+
 function getRenameErrorMessage(error: unknown): string {
+  return getSessionActionErrorMessage(error, "Session name could not be saved.");
+}
+
+function getSessionActionErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error
     ? error.message
-    : "Session name could not be saved.";
+    : fallback;
 }
 
 function isActiveSession(status: SessionStatus): boolean {
