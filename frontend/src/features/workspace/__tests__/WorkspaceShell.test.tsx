@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { render } from "@testing-library/react";
@@ -48,6 +51,33 @@ afterEach(() => {
 });
 
 describe("WorkspaceShell", () => {
+  it("keeps the Composer dock fixed to the workspace viewport in CSS", () => {
+    const cwd = process.cwd();
+    const frontendRoot = cwd.endsWith("frontend") ? cwd : join(cwd, "frontend");
+    const css = readFileSync(
+      join(frontendRoot, "src", "styles", "global.css"),
+      "utf8",
+    );
+
+    expect(css).toMatch(
+      /\.workspace-shell\s*\{[^}]*--workspace-sidebar-width:\s*clamp\(280px,\s*22vw,\s*320px\);[^}]*--workspace-inspector-width:\s*0px;[^}]*height:\s*calc\(100vh\s*-\s*73px\);[^}]*min-height:\s*0;[^}]*grid-template-columns:\s*var\(--workspace-sidebar-width\)\s+minmax\(0,\s*1fr\);/su,
+    );
+    expect(css).toMatch(
+      /\.workspace-shell--inspector-open\s*\{[^}]*--workspace-inspector-width:\s*clamp\(360px,\s*28vw,\s*420px\);[^}]*grid-template-columns:\s*var\(--workspace-sidebar-width\)\s+minmax\(0,\s*1fr\)\s+var\(--workspace-inspector-width\);/su,
+    );
+    expect(css).toMatch(
+      /\.workspace-main__composer-dock\s*\{[^}]*position:\s*fixed;[^}]*left:\s*var\(--workspace-sidebar-width\);[^}]*right:\s*var\(--workspace-inspector-width\);/su,
+    );
+    expect(css).toMatch(/\.composer\s*\{[^}]*max-height:\s*min\(42vh,\s*260px\);[^}]*overflow:\s*auto;/su);
+    expect(css).toMatch(/\.composer\s+textarea\s*\{[^}]*resize:\s*none;/su);
+    expect(css).not.toMatch(
+      /@media\s*\(max-width:\s*900px\)[\s\S]*\.workspace-shell,\s*\.workspace-shell--inspector-open\s*\{[^}]*height:\s*auto;/u,
+    );
+    expect(css).not.toMatch(
+      /@media\s*\(max-width:\s*900px\)[\s\S]*\.workspace-shell,\s*\.workspace-shell--inspector-open\s*\{[^}]*overflow:\s*visible;/u,
+    );
+  });
+
   it("renders the workspace with inspector closed and no right-column placeholder by default", async () => {
     renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
