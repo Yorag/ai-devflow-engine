@@ -67,7 +67,7 @@ def test_agent_role_seed_assets_parse_front_matter_and_hash_body() -> None:
         asset = load_agent_role_seed_asset(path)
 
         assert asset.prompt_id == prompt_id
-        assert asset.prompt_version == "2026-05-06.2"
+        assert asset.prompt_version == "2026-05-06.3"
         assert asset.prompt_type is PromptType.AGENT_ROLE_SEED
         assert asset.authority_level is PromptAuthorityLevel.AGENT_ROLE_PROMPT
         assert asset.model_call_type is ModelCallType.STAGE_EXECUTION

@@ -12,6 +12,22 @@ RUNTIME_INSTRUCTIONS_PROMPT_ID = "runtime_instructions"
 STRUCTURED_OUTPUT_REPAIR_PROMPT_ID = "structured_output_repair"
 COMPRESSION_PROMPT_ID = "compression_prompt"
 TOOL_USAGE_TEMPLATE_PROMPT_ID = "tool_usage_template"
+TOOL_PROMPT_FRAGMENT_PROMPT_IDS_BY_TOOL = {
+    "bash": "tool_prompt_fragment.bash",
+    "create_code_review_request": "tool_prompt_fragment.create_code_review_request",
+    "create_commit": "tool_prompt_fragment.create_commit",
+    "edit_file": "tool_prompt_fragment.edit_file",
+    "glob": "tool_prompt_fragment.glob",
+    "grep": "tool_prompt_fragment.grep",
+    "prepare_branch": "tool_prompt_fragment.prepare_branch",
+    "push_branch": "tool_prompt_fragment.push_branch",
+    "read_delivery_snapshot": "tool_prompt_fragment.read_delivery_snapshot",
+    "read_file": "tool_prompt_fragment.read_file",
+    "write_file": "tool_prompt_fragment.write_file",
+}
+TOOL_PROMPT_FRAGMENT_PROMPT_IDS = frozenset(
+    TOOL_PROMPT_FRAGMENT_PROMPT_IDS_BY_TOOL.values()
+)
 
 STAGE_PROMPT_FRAGMENT_PROMPT_IDS_BY_STAGE = {
     common.StageType.REQUIREMENT_ANALYSIS: (
@@ -48,6 +64,7 @@ REQUIRED_BUILTIN_PROMPT_IDS = frozenset(
         STRUCTURED_OUTPUT_REPAIR_PROMPT_ID,
         COMPRESSION_PROMPT_ID,
         TOOL_USAGE_TEMPLATE_PROMPT_ID,
+        *TOOL_PROMPT_FRAGMENT_PROMPT_IDS,
         *STAGE_PROMPT_FRAGMENT_PROMPT_IDS,
         *AGENT_ROLE_SEED_PROMPT_IDS,
     }
@@ -86,6 +103,26 @@ ALL_STAGE_TYPES = (
     common.StageType.DELIVERY_INTEGRATION,
 )
 
+
+def _tool_prompt_fragment_stage_types() -> dict[str, tuple[common.StageType, ...]]:
+    from backend.app.domain.graph_definition import stage_allowed_tools
+
+    stages_by_prompt_id: dict[str, list[common.StageType]] = {
+        prompt_id: [] for prompt_id in TOOL_PROMPT_FRAGMENT_PROMPT_IDS_BY_TOOL.values()
+    }
+    for stage_type, tool_names in stage_allowed_tools().items():
+        for tool_name in tool_names:
+            prompt_id = TOOL_PROMPT_FRAGMENT_PROMPT_IDS_BY_TOOL.get(tool_name)
+            if prompt_id is not None:
+                stages_by_prompt_id[prompt_id].append(stage_type)
+    return {
+        prompt_id: tuple(stage_types)
+        for prompt_id, stage_types in stages_by_prompt_id.items()
+    }
+
+
+TOOL_PROMPT_FRAGMENT_STAGE_TYPES = _tool_prompt_fragment_stage_types()
+
 BUILTIN_PROMPT_DEFINITIONS = (
     BuiltinPromptDefinition(
         prompt_id=RUNTIME_INSTRUCTIONS_PROMPT_ID,
@@ -106,6 +143,14 @@ BUILTIN_PROMPT_DEFINITIONS = (
         prompt_id=TOOL_USAGE_TEMPLATE_PROMPT_ID,
         relative_path="tools/tool_usage_common.md",
         applies_to_stage_types=ALL_STAGE_TYPES,
+    ),
+    *(
+        BuiltinPromptDefinition(
+            prompt_id=prompt_id,
+            relative_path=f"tools/{tool_name}.md",
+            applies_to_stage_types=TOOL_PROMPT_FRAGMENT_STAGE_TYPES[prompt_id],
+        )
+        for tool_name, prompt_id in TOOL_PROMPT_FRAGMENT_PROMPT_IDS_BY_TOOL.items()
     ),
     BuiltinPromptDefinition(
         prompt_id=STAGE_PROMPT_FRAGMENT_PROMPT_IDS_BY_STAGE[
@@ -155,6 +200,8 @@ BUILTIN_PROMPT_DEFINITIONS = (
 def applies_to_stage_types_for_prompt_id(prompt_id: str) -> tuple[common.StageType, ...]:
     if prompt_id in STAGE_PROMPT_FRAGMENT_STAGE_TYPES:
         return STAGE_PROMPT_FRAGMENT_STAGE_TYPES[prompt_id]
+    if prompt_id in TOOL_PROMPT_FRAGMENT_STAGE_TYPES:
+        return TOOL_PROMPT_FRAGMENT_STAGE_TYPES[prompt_id]
     if prompt_id in ROLE_STAGE_TYPES:
         return ROLE_STAGE_TYPES[prompt_id]
     return ALL_STAGE_TYPES

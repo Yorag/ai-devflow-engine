@@ -53,7 +53,7 @@ def _tool_asset() -> PromptAssetRead:
         prompt_type=PromptType.TOOL_USAGE_TEMPLATE,
         authority_level=PromptAuthorityLevel.TOOL_DESCRIPTION_RENDERED,
         model_call_type=ModelCallType.TOOL_CALL_PREPARATION,
-        cache_scope=PromptCacheScope.GLOBAL_STATIC,
+        cache_scope=PromptCacheScope.RUN_STATIC,
         source_ref="backend://prompts/tools/tool_usage_common.md",
         content_hash=PromptAssetRead.calculate_content_hash(body),
         sections=[
@@ -61,10 +61,33 @@ def _tool_asset() -> PromptAssetRead:
                 section_id="tool_usage_template",
                 title="Tool Usage",
                 body=body,
-                cache_scope=PromptCacheScope.GLOBAL_STATIC,
+                cache_scope=PromptCacheScope.RUN_STATIC,
             )
         ],
         applies_to_stage_types=[StageType.SOLUTION_DESIGN],
+    )
+
+
+def _tool_prompt_fragment_asset() -> PromptAssetRead:
+    body = "# read_file Tool Prompt\n\nUse read_file for workspace reads only."
+    return PromptAssetRead(
+        prompt_id="tool_prompt_fragment.read_file",
+        prompt_version="2026-05-04.1",
+        prompt_type=PromptType.TOOL_PROMPT_FRAGMENT,
+        authority_level=PromptAuthorityLevel.TOOL_DESCRIPTION_RENDERED,
+        model_call_type=ModelCallType.TOOL_CALL_PREPARATION,
+        cache_scope=PromptCacheScope.GLOBAL_STATIC,
+        source_ref="backend://prompts/tools/read_file.md",
+        content_hash=PromptAssetRead.calculate_content_hash(body),
+        sections=[
+            PromptSectionRead(
+                section_id="tool_prompt_fragment.read_file",
+                title="Read File Tool Prompt",
+                body=body,
+                cache_scope=PromptCacheScope.GLOBAL_STATIC,
+            )
+        ],
+        applies_to_stage_types=[],
     )
 
 
@@ -201,6 +224,7 @@ def test_renderer_metadata_round_trips_into_context_manifest_system_prompt_overr
                 _runtime_asset(),
                 _stage_prompt_fragment_asset(),
                 _tool_asset(),
+                _tool_prompt_fragment_asset(),
             ]
         )
     ).render_messages(request)
@@ -239,10 +263,12 @@ def test_renderer_metadata_round_trips_into_context_manifest_system_prompt_overr
     assert dumped["prompt_refs"][0]["prompt_id"] == "runtime_instructions"
     assert dumped["prompt_refs"][1]["prompt_id"] == "stage_prompt_fragment.solution_design"
     assert dumped["prompt_refs"][2]["prompt_id"] == "tool_usage_template"
+    assert dumped["prompt_refs"][3]["prompt_id"] == "tool_prompt_fragment.read_file"
     assert dumped["prompt_asset_sources"] == [
         "backend://prompts/runtime/runtime_instructions.md",
         "backend://prompts/stages/solution_design.md",
         "backend://prompts/tools/tool_usage_common.md",
+        "backend://prompts/tools/read_file.md",
     ]
     assert dumped["rendered_output_ref"] == rendered.rendered_output_ref
     assert dumped["render_hash"] == rendered.render_hash

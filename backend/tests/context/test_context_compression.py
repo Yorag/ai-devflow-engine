@@ -314,7 +314,7 @@ def test_compression_runner_writes_compressed_block_and_model_call_trace_with_ex
 
     assert result.compressed_context_block is not None
     assert result.compressed_context_block.compression_prompt_id == "compression_prompt"
-    assert result.compressed_context_block.compression_prompt_version == "2026-05-04.1"
+    assert result.compressed_context_block.compression_prompt_version == "2026-05-06.1"
     assert provider_adapter.calls[0]["model_call_type"] is ModelCallType.CONTEXT_COMPRESSION
     assert [call["process_key"] for call in artifact_store.calls] == [
         "compressed_context_block",
@@ -586,6 +586,7 @@ def _builder_renderer() -> PromptRenderer:
                     model_call_type=ModelCallType.STRUCTURED_OUTPUT_REPAIR,
                     source_ref="backend://prompts/repairs/structured_output_repair.md",
                     body="# Structured Output Repair\nRepair only invalid JSON.",
+                    cache_scope=PromptCacheScope.DYNAMIC_UNCACHED,
                 ),
                 _asset(
                     prompt_id="compression_prompt",
@@ -615,6 +616,23 @@ def _builder_renderer() -> PromptRenderer:
                     model_call_type=ModelCallType.TOOL_CALL_PREPARATION,
                     source_ref="backend://prompts/tools/tool_usage_common.md",
                     body="# Tool Usage\nUse only listed tools.",
+                    cache_scope=PromptCacheScope.RUN_STATIC,
+                ),
+                _asset(
+                    prompt_id="tool_prompt_fragment.grep",
+                    prompt_type=PromptType.TOOL_PROMPT_FRAGMENT,
+                    authority_level=PromptAuthorityLevel.TOOL_DESCRIPTION_RENDERED,
+                    model_call_type=ModelCallType.TOOL_CALL_PREPARATION,
+                    source_ref="backend://prompts/tools/grep.md",
+                    body="# grep Tool\nUse grep for workspace text search.",
+                ),
+                _asset(
+                    prompt_id="tool_prompt_fragment.read_file",
+                    prompt_type=PromptType.TOOL_PROMPT_FRAGMENT,
+                    authority_level=PromptAuthorityLevel.TOOL_DESCRIPTION_RENDERED,
+                    model_call_type=ModelCallType.TOOL_CALL_PREPARATION,
+                    source_ref="backend://prompts/tools/read_file.md",
+                    body="# read_file Tool\nUse read_file for workspace text reads.",
                 ),
             ]
         )

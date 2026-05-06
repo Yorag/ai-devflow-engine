@@ -71,6 +71,7 @@ def _registry() -> PromptRegistry:
                 model_call_type=ModelCallType.STRUCTURED_OUTPUT_REPAIR,
                 source_ref="backend://prompts/repairs/structured_output_repair.md",
                 body="# Structured Output Repair\n\nRepair only invalid JSON.",
+                cache_scope=PromptCacheScope.DYNAMIC_UNCACHED,
             ),
             _asset(
                 prompt_id="tool_usage_template",
@@ -79,6 +80,18 @@ def _registry() -> PromptRegistry:
                 model_call_type=ModelCallType.TOOL_CALL_PREPARATION,
                 source_ref="backend://prompts/tools/tool_usage_common.md",
                 body="# Tool Usage\n\nUse only listed tools.",
+                cache_scope=PromptCacheScope.RUN_STATIC,
+            ),
+            _asset(
+                prompt_id="tool_prompt_fragment.read_file",
+                prompt_type=PromptType.TOOL_PROMPT_FRAGMENT,
+                authority_level=PromptAuthorityLevel.TOOL_DESCRIPTION_RENDERED,
+                model_call_type=ModelCallType.TOOL_CALL_PREPARATION,
+                source_ref="backend://prompts/tools/read_file.md",
+                body=(
+                    "# read_file Tool Prompt\n\n"
+                    "Use read_file for workspace reads only."
+                ),
             ),
             _asset(
                 prompt_id="stage_prompt_fragment.solution_design",
@@ -173,6 +186,7 @@ def test_render_stage_execution_messages_with_metadata_without_prompt_metadata_i
     assert "Solution Design Stage Prompt" in result.messages[0].content
     assert "Use the current stage_contract" in result.messages[0].content
     assert "read_file description." in result.messages[0].content
+    assert "Use read_file for workspace reads only." in result.messages[0].content
     assert '"solution"' in result.messages[0].content
     assert "You may choose a concise tone" in result.messages[1].content
     assert "Create a solution design." in result.messages[1].content
@@ -199,6 +213,7 @@ def test_render_stage_execution_messages_with_metadata_without_prompt_metadata_i
         "runtime_instructions",
         "stage_prompt_fragment.solution_design",
         "tool_usage_template",
+        "tool_prompt_fragment.read_file",
     ]
     agent_section = next(
         section for section in result.sections if section.section_id == "agent_role_prompt"
@@ -271,6 +286,107 @@ def test_tool_descriptions_must_not_exceed_stage_contract_allowed_tools() -> Non
 
     assert exc_info.value.error.code == "tool_contract_conflict"
     assert "write_file" in exc_info.value.error.message
+
+
+def test_tool_usage_renders_only_available_tool_prompt_fragments_in_name_order() -> None:
+    from backend.app.prompts.renderer import PromptRenderer
+
+    registry = PromptRegistry(
+        [
+            *_registry().list_by_type(PromptType.RUNTIME_INSTRUCTIONS),
+            *_registry().list_by_type(PromptType.STRUCTURED_OUTPUT_REPAIR),
+            *_registry().list_by_type(PromptType.TOOL_USAGE_TEMPLATE),
+            *_registry().list_by_type(PromptType.STAGE_PROMPT_FRAGMENT),
+            _asset(
+                prompt_id="tool_prompt_fragment.grep",
+                prompt_type=PromptType.TOOL_PROMPT_FRAGMENT,
+                authority_level=PromptAuthorityLevel.TOOL_DESCRIPTION_RENDERED,
+                model_call_type=ModelCallType.TOOL_CALL_PREPARATION,
+                source_ref="backend://prompts/tools/grep.md",
+                body="# grep Tool Prompt\n\nUse grep for text search.",
+            ),
+            _asset(
+                prompt_id="tool_prompt_fragment.read_file",
+                prompt_type=PromptType.TOOL_PROMPT_FRAGMENT,
+                authority_level=PromptAuthorityLevel.TOOL_DESCRIPTION_RENDERED,
+                model_call_type=ModelCallType.TOOL_CALL_PREPARATION,
+                source_ref="backend://prompts/tools/read_file.md",
+                body="# read_file Tool Prompt\n\nUse read_file for text reads.",
+            ),
+            _asset(
+                prompt_id="tool_prompt_fragment.write_file",
+                prompt_type=PromptType.TOOL_PROMPT_FRAGMENT,
+                authority_level=PromptAuthorityLevel.TOOL_DESCRIPTION_RENDERED,
+                model_call_type=ModelCallType.TOOL_CALL_PREPARATION,
+                source_ref="backend://prompts/tools/write_file.md",
+                body="# write_file Tool Prompt\n\nUse write_file for edits.",
+            ),
+        ]
+    )
+    request = _request().model_copy(
+        update={
+            "stage_contracts": {
+                StageType.SOLUTION_DESIGN.value: {
+                    **_stage_contracts()[StageType.SOLUTION_DESIGN.value],
+                    "allowed_tools": ["write_file", "read_file", "grep"],
+                }
+            },
+            "available_tools": [_tool("read_file"), _tool("grep")],
+        }
+    )
+
+    result = PromptRenderer(registry).render_messages(request)
+    tool_section = next(
+        section for section in result.sections if section.section_id == "available_tools"
+    )
+
+    assert tool_section.body.index("grep Tool Prompt") < tool_section.body.index(
+        "read_file Tool Prompt"
+    )
+    assert "write_file Tool Prompt" not in tool_section.body
+    assert [ref.prompt_id for ref in result.metadata.prompt_refs] == [
+        "runtime_instructions",
+        "stage_prompt_fragment.solution_design",
+        "tool_usage_template",
+        "tool_prompt_fragment.grep",
+        "tool_prompt_fragment.read_file",
+    ]
+
+
+def test_tool_usage_requires_prompt_fragment_for_every_available_tool() -> None:
+    from backend.app.prompts.renderer import PromptRenderException, PromptRenderer
+
+    request = _request().model_copy(
+        update={
+            "stage_contracts": {
+                StageType.SOLUTION_DESIGN.value: {
+                    **_stage_contracts()[StageType.SOLUTION_DESIGN.value],
+                    "allowed_tools": ["custom_tool"],
+                }
+            },
+            "available_tools": [_tool("custom_tool")],
+        }
+    )
+
+    with pytest.raises(PromptRenderException) as exc_info:
+        PromptRenderer(_registry()).render_messages(request)
+
+    assert exc_info.value.error.code == "tool_prompt_fragment_missing"
+    assert "custom_tool" in exc_info.value.error.message
+
+
+def test_tool_usage_rejects_duplicate_available_tool_names() -> None:
+    from backend.app.prompts.renderer import PromptRenderException, PromptRenderer
+
+    request = _request().model_copy(
+        update={"available_tools": [_tool("read_file"), _tool("read_file")]}
+    )
+
+    with pytest.raises(PromptRenderException) as exc_info:
+        PromptRenderer(_registry()).render_messages(request)
+
+    assert exc_info.value.error.code == "duplicate_available_tool"
+    assert "read_file" in exc_info.value.error.message
 
 
 def test_unsupported_model_call_type_returns_structured_renderer_error() -> None:

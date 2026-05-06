@@ -37,6 +37,7 @@ def test_prompt_asset_read_locks_system_prompt_asset_identity_and_hash() -> None
     assert {prompt_type.value for prompt_type in PromptType} == {
         "runtime_instructions",
         "stage_prompt_fragment",
+        "tool_prompt_fragment",
         "structured_output_repair",
         "compression_prompt",
         "agent_role_seed",
@@ -102,6 +103,54 @@ def test_prompt_asset_read_locks_system_prompt_asset_identity_and_hash() -> None
     ]
     assert "front_matter" not in dumped
     assert "compression_prompt" not in dumped
+
+
+def test_tool_prompt_fragment_asset_uses_static_tool_description_contract() -> None:
+    from backend.app.schemas.prompts import (
+        ModelCallType,
+        PromptAssetRead,
+        PromptAuthorityLevel,
+        PromptCacheScope,
+        PromptSectionRead,
+        PromptType,
+    )
+
+    valid_section = PromptSectionRead(
+        section_id="tool_prompt_fragment.read_file",
+        title="Read File Tool Prompt",
+        body="Use read_file only for workspace text reads.",
+        cache_scope=PromptCacheScope.GLOBAL_STATIC,
+    )
+    asset = PromptAssetRead(
+        prompt_id="tool_prompt_fragment.read_file",
+        prompt_version="2026-05-06.1",
+        prompt_type=PromptType.TOOL_PROMPT_FRAGMENT,
+        authority_level=PromptAuthorityLevel.TOOL_DESCRIPTION_RENDERED,
+        model_call_type=ModelCallType.TOOL_CALL_PREPARATION,
+        cache_scope=PromptCacheScope.GLOBAL_STATIC,
+        source_ref="backend://prompts/tools/read_file.md",
+        content_hash="1" * 64,
+        sections=[valid_section],
+    )
+
+    dumped = asset.model_dump(mode="json")
+    assert dumped["prompt_type"] == "tool_prompt_fragment"
+    assert dumped["authority_level"] == "tool_description_rendered"
+    assert dumped["model_call_type"] == "tool_call_preparation"
+    assert dumped["cache_scope"] == "global_static"
+
+    with pytest.raises(ValidationError):
+        PromptAssetRead(
+            prompt_id="tool_prompt_fragment.read_file",
+            prompt_version="2026-05-06.1",
+            prompt_type=PromptType.TOOL_PROMPT_FRAGMENT,
+            authority_level=PromptAuthorityLevel.TOOL_DESCRIPTION_RENDERED,
+            model_call_type=ModelCallType.TOOL_CALL_PREPARATION,
+            cache_scope=PromptCacheScope.RUN_STATIC,
+            source_ref="backend://prompts/tools/read_file.md",
+            content_hash="2" * 64,
+            sections=[valid_section],
+        )
 
 
 def test_prompt_version_refs_enter_context_manifest_and_compressed_context_metadata() -> None:
