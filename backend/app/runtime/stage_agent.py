@@ -935,6 +935,19 @@ class StageAgentRuntime:
     ) -> StageNodeResult:
         del iteration_index, last_decision_trace_ref, last_model_call_ref
         if decision.decision_type is AgentDecisionType.REQUEST_CLARIFICATION:
+            if decision.clarification is None:
+                return self._failed_result(
+                    request,
+                    reason="clarification_payload_missing",
+                )
+            self._append_process_record(
+                request,
+                "clarification_request",
+                {
+                    **decision.clarification.model_dump(mode="json"),
+                    "decision_trace_ref": decision.decision_trace.trace_ref,
+                },
+            )
             return self._node_result(
                 request,
                 status=StageStatus.WAITING_CLARIFICATION,

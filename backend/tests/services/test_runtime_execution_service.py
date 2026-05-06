@@ -15,16 +15,24 @@ from backend.app.db.models.graph import (
 )
 from backend.app.db.models.log import AuditLogEntryModel, LogBase
 from backend.app.db.models.runtime import (
+    ApprovalDecisionModel,
+    ApprovalRequestModel,
+    ClarificationRecordModel,
     PipelineRunModel,
     StageArtifactModel,
     StageRunModel,
+    ToolConfirmationRequestModel,
 )
 from backend.app.domain.enums import (
+    ApprovalStatus,
+    ApprovalType,
     RunStatus,
     SessionStatus,
     SseEventType,
     StageStatus,
     StageType,
+    ToolConfirmationStatus,
+    ToolRiskLevel,
 )
 from backend.app.domain.runtime_refs import (
     CheckpointPurpose,
@@ -165,6 +173,28 @@ class FailingAfterGraphResumeEngine:
             trace_context=interrupt.trace_context,
         )
         raise RuntimeError("langgraph resume crashed after graph command")
+
+
+class CapturingStageAgentRuntime:
+    instances: list["CapturingStageAgentRuntime"] = []
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.kwargs = kwargs
+        CapturingStageAgentRuntime.instances.append(self)
+
+    def run_stage(self, invocation: Any) -> Any:
+        from backend.app.runtime.stage_runner_port import StageNodeResult
+
+        return StageNodeResult(
+            run_id=invocation.run_id,
+            stage_run_id=invocation.stage_run_id,
+            stage_type=invocation.stage_type,
+            status=StageStatus.FAILED,
+            artifact_refs=[],
+            domain_event_refs=[],
+            log_summary_refs=[],
+            audit_refs=[],
+        )
 
 
 def test_dispatch_started_run_reconstructs_context_and_calls_runtime_engine_start(
@@ -470,6 +500,102 @@ def test_runtime_interrupt_marks_run_stage_and_session_waiting(
         assert stage_updated.payload["stage_node"]["status"] == "waiting_clarification"
 
 
+def test_waiting_clarification_step_creates_actionable_request_and_interrupt(
+    tmp_path: Path,
+) -> None:
+    fixture = _start_first_run(tmp_path)
+    fake_engine = CapturingRuntimeEngine(step_status=StageStatus.WAITING_CLARIFICATION)
+    service = RuntimeExecutionService(
+        database_manager=fixture.manager,
+        environment_settings=fixture.settings,
+        engine_factory=lambda _factory_input: fake_engine,
+    )
+
+    service.dispatch_started_run(fixture.command)
+
+    with fixture.manager.session(DatabaseRole.RUNTIME) as session:
+        clarification = session.query(ClarificationRecordModel).one()
+        assert clarification.run_id == fixture.result.run.run_id
+        assert clarification.stage_run_id == fixture.result.stage.stage_run_id
+        assert clarification.answer is None
+        assert clarification.graph_interrupt_ref
+        run = session.get(PipelineRunModel, fixture.result.run.run_id)
+        stage = session.get(StageRunModel, fixture.result.stage.stage_run_id)
+        assert run is not None
+        assert stage is not None
+        assert run.status is RunStatus.WAITING_CLARIFICATION
+        assert stage.status is StageStatus.WAITING_CLARIFICATION
+
+    with fixture.manager.session(DatabaseRole.GRAPH) as session:
+        graph_interrupt = session.get(
+            GraphInterruptModel,
+            clarification.graph_interrupt_ref,
+        )
+        thread = session.get(GraphThreadModel, fixture.result.run.graph_thread_ref)
+        assert graph_interrupt is not None
+        assert thread is not None
+        assert graph_interrupt.status == "pending"
+        assert graph_interrupt.runtime_object_ref == clarification.clarification_id
+        assert thread.current_interrupt_id == graph_interrupt.interrupt_id
+
+    with fixture.manager.session(DatabaseRole.EVENT) as session:
+        event_types = {
+            event.event_type
+            for event in session.query(DomainEventModel)
+            .filter(DomainEventModel.run_id == fixture.result.run.run_id)
+            .all()
+        }
+        assert "clarification_requested" in event_types
+
+
+def test_waiting_tool_confirmation_step_creates_actionable_request_and_interrupt(
+    tmp_path: Path,
+) -> None:
+    fixture = _start_first_run(tmp_path)
+    fake_engine = CapturingRuntimeEngine(
+        step_status=StageStatus.WAITING_TOOL_CONFIRMATION
+    )
+    service = RuntimeExecutionService(
+        database_manager=fixture.manager,
+        environment_settings=fixture.settings,
+        engine_factory=lambda _factory_input: fake_engine,
+    )
+
+    service.dispatch_started_run(fixture.command)
+
+    with fixture.manager.session(DatabaseRole.RUNTIME) as session:
+        request = session.query(ToolConfirmationRequestModel).one()
+        assert request.run_id == fixture.result.run.run_id
+        assert request.stage_run_id == fixture.result.stage.stage_run_id
+        assert request.status is ToolConfirmationStatus.PENDING
+        assert request.graph_interrupt_ref
+        assert request.risk_level is ToolRiskLevel.HIGH_RISK
+        run = session.get(PipelineRunModel, fixture.result.run.run_id)
+        stage = session.get(StageRunModel, fixture.result.stage.stage_run_id)
+        assert run is not None
+        assert stage is not None
+        assert run.status is RunStatus.WAITING_TOOL_CONFIRMATION
+        assert stage.status is StageStatus.WAITING_TOOL_CONFIRMATION
+
+    with fixture.manager.session(DatabaseRole.GRAPH) as session:
+        graph_interrupt = session.get(GraphInterruptModel, request.graph_interrupt_ref)
+        thread = session.get(GraphThreadModel, fixture.result.run.graph_thread_ref)
+        assert graph_interrupt is not None
+        assert thread is not None
+        assert graph_interrupt.status == "pending"
+        assert graph_interrupt.runtime_object_ref == request.tool_confirmation_id
+        assert thread.current_interrupt_id == graph_interrupt.interrupt_id
+
+    with fixture.manager.session(DatabaseRole.EVENT) as session:
+        event_types = {
+            event.event_type
+            for event in session.query(DomainEventModel)
+            .filter(DomainEventModel.run_id == fixture.result.run.run_id)
+            .all()
+        }
+        assert "tool_confirmation_requested" in event_types
+
+
 def test_terminal_result_marks_run_session_and_thread_completed(
     tmp_path: Path,
 ) -> None:
@@ -674,6 +800,116 @@ def test_default_engine_factory_uses_persisted_template_snapshot_after_template_
     template_snapshot = captured_template_snapshots[0]
     assert template_snapshot.stage_role_bindings[0].system_prompt == persisted_prompt
     assert template_snapshot.stage_role_bindings[0].system_prompt != mutated_prompt
+
+
+def test_default_engine_factory_passes_persisted_context_to_stage_agent(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fixture = _start_first_run(tmp_path)
+    with fixture.manager.session(DatabaseRole.RUNTIME) as session:
+        prior_artifact = StageArtifactModel(
+            artifact_id="artifact-prior-solution",
+            run_id=fixture.result.run.run_id,
+            stage_run_id=fixture.result.stage.stage_run_id,
+            artifact_type="solution_design_artifact",
+            payload_ref="stage-artifact://artifact-prior-solution/output",
+            process={
+                "tool_call_ref": "tool-call://runtime-dispatch/prior",
+                "reasoning_trace_ref": "reasoning://runtime-dispatch/prior",
+            },
+            metrics={},
+            created_at=NOW,
+        )
+        clarification = ClarificationRecordModel(
+            clarification_id="clarification-context-runtime-dispatch",
+            run_id=fixture.result.run.run_id,
+            stage_run_id=fixture.result.stage.stage_run_id,
+            question="Which module should be changed?",
+            answer="Use the production runtime dispatcher.",
+            payload_ref="payload://clarification-context-runtime-dispatch",
+            graph_interrupt_ref="interrupt-clarification-context-runtime-dispatch",
+            requested_at=NOW,
+            answered_at=NOW,
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        approval_request = ApprovalRequestModel(
+            approval_id="approval-context-runtime-dispatch",
+            run_id=fixture.result.run.run_id,
+            stage_run_id=fixture.result.stage.stage_run_id,
+            approval_type=ApprovalType.SOLUTION_DESIGN_APPROVAL,
+            status=ApprovalStatus.APPROVED,
+            payload_ref="approval-request://approval-context-runtime-dispatch",
+            graph_interrupt_ref="interrupt-approval-context-runtime-dispatch",
+            requested_at=NOW,
+            resolved_at=NOW,
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        approval_decision = ApprovalDecisionModel(
+            decision_id="approval-decision-context-runtime-dispatch",
+            approval_id="approval-context-runtime-dispatch",
+            run_id=fixture.result.run.run_id,
+            decision=ApprovalStatus.APPROVED,
+            reason="Design accepted.",
+            decided_by_actor_id="session-user",
+            decided_at=NOW,
+            created_at=NOW,
+        )
+        session.add_all([prior_artifact, clarification, approval_request])
+        session.flush()
+        session.add(approval_decision)
+        session.commit()
+
+    CapturingStageAgentRuntime.instances = []
+    monkeypatch.setattr(
+        runtime_dispatch_module,
+        "StageAgentRuntime",
+        CapturingStageAgentRuntime,
+    )
+    service = RuntimeExecutionService(
+        database_manager=fixture.manager,
+        environment_settings=fixture.settings,
+    )
+    factory_input = _factory_input_for_fixture(service, fixture)
+
+    try:
+        engine = service._default_engine_factory(factory_input)  # noqa: SLF001
+        from backend.app.runtime.stage_runner_port import StageNodeInvocation
+
+        engine._stage_runner.run_stage(  # noqa: SLF001
+            StageNodeInvocation(
+                run_id=fixture.result.run.run_id,
+                stage_run_id=fixture.result.stage.stage_run_id,
+                stage_type=fixture.result.stage.stage_type,
+                graph_node_key="requirement_analysis",
+                stage_contract_ref="requirement_analysis",
+                runtime_context=factory_input.context,
+                trace_context=factory_input.context.trace_context,
+            )
+        )
+    finally:
+        factory_input.control_session.close()
+        factory_input.runtime_session.close()
+        factory_input.graph_session.close()
+        factory_input.event_session.close()
+        factory_input.log_session.close()
+
+    assert len(CapturingStageAgentRuntime.instances) == 1
+    kwargs = CapturingStageAgentRuntime.instances[0].kwargs
+    assert any(
+        artifact.artifact_id == "artifact-prior-solution"
+        for artifact in kwargs["stage_artifacts"]
+    )
+    assert any(
+        item.clarification_id == "clarification-context-runtime-dispatch"
+        for item in kwargs["clarifications"]
+    )
+    assert any(
+        item.decision_id == "approval-decision-context-runtime-dispatch"
+        for item in kwargs["approval_decisions"]
+    )
 
 
 def test_default_engine_factory_reuses_checkpointer_across_engine_instances(

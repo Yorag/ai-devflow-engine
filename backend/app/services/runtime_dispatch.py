@@ -23,6 +23,8 @@ from backend.app.db.models.graph import (
     GraphThreadModel,
 )
 from backend.app.db.models.runtime import (
+    ApprovalDecisionModel,
+    ClarificationRecordModel,
     ModelBindingSnapshotModel,
     PipelineRunModel,
     ProviderCallPolicySnapshotModel,
@@ -32,7 +34,16 @@ from backend.app.db.models.runtime import (
     StageRunModel,
 )
 from backend.app.db.session import DatabaseManager
-from backend.app.domain.enums import RunStatus, SessionStatus, StageStatus, StageType
+from backend.app.domain.changes import ChangeSet, ContextReference
+from backend.app.domain.enums import (
+    ApprovalType,
+    RunStatus,
+    SessionStatus,
+    StageStatus,
+    StageType,
+    ToolRiskCategory,
+    ToolRiskLevel,
+)
 from backend.app.domain.graph_definition import GraphDefinition
 from backend.app.domain.provider_snapshot import ProviderSnapshot
 from backend.app.domain.runtime_refs import (
@@ -78,10 +89,14 @@ from backend.app.schemas.runtime_settings import (
     RuntimeLimitSnapshotRead,
 )
 from backend.app.services.artifacts import ArtifactStore
+from backend.app.services.approvals import ApprovalService
+from backend.app.services.clarifications import ClarificationService
 from backend.app.services.events import DomainEventType, EventStore
 from backend.app.services.graph_runtime import GraphCheckpointPort, GraphRuntimeCommandPort
 from backend.app.services.runs import TerminalStatusProjector
+from backend.app.services.runtime_orchestration import RuntimeOrchestrationService
 from backend.app.services.stages import StageRunService
+from backend.app.services.tool_confirmations import ToolConfirmationService
 from backend.app.tools.registry import ToolRegistry
 
 
@@ -340,6 +355,8 @@ class RuntimeExecutionService:
                     runtime_session=runtime_session,
                     graph_session=graph_session,
                     event_session=event_session,
+                    log_session=log_session,
+                    log_writer=log_writer,
                 )
                 self._commit_sessions(
                     control_session=control_session,
@@ -567,8 +584,21 @@ class RuntimeExecutionService:
         runtime_session: Session,
         graph_session: Session,
         event_session: Session,
+        log_session: Session,
+        log_writer: JsonlLogWriter,
     ) -> None:
         if isinstance(result, RuntimeStepResult):
+            if self._project_waiting_step_as_actionable_interrupt(
+                result=result,
+                context=context,
+                control_session=control_session,
+                runtime_session=runtime_session,
+                graph_session=graph_session,
+                event_session=event_session,
+                log_session=log_session,
+                log_writer=log_writer,
+            ):
+                return
             self._project_step_result(
                 result=result,
                 context=context,
@@ -658,7 +688,231 @@ class RuntimeExecutionService:
             run_id=run.run_id,
             stage_run_id=stage.stage_run_id,
             occurred_at=occurred_at,
+        )
+
+    def _project_waiting_step_as_actionable_interrupt(
+        self,
+        *,
+        result: RuntimeStepResult,
+        context: RuntimeExecutionContext,
+        control_session: Session,
+        runtime_session: Session,
+        graph_session: Session,
+        event_session: Session,
+        log_session: Session,
+        log_writer: JsonlLogWriter,
+    ) -> bool:
+        if result.status is StageStatus.WAITING_CLARIFICATION:
+            self._request_runtime_clarification(
+                result=result,
+                context=context,
+                control_session=control_session,
+                runtime_session=runtime_session,
+                graph_session=graph_session,
+                event_session=event_session,
+                log_session=log_session,
+                log_writer=log_writer,
             )
+            return True
+        if result.status is StageStatus.WAITING_TOOL_CONFIRMATION:
+            self._request_runtime_tool_confirmation(
+                result=result,
+                context=context,
+                control_session=control_session,
+                runtime_session=runtime_session,
+                graph_session=graph_session,
+                event_session=event_session,
+                log_session=log_session,
+                log_writer=log_writer,
+            )
+            return True
+        if result.status is StageStatus.WAITING_APPROVAL:
+            self._request_runtime_approval(
+                result=result,
+                context=context,
+                control_session=control_session,
+                runtime_session=runtime_session,
+                graph_session=graph_session,
+                event_session=event_session,
+                log_session=log_session,
+                log_writer=log_writer,
+            )
+            return True
+        return False
+
+    def _request_runtime_clarification(
+        self,
+        *,
+        result: RuntimeStepResult,
+        context: RuntimeExecutionContext,
+        control_session: Session,
+        runtime_session: Session,
+        graph_session: Session,
+        event_session: Session,
+        log_session: Session,
+        log_writer: JsonlLogWriter,
+    ) -> None:
+        artifact = self._latest_stage_artifact(
+            runtime_session,
+            run_id=result.run_id,
+            stage_run_id=result.stage_run_id,
+            artifact_refs=result.artifact_refs,
+        )
+        process = dict(artifact.process) if artifact is not None else {}
+        clarification = self._latest_process_mapping(process, "clarification_request")
+        question = _first_text(
+            clarification,
+            ("question", "prompt", "summary"),
+            default=f"{result.stage_type.value} requires clarification before continuing.",
+        )
+        payload_ref = _first_text(
+            clarification,
+            ("payload_ref", "source_ref"),
+            default=(
+                f"stage-artifact://{artifact.artifact_id}#process/clarification_request"
+                if artifact is not None
+                else f"runtime-wait://{result.stage_run_id}/clarification"
+            ),
+        )
+        ClarificationService(
+            control_session=control_session,
+            runtime_session=runtime_session,
+            event_session=event_session,
+            graph_session=graph_session,
+            audit_service=AuditService(log_session, audit_writer=log_writer),
+            runtime_orchestration=self._runtime_orchestration(graph_session),
+            now=self._now,
+        ).request_clarification(
+            session_id=context.session_id,
+            run_id=result.run_id,
+            stage_run_id=result.stage_run_id,
+            question=question,
+            payload_ref=payload_ref,
+            trace_context=result.trace_context,
+        )
+
+    def _request_runtime_tool_confirmation(
+        self,
+        *,
+        result: RuntimeStepResult,
+        context: RuntimeExecutionContext,
+        control_session: Session,
+        runtime_session: Session,
+        graph_session: Session,
+        event_session: Session,
+        log_session: Session,
+        log_writer: JsonlLogWriter,
+    ) -> None:
+        artifact = self._latest_stage_artifact(
+            runtime_session,
+            run_id=result.run_id,
+            stage_run_id=result.stage_run_id,
+            artifact_refs=result.artifact_refs,
+        )
+        process = dict(artifact.process) if artifact is not None else {}
+        confirmation = self._latest_process_mapping(process, "tool_confirmation_trace")
+        tool_name = _first_text(confirmation, ("tool_name",), default="runtime_tool")
+        command_preview = _optional_text(confirmation.get("command_summary")) or _optional_text(
+            confirmation.get("command_preview")
+        )
+        confirmation_ref = _first_text(
+            confirmation,
+            ("tool_confirmation_ref", "confirmation_object_ref", "call_id"),
+            default=(
+                f"stage-artifact://{artifact.artifact_id}#process/tool_confirmation_trace"
+                if artifact is not None
+                else f"runtime-wait://{result.stage_run_id}/tool-confirmation"
+            ),
+        )
+        ToolConfirmationService(
+            control_session=control_session,
+            runtime_session=runtime_session,
+            event_session=event_session,
+            graph_session=graph_session,
+            runtime_orchestration=self._runtime_orchestration(graph_session),
+            audit_service=AuditService(log_session, audit_writer=log_writer),
+            log_writer=log_writer,
+            redaction_policy=self._redaction_policy,
+            now=self._now,
+        ).create_request(
+            session_id=context.session_id,
+            run_id=result.run_id,
+            stage_run_id=result.stage_run_id,
+            confirmation_object_ref=confirmation_ref,
+            tool_name=tool_name,
+            command_preview=command_preview,
+            target_summary=_first_text(
+                confirmation,
+                ("target_resource", "target_summary"),
+                default="Runtime tool action requires confirmation.",
+            ),
+            risk_level=_tool_risk_level(confirmation.get("risk_level")),
+            risk_categories=_tool_risk_categories(confirmation.get("risk_categories")),
+            reason=_first_text(
+                confirmation,
+                ("reason",),
+                default="Runtime requested confirmation before continuing.",
+            ),
+            expected_side_effects=_string_list(
+                confirmation.get("expected_side_effects"),
+                default=("Runtime action may modify project state.",),
+            ),
+            alternative_path_summary=_optional_text(
+                confirmation.get("alternative_path_summary")
+            ),
+            planned_deny_followup_action=_optional_text(
+                confirmation.get("planned_deny_followup_action")
+            ),
+            planned_deny_followup_summary=_optional_text(
+                confirmation.get("planned_deny_followup_summary")
+            ),
+            trace_context=result.trace_context,
+        )
+
+    def _request_runtime_approval(
+        self,
+        *,
+        result: RuntimeStepResult,
+        context: RuntimeExecutionContext,
+        control_session: Session,
+        runtime_session: Session,
+        graph_session: Session,
+        event_session: Session,
+        log_session: Session,
+        log_writer: JsonlLogWriter,
+    ) -> None:
+        del log_session
+        approval_type = (
+            ApprovalType.CODE_REVIEW_APPROVAL
+            if result.stage_type is StageType.CODE_REVIEW
+            else ApprovalType.SOLUTION_DESIGN_APPROVAL
+        )
+        service = ApprovalService(
+            control_session=control_session,
+            runtime_session=runtime_session,
+            event_session=event_session,
+            graph_session=graph_session,
+            runtime_orchestration=self._runtime_orchestration(graph_session),
+            log_writer=log_writer,
+            redaction_policy=self._redaction_policy,
+            now=self._now,
+        )
+        kwargs = {
+            "session_id": context.session_id,
+            "run_id": result.run_id,
+            "stage_run_id": result.stage_run_id,
+            "payload_ref": f"runtime-wait://{result.stage_run_id}/approval",
+            "approval_object_excerpt": (
+                f"{result.stage_type.value} is waiting for approval."
+            ),
+            "risk_excerpt": "Runtime requested approval before continuing.",
+            "approval_object_preview": {"stage_type": result.stage_type.value},
+            "trace_context": result.trace_context,
+        }
+        if approval_type is ApprovalType.CODE_REVIEW_APPROVAL:
+            service.create_code_review_approval(**kwargs)
+        else:
+            service.create_solution_design_approval(**kwargs)
 
     def _project_interrupt_result(
         self,
@@ -837,6 +1091,10 @@ class RuntimeExecutionService:
             artifact_store=artifact_store,
             now=factory_input.now,
         )
+        stage_artifacts = self._stage_artifacts_for_context(
+            factory_input.runtime_session,
+            run_id=context.run_id,
+        )
         provider_registry = ProviderRegistry(
             provider_snapshots=provider_reads,
             model_binding_snapshots=binding_reads,
@@ -857,6 +1115,19 @@ class RuntimeExecutionService:
             template_snapshot=template_snapshot,
             graph_definition=graph_definition,
             runtime_limit_snapshot=runtime_limit_snapshot,
+            stage_artifacts=stage_artifacts,
+            context_references=self._context_references_from_stage_artifacts(
+                stage_artifacts
+            ),
+            change_sets=self._change_sets_from_stage_artifacts(stage_artifacts),
+            clarifications=self._clarifications_for_context(
+                factory_input.runtime_session,
+                run_id=context.run_id,
+            ),
+            approval_decisions=self._approval_decisions_for_context(
+                factory_input.runtime_session,
+                run_id=context.run_id,
+            ),
         )
         return LangGraphRuntimeEngine(
             graph_definition=graph_definition,
@@ -1206,6 +1477,162 @@ class RuntimeExecutionService:
             return value
         return f"Execute the {stage_type.value} stage."
 
+    def _runtime_orchestration(
+        self,
+        graph_session: Session,
+    ) -> RuntimeOrchestrationService:
+        return RuntimeOrchestrationService(
+            runtime_port=GraphRuntimeCommandPort(graph_session, now=self._now),
+            checkpoint_port=GraphCheckpointPort(graph_session, now=self._now),
+            clock=self._now,
+        )
+
+    @staticmethod
+    def _latest_stage_artifact(
+        runtime_session: Session,
+        *,
+        run_id: str,
+        stage_run_id: str,
+        artifact_refs: Sequence[str],
+    ) -> StageArtifactModel | None:
+        for artifact_ref in reversed(tuple(artifact_refs)):
+            artifact_id = _stage_artifact_id_from_ref(artifact_ref)
+            artifact = runtime_session.get(StageArtifactModel, artifact_id)
+            if (
+                artifact is not None
+                and artifact.run_id == run_id
+                and artifact.stage_run_id == stage_run_id
+            ):
+                return artifact
+        return (
+            runtime_session.query(StageArtifactModel)
+            .filter(
+                StageArtifactModel.run_id == run_id,
+                StageArtifactModel.stage_run_id == stage_run_id,
+            )
+            .order_by(
+                StageArtifactModel.created_at.desc(),
+                StageArtifactModel.artifact_id.desc(),
+            )
+            .first()
+        )
+
+    @staticmethod
+    def _latest_process_mapping(
+        process: dict[str, Any],
+        key: str,
+    ) -> dict[str, Any]:
+        records = _mapping_records(process.get(key))
+        if not records:
+            return {}
+        return dict(records[-1])
+
+    @staticmethod
+    def _stage_artifacts_for_context(
+        runtime_session: Session,
+        *,
+        run_id: str,
+    ) -> tuple[StageArtifactModel, ...]:
+        return tuple(
+            runtime_session.query(StageArtifactModel)
+            .filter(StageArtifactModel.run_id == run_id)
+            .order_by(
+                StageArtifactModel.created_at.asc(),
+                StageArtifactModel.artifact_id.asc(),
+            )
+            .all()
+        )
+
+    @staticmethod
+    def _clarifications_for_context(
+        runtime_session: Session,
+        *,
+        run_id: str,
+    ) -> tuple[ClarificationRecordModel, ...]:
+        return tuple(
+            runtime_session.query(ClarificationRecordModel)
+            .filter(ClarificationRecordModel.run_id == run_id)
+            .order_by(
+                ClarificationRecordModel.requested_at.asc(),
+                ClarificationRecordModel.clarification_id.asc(),
+            )
+            .all()
+        )
+
+    @staticmethod
+    def _approval_decisions_for_context(
+        runtime_session: Session,
+        *,
+        run_id: str,
+    ) -> tuple[ApprovalDecisionModel, ...]:
+        return tuple(
+            runtime_session.query(ApprovalDecisionModel)
+            .filter(ApprovalDecisionModel.run_id == run_id)
+            .order_by(
+                ApprovalDecisionModel.decided_at.asc(),
+                ApprovalDecisionModel.decision_id.asc(),
+            )
+            .all()
+        )
+
+    @staticmethod
+    def _context_references_from_stage_artifacts(
+        stage_artifacts: Sequence[StageArtifactModel],
+    ) -> tuple[ContextReference, ...]:
+        references: list[ContextReference] = []
+        seen: set[str] = set()
+        for artifact in stage_artifacts:
+            process = artifact.process if isinstance(artifact.process, dict) else {}
+            for raw in (
+                *_mapping_records(process.get("context_reference")),
+                *_mapping_records(process.get("context_references")),
+            ):
+                try:
+                    reference = ContextReference.model_validate(raw)
+                except (TypeError, ValueError):
+                    continue
+                if reference.reference_id in seen:
+                    continue
+                seen.add(reference.reference_id)
+                references.append(reference)
+            for change_set in RuntimeExecutionService._change_sets_from_process(
+                process
+            ):
+                for reference in change_set.context_references:
+                    if reference.reference_id in seen:
+                        continue
+                    seen.add(reference.reference_id)
+                    references.append(reference)
+        return tuple(references)
+
+    @staticmethod
+    def _change_sets_from_stage_artifacts(
+        stage_artifacts: Sequence[StageArtifactModel],
+    ) -> tuple[ChangeSet, ...]:
+        change_sets: list[ChangeSet] = []
+        seen: set[str] = set()
+        for artifact in stage_artifacts:
+            process = artifact.process if isinstance(artifact.process, dict) else {}
+            for change_set in RuntimeExecutionService._change_sets_from_process(process):
+                if change_set.change_set_id in seen:
+                    continue
+                seen.add(change_set.change_set_id)
+                change_sets.append(change_set)
+        return tuple(change_sets)
+
+    @staticmethod
+    def _change_sets_from_process(process: dict[str, Any]) -> tuple[ChangeSet, ...]:
+        change_sets: list[ChangeSet] = []
+        for raw in (
+            *_mapping_records(process.get("change_set")),
+            *_mapping_records(process.get("change_sets")),
+        ):
+            try:
+                change_sets.append(ChangeSet.model_validate(raw))
+            except (TypeError, ValueError):
+                continue
+        return tuple(change_sets)
+
     @staticmethod
     def _require_run(runtime_session: Session, run_id: str) -> PipelineRunModel:
         run = runtime_session.get(PipelineRunModel, run_id)
@@ -1522,6 +1949,11 @@ class _RuntimeDispatchStageRunner:
         template_snapshot: TemplateSnapshot,
         graph_definition: GraphDefinition,
         runtime_limit_snapshot: RuntimeLimitSnapshotRead,
+        stage_artifacts: Sequence[StageArtifactModel],
+        context_references: Sequence[ContextReference],
+        change_sets: Sequence[ChangeSet],
+        clarifications: Sequence[ClarificationRecordModel],
+        approval_decisions: Sequence[ApprovalDecisionModel],
     ) -> None:
         self._service = service
         self._runtime_session = runtime_session
@@ -1538,6 +1970,11 @@ class _RuntimeDispatchStageRunner:
         self._template_snapshot = template_snapshot
         self._graph_definition = graph_definition
         self._runtime_limit_snapshot = runtime_limit_snapshot
+        self._stage_artifacts = tuple(stage_artifacts)
+        self._context_references = tuple(context_references)
+        self._change_sets = tuple(change_sets)
+        self._clarifications = tuple(clarifications)
+        self._approval_decisions = tuple(approval_decisions)
 
     def run_stage(self, invocation: StageNodeInvocation) -> StageNodeResult:
         self._ensure_stage(invocation)
@@ -1649,6 +2086,11 @@ class _RuntimeDispatchStageRunner:
             response_schema={"type": "object", "additionalProperties": True},
             output_schema_ref=f"schema://stage-agent/{stage_type.value}",
             requested_max_output_tokens=provider_config.max_output_tokens,
+            stage_artifacts=self._stage_artifacts,
+            context_references=self._context_references,
+            change_sets=self._change_sets,
+            clarifications=self._clarifications,
+            approval_decisions=self._approval_decisions,
             now=self._now,
         )
 
@@ -1750,6 +2192,95 @@ def _safe_failure_reason(exc: Exception) -> str:
     if len(message) > 300:
         message = message[:297] + "..."
     return message or "Runtime execution failed."
+
+
+def _stage_artifact_id_from_ref(value: str) -> str:
+    if not value.startswith("stage-artifact://"):
+        return value
+    without_scheme = value.removeprefix("stage-artifact://")
+    without_fragment = without_scheme.split("#", 1)[0]
+    return without_fragment.split("/", 1)[0]
+
+
+def _mapping_records(value: object) -> tuple[dict[str, Any], ...]:
+    if isinstance(value, dict):
+        return (dict(value),)
+    if isinstance(value, list | tuple):
+        return tuple(dict(item) for item in value if isinstance(item, dict))
+    return ()
+
+
+def _first_text(
+    mapping: dict[str, Any],
+    keys: Sequence[str],
+    *,
+    default: str,
+) -> str:
+    for key in keys:
+        value = _optional_text(mapping.get(key))
+        if value is not None:
+            return value
+    return default
+
+
+def _optional_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    return stripped
+
+
+def _string_list(
+    value: object,
+    *,
+    default: Sequence[str],
+) -> list[str]:
+    if isinstance(value, str):
+        item = value.strip()
+        return [item] if item else list(default)
+    if isinstance(value, list | tuple):
+        items = [item.strip() for item in value if isinstance(item, str) and item.strip()]
+        if items:
+            return items
+    return list(default)
+
+
+def _tool_risk_level(value: object) -> ToolRiskLevel:
+    if isinstance(value, ToolRiskLevel):
+        return value
+    if isinstance(value, str):
+        try:
+            return ToolRiskLevel(value.strip())
+        except ValueError:
+            return ToolRiskLevel.HIGH_RISK
+    return ToolRiskLevel.HIGH_RISK
+
+
+def _tool_risk_categories(value: object) -> list[ToolRiskCategory]:
+    raw_values: tuple[object, ...]
+    if isinstance(value, str):
+        raw_values = (value,)
+    elif isinstance(value, list | tuple):
+        raw_values = tuple(value)
+    else:
+        raw_values = ()
+
+    categories: list[ToolRiskCategory] = []
+    for raw_value in raw_values:
+        if isinstance(raw_value, ToolRiskCategory):
+            category = raw_value
+        elif isinstance(raw_value, str):
+            try:
+                category = ToolRiskCategory(raw_value.strip())
+            except ValueError:
+                continue
+        else:
+            continue
+        if category not in categories:
+            categories.append(category)
+    return categories or [ToolRiskCategory.UNKNOWN_COMMAND]
 
 
 def _bounded_id(*parts: str) -> str:
