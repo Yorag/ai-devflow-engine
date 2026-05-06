@@ -135,7 +135,7 @@ describe("SettingsBoundary", () => {
     expect(await within(dialog).findByText("Project: AI Devflow Engine")).toBeTruthy();
 
     fireEvent.click(
-      within(dialog).getByRole("button", { name: "Export configuration package" }),
+      within(dialog).getByRole("button", { name: "Download JSON" }),
     );
 
     expect(await within(dialog).findByText("function-one-config-v1")).toBeTruthy();
@@ -164,9 +164,7 @@ describe("SettingsBoundary", () => {
       "audit body text",
     ]);
 
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "Import configuration package" }),
-    );
+    uploadConfigurationPackage(dialog, "project-default");
 
     expect(await within(dialog).findByText("Boundary import completed.")).toBeTruthy();
     expect(within(dialog).getByText(/provider-visible/u)).toBeTruthy();
@@ -378,6 +376,27 @@ function normalizePath(input: RequestInfo | URL): string {
   }
 
   return raw;
+}
+
+function uploadConfigurationPackage(container: HTMLElement, projectId: string) {
+  const file = new File(
+    [
+      JSON.stringify({
+        package_schema_version: "function-one-config-v1",
+        scope: { scope_type: "project", project_id: projectId },
+        providers: [],
+        delivery_channels: [],
+        pipeline_templates: [],
+      }),
+    ],
+    "config-package.json",
+    { type: "application/json" },
+  );
+
+  fireEvent.change(
+    within(container).getByLabelText("Configuration package JSON file"),
+    { target: { files: [file] } },
+  );
 }
 
 function expectTextToExclude(container: HTMLElement, terms: string[]) {

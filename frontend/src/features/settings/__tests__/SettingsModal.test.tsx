@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiQueryKeys } from "../../../api/hooks";
 import type {
   ConfigurationPackageExport,
+  ConfigurationPackageImportRequest,
   ConfigurationPackageImportResult,
   ProjectDeliveryChannelDetailProjection,
   ProjectRead,
@@ -29,6 +30,8 @@ import { ConfigurationPackageSettings } from "../ConfigurationPackageSettings";
 import { SettingsModal } from "../SettingsModal";
 
 afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   cleanup();
 });
 
@@ -865,12 +868,14 @@ describe("SettingsModal", () => {
 
     expect(await within(dialog).findByText("Project: AI Devflow Engine")).toBeTruthy();
     fireEvent.click(
-      within(dialog).getByRole("button", { name: "Export configuration package" }),
+      within(dialog).getByRole("button", { name: "Download JSON" }),
     );
     expect(await within(dialog).findByText("function-one-config-v1")).toBeTruthy();
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "Import configuration package" }),
+    uploadConfigurationPackage(
+      dialog,
+      createConfigurationPackageImport("project-default"),
     );
+
     expect(
       await within(dialog).findByText("Imported 2 configuration objects."),
     ).toBeTruthy();
@@ -902,7 +907,7 @@ describe("SettingsModal", () => {
     const dialog = screen.getByRole("dialog", { name: "Settings" });
     fireEvent.click(within(dialog).getByRole("tab", { name: "导入导出" }));
     fireEvent.click(
-      within(dialog).getByRole("button", { name: "Export configuration package" }),
+      within(dialog).getByRole("button", { name: "Download JSON" }),
     );
 
     expect(within(dialog).queryByText("function-one-config-v1")).toBeNull();
@@ -921,9 +926,7 @@ describe("SettingsModal", () => {
 
     expect(await within(dialog).findByText("backend-config-v2")).toBeTruthy();
 
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "Import configuration package" }),
-    );
+    uploadConfigurationPackage(dialog, createConfigurationPackageImport(project.project_id));
 
     expect(within(dialog).queryByText("Imported 2 configuration objects.")).toBeNull();
     expect(within(dialog).queryByText(/provider-custom/u)).toBeNull();
@@ -944,6 +947,317 @@ describe("SettingsModal", () => {
 
     expect(await within(dialog).findByText("Backend import completed.")).toBeTruthy();
     expect(within(dialog).getByText(/provider-from-backend/u)).toBeTruthy();
+  });
+
+  it("downloads exported configuration packages as stable JSON files", async () => {
+    const project = createSettingsProject();
+    const exportedPackage: ConfigurationPackageExport = {
+      export_id: "export-file-test",
+      exported_at: "2026-05-06T11:22:33.000Z",
+      package_schema_version: "function-one-config-v1",
+      scope: { scope_type: "project", project_id: project.project_id },
+      providers: [],
+      delivery_channels: [],
+      pipeline_templates: [],
+    };
+    const createdBlobs: Blob[] = [];
+    const createObjectUrl = vi.fn((blob: Blob) => {
+      createdBlobs.push(blob);
+      return "blob:config-export";
+    });
+    const revokeObjectUrl = vi.fn();
+    const clickSpy = vi.fn();
+    const originalCreateElement = document.createElement.bind(document);
+    const createdAnchors: HTMLAnchorElement[] = [];
+
+    class URLWithBlobSupport extends URL {
+      static createObjectURL = createObjectUrl;
+      static revokeObjectURL = revokeObjectUrl;
+    }
+
+    vi.stubGlobal("URL", URLWithBlobSupport);
+    vi.spyOn(document, "createElement").mockImplementation((tagName) => {
+      const element = originalCreateElement(tagName);
+
+      if (tagName.toLowerCase() === "a") {
+        createdAnchors.push(element as HTMLAnchorElement);
+        vi.spyOn(element, "click").mockImplementation(clickSpy);
+      }
+
+      return element;
+    });
+
+    renderSettingsModalWithRequest(project, async (input) => {
+      const path = normalizePath(input);
+
+      if (path.endsWith("/configuration-package/export")) {
+        return jsonResponse(exportedPackage);
+      }
+
+      if (path.endsWith("/delivery-channel")) {
+        return jsonResponse(createDeliveryChannel(project.project_id));
+      }
+
+      return jsonResponse([]);
+    });
+
+    const dialog = screen.getByRole("dialog", { name: "Settings" });
+    fireEvent.click(within(dialog).getByRole("tab", { name: "导入导出" }));
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Download JSON" }));
+
+    await waitFor(() => {
+      expect(createObjectUrl).toHaveBeenCalledTimes(1);
+    });
+    const blob = createdBlobs[0];
+    if (!blob) {
+      throw new Error("Expected export download to create a Blob.");
+    }
+    await expect(blob.text()).resolves.toBe(`${JSON.stringify(exportedPackage, null, 2)}\n`);
+    expect(blob.type).toBe("application/json");
+    const createdAnchor = createdAnchors[0];
+    expect(createdAnchor?.download).toMatch(
+      /^function-one-config-Settings-Test-Project-\d{8}-\d{6}\.json$/u,
+    );
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:config-export");
+    expect(
+      await within(dialog).findByText(
+        /Downloaded function-one-config-Settings-Test-Project-/u,
+      ),
+    ).toBeTruthy();
+  });
+
+  it("uploads a selected JSON configuration package file to the import API", async () => {
+    const project = createSettingsProject();
+    const importCalls: unknown[] = [];
+    const packageBody = createConfigurationPackageImport(project.project_id);
+    const fileInputClicks: HTMLElement[] = [];
+    const originalCreateElement = document.createElement.bind(document);
+
+    vi.spyOn(document, "createElement").mockImplementation((tagName) => {
+      const element = originalCreateElement(tagName);
+
+      if (tagName.toLowerCase() === "input") {
+        vi.spyOn(element, "click").mockImplementation(() => {
+          fileInputClicks.push(element);
+        });
+      }
+
+      return element;
+    });
+
+    renderSettingsModalWithRequest(project, async (input, init) => {
+      const path = normalizePath(input);
+
+      if (path.endsWith("/configuration-package/import")) {
+        importCalls.push(JSON.parse(String(init?.body)));
+        return jsonResponse({
+          package_id: "uploaded-import",
+          summary: "Uploaded configuration package.",
+          changed_objects: [
+            {
+              object_type: "provider",
+              object_id: "provider-uploaded",
+              action: "updated",
+            },
+          ],
+        } satisfies ConfigurationPackageImportResult);
+      }
+
+      if (path.endsWith("/delivery-channel")) {
+        return jsonResponse(createDeliveryChannel(project.project_id));
+      }
+
+      return jsonResponse([]);
+    });
+
+    const dialog = screen.getByRole("dialog", { name: "Settings" });
+    fireEvent.click(within(dialog).getByRole("tab", { name: "导入导出" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Upload JSON" }));
+
+    expect(fileInputClicks).toContain(
+      within(dialog).getByLabelText("Configuration package JSON file"),
+    );
+
+    uploadConfigurationPackage(dialog, packageBody);
+
+    expect(await within(dialog).findByText("Uploaded configuration package.")).toBeTruthy();
+    expect(within(dialog).getByText(/provider-uploaded/u)).toBeTruthy();
+    expect(importCalls).toEqual([packageBody]);
+  });
+
+  it("shows a JSON parse error and does not call import for invalid JSON files", async () => {
+    const project = createSettingsProject();
+    const importFetcher = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        jsonResponse({ summary: "Should not import." }),
+    );
+
+    renderSettingsModalWithRequest(project, async (input, init) => {
+      const path = normalizePath(input);
+
+      if (path.endsWith("/configuration-package/import")) {
+        return importFetcher(input, init);
+      }
+
+      if (path.endsWith("/delivery-channel")) {
+        return jsonResponse(createDeliveryChannel(project.project_id));
+      }
+
+      return jsonResponse([]);
+    });
+
+    const dialog = screen.getByRole("dialog", { name: "Settings" });
+    fireEvent.click(within(dialog).getByRole("tab", { name: "导入导出" }));
+    const fileInput = within(dialog).getByLabelText(
+      "Configuration package JSON file",
+    );
+    const file = new File(["{ invalid json"], "config-package.json", {
+      type: "application/json",
+    });
+
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    expect(await within(dialog).findByText(/JSON parse failed:/u)).toBeTruthy();
+    expect(importFetcher).not.toHaveBeenCalled();
+  });
+
+  it("shows project selection and file type errors before using package APIs", async () => {
+    const fetcher = vi.fn(async () => jsonResponse({}));
+
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ConfigurationPackageSettings project={null} request={{ fetcher }} />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Download JSON" }));
+    expect(
+      await screen.findByText("Select a project before downloading JSON."),
+    ).toBeTruthy();
+    expect(fetcher).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Upload JSON" }));
+    const fileInput = screen.getByLabelText("Configuration package JSON file");
+    fireEvent.change(fileInput, {
+      target: {
+        files: [
+          new File(["{}"], "config-package.txt", {
+            type: "text/plain",
+          }),
+        ],
+      },
+    });
+
+    expect(
+      await screen.findByText("Select a project before uploading JSON."),
+    ).toBeTruthy();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-JSON package files before reading import content", async () => {
+    const project = createSettingsProject();
+    const importFetcher = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        jsonResponse({ summary: "Imported." }),
+    );
+
+    renderSettingsModalWithRequest(project, async (input, init) => {
+      const path = normalizePath(input);
+
+      if (path.endsWith("/configuration-package/import")) {
+        return importFetcher(input, init);
+      }
+
+      if (path.endsWith("/delivery-channel")) {
+        return jsonResponse(createDeliveryChannel(project.project_id));
+      }
+
+      return jsonResponse([]);
+    });
+
+    const dialog = screen.getByRole("dialog", { name: "Settings" });
+    fireEvent.click(within(dialog).getByRole("tab", { name: "导入导出" }));
+    fireEvent.change(
+      within(dialog).getByLabelText("Configuration package JSON file"),
+      {
+        target: {
+          files: [
+            new File(["{}"], "config-package.txt", {
+              type: "",
+            }),
+          ],
+        },
+      },
+    );
+
+    expect(
+      await within(dialog).findByText("Choose a .json configuration package file."),
+    ).toBeTruthy();
+    expect(importFetcher).not.toHaveBeenCalled();
+  });
+
+  it("shows package field errors without refreshing configuration queries", async () => {
+    const project = createSettingsProject();
+    const queryClient = createQueryClient();
+    const deliveryQueryFn = vi.fn(async () => createDeliveryChannel(project.project_id));
+    const providersQueryFn = vi.fn(async () => []);
+    const templatesQueryFn = vi.fn(async () => []);
+
+    await queryClient.prefetchQuery({
+      queryKey: apiQueryKeys.projectDeliveryChannel(project.project_id),
+      queryFn: deliveryQueryFn,
+    });
+    await queryClient.prefetchQuery({
+      queryKey: apiQueryKeys.providers,
+      queryFn: providersQueryFn,
+    });
+    await queryClient.prefetchQuery({
+      queryKey: apiQueryKeys.pipelineTemplates,
+      queryFn: templatesQueryFn,
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ConfigurationPackageSettings
+          project={project}
+          request={{
+            fetcher: async (input) => {
+              const path = normalizePath(input);
+
+              if (path.endsWith("/configuration-package/import")) {
+                return jsonResponse({
+                  package_id: "field-error-import",
+                  summary: "Import failed validation.",
+                  field_errors: [
+                    {
+                      field: "providers[0].default_model_id",
+                      message: "Model is not listed.",
+                    },
+                  ],
+                } satisfies ConfigurationPackageImportResult);
+              }
+
+              return jsonResponse(createDeliveryChannel(project.project_id));
+            },
+          }}
+        />
+      </QueryClientProvider>,
+    );
+
+    uploadConfigurationPackage(
+      document.body,
+      createConfigurationPackageImport(project.project_id),
+    );
+
+    expect(await screen.findByText("Import failed validation.")).toBeTruthy();
+    expect(
+      screen.getByText("providers[0].default_model_id: Model is not listed."),
+    ).toBeTruthy();
+    expect(screen.queryByText("Uploaded config-package.json.")).toBeNull();
+    expect(deliveryQueryFn).toHaveBeenCalledTimes(1);
+    expect(providersQueryFn).toHaveBeenCalledTimes(1);
+    expect(templatesQueryFn).toHaveBeenCalledTimes(1);
   });
 
   it("invalidates project configuration queries after successful package import", async () => {
@@ -994,8 +1308,9 @@ describe("SettingsModal", () => {
     expect(providersQueryFn).toHaveBeenCalledTimes(1);
     expect(templatesQueryFn).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Import configuration package" }),
+    uploadConfigurationPackage(
+      document.body,
+      createConfigurationPackageImport(project.project_id),
     );
 
     importResponse.resolve(
@@ -1096,6 +1411,32 @@ function createDeliveryChannel(
     last_validated_at: "2026-05-02T00:00:00.000Z",
     updated_at: "2026-05-02T00:00:00.000Z",
   };
+}
+
+function createConfigurationPackageImport(
+  projectId: string,
+): ConfigurationPackageImportRequest {
+  return {
+    package_schema_version: "function-one-config-v1",
+    scope: { scope_type: "project", project_id: projectId },
+    providers: [],
+    delivery_channels: [],
+    pipeline_templates: [],
+  };
+}
+
+function uploadConfigurationPackage(
+  container: HTMLElement,
+  body: ConfigurationPackageImportRequest,
+) {
+  const fileInput = within(container).getByLabelText(
+    "Configuration package JSON file",
+  );
+  const file = new File([JSON.stringify(body)], "config-package.json", {
+    type: "application/json",
+  });
+
+  fireEvent.change(fileInput, { target: { files: [file] } });
 }
 
 function createDeferred<T>() {
