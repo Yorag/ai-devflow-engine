@@ -1,4 +1,11 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -318,12 +325,12 @@ describe("Feed Inspector opening", () => {
       target: { value: "project-loaded" },
     });
 
-    expect(
-      await screen.findByRole("heading", {
-        level: 2,
-        name: "Checkout Service",
-      }),
-    ).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Switch project")).toHaveProperty(
+        "value",
+        "project-loaded",
+      );
+    });
     expect(screen.queryByRole("complementary", { name: "Inspector" })).toBeNull();
     expect(screen.queryByText("Inspector closed")).toBeNull();
     expect(screen.queryByText("stage-solution-design-running")).toBeNull();

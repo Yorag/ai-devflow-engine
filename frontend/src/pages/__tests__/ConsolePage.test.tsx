@@ -126,7 +126,8 @@ describe("ConsolePage route baseline", () => {
     renderWithAppProviders(null, { route: "/console" });
 
     expect(await screen.findByText("Narrative Workspace")).toBeTruthy();
-    expect(await screen.findByText("Default delivery")).toBeTruthy();
+    expect(await screen.findByText("C:/Users/.../ai-devflow-engine")).toBeTruthy();
+    expect(screen.queryByText("Default delivery")).toBeNull();
     expect(screen.queryByText("Inspector closed")).toBeNull();
     expect(screen.queryByText(/workflow surface comes online/i)).toBeNull();
     expect(screen.queryByText(/baseline/i)).toBeNull();

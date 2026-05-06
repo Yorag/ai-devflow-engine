@@ -4,7 +4,6 @@ import { useEffect, useState, type FormEvent } from "react";
 import type { ApiRequestOptions } from "../../api/client";
 import {
   apiQueryKeys,
-  useProjectDeliveryChannelQuery,
   useProjectSessionsQuery,
   useProjectsQuery,
 } from "../../api/hooks";
@@ -48,15 +47,7 @@ export function ProjectSidebar({
     null;
   const projectId = currentProject?.project_id ?? "";
   const sessionsQuery = useProjectSessionsQuery(projectId, { request });
-  const deliveryQuery = useProjectDeliveryChannelQuery(projectId, { request });
   const sessions = sessionsQuery.data ?? [];
-  const sessionCount = sessions.length;
-  const deliveryMode = deliveryQuery.data?.delivery_mode ?? "unknown";
-  const latestSession = sessions.reduce<ProjectSidebarLatestSession | null>(
-    (latest, session) =>
-      latest && latest.updated_at >= session.updated_at ? latest : session,
-    null,
-  );
 
   useEffect(() => {
     onCurrentProjectChange(currentProject);
@@ -159,7 +150,7 @@ export function ProjectSidebar({
             setLoadProjectError(null);
           }}
         >
-          {isLoadingProject ? "Loading project" : "Load project"}
+          {isLoadingProject ? "Loading" : "Load"}
         </button>
         <button
           className="workspace-button"
@@ -193,7 +184,7 @@ export function ProjectSidebar({
               type="submit"
               disabled={!projectRootPath.trim() || isLoadingProject}
             >
-              {isLoadingProject ? "Loading" : "Load local project"}
+              {isLoadingProject ? "Loading" : "Load"}
             </button>
             <button
               className="workspace-button workspace-button--secondary"
@@ -213,25 +204,6 @@ export function ProjectSidebar({
 
       {loadProjectError ? <ErrorState error={loadProjectError} /> : null}
       {createSessionError ? <ErrorState error={createSessionError} /> : null}
-
-      {currentProject ? (
-        <section className="project-summary" aria-label="Current project summary">
-          <div>
-            <span>Sessions</span>
-            <strong>{sessionCount}</strong>
-          </div>
-          <div>
-            <span>Default delivery</span>
-            <strong>{deliveryMode}</strong>
-          </div>
-          <div>
-            <span>Latest activity</span>
-            <strong>
-              {latestSession ? formatTimestamp(latestSession.updated_at) : "None"}
-            </strong>
-          </div>
-        </section>
-      ) : null}
 
       <button
         className="workspace-button workspace-button--danger"
@@ -329,10 +301,6 @@ function removeDeletedSession(
   return sessions.filter((session) => session.session_id !== sessionId);
 }
 
-type ProjectSidebarLatestSession = {
-  updated_at: string;
-};
-
 function ProjectSwitcher({
   projects,
   currentProject,
@@ -345,11 +313,9 @@ function ProjectSwitcher({
   return (
     <section className="project-switcher" aria-label="Project switcher">
       <p className="workspace-eyebrow">Project</p>
-      <h2>{currentProject?.name ?? "No project loaded"}</h2>
-      <p>{currentProject?.root_path ?? "Load a local project to begin."}</p>
       {projects.length > 0 ? (
         <label>
-          <span>Switch project</span>
+          <span className="sr-only">Switch project</span>
           <select
             value={currentProject?.project_id ?? ""}
             onChange={(event) => onProjectChange(event.target.value)}
@@ -362,21 +328,28 @@ function ProjectSwitcher({
           </select>
         </label>
       ) : null}
+      <p className="project-switcher__path" title={currentProject?.root_path}>
+        {currentProject
+          ? formatCompactPath(currentProject.root_path)
+          : "Load a local project to begin."}
+      </p>
     </section>
   );
 }
 
-function formatTimestamp(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
+function formatCompactPath(value: string): string {
+  const normalized = value.replace(/\\/gu, "/");
+  const segments = normalized.split("/").filter(Boolean);
+
+  if (segments.length <= 3) {
     return value;
   }
 
-  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(
-    date.getUTCDate(),
-  )} ${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}`;
-}
+  const hasDriveRoot = /^[A-Za-z]:$/u.test(segments[0] ?? "");
+  const prefix = hasDriveRoot
+    ? `${segments[0]}/${segments[1]}`
+    : `${normalized.startsWith("/") ? "/" : ""}${segments[0]}/${segments[1]}`;
+  const leaf = segments[segments.length - 1];
 
-function pad2(value: number): string {
-  return String(value).padStart(2, "0");
+  return `${prefix}/.../${leaf}`;
 }

@@ -177,33 +177,26 @@ a {
 
 .project-switcher {
   display: grid;
-  gap: 10px;
+  gap: 6px;
   min-width: 0;
 }
 
-.project-switcher h2,
 .session-list h2,
 .session-list-item h3 {
   margin: 0;
   letter-spacing: 0;
 }
 
-.project-switcher h2 {
-  font-size: 1rem;
-  line-height: 1.25;
-}
-
 .project-switcher p:not(.workspace-eyebrow) {
   margin: 0;
   color: var(--text-muted);
   font-size: 0.8rem;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
+  line-height: 1.25;
 }
 
 .project-switcher label {
   display: grid;
-  gap: 6px;
+  gap: 0;
   color: oklch(33% 0.02 248);
   font-size: 0.78rem;
   font-weight: 650;
@@ -216,9 +209,18 @@ a {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
-  color: inherit;
+  color: oklch(27% 0.022 248);
   padding: 0 10px;
   font: inherit;
+  font-size: 0.92rem;
+  font-weight: 750;
+}
+
+.project-switcher__path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .workspace-sidebar__actions {
@@ -319,37 +321,6 @@ a {
   width: auto;
   min-height: 32px;
   padding: 0 12px;
-}
-
-.project-summary {
-  display: grid;
-  gap: 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-  padding: 12px;
-}
-
-.project-summary div {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  min-width: 0;
-}
-
-.project-summary span {
-  color: var(--text-muted);
-  font-size: 0.78rem;
-  font-weight: 650;
-}
-
-.project-summary strong {
-  min-width: 0;
-  color: oklch(28% 0.025 248);
-  font-size: 0.8rem;
-  overflow-wrap: anywhere;
-  text-align: right;
 }
 
 .session-list {
@@ -2972,16 +2943,6 @@ a {
 
   .workspace-sidebar__actions {
     grid-template-columns: 1fr;
-  }
-
-  .project-summary div {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .project-summary strong {
-    text-align: left;
   }
 
   .settings-form-grid,

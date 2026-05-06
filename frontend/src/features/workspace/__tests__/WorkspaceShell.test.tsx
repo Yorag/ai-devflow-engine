@@ -156,22 +156,30 @@ describe("WorkspaceShell", () => {
     expect(await screen.findByRole("complementary", { name: "Inspector" })).toBeTruthy();
   });
 
-  it("shows project navigation, delivery summary, and session management affordances", async () => {
+  it("shows compact project navigation and session management affordances", async () => {
     renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
+    const projectSwitcher = await screen.findByRole("region", {
+      name: "Project switcher",
+    });
+    expect(within(projectSwitcher).getByText("Project")).toBeTruthy();
+    expect(await screen.findByLabelText("Switch project")).toHaveProperty(
+      "value",
+      "project-default",
+    );
     expect(
-      await screen.findByRole("heading", {
-        level: 2,
-        name: "AI Devflow Engine",
-      }),
-    ).toBeTruthy();
-    expect(
-      screen.getByText("C:/Users/lkw/Desktop/github/agent-project/ai-devflow-engine"),
-    ).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Load project" })).toBeTruthy();
+      screen.queryByText(
+        "C:/Users/lkw/Desktop/github/agent-project/ai-devflow-engine",
+      ),
+    ).toBeNull();
+    expect(screen.getByText("C:/Users/.../ai-devflow-engine")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Load" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "New session" })).toBeTruthy();
-    expect(screen.getByText("Default delivery")).toBeTruthy();
-    expect(await screen.findByText("demo_delivery")).toBeTruthy();
+    expect(
+      screen.queryByRole("region", { name: "Current project summary" }),
+    ).toBeNull();
+    expect(screen.queryByText("Default delivery")).toBeNull();
+    expect(screen.queryByText("Latest activity")).toBeNull();
     expect(
       screen.getByRole("button", { name: "Default project cannot be removed" }),
     ).toHaveProperty("disabled", true);
@@ -274,12 +282,10 @@ describe("WorkspaceShell", () => {
   it("switches the current project and keeps shell-only destructive actions disabled", async () => {
     renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
-    expect(
-      await screen.findByRole("heading", {
-        level: 2,
-        name: "AI Devflow Engine",
-      }),
-    ).toBeTruthy();
+    expect(await screen.findByLabelText("Switch project")).toHaveProperty(
+      "value",
+      "project-default",
+    );
     expect(
       await screen.findByRole("button", { name: "Open Blank requirement" }),
     ).toHaveProperty("ariaCurrent", "page");
@@ -288,14 +294,14 @@ describe("WorkspaceShell", () => {
       target: { value: "project-loaded" },
     });
 
-    expect(
-      await screen.findByRole("heading", {
-        level: 2,
-        name: "Checkout Service",
-      }),
-    ).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Switch project")).toHaveProperty(
+        "value",
+        "project-loaded",
+      );
+    });
     expect(screen.getByText("C:/work/checkout-service")).toBeTruthy();
-    expect(await screen.findByText("git_auto_delivery")).toBeTruthy();
+    expect(screen.queryByText("git_auto_delivery")).toBeNull();
     expect(
       screen.getByRole("button", { name: "Remove Checkout Service unavailable" }),
     ).toHaveProperty("disabled", true);
@@ -479,18 +485,26 @@ describe("WorkspaceShell", () => {
 
     renderWithAppProviders(<ConsolePage request={request} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Load project" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Load" }));
     fireEvent.change(screen.getByLabelText("Project root path"), {
       target: { value: "C:/work/loaded-flow" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Load local project" }));
+    fireEvent.click(
+      within(screen.getByRole("form", { name: "Load local project" })).getByRole(
+        "button",
+        { name: "Load" },
+      ),
+    );
 
     await waitFor(() => {
       expect(createProjectBody).toEqual({ root_path: "C:/work/loaded-flow" });
     });
-    expect(
-      await screen.findByRole("heading", { level: 2, name: "Loaded Flow" }),
-    ).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Switch project")).toHaveProperty(
+        "value",
+        "project-loaded-from-path",
+      );
+    });
     expect(screen.getByText("C:/work/loaded-flow")).toBeTruthy();
     expect(screen.getByRole("button", { name: "New session" })).toHaveProperty(
       "disabled",
@@ -501,18 +515,17 @@ describe("WorkspaceShell", () => {
   it("keeps a loaded project visible through the query refresh flow", async () => {
     renderWithAppProviders(null, { route: "/console" });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Load project" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Load" }));
     fireEvent.change(screen.getByLabelText("Project root path"), {
       target: { value: "C:/work/query-refresh-flow" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Load local project" }));
+    fireEvent.click(
+      within(screen.getByRole("form", { name: "Load local project" })).getByRole(
+        "button",
+        { name: "Load" },
+      ),
+    );
 
-    expect(
-      await screen.findByRole("heading", {
-        level: 2,
-        name: "Query Refresh Flow",
-      }),
-    ).toBeTruthy();
     await waitFor(() => {
       expect(screen.getByLabelText("Switch project")).toHaveProperty(
         "value",
