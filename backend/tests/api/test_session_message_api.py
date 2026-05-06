@@ -62,10 +62,32 @@ def configure_required_providers(app) -> None:  # noqa: ANN001
         session.commit()
 
 
+class CapturingRuntimeDispatcher:
+    def __init__(self, app) -> None:  # noqa: ANN001
+        self.app = app
+        self.commands = []
+        self.visibility_checks = []
+
+    def dispatch_started_run(self, command) -> None:  # noqa: ANN001
+        self.commands.append(command)
+        with self.app.state.database_manager.session(DatabaseRole.RUNTIME) as session:
+            run = session.get(PipelineRunModel, command.run_id)
+            stage = session.get(StageRunModel, command.stage_run_id)
+            self.visibility_checks.append((run is not None, stage is not None))
+
+
+class FailingRuntimeDispatcher(CapturingRuntimeDispatcher):
+    def dispatch_started_run(self, command) -> None:  # noqa: ANN001
+        super().dispatch_started_run(command)
+        raise RuntimeError("runtime queue unavailable")
+
+
 def test_post_session_message_new_requirement_starts_first_run_and_returns_first_user_message(
     tmp_path: Path,
 ) -> None:
     app = build_app(tmp_path)
+    dispatcher = CapturingRuntimeDispatcher(app)
+    app.state.runtime_execution_dispatcher = dispatcher
 
     with TestClient(app) as client:
         created = create_draft_session(client)
@@ -95,6 +117,9 @@ def test_post_session_message_new_requirement_starts_first_run_and_returns_first
 
     run_id = body["session"]["current_run_id"]
     stage_run_id = body["message_item"]["stage_run_id"]
+    graph_definition_ref = None
+    graph_thread_ref = None
+    run_trace_id = None
 
     with app.state.database_manager.session(DatabaseRole.CONTROL) as session:
         control_session = session.get(SessionModel, created["session_id"])
@@ -109,11 +134,14 @@ def test_post_session_message_new_requirement_starts_first_run_and_returns_first
         assert run.status is RunStatus.RUNNING
         assert run.attempt_index == 1
         assert run.graph_definition_ref
+        graph_definition_ref = run.graph_definition_ref
         assert run.graph_thread_ref
+        graph_thread_ref = run.graph_thread_ref
         assert run.workspace_ref
         assert run.runtime_limit_snapshot_ref
         assert run.provider_call_policy_snapshot_ref
         assert run.template_snapshot_ref
+        run_trace_id = run.trace_id
         stage = session.get(StageRunModel, stage_run_id)
         assert stage is not None
         assert stage.stage_type is StageType.REQUIREMENT_ANALYSIS
@@ -121,9 +149,21 @@ def test_post_session_message_new_requirement_starts_first_run_and_returns_first
         assert stage.attempt_index == 1
         assert stage.graph_node_key == "requirement_analysis"
 
+    assert len(dispatcher.commands) == 1
+    command = dispatcher.commands[0]
+    assert command.session_id == created["session_id"]
+    assert command.run_id == run_id
+    assert command.stage_run_id == stage_run_id
+    assert command.stage_type is StageType.REQUIREMENT_ANALYSIS
+    assert command.graph_thread_id == graph_thread_ref
+    assert command.trace_context.request_id == "req-new-requirement"
+    assert command.trace_context.trace_id == run_trace_id
+    assert command.trace_context.correlation_id == "corr-new-requirement"
+    assert dispatcher.visibility_checks == [(True, True)]
+
     with app.state.database_manager.session(DatabaseRole.GRAPH) as session:
-        definition = session.get(GraphDefinitionModel, run.graph_definition_ref)
-        thread = session.get(GraphThreadModel, run.graph_thread_ref)
+        definition = session.get(GraphDefinitionModel, graph_definition_ref)
+        thread = session.get(GraphThreadModel, graph_thread_ref)
         assert definition is not None
         assert definition.run_id == run_id
         assert thread is not None
@@ -156,6 +196,47 @@ def test_post_session_message_new_requirement_starts_first_run_and_returns_first
     assert audit.result is AuditResult.SUCCEEDED
     assert audit.request_id == "req-new-requirement"
     assert audit.correlation_id == "corr-new-requirement"
+
+
+def test_new_requirement_dispatch_failure_does_not_hide_committed_startup(
+    tmp_path: Path,
+) -> None:
+    app = build_app(tmp_path)
+    dispatcher = FailingRuntimeDispatcher(app)
+    app.state.runtime_execution_dispatcher = dispatcher
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        created = create_draft_session(client)
+        response = client.post(
+            f"/api/sessions/{created['session_id']}/messages",
+            json={
+                "message_type": "new_requirement",
+                "content": "Start even when dispatch transport is unavailable.",
+            },
+            headers={
+                "X-Request-ID": "req-dispatch-failure",
+                "X-Correlation-ID": "corr-dispatch-failure",
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    run_id = body["session"]["current_run_id"]
+    assert body["session"]["status"] == "running"
+    assert len(dispatcher.commands) == 1
+    assert dispatcher.commands[0].run_id == run_id
+    assert dispatcher.visibility_checks == [(True, True)]
+
+    with app.state.database_manager.session(DatabaseRole.CONTROL) as session:
+        control_session = session.get(SessionModel, created["session_id"])
+        assert control_session is not None
+        assert control_session.current_run_id == run_id
+        assert control_session.status is SessionStatus.RUNNING
+
+    with app.state.database_manager.session(DatabaseRole.RUNTIME) as session:
+        run = session.get(PipelineRunModel, run_id)
+        assert run is not None
+        assert run.status is RunStatus.RUNNING
 
 
 def test_new_requirement_auto_titles_default_draft_session_and_list_reflects_name(
@@ -213,6 +294,8 @@ def test_new_requirement_does_not_auto_title_renamed_session(tmp_path: Path) -> 
 
 def test_new_requirement_rejects_non_draft_or_existing_run_session(tmp_path: Path) -> None:
     app = build_app(tmp_path)
+    dispatcher = CapturingRuntimeDispatcher(app)
+    app.state.runtime_execution_dispatcher = dispatcher
 
     with TestClient(app) as client:
         created = create_draft_session(client)
@@ -234,6 +317,7 @@ def test_new_requirement_rejects_non_draft_or_existing_run_session(tmp_path: Pat
     assert second.json()["error_code"] == "validation_error"
     assert "draft" in second.json()["message"]
     assert "current_run_id" in second.json()["message"]
+    assert len(dispatcher.commands) == 1
 
     with app.state.database_manager.session(DatabaseRole.LOG) as session:
         audit = (
