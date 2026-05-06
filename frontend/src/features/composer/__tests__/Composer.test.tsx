@@ -146,6 +146,46 @@ describe("Composer component", () => {
     expect(screen.getByLabelText("当前输入")).toHaveProperty("value", "");
   });
 
+  it("shows submit errors and keeps the draft input available", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (
+        input === "/api/sessions/session-draft/messages" &&
+        init?.method === "POST"
+      ) {
+        return new Response(
+          JSON.stringify({
+            error_code: "validation_error",
+            message: "Provider is unavailable for the selected template.",
+            request_id: "req-composer-provider",
+          }),
+          {
+            status: 422,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+
+      return createMockApiFetcher()(input, init);
+    });
+
+    renderComposerForWorkspace(mockSessionWorkspaces["session-draft"], { fetcher });
+
+    fireEvent.change(screen.getByLabelText("当前输入"), {
+      target: { value: "Start even when provider config is wrong." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(
+      await screen.findByText("Provider is unavailable for the selected template."),
+    ).toBeTruthy();
+    expect(screen.getByText("Request req-composer-provider")).toBeTruthy();
+    expect(screen.getByLabelText("当前输入")).toHaveProperty(
+      "value",
+      "Start even when provider config is wrong.",
+    );
+    expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", false);
+  });
+
   it("renders a compact single-row input surface without helper or run binding text", () => {
     renderComposerForWorkspace(mockSessionWorkspaces["session-draft"]);
 

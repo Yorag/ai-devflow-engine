@@ -284,6 +284,16 @@ export function TemplateEditor({
             Discard changes
           </button>
         ) : null}
+        {template.template_source === "user_template" ? (
+          <button
+            className="workspace-button workspace-button--secondary"
+            type="button"
+            onClick={onSaveAs}
+            disabled={!canSave}
+          >
+            {isSaving ? "Saving template" : "Save as new template"}
+          </button>
+        ) : null}
         <button
           className="workspace-button"
           type="button"

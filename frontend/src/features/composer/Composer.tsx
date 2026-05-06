@@ -10,6 +10,7 @@ import type {
   SessionRead,
   StageType,
 } from "../../api/types";
+import { ErrorState } from "../errors/ErrorState";
 import { resolveComposerState } from "./composer-state";
 
 type ComposerProps = {
@@ -31,6 +32,7 @@ export function Composer({
 }: ComposerProps): JSX.Element {
   const queryClient = useQueryClient();
   const [value, setValue] = useState("");
+  const [submitError, setSubmitError] = useState<unknown | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const [isSubmitting, setSubmitting] = useState(false);
   const resolved = resolveComposerState(composerState, currentStageType);
@@ -40,6 +42,7 @@ export function Composer({
 
   useEffect(() => {
     setValue("");
+    setSubmitError(null);
   }, [session?.session_id]);
 
   useEffect(() => {
@@ -71,6 +74,7 @@ export function Composer({
 
     setSubmitting(true);
     onBusyChange?.(true);
+    setSubmitError(null);
     try {
       await appendSessionMessage(
         session.session_id,
@@ -89,6 +93,8 @@ export function Composer({
         queryKey: apiQueryKeys.projectSessions(session.project_id),
         refetchType: "all",
       });
+    } catch (error) {
+      setSubmitError(error);
     } finally {
       setSubmitting(false);
       onBusyChange?.(false);
@@ -169,6 +175,7 @@ export function Composer({
             rows={1}
           />
         </label>
+        {submitError ? <ErrorState error={submitError} /> : null}
       </div>
       <div className="composer__actions">
         <div className="composer__primary-actions">

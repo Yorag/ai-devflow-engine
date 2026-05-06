@@ -463,6 +463,59 @@ describe("TemplateEditor", () => {
     expect(deletedTemplateIds).toEqual(["template-user-existing"]);
   });
 
+  it("supports saving a user template as a new template", async () => {
+    const workspace = mockSessionWorkspaces["session-draft"];
+    const systemTemplate = mockPipelineTemplates[1];
+    const userTemplate = {
+      ...systemTemplate,
+      template_id: "template-user-existing",
+      name: "Team feature flow",
+      template_source: "user_template" as const,
+      base_template_id: systemTemplate.template_id,
+    };
+    const savedAsTemplates: PipelineTemplateRead[] = [];
+    const overwrittenTemplateIds: string[] = [];
+
+    renderWithAppProviders(
+      <TemplateEmptyState
+        session={workspace.session}
+        templates={[...mockPipelineTemplates, userTemplate]}
+        providers={mockProviderList}
+        selectedTemplateId="template-user-existing"
+        onTemplateChange={() => undefined}
+        onTemplateSaveAs={(template) => {
+          savedAsTemplates.push(template);
+        }}
+        onTemplateOverwrite={(template) =>
+          overwrittenTemplateIds.push(template.template_id)
+        }
+      />,
+    );
+
+    const editor = screen.getByRole("region", { name: "Template editor" });
+    fireEvent.change(within(editor).getByLabelText("Requirement Analysis system prompt"), {
+      target: { value: "Clarify copied template requirements." },
+    });
+    fireEvent.click(
+      within(editor).getByRole("button", { name: "Save as new template" }),
+    );
+
+    await waitFor(() => {
+      expect(savedAsTemplates).toHaveLength(1);
+    });
+    expect(savedAsTemplates[0]).toMatchObject({
+      template_id: "template-user-template-user-existing-1",
+      template_source: "user_template",
+      base_template_id: "template-user-existing",
+    });
+    expect(
+      savedAsTemplates[0].stage_role_bindings.find(
+        (binding) => binding.stage_type === "requirement_analysis",
+      )?.system_prompt,
+    ).toBe("Clarify copied template requirements.");
+    expect(overwrittenTemplateIds).toEqual([]);
+  });
+
   it("uses fallback template selection after deleting a user template without a base match", async () => {
     const workspace = mockSessionWorkspaces["session-draft"];
     const userTemplate = {

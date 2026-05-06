@@ -246,10 +246,7 @@ function buildUserTemplate(
     name: draft.name.trim(),
     template_id: createSaveAsTemplateId(sourceTemplate.template_id, templates),
     template_source: "user_template",
-    base_template_id:
-      sourceTemplate.template_source === "system_template"
-        ? sourceTemplate.template_id
-        : sourceTemplate.base_template_id,
+    base_template_id: sourceTemplate.template_id,
     created_at: new Date(0).toISOString(),
     updated_at: new Date(0).toISOString(),
   };

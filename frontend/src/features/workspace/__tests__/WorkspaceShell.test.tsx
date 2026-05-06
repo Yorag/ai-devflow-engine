@@ -1600,6 +1600,47 @@ describe("WorkspaceShell", () => {
     expect(templateSaveCalls).toBe(0);
   });
 
+  it("surfaces draft Composer submit failures without hiding the editable input", async () => {
+    const baseFetcher = createMockApiFetcher();
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const path = normalizeTestPath(input);
+        const method = init?.method ?? "GET";
+
+        if (method === "POST" && path === "/api/sessions/session-draft/messages") {
+          return jsonTestResponse(
+            {
+              error_code: "validation_error",
+              message: "Provider is unavailable for the selected template.",
+              request_id: "req-workspace-provider",
+            },
+            422,
+          );
+        }
+
+        return baseFetcher(input, init);
+      },
+    };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    const input = await screen.findByLabelText("当前输入");
+    fireEvent.change(input, {
+      target: { value: "Start with invalid provider configuration." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(
+      await screen.findByText("Provider is unavailable for the selected template."),
+    ).toBeTruthy();
+    expect(screen.getByText("Request req-workspace-provider")).toBeTruthy();
+    expect(screen.getByLabelText("当前输入")).toHaveProperty(
+      "value",
+      "Start with invalid provider configuration.",
+    );
+    expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", false);
+  });
+
   it("keeps Composer send-enabled for waiting clarification sessions", async () => {
     renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
