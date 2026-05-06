@@ -117,6 +117,10 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
     unavailableProviderIds.length > 0
       ? unavailableProviderMessage(unavailableProviderIds)
       : null;
+  const isInspectorVisible = inspector.isOpen && inspector.target !== null;
+  const shellClassName = isInspectorVisible
+    ? "workspace-shell workspace-shell--inspector-open"
+    : "workspace-shell workspace-shell--inspector-closed";
 
   useEffect(() => {
     if (!selectedSession) {
@@ -218,9 +222,7 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
 
   return (
     <section
-      className={`workspace-shell${
-        inspector.isOpen ? " workspace-shell--inspector-open" : ""
-      }`}
+      className={shellClassName}
       aria-label="Workspace shell"
     >
       <ProjectSidebar
@@ -232,79 +234,93 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
         onCurrentProjectChange={setCurrentProject}
       />
       <section className="workspace-main" aria-label="Narrative workspace">
-        <div className="workspace-toolbar" aria-label="Global tools">
-          {workspace ? (
-            <TerminateRunAction
-              projectId={workspace.project.project_id}
-              sessionId={workspace.session.session_id}
-              runId={workspace.current_run_id}
-              sessionStatus={workspace.session.status}
-              secondaryActions={workspace.composer_state.secondary_actions}
-              isBusy={isWorkspaceActionBusy}
-              onBusyChange={setWorkspaceActionBusy}
-              request={request}
-            />
-          ) : null}
-          <button
-            className="workspace-button workspace-button--secondary workspace-button--compact"
-            type="button"
-            onClick={() => setSettingsOpen(true)}
-            aria-label="Open settings"
-          >
-            Settings
-          </button>
-        </div>
-        <div className="narrative-feed" aria-label="Narrative Feed">
-          {workspace?.session.status === "draft" ? (
-            <>
-              {templateChangeError ? <ErrorState error={templateChangeError} /> : null}
-              <TemplateEmptyState
-                session={workspace.session}
-                templates={templatesQuery.data ?? []}
-                providers={providersQuery.data ?? []}
-                selectedTemplateId={selectedTemplateId}
-                onTemplateChange={handleTemplateChange}
-                isTemplateChangeBusy={isWorkspaceActionBusy}
+        <div className="workspace-main__content">
+          <div className="workspace-toolbar" aria-label="Global tools">
+            {workspace ? (
+              <TerminateRunAction
+                projectId={workspace.project.project_id}
+                sessionId={workspace.session.session_id}
+                runId={workspace.current_run_id}
+                sessionStatus={workspace.session.status}
+                secondaryActions={workspace.composer_state.secondary_actions}
+                isBusy={isWorkspaceActionBusy}
+                onBusyChange={setWorkspaceActionBusy}
+                request={request}
               />
-            </>
+            ) : null}
+            <button
+              className="workspace-button workspace-button--secondary workspace-button--compact"
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              aria-label="Open settings"
+            >
+              Settings
+            </button>
+          </div>
+          {workspace?.session.status === "draft" ? (
+            <div className="workspace-main__panel workspace-main__panel--template">
+              <div className="narrative-feed" aria-label="Narrative Feed">
+                {templateChangeError ? (
+                  <ErrorState error={templateChangeError} />
+                ) : null}
+                <TemplateEmptyState
+                  session={workspace.session}
+                  templates={templatesQuery.data ?? []}
+                  providers={providersQuery.data ?? []}
+                  selectedTemplateId={selectedTemplateId}
+                  onTemplateChange={handleTemplateChange}
+                  isTemplateChangeBusy={isWorkspaceActionBusy}
+                />
+              </div>
+            </div>
           ) : workspace ? (
-            <NarrativeFeed
-              entries={workspace.narrative_feed}
-              runs={workspace.runs}
-              currentRunId={workspace.current_run_id}
-              currentSessionStatus={workspace.session.status}
-              sessionId={workspace.session.session_id}
-              projectId={workspace.project.project_id}
-              request={request}
-              onOpenInspectorTarget={inspector.openEntry}
-              onOpenSettings={() => setSettingsOpen(true)}
-            />
+            <div className="workspace-main__panel workspace-main__panel--feed">
+              <div className="narrative-feed" aria-label="Narrative Feed">
+                <NarrativeFeed
+                  entries={workspace.narrative_feed}
+                  runs={workspace.runs}
+                  currentRunId={workspace.current_run_id}
+                  currentSessionStatus={workspace.session.status}
+                  sessionId={workspace.session.session_id}
+                  projectId={workspace.project.project_id}
+                  request={request}
+                  onOpenInspectorTarget={inspector.openEntry}
+                  onOpenSettings={() => setSettingsOpen(true)}
+                />
+              </div>
+            </div>
           ) : (
-            <div className="workspace-main__empty">
-              <p className="workspace-eyebrow">Narrative Workspace</p>
-              <h1>{selectedSession ? selectedSession.display_name : "Workspace"}</h1>
-              <p>
-                {selectedSession
-                  ? "Run history and execution feed will appear here."
-                  : "Create or select a session to review its execution feed."}
-              </p>
+            <div className="workspace-main__panel workspace-main__panel--empty">
+              <div className="workspace-main__empty">
+                <p className="workspace-eyebrow">Narrative Workspace</p>
+                <h1>
+                  {selectedSession ? selectedSession.display_name : "Workspace"}
+                </h1>
+                <p>
+                  {selectedSession
+                    ? "Run history and execution feed will appear here."
+                    : "Create or select a session to review its execution feed."}
+                </p>
+              </div>
             </div>
           )}
+          {workspace ? (
+            <div className="workspace-main__panel workspace-main__panel--composer">
+              <Composer
+                session={workspace.session}
+                composerState={workspace.composer_state}
+                currentStageType={workspace.current_stage_type}
+                isBusy={isWorkspaceActionBusy}
+                onBusyChange={setWorkspaceActionBusy}
+                request={request}
+                startBlockedReason={startBlockedReason}
+              />
+            </div>
+          ) : null}
         </div>
-        {workspace ? (
-          <Composer
-            session={workspace.session}
-            composerState={workspace.composer_state}
-            currentStageType={workspace.current_stage_type}
-            isBusy={isWorkspaceActionBusy}
-            onBusyChange={setWorkspaceActionBusy}
-            request={request}
-            startBlockedReason={startBlockedReason}
-          />
-        ) : null}
       </section>
       <InspectorPanel
-        isOpen={inspector.isOpen}
+        isOpen={isInspectorVisible}
         target={inspector.target}
         onClose={inspector.close}
         request={request}

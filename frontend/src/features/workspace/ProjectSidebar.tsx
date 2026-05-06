@@ -250,6 +250,21 @@ export function ProjectSidebar({
         sessions={sessions}
         currentSessionId={currentSessionId}
         onSessionChange={onSessionChange}
+        onSessionRename={(session) => {
+          queryClient.setQueryData<SessionRead[]>(
+            apiQueryKeys.projectSessions(projectId),
+            (current) => updateRenamedSession(current ?? [], session),
+          );
+          void queryClient.invalidateQueries({
+            queryKey: apiQueryKeys.projectSessions(projectId),
+            refetchType: "all",
+          });
+          void queryClient.invalidateQueries({
+            queryKey: apiQueryKeys.sessionWorkspace(session.session_id),
+            refetchType: "all",
+          });
+        }}
+        request={request}
       />
     </aside>
   );
@@ -275,6 +290,15 @@ function upsertCreatedSession(
       (session) => session.session_id !== createdSession.session_id,
     ),
   ];
+}
+
+function updateRenamedSession(
+  sessions: SessionRead[],
+  renamedSession: SessionRead,
+): SessionRead[] {
+  return sessions.map((session) =>
+    session.session_id === renamedSession.session_id ? renamedSession : session,
+  );
 }
 
 type ProjectSidebarLatestSession = {

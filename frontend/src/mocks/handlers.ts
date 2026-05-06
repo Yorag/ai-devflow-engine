@@ -233,6 +233,35 @@ function createMockRoutes(
         ? jsonResponse(workspace)
         : jsonResponse(mockApiError("not_found"), 404);
     }),
+    route("PATCH", /^\/api\/sessions\/([^/]+)$/u, ([, sessionId], init) => {
+      const session = sessions.find((candidate) => candidate.session_id === sessionId);
+      const workspace = workspaces[sessionId];
+      if (!session || !workspace) {
+        return jsonResponse(mockApiError("not_found"), 404);
+      }
+
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+      const displayName =
+        body && typeof body.display_name === "string"
+          ? body.display_name.trim()
+          : "";
+      if (!displayName) {
+        return jsonResponse(mockApiError("validation_error"), 422);
+      }
+
+      const updatedSession = {
+        ...session,
+        display_name: displayName,
+        updated_at: "2026-05-05T08:20:00.000Z",
+      };
+      Object.assign(session, updatedSession);
+      workspaces[sessionId] = {
+        ...workspace,
+        session: updatedSession,
+      };
+
+      return jsonResponse(updatedSession);
+    }),
     route("PUT", /^\/api\/sessions\/([^/]+)\/template$/u, ([, sessionId], init) => {
       const session = sessions.find((candidate) => candidate.session_id === sessionId);
       const workspace = workspaces[sessionId];

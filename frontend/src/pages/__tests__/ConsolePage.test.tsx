@@ -68,7 +68,12 @@ describe("ConsolePage route baseline", () => {
     expect(
       screen.getByRole("region", { name: "Narrative workspace" }),
     ).toBeTruthy();
-    expect(screen.getByText("Inspector closed")).toBeTruthy();
+    const shell = screen.getByRole("region", { name: "Workspace shell" });
+    expect(shell.getAttribute("class")).toContain(
+      "workspace-shell--inspector-closed",
+    );
+    expect(screen.queryByRole("complementary", { name: "Inspector" })).toBeNull();
+    expect(screen.queryByText("Inspector closed")).toBeNull();
     expect(screen.getByLabelText("query client ready").textContent).toBe(
       "ready",
     );
@@ -122,7 +127,7 @@ describe("ConsolePage route baseline", () => {
 
     expect(await screen.findByText("Narrative Workspace")).toBeTruthy();
     expect(await screen.findByText("Default delivery")).toBeTruthy();
-    expect(screen.getByText("Inspector closed")).toBeTruthy();
+    expect(screen.queryByText("Inspector closed")).toBeNull();
     expect(screen.queryByText(/workflow surface comes online/i)).toBeNull();
     expect(screen.queryByText(/baseline/i)).toBeNull();
     expect(screen.queryByText(/feature slices/i)).toBeNull();
