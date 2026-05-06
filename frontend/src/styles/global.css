@@ -530,6 +530,7 @@ a {
 .workspace-main__scroll {
   min-height: 0;
   overflow: auto;
+  scrollbar-gutter: stable both-edges;
   padding: 24px 24px 300px;
 }
 
@@ -580,7 +581,7 @@ a {
   width: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
+  align-items: center;
   gap: 10px;
   overflow: visible;
   padding: 8px;
@@ -605,6 +606,7 @@ a {
 }
 
 .composer textarea {
+  display: block;
   width: 100%;
   min-height: 40px;
   max-height: calc(1.45em * 5 + 20px);

@@ -72,10 +72,16 @@ describe("WorkspaceShell", () => {
       /\.workspace-main__composer-dock\s*\{[^}]*position:\s*fixed;[^}]*left:\s*var\(--workspace-sidebar-width\);[^}]*right:\s*var\(--workspace-inspector-width\);/su,
     );
     expect(css).toMatch(
-      /\.composer\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto;[^}]*align-items:\s*end;[^}]*overflow:\s*visible;/su,
+      /\.workspace-main__scroll\s*\{[^}]*scrollbar-gutter:\s*stable\s+both-edges;/su,
+    );
+    expect(css).toMatch(
+      /\.composer\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto;[^}]*align-items:\s*center;[^}]*overflow:\s*visible;/su,
     );
     expect(css).toMatch(
       /\.composer\s+textarea\s*\{[^}]*min-height:\s*40px;[^}]*max-height:\s*calc\(1\.45em\s*\*\s*5\s*\+\s*20px\);[^}]*resize:\s*none;[^}]*overflow-y:\s*auto;/su,
+    );
+    expect(css).toMatch(
+      /\.composer\s+textarea\s*\{[^}]*display:\s*block;/su,
     );
     expect(css).toMatch(
       /\.composer__primary-actions\s+\.workspace-button\s*\{[^}]*width:\s*auto;[^}]*min-height:\s*40px;/su,
