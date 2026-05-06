@@ -46,6 +46,8 @@ type CapabilityDraft = {
   supportsNativeReasoning: boolean;
 };
 
+const MASKED_API_KEY_INPUT = "*************";
+
 const providerTemplates: ProviderTemplate[] = [
   {
     templateId: "volcengine",
@@ -414,6 +416,11 @@ function ProviderCard({
                 placeholder="sk-..."
                 type="password"
                 value={draft.apiKeyInput}
+                onFocus={(event) => {
+                  if (event.currentTarget.value === MASKED_API_KEY_INPUT) {
+                    event.currentTarget.select();
+                  }
+                }}
                 onChange={(event) =>
                   updateDraft({
                     apiKeyInput: event.target.value,
@@ -615,9 +622,7 @@ function providerToWriteRequest(
     display_name: draft.displayName.trim() || provider.display_name,
     protocol_type: provider.protocol_type,
     base_url: draft.baseUrl.trim(),
-    api_key_ref: draft.apiKeyTouched
-      ? draft.apiKeyInput.trim() || null
-      : provider.api_key_ref,
+    api_key_ref: apiKeyRefForWrite(provider, draft),
     default_model_id: defaultModel,
     supported_model_ids: models,
     is_enabled: draft.isEnabled,
@@ -635,7 +640,7 @@ function createProviderDraft(provider: ProviderRead): ProviderDraft {
   return {
     displayName: provider.display_name,
     baseUrl: provider.base_url,
-    apiKeyInput: "",
+    apiKeyInput: provider.api_key_ref ? MASKED_API_KEY_INPUT : "",
     apiKeyTouched: false,
     supportedModels: provider.supported_model_ids.join(", "),
     defaultModel: provider.default_model_id,
@@ -647,6 +652,16 @@ function createProviderDraft(provider: ProviderRead): ProviderDraft {
       ]),
     ),
   };
+}
+
+function apiKeyRefForWrite(
+  provider: ProviderRead,
+  draft: ProviderDraft,
+): string | null {
+  if (!draft.apiKeyTouched || draft.apiKeyInput === MASKED_API_KEY_INPUT) {
+    return provider.api_key_ref;
+  }
+  return draft.apiKeyInput.trim() || null;
 }
 
 function capabilityForModel(

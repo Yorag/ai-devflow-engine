@@ -698,6 +698,105 @@ describe("SettingsModal", () => {
     expect(within(dialog).getByText("No providers added")).toBeTruthy();
   });
 
+  it("shows configured provider API keys as editable masked values without submitting the mask", async () => {
+    const project = createSettingsProject();
+    const calls: Array<{
+      path: string;
+      method: string;
+      body: ProviderWriteRequest | null;
+    }> = [];
+    let providers: ProviderRead[] = [
+      createProvider({
+        provider_id: "provider-custom-openai",
+        display_name: "OpenAI Completions",
+        provider_source: "custom",
+        protocol_type: "openai_completions_compatible",
+        base_url: "https://api.openai.com/v1",
+        api_key_ref: "[configured:api_key]",
+        default_model_id: "gpt-4.1",
+        supported_model_ids: ["gpt-4.1"],
+        runtime_capabilities: [createCapabilities({ model_id: "gpt-4.1" })],
+      }),
+    ];
+
+    renderSettingsModalWithRequest(project, async (input, init) => {
+      const path = normalizePath(input);
+
+      if (path.endsWith("/providers") && (init?.method ?? "GET") === "GET") {
+        return jsonResponse(providers);
+      }
+
+      if (
+        path.endsWith("/providers/provider-custom-openai") &&
+        init?.method === "PATCH"
+      ) {
+        const body = JSON.parse(String(init.body)) as ProviderWriteRequest;
+        calls.push({ path, method: "PATCH", body });
+        providers = [
+          {
+            ...providers[0],
+            ...body,
+            display_name: body.display_name ?? providers[0].display_name,
+            runtime_capabilities: body.runtime_capabilities.map((capability) =>
+              createCapabilities(capability),
+            ),
+          },
+        ];
+        return jsonResponse(providers[0]);
+      }
+
+      if (path.endsWith("/delivery-channel")) {
+        return jsonResponse(createDeliveryChannel(project.project_id));
+      }
+
+      return jsonResponse([]);
+    });
+
+    const dialog = screen.getByRole("dialog", { name: "Settings" });
+    fireEvent.click(within(dialog).getByRole("tab", { name: "模型提供商" }));
+    const card = await within(dialog).findByRole("article", {
+      name: "OpenAI Completions",
+    });
+    fireEvent.click(within(card).getByRole("button", { name: "Configure" }));
+
+    const apiKeyInput = within(card).getByLabelText("API key");
+    expect(apiKeyInput).toHaveProperty("value", "*************");
+
+    fireEvent.click(within(card).getByRole("button", { name: "OpenAI Completions" }));
+    fireEvent.change(within(card).getByLabelText("Provider name"), {
+      target: { value: "Team OpenAI Gateway" },
+    });
+    fireEvent.click(within(card).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    expect(calls[0].body?.api_key_ref).toBe("[configured:api_key]");
+    expect(calls[0].body?.api_key_ref).not.toBe("*************");
+
+    const renamedCard = await within(dialog).findByRole("article", {
+      name: "Team OpenAI Gateway",
+    });
+    expect(within(renamedCard).getByLabelText("API key")).toHaveProperty(
+      "value",
+      "*************",
+    );
+
+    fireEvent.change(within(renamedCard).getByLabelText("API key"), {
+      target: { value: "sk-openai-rotated-key" },
+    });
+    expect(within(renamedCard).getByLabelText("API key")).toHaveProperty(
+      "value",
+      "sk-openai-rotated-key",
+    );
+    fireEvent.click(within(renamedCard).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(calls).toHaveLength(2);
+    });
+    expect(calls[1].body?.api_key_ref).toBe("sk-openai-rotated-key");
+  });
+
   it("shows provider configuration with only user-visible fields", async () => {
     renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
@@ -721,6 +820,10 @@ describe("SettingsModal", () => {
     expect(within(providerCard).getByLabelText("API key")).toHaveProperty(
       "placeholder",
       "sk-...",
+    );
+    expect(within(providerCard).getByLabelText("API key")).toHaveProperty(
+      "value",
+      "*************",
     );
     expect(within(providerCard).getByLabelText("Supported models")).toHaveProperty(
       "placeholder",
@@ -848,7 +951,10 @@ describe("SettingsModal", () => {
     expect(
       await within(dialog).findByDisplayValue("https://provider.initial.test/v1"),
     ).toBeTruthy();
-    expect(within(dialog).getByLabelText("API key")).toHaveProperty("value", "");
+    expect(within(dialog).getByLabelText("API key")).toHaveProperty(
+      "value",
+      "*************",
+    );
     expect(within(dialog).queryByText("[configured:api_key]")).toBeNull();
     expect(within(dialog).getByLabelText("Default model")).toHaveProperty(
       "value",
@@ -886,7 +992,10 @@ describe("SettingsModal", () => {
         "https://provider.fresh.test/v1",
       );
     });
-    expect(within(dialog).getByLabelText("API key")).toHaveProperty("value", "");
+    expect(within(dialog).getByLabelText("API key")).toHaveProperty(
+      "value",
+      "*************",
+    );
     expect(within(dialog).queryByText("[configured:api_key]")).toBeNull();
     expect(within(dialog).getByLabelText("Default model")).toHaveProperty(
       "value",
