@@ -1,6 +1,6 @@
 ---
 prompt_id: runtime_instructions
-prompt_version: 2026-05-06.2
+prompt_version: 2026-05-06.3
 prompt_type: runtime_instructions
 authority_level: system_trusted
 model_call_type: stage_execution
@@ -64,6 +64,30 @@ Use the fewest tokens that still satisfy the response_schema and downstream hand
 ## Structured Output
 
 Return the artifact required by response_schema. Do not add fields outside the schema, omit required fields, rename fields, change value types, or replace the required structured artifact with informal prose. If a stage cannot complete safely, use the schema-defined failure, blocked, or clarification shape. When the schema asks for evidence, include only evidence actually present in the rendered context or tool results.
+
+AgentDecision outputs use a flat payload shape. Put `decision_type` and every field required by that decision type in the same top-level JSON object. Do not nest the payload under keys such as `fail_stage`, `structured_repair`, `clarification`, `stage_artifact`, or `retry`. Every required array field must contain at least one non-empty string; do not return an empty array for `evidence_refs`, `incomplete_items`, `missing_facts`, `fields_to_update`, `revised_plan_steps`, `risk_categories`, or `expected_side_effects`.
+
+For example, a failure decision must be:
+
+```json
+{
+  "decision_type": "fail_stage",
+  "failure_reason": "specific blocker",
+  "evidence_refs": ["context-ref-or-log-ref"],
+  "incomplete_items": ["item that could not be completed"],
+  "user_visible_summary": "short user-facing summary"
+}
+```
+
+It must not be:
+
+```json
+{
+  "fail_stage": {
+    "failure_reason": "specific blocker"
+  }
+}
+```
 
 ## No Raw Chain-of-Thought
 

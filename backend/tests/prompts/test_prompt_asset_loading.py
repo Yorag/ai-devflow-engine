@@ -331,13 +331,14 @@ def test_runtime_instructions_define_real_development_boundaries() -> None:
     asset = PromptRegistry.load_builtin_assets().get("runtime_instructions")
     body = asset.sections[0].body
 
-    assert asset.prompt_version == "2026-05-06.2"
+    assert asset.prompt_version == "2026-05-06.3"
     assert "Authority Order" in body
     assert "stage-contract-rendered controls, including response_schema" in body
     assert "Untrusted Context" in body
     assert "Tool And Side Effect Policy" in body
     assert "No Raw Chain-of-Thought" in body
     assert "response_schema" in body
+    assert "AgentDecision outputs use a flat payload shape" in body
 
 
 def test_load_builtin_assets_rejects_missing_front_matter(tmp_path: Path) -> None:

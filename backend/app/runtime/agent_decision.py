@@ -134,6 +134,32 @@ class AgentDecisionType(StrEnum):
 
 
 def agent_decision_response_schema() -> JsonObject:
+    string_array_schema: JsonObject = {
+        "type": "array",
+        "items": {"type": "string", "minLength": 1},
+        "minItems": 1,
+    }
+    json_object_schema: JsonObject = {
+        "type": "object",
+        "additionalProperties": True,
+    }
+
+    def decision_schema(
+        decision_type: AgentDecisionType,
+        *,
+        properties: JsonObject,
+        required: list[str],
+    ) -> JsonObject:
+        return {
+            "type": "object",
+            "properties": {
+                "decision_type": {"const": decision_type.value},
+                **properties,
+            },
+            "required": ["decision_type", *required],
+            "additionalProperties": False,
+        }
+
     return {
         "title": "AgentDecision",
         "type": "object",
@@ -149,9 +175,157 @@ def agent_decision_response_schema() -> JsonObject:
                     AgentDecisionType.FAIL_STAGE.value,
                 ],
             },
+            "tool_name": {"type": "string", "minLength": 1},
+            "command_summary": {"type": "string", "minLength": 1},
+            "target_resource": {"type": "string", "minLength": 1},
+            "risk_level": {
+                "type": "string",
+                "enum": [item.value for item in ToolRiskLevel],
+            },
+            "risk_categories": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": [item.value for item in ToolRiskCategory],
+                },
+                "minItems": 1,
+            },
+            "expected_side_effects": string_array_schema,
+            "alternative_path_summary": {"type": "string", "minLength": 1},
+            "input_payload": json_object_schema,
+            "artifact_type": {"type": "string", "minLength": 1},
+            "artifact_payload": json_object_schema,
+            "evidence_refs": string_array_schema,
+            "risk_summary": json_object_schema,
+            "failure_summary": json_object_schema,
+            "question": {"type": "string", "minLength": 1},
+            "missing_facts": string_array_schema,
+            "impact_scope": {"type": "string", "minLength": 1},
+            "related_refs": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 1},
+            },
+            "fields_to_update": string_array_schema,
+            "parse_error": {"type": "string", "minLength": 1},
+            "repair_instruction": {"type": "string", "minLength": 1},
+            "invalid_output_ref": {"type": "string", "minLength": 1},
+            "reason": {"type": "string", "minLength": 1},
+            "revised_plan_steps": string_array_schema,
+            "failure_reason": {"type": "string", "minLength": 1},
+            "incomplete_items": string_array_schema,
+            "user_visible_summary": {"type": "string", "minLength": 1},
         },
         "required": ["decision_type"],
-        "additionalProperties": True,
+        "additionalProperties": False,
+        "oneOf": [
+            decision_schema(
+                AgentDecisionType.REQUEST_TOOL_CONFIRMATION,
+                properties={
+                    "tool_name": {"type": "string", "minLength": 1},
+                    "command_summary": {"type": "string", "minLength": 1},
+                    "target_resource": {"type": "string", "minLength": 1},
+                    "risk_level": {
+                        "type": "string",
+                        "enum": [item.value for item in ToolRiskLevel],
+                    },
+                    "risk_categories": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [item.value for item in ToolRiskCategory],
+                        },
+                        "minItems": 1,
+                    },
+                    "expected_side_effects": string_array_schema,
+                    "alternative_path_summary": {"type": "string", "minLength": 1},
+                    "input_payload": json_object_schema,
+                },
+                required=[
+                    "tool_name",
+                    "command_summary",
+                    "target_resource",
+                    "risk_level",
+                    "risk_categories",
+                    "expected_side_effects",
+                    "alternative_path_summary",
+                ],
+            ),
+            decision_schema(
+                AgentDecisionType.SUBMIT_STAGE_ARTIFACT,
+                properties={
+                    "artifact_type": {"type": "string", "minLength": 1},
+                    "artifact_payload": json_object_schema,
+                    "evidence_refs": string_array_schema,
+                    "risk_summary": json_object_schema,
+                    "failure_summary": json_object_schema,
+                },
+                required=[
+                    "artifact_type",
+                    "artifact_payload",
+                    "evidence_refs",
+                ],
+            ),
+            decision_schema(
+                AgentDecisionType.REQUEST_CLARIFICATION,
+                properties={
+                    "question": {"type": "string", "minLength": 1},
+                    "missing_facts": string_array_schema,
+                    "impact_scope": {"type": "string", "minLength": 1},
+                    "related_refs": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 1},
+                    },
+                    "fields_to_update": string_array_schema,
+                },
+                required=[
+                    "question",
+                    "missing_facts",
+                    "impact_scope",
+                    "fields_to_update",
+                ],
+            ),
+            decision_schema(
+                AgentDecisionType.REPAIR_STRUCTURED_OUTPUT,
+                properties={
+                    "parse_error": {"type": "string", "minLength": 1},
+                    "repair_instruction": {"type": "string", "minLength": 1},
+                    "invalid_output_ref": {"type": "string", "minLength": 1},
+                },
+                required=[
+                    "parse_error",
+                    "repair_instruction",
+                    "invalid_output_ref",
+                ],
+            ),
+            decision_schema(
+                AgentDecisionType.RETRY_WITH_REVISED_PLAN,
+                properties={
+                    "reason": {"type": "string", "minLength": 1},
+                    "revised_plan_steps": string_array_schema,
+                    "evidence_refs": string_array_schema,
+                },
+                required=[
+                    "reason",
+                    "revised_plan_steps",
+                    "evidence_refs",
+                ],
+            ),
+            decision_schema(
+                AgentDecisionType.FAIL_STAGE,
+                properties={
+                    "failure_reason": {"type": "string", "minLength": 1},
+                    "evidence_refs": string_array_schema,
+                    "incomplete_items": string_array_schema,
+                    "user_visible_summary": {"type": "string", "minLength": 1},
+                },
+                required=[
+                    "failure_reason",
+                    "evidence_refs",
+                    "incomplete_items",
+                    "user_visible_summary",
+                ],
+            ),
+        ],
     }
 
 
