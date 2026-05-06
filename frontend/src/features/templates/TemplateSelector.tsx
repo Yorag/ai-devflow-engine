@@ -18,7 +18,10 @@ export function TemplateSelector({
   const disabledIds = new Set(disabledTemplateIds);
 
   return (
-    <fieldset className="template-selector" aria-label="Pipeline templates">
+    <fieldset
+      className="template-selector template-selector--compact"
+      aria-label="Pipeline templates"
+    >
       <legend>Templates</legend>
       <div className="template-selector__options">
         {templates.map((template) => {

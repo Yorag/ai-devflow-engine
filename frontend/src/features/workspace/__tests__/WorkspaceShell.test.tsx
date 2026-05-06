@@ -10,6 +10,8 @@ import type { ApiRequestOptions } from "../../../api/client";
 import { terminateRun } from "../../../api/runs";
 import type {
   ExecutionNodeProjection,
+  PipelineTemplateRead,
+  PipelineTemplateWriteRequest,
   ProviderRead,
   ProjectRead,
   SessionRead,
@@ -20,6 +22,7 @@ import { createQueryClient } from "../../../app/query-client";
 import { renderWithAppProviders } from "../../../app/test-utils";
 import {
   mockFeedEntriesByType,
+  mockPipelineTemplates,
   mockProviderList,
   mockSessionWorkspaces,
   mockStageInspectorProjection,
@@ -68,8 +71,15 @@ describe("WorkspaceShell", () => {
     expect(css).toMatch(
       /\.workspace-main__composer-dock\s*\{[^}]*position:\s*fixed;[^}]*left:\s*var\(--workspace-sidebar-width\);[^}]*right:\s*var\(--workspace-inspector-width\);/su,
     );
-    expect(css).toMatch(/\.composer\s*\{[^}]*max-height:\s*min\(42vh,\s*260px\);[^}]*overflow:\s*auto;/su);
-    expect(css).toMatch(/\.composer\s+textarea\s*\{[^}]*resize:\s*none;/su);
+    expect(css).toMatch(
+      /\.composer\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto;[^}]*align-items:\s*end;[^}]*overflow:\s*visible;/su,
+    );
+    expect(css).toMatch(
+      /\.composer\s+textarea\s*\{[^}]*min-height:\s*40px;[^}]*max-height:\s*calc\(1\.45em\s*\*\s*5\s*\+\s*20px\);[^}]*resize:\s*none;[^}]*overflow-y:\s*auto;/su,
+    );
+    expect(css).toMatch(
+      /\.composer__primary-actions\s+\.workspace-button\s*\{[^}]*width:\s*auto;[^}]*min-height:\s*40px;/su,
+    );
     expect(css).not.toMatch(
       /@media\s*\(max-width:\s*900px\)[\s\S]*\.workspace-shell,\s*\.workspace-shell--inspector-open\s*\{[^}]*height:\s*auto;/u,
     );
@@ -715,20 +725,208 @@ describe("WorkspaceShell", () => {
     const editor = await screen.findByRole("region", { name: "Template editor" });
     expect(within(editor).getByText("Run configuration")).toBeTruthy();
     expect(
-      within(editor).getByLabelText("requirement_analysis system prompt"),
+      within(editor).getByLabelText("Requirement Analysis system prompt"),
     ).toBeTruthy();
-    expect(within(editor).getByLabelText("requirement_analysis provider")).toBeTruthy();
+    expect(within(editor).getByLabelText("Requirement Analysis provider")).toBeTruthy();
 
-    fireEvent.change(within(editor).getByLabelText("requirement_analysis system prompt"), {
+    fireEvent.change(within(editor).getByLabelText("Requirement Analysis system prompt"), {
       target: { value: "Clarify only when missing facts block implementation." },
     });
 
-    expect(within(editor).getByText(/Save this edited system template/u)).toBeTruthy();
+    expect(within(editor).getByText(/Unsaved edits will not affect/u)).toBeTruthy();
     expect(
-      within(editor).getByRole("button", { name: "Save as user template" }),
+      within(editor).getByRole("button", { name: "Save template" }),
     ).toBeTruthy();
     expect(document.body.textContent ?? "").not.toContain("DeliveryChannel");
     expect(document.body.textContent ?? "").not.toContain("deterministic test runtime");
+  });
+
+  it("saves a system template as a user template and binds it to the draft session", async () => {
+    const baseFetcher = createMockApiFetcher();
+    const saveAsBodies: PipelineTemplateWriteRequest[] = [];
+    let sessionTemplateBody: unknown = null;
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const path = normalizeTestPath(input);
+        const method = init?.method ?? "GET";
+
+        if (
+          method === "POST" &&
+          path === "/api/pipeline-templates/template-feature/save-as"
+        ) {
+          const saveAsBody =
+            typeof init?.body === "string"
+              ? (JSON.parse(init.body) as PipelineTemplateWriteRequest)
+              : null;
+          if (!saveAsBody) {
+            return jsonTestResponse({ message: "Missing template body" }, 400);
+          }
+          saveAsBodies.push(saveAsBody);
+          return jsonTestResponse(
+            {
+              ...mockPipelineTemplates.find(
+                (template) => template.template_id === "template-feature",
+              )!,
+              ...saveAsBody,
+              template_id: "template-user-saved-stage",
+              template_source: "user_template",
+              base_template_id: "template-feature",
+              created_at: "2026-05-05T08:30:00.000Z",
+              updated_at: "2026-05-05T08:30:00.000Z",
+            },
+            201,
+          );
+        }
+
+        if (method === "PUT" && path === "/api/sessions/session-draft/template") {
+          sessionTemplateBody =
+            typeof init?.body === "string" ? JSON.parse(init.body) : null;
+          return jsonTestResponse({
+            ...mockSessionWorkspaces["session-draft"].session,
+            selected_template_id: "template-user-saved-stage",
+          });
+        }
+
+        return baseFetcher(input, init);
+      },
+    };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    const editor = await screen.findByRole("region", { name: "Template editor" });
+    fireEvent.change(
+      within(editor).getByLabelText("Requirement Analysis system prompt"),
+      {
+        target: { value: "Clarify the saved requirement before design." },
+      },
+    );
+    fireEvent.click(within(editor).getByRole("tab", { name: "Solution Design" }));
+    fireEvent.change(within(editor).getByLabelText("Solution Design system prompt"), {
+      target: { value: "Design the saved stage only." },
+    });
+    fireEvent.click(within(editor).getByRole("button", { name: "Save template" }));
+
+    await waitFor(() => {
+      expect(sessionTemplateBody).toEqual({
+        template_id: "template-user-saved-stage",
+      });
+    });
+    expect(saveAsBodies).toHaveLength(1);
+    expect(saveAsBodies[0].stage_role_bindings).toHaveLength(6);
+    expect(saveAsBodies[0].stage_role_bindings).toEqual(
+      mockPipelineTemplates
+        .find((template) => template.template_id === "template-feature")!
+        .stage_role_bindings.map((binding) =>
+          binding.stage_type === "solution_design"
+            ? { ...binding, system_prompt: "Design the saved stage only." }
+            : binding.stage_type === "requirement_analysis"
+              ? {
+                  ...binding,
+                  system_prompt: "Clarify the saved requirement before design.",
+                }
+            : binding,
+        ),
+    );
+  });
+
+  it("hides the template panel after saving and binding while Composer stays ready", async () => {
+    renderWithAppProviders(
+      <ConsolePage request={{ fetcher: createMockApiFetcher() }} />,
+    );
+
+    const editor = await screen.findByRole("region", { name: "Template editor" });
+    fireEvent.change(within(editor).getByLabelText("Requirement Analysis system prompt"), {
+      target: { value: "Clarify saved requirements before implementation." },
+    });
+    fireEvent.click(within(editor).getByRole("button", { name: "Save template" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("region", { name: "Template editor" })).toBeNull();
+      expect(
+        screen.queryByRole("region", { name: "Template empty state" }),
+      ).toBeNull();
+    });
+    expect(screen.getByRole("form", { name: "Composer" })).toBeTruthy();
+    expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", false);
+  });
+
+  it("deletes a user template through the template API before selecting fallback", async () => {
+    const userTemplate: PipelineTemplateRead = {
+      ...mockPipelineTemplates[1],
+      template_id: "template-user-shell-delete",
+      template_source: "user_template",
+      base_template_id: "template-feature",
+      name: "Shell user template",
+    };
+    const draftSession: SessionRead = {
+      ...mockSessionWorkspaces["session-draft"].session,
+      selected_template_id: userTemplate.template_id,
+    };
+    const draftWorkspace: SessionWorkspaceProjection = {
+      ...mockSessionWorkspaces["session-draft"],
+      session: draftSession,
+    };
+    const baseFetcher = createMockApiFetcher();
+    const deletedTemplateIds: string[] = [];
+    const templateUpdates: unknown[] = [];
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const path = normalizeTestPath(input);
+        const method = init?.method ?? "GET";
+
+        if (
+          method === "GET" &&
+          path === "/api/projects/project-default/sessions"
+        ) {
+          return jsonTestResponse(
+            Object.values(mockSessionWorkspaces)
+              .map((workspace) => workspace.session)
+              .map((session) =>
+                session.session_id === "session-draft" ? draftSession : session,
+              )
+              .filter((session) => session.project_id === "project-default"),
+          );
+        }
+
+        if (method === "GET" && path === "/api/pipeline-templates") {
+          return jsonTestResponse([...mockPipelineTemplates, userTemplate]);
+        }
+
+        if (method === "GET" && path === "/api/sessions/session-draft/workspace") {
+          return jsonTestResponse(draftWorkspace);
+        }
+
+        if (
+          method === "DELETE" &&
+          path === "/api/pipeline-templates/template-user-shell-delete"
+        ) {
+          deletedTemplateIds.push(userTemplate.template_id);
+          return new Response(null, { status: 204 });
+        }
+
+        if (method === "PUT" && path === "/api/sessions/session-draft/template") {
+          templateUpdates.push(
+            typeof init?.body === "string" ? JSON.parse(init.body) : null,
+          );
+          draftSession.selected_template_id = "template-feature";
+          draftWorkspace.session = draftSession;
+          return jsonTestResponse(draftSession);
+        }
+
+        return baseFetcher(input, init);
+      },
+    };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    const editor = await screen.findByRole("region", { name: "Template editor" });
+    expect(await screen.findByRole("heading", { name: "Shell user template" })).toBeTruthy();
+    fireEvent.click(within(editor).getByRole("button", { name: "Delete template" }));
+
+    await waitFor(() => {
+      expect(deletedTemplateIds).toEqual(["template-user-shell-delete"]);
+      expect(templateUpdates).toEqual([{ template_id: "template-feature" }]);
+    });
   });
 
   it("initializes the workspace store from the loaded session snapshot", async () => {
@@ -1269,7 +1467,7 @@ describe("WorkspaceShell", () => {
     expect(screen.getByLabelText("当前输入")).toBeTruthy();
   });
 
-  it("blocks first requirement input when the selected template has unavailable providers", async () => {
+  it("keeps first requirement input available when no provider is configured", async () => {
     const baseFetcher = createMockApiFetcher();
     const request: ApiRequestOptions = {
       fetcher: async (input, init) => {
@@ -1286,21 +1484,18 @@ describe("WorkspaceShell", () => {
 
     renderWithAppProviders(<ConsolePage request={request} />);
 
-    await waitFor(() => {
-      expect(
-        screen.getAllByText(
-          "This template references unavailable providers: provider-deepseek.",
-        ),
-      ).toHaveLength(2);
-    });
-    expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", true);
+    expect(await screen.findByText("No provider configured.")).toBeTruthy();
+    expect(document.body.textContent ?? "").not.toContain("provider-deepseek");
+    const input = screen.getByLabelText("当前输入");
+    expect(input).toHaveProperty("disabled", false);
+    fireEvent.change(input, { target: { value: "Start with the bound template." } });
     expect(screen.getByRole("button", { name: "发送" })).toHaveProperty(
       "disabled",
-      true,
+      false,
     );
   });
 
-  it("blocks first requirement input when configured providers do not include the selected template binding", async () => {
+  it("keeps first requirement input available when configured providers do not include the selected template binding", async () => {
     const baseFetcher = createMockApiFetcher();
     const mimoProvider: ProviderRead = {
       ...mockProviderList[2],
@@ -1331,7 +1526,7 @@ describe("WorkspaceShell", () => {
     renderWithAppProviders(<ConsolePage request={request} />);
 
     const editor = await screen.findByRole("region", { name: "Template editor" });
-    const providerSelect = within(editor).getByLabelText("requirement_analysis provider");
+    const providerSelect = within(editor).getByLabelText("Requirement Analysis provider");
     await waitFor(() => {
       expect(providerSelect).toHaveProperty("value", "provider-deepseek");
     });
@@ -1340,21 +1535,110 @@ describe("WorkspaceShell", () => {
     ).toBeTruthy();
     expect(
       within(providerSelect).getByRole("option", {
-        name: "Unavailable provider: provider-deepseek",
+        name: "Unavailable provider",
       }),
     ).toBeTruthy();
     expect(
       screen.getAllByText(
-        "This template references unavailable providers: provider-deepseek.",
+        "This template references unavailable providers.",
       ),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
+    expect(document.body.textContent ?? "").not.toContain("provider-deepseek");
 
     const input = screen.getByLabelText("当前输入");
-    expect(input).toHaveProperty("disabled", true);
+    expect(input).toHaveProperty("disabled", false);
+    fireEvent.change(input, { target: { value: "Send with current template." } });
     expect(screen.getByRole("button", { name: "发送" })).toHaveProperty(
       "disabled",
-      true,
+      false,
     );
+  });
+
+  it("sends a draft requirement without persisting unsaved template edits", async () => {
+    const baseFetcher = createMockApiFetcher();
+    let messageBody: unknown = null;
+    let templateSaveCalls = 0;
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const path = normalizeTestPath(input);
+        const method = init?.method ?? "GET";
+
+        if (method === "POST" && path === "/api/sessions/session-draft/messages") {
+          messageBody = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+        }
+
+        if (
+          path.startsWith("/api/pipeline-templates/") &&
+          (method === "POST" || method === "PATCH")
+        ) {
+          templateSaveCalls += 1;
+        }
+
+        return baseFetcher(input, init);
+      },
+    };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    const editor = await screen.findByRole("region", { name: "Template editor" });
+    fireEvent.change(within(editor).getByLabelText("Requirement Analysis system prompt"), {
+      target: { value: "This unsaved edit should not be saved before sending." },
+    });
+    expect(within(editor).getByText(/Unsaved edits will not affect/u)).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("当前输入"), {
+      target: { value: "Start from the currently selected template." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => {
+      expect(messageBody).toEqual({
+        message_type: "new_requirement",
+        content: "Start from the currently selected template.",
+      });
+    });
+    expect(templateSaveCalls).toBe(0);
+  });
+
+  it("surfaces draft Composer submit failures without hiding the editable input", async () => {
+    const baseFetcher = createMockApiFetcher();
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const path = normalizeTestPath(input);
+        const method = init?.method ?? "GET";
+
+        if (method === "POST" && path === "/api/sessions/session-draft/messages") {
+          return jsonTestResponse(
+            {
+              error_code: "validation_error",
+              message: "Provider is unavailable for the selected template.",
+              request_id: "req-workspace-provider",
+            },
+            422,
+          );
+        }
+
+        return baseFetcher(input, init);
+      },
+    };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    const input = await screen.findByLabelText("当前输入");
+    fireEvent.change(input, {
+      target: { value: "Start with invalid provider configuration." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(
+      await screen.findByText("Provider is unavailable for the selected template."),
+    ).toBeTruthy();
+    expect(screen.getByText("Request req-workspace-provider")).toBeTruthy();
+    expect(screen.getByLabelText("当前输入")).toHaveProperty(
+      "value",
+      "Start with invalid provider configuration.",
+    );
+    expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", false);
   });
 
   it("keeps Composer send-enabled for waiting clarification sessions", async () => {
@@ -1367,8 +1651,8 @@ describe("WorkspaceShell", () => {
     );
 
     expect(await screen.findByRole("button", { name: "发送" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "暂停当前运行" })).toBeTruthy();
-    expect(screen.getByText(/等待你的澄清回复/u)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "暂停当前运行" })).toBeNull();
+    expect(screen.queryByText(/等待你的澄清回复/u)).toBeNull();
   });
 
   it("resets unsent Composer input when the selected session changes", async () => {

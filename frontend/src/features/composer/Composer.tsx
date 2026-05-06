@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import type { ApiRequestOptions } from "../../api/client";
@@ -10,9 +10,8 @@ import type {
   SessionRead,
   StageType,
 } from "../../api/types";
-import { getComposerHelperText } from "./composer-mode";
+import { ErrorState } from "../errors/ErrorState";
 import { resolveComposerState } from "./composer-state";
-import { RunControlButtons } from "./RunControlButtons";
 
 type ComposerProps = {
   session: SessionRead | null;
@@ -21,7 +20,6 @@ type ComposerProps = {
   isBusy?: boolean;
   onBusyChange?: (busy: boolean) => void;
   request?: ApiRequestOptions;
-  startBlockedReason?: string | null;
 };
 
 export function Composer({
@@ -31,23 +29,36 @@ export function Composer({
   isBusy = false,
   onBusyChange,
   request,
-  startBlockedReason = null,
 }: ComposerProps): JSX.Element {
   const queryClient = useQueryClient();
   const [value, setValue] = useState("");
+  const [submitError, setSubmitError] = useState<unknown | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const [isSubmitting, setSubmitting] = useState(false);
-  const [isNestedActionBusy, setNestedActionBusy] = useState(false);
   const resolved = resolveComposerState(composerState, currentStageType);
   const isSharedBusy = isBusy;
-  const isActionBusy = isSubmitting || isSharedBusy || isNestedActionBusy;
-  const isStartBlocked = Boolean(
-    startBlockedReason && resolved.messageType === "new_requirement",
-  );
-  const canSend = Boolean(session) && resolved.canSend && !isStartBlocked;
+  const isActionBusy = isSubmitting || isSharedBusy;
+  const canSend = Boolean(session) && resolved.canSend;
 
   useEffect(() => {
     setValue("");
+    setSubmitError(null);
   }, [session?.session_id]);
+
+  useEffect(() => {
+    resizeTextarea(inputRef.current);
+  }, [value]);
+
+  function resizeTextarea(textarea: HTMLTextAreaElement | null) {
+    if (!textarea) {
+      return;
+    }
+
+    textarea.style.height = "auto";
+    if (textarea.value) {
+      textarea.style.height = `${textarea.scrollHeight}px`;
+    }
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -63,6 +74,7 @@ export function Composer({
 
     setSubmitting(true);
     onBusyChange?.(true);
+    setSubmitError(null);
     try {
       await appendSessionMessage(
         session.session_id,
@@ -81,6 +93,8 @@ export function Composer({
         queryKey: apiQueryKeys.projectSessions(session.project_id),
         refetchType: "all",
       });
+    } catch (error) {
+      setSubmitError(error);
     } finally {
       setSubmitting(false);
       onBusyChange?.(false);
@@ -122,7 +136,7 @@ export function Composer({
 
   const primaryButtonDisabled =
     resolved.lifecycle === "send"
-      ? !value.trim() || isStartBlocked || isActionBusy
+      ? !value.trim() || isActionBusy
       : resolved.lifecycle === "disabled" ||
         !composerState?.bound_run_id ||
         isActionBusy;
@@ -137,49 +151,33 @@ export function Composer({
           : resolved.actionLabel;
 
   return (
-    <form className="composer" aria-label="Composer" onSubmit={handleSubmit}>
+    <form
+      className="composer composer--compact"
+      aria-label="Composer"
+      onSubmit={handleSubmit}
+    >
       <div className="composer__body">
         <label className="composer__field" htmlFor="workspace-composer-input">
-          <span className="composer__label">当前输入</span>
+          <span className="composer__label sr-only">当前输入</span>
           <textarea
+            ref={inputRef}
             id="workspace-composer-input"
             aria-label="当前输入"
             value={value}
-            onChange={(event) => setValue(event.target.value)}
-            disabled={!resolved.inputEnabled || isStartBlocked || isActionBusy}
+            onChange={(event) => {
+              resizeTextarea(event.currentTarget);
+              setValue(event.target.value);
+            }}
+            disabled={!resolved.inputEnabled || isActionBusy}
             placeholder={
               resolved.mode === "waiting_clarification" ? "补充澄清信息" : "输入需求"
             }
-            rows={3}
+            rows={1}
           />
         </label>
-        <p className="composer__helper">
-          {isStartBlocked
-            ? startBlockedReason
-            : getComposerHelperText(composerState, currentStageType)}
-        </p>
+        {submitError ? <ErrorState error={submitError} /> : null}
       </div>
       <div className="composer__actions">
-        <span className="composer__binding">
-          {composerState?.bound_run_id
-            ? `绑定 run ${composerState.bound_run_id}`
-            : "尚未绑定 run"}
-        </span>
-        {session ? (
-          <RunControlButtons
-            projectId={session.project_id}
-            sessionId={session.session_id}
-            runId={composerState?.bound_run_id ?? null}
-            lifecycle={resolved.lifecycle}
-            secondaryActions={composerState?.secondary_actions ?? []}
-            isBusy={isActionBusy}
-            onBusyChange={(busy) => {
-              setNestedActionBusy(busy);
-              onBusyChange?.(busy);
-            }}
-            request={request}
-          />
-        ) : null}
         <div className="composer__primary-actions">
           <button
             type={resolved.lifecycle === "send" ? "submit" : "button"}

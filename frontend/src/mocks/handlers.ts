@@ -1,6 +1,8 @@
 import type { ApiRequestOptions } from "../api/client";
 import type {
   MessageFeedEntry,
+  PipelineTemplateRead,
+  PipelineTemplateWriteRequest,
   ProjectDeliveryChannelDetailProjection,
   ProjectRead,
   SessionRead,
@@ -75,6 +77,12 @@ function createMockRoutes(
   const projects = mockProjectList.map((project) => ({ ...project }));
   let sessions = mockSessionList.map((session) => ({ ...session }));
   let providers = mockProviderList.map((provider) => ({ ...provider }));
+  let templates = mockPipelineTemplates.map((template) => ({
+    ...template,
+    stage_role_bindings: template.stage_role_bindings.map((binding) => ({
+      ...binding,
+    })),
+  }));
 
   return [
     route("GET", /^\/api\/projects$/u, () => jsonResponse(projects)),
@@ -116,9 +124,73 @@ function createMockRoutes(
       );
       return jsonResponse(createdSession);
     }),
-    route("GET", /^\/api\/pipeline-templates$/u, () =>
-      jsonResponse(mockPipelineTemplates),
-    ),
+    route("GET", /^\/api\/pipeline-templates$/u, () => jsonResponse(templates)),
+    route("POST", /^\/api\/pipeline-templates\/([^/]+)\/save-as$/u, ([, templateId], init) => {
+      const sourceTemplate = templates.find(
+        (template) => template.template_id === templateId,
+      );
+      if (!sourceTemplate) {
+        return jsonResponse(mockApiError("not_found"), 404);
+      }
+      const body = readTemplateWriteRequest(init);
+      if (!body) {
+        return jsonResponse(mockApiError("validation_error"), 422);
+      }
+      const savedTemplate: PipelineTemplateRead = {
+        ...sourceTemplate,
+        ...body,
+        template_id: `template-user-${templateId}-${templates.length + 1}`,
+        template_source: "user_template",
+        base_template_id: templateId,
+        created_at: "2026-05-05T08:30:00.000Z",
+        updated_at: "2026-05-05T08:30:00.000Z",
+      };
+      templates = [...templates, savedTemplate];
+      return jsonResponse(savedTemplate, 201);
+    }),
+    route("PATCH", /^\/api\/pipeline-templates\/([^/]+)$/u, ([, templateId], init) => {
+      const existing = templates.find((template) => template.template_id === templateId);
+      if (!existing) {
+        return jsonResponse(mockApiError("not_found"), 404);
+      }
+      if (existing.template_source !== "user_template") {
+        return jsonResponse(
+          mockApiError("validation_error", {
+            message: "System templates cannot be overwritten.",
+          }),
+          409,
+        );
+      }
+      const body = readTemplateWriteRequest(init);
+      if (!body) {
+        return jsonResponse(mockApiError("validation_error"), 422);
+      }
+      const updatedTemplate: PipelineTemplateRead = {
+        ...existing,
+        ...body,
+        updated_at: "2026-05-05T08:35:00.000Z",
+      };
+      templates = templates.map((template) =>
+        template.template_id === templateId ? updatedTemplate : template,
+      );
+      return jsonResponse(updatedTemplate);
+    }),
+    route("DELETE", /^\/api\/pipeline-templates\/([^/]+)$/u, ([, templateId]) => {
+      const existing = templates.find((template) => template.template_id === templateId);
+      if (!existing) {
+        return jsonResponse(mockApiError("not_found"), 404);
+      }
+      if (existing.template_source !== "user_template") {
+        return jsonResponse(
+          mockApiError("validation_error", {
+            message: "System templates cannot be deleted.",
+          }),
+          409,
+        );
+      }
+      templates = templates.filter((template) => template.template_id !== templateId);
+      return new Response(null, { status: 204 });
+    }),
     route("GET", /^\/api\/providers$/u, () => jsonResponse(providers)),
     route("POST", /^\/api\/providers$/u, (_match, init) => {
       const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
@@ -322,7 +394,7 @@ function createMockRoutes(
       const templateId =
         body && typeof body.template_id === "string" ? body.template_id : "";
       if (
-        !mockPipelineTemplates.some((template) => template.template_id === templateId)
+        !templates.some((template) => template.template_id === templateId)
       ) {
         return jsonResponse(mockApiError("validation_error"), 422);
       }
@@ -454,6 +526,38 @@ function route(
   respond: MockRoute["respond"],
 ): MockRoute {
   return { method, pattern, respond };
+}
+
+function readTemplateWriteRequest(
+  init?: RequestInit,
+): PipelineTemplateWriteRequest | null {
+  const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+  if (!body || typeof body !== "object") {
+    return null;
+  }
+
+  const candidate = body as Partial<PipelineTemplateWriteRequest>;
+  if (
+    typeof candidate.name !== "string" ||
+    !Array.isArray(candidate.stage_role_bindings) ||
+    typeof candidate.auto_regression_enabled !== "boolean" ||
+    typeof candidate.max_auto_regression_retries !== "number"
+  ) {
+    return null;
+  }
+
+  return {
+    name: candidate.name,
+    description:
+      typeof candidate.description === "string" || candidate.description === null
+        ? candidate.description
+        : null,
+    stage_role_bindings: candidate.stage_role_bindings.map((binding) => ({
+      ...binding,
+    })),
+    auto_regression_enabled: candidate.auto_regression_enabled,
+    max_auto_regression_retries: candidate.max_auto_regression_retries,
+  };
 }
 
 function mockProviderApiKeyProjection(

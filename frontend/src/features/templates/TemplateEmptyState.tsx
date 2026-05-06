@@ -4,7 +4,6 @@ import type {
   PipelineTemplateRead,
   ProviderRead,
   SessionRead,
-  StageType,
 } from "../../api/types";
 import { TemplateEditor } from "./TemplateEditor";
 import { TemplateSelector } from "./TemplateSelector";
@@ -23,24 +22,18 @@ type TemplateEmptyStateProps = {
   selectedTemplateId: string;
   onTemplateChange: (templateId: string) => void;
   isTemplateChangeBusy?: boolean;
-  onTemplateSaveAs?: (template: PipelineTemplateRead) => void;
-  onTemplateOverwrite?: (template: PipelineTemplateRead) => void;
-  onTemplateDelete?: (templateId: string) => void;
+  onTemplateSaveAs?: (
+    template: PipelineTemplateRead,
+    sourceTemplate: PipelineTemplateRead,
+    draft: TemplateDraftState,
+  ) => unknown | Promise<unknown>;
+  onTemplateOverwrite?: (
+    template: PipelineTemplateRead,
+    sourceTemplate: PipelineTemplateRead,
+    draft: TemplateDraftState,
+  ) => unknown | Promise<unknown>;
+  onTemplateDelete?: (templateId: string) => void | Promise<void>;
 };
-
-const stageLabels: Record<StageType, string> = {
-  requirement_analysis: "Requirement Analysis",
-  solution_design: "Solution Design",
-  code_generation: "Code Generation",
-  test_generation_execution: "Test Generation & Execution",
-  code_review: "Code Review",
-  delivery_integration: "Delivery Integration",
-};
-
-const approvalLabels = {
-  solution_design_approval: "Solution Design approval",
-  code_review_approval: "Code Review approval",
-} as const;
 
 export function TemplateEmptyState({
   session,
@@ -55,6 +48,8 @@ export function TemplateEmptyState({
 }: TemplateEmptyStateProps): JSX.Element {
   const [localTemplates, setLocalTemplates] = useState(templates);
   const [localCreatedTemplateIds, setLocalCreatedTemplateIds] = useState<string[]>([]);
+  const [templateSaveError, setTemplateSaveError] = useState<unknown | null>(null);
+  const [isTemplateSaveBusy, setTemplateSaveBusy] = useState(false);
   const selectedTemplate =
     localTemplates.find((template) => template.template_id === selectedTemplateId) ??
     localTemplates[0] ??
@@ -89,19 +84,44 @@ export function TemplateEmptyState({
     }
   }, [draft, providers, setDraft]);
 
-  function handleSaveAs() {
+  async function handleSaveAs() {
     if (!selectedTemplate || !draft) {
       return;
     }
 
-    const savedTemplate = buildUserTemplate(selectedTemplate, draft, localTemplates);
-    setLocalTemplates((current) => [...current, savedTemplate]);
-    setLocalCreatedTemplateIds((current) => [...current, savedTemplate.template_id]);
-    setDraft(createTemplateDraft(savedTemplate));
-    onTemplateSaveAs?.(savedTemplate);
+    setTemplateSaveBusy(true);
+    setTemplateSaveError(null);
+    try {
+      const localTemplate = buildUserTemplate(
+        selectedTemplate,
+        draft,
+        localTemplates,
+      );
+      const saveResult = await onTemplateSaveAs?.(
+        localTemplate,
+        selectedTemplate,
+        draft,
+      );
+      const savedTemplate = isPipelineTemplateRead(saveResult)
+        ? saveResult
+        : localTemplate;
+      setLocalTemplates((current) => upsertTemplate(current, savedTemplate));
+      if (!templates.some((template) => template.template_id === savedTemplate.template_id)) {
+        setLocalCreatedTemplateIds((current) =>
+          current.includes(savedTemplate.template_id)
+            ? current
+            : [...current, savedTemplate.template_id],
+        );
+      }
+      setDraft(createTemplateDraft(savedTemplate));
+    } catch (error) {
+      setTemplateSaveError(error);
+    } finally {
+      setTemplateSaveBusy(false);
+    }
   }
 
-  function handleOverwrite() {
+  async function handleOverwrite() {
     if (
       !selectedTemplate ||
       !draft ||
@@ -110,41 +130,59 @@ export function TemplateEmptyState({
       return;
     }
 
-    const overwrittenTemplate = {
-      ...selectedTemplate,
-      ...draft,
-      updated_at: new Date(0).toISOString(),
-    };
-    setLocalTemplates((current) =>
-      current.map((template) =>
-        template.template_id === selectedTemplate.template_id
-          ? overwrittenTemplate
-          : template,
-      ),
-    );
-    setDraft(createTemplateDraft(overwrittenTemplate));
-    onTemplateOverwrite?.(overwrittenTemplate);
+    setTemplateSaveBusy(true);
+    setTemplateSaveError(null);
+    try {
+      const localTemplate = {
+        ...selectedTemplate,
+        ...draft,
+        name: draft.name.trim(),
+        updated_at: new Date(0).toISOString(),
+      };
+      const overwriteResult = await onTemplateOverwrite?.(
+        localTemplate,
+        selectedTemplate,
+        draft,
+      );
+      const overwrittenTemplate = isPipelineTemplateRead(overwriteResult)
+        ? overwriteResult
+        : localTemplate;
+      setLocalTemplates((current) => upsertTemplate(current, overwrittenTemplate));
+      setDraft(createTemplateDraft(overwrittenTemplate));
+    } catch (error) {
+      setTemplateSaveError(error);
+    } finally {
+      setTemplateSaveBusy(false);
+    }
   }
 
-  function handleDelete() {
+  async function handleDelete() {
     if (!selectedTemplate || selectedTemplate.template_source !== "user_template") {
       return;
     }
 
-    const remainingTemplates = localTemplates.filter(
-      (template) => template.template_id !== selectedTemplate.template_id,
-    );
-    const nextTemplateId = resolveDeleteFallbackTemplateId(
-      selectedTemplate,
-      remainingTemplates,
-    );
+    setTemplateSaveBusy(true);
+    setTemplateSaveError(null);
+    try {
+      await onTemplateDelete?.(selectedTemplate.template_id);
+      const remainingTemplates = localTemplates.filter(
+        (template) => template.template_id !== selectedTemplate.template_id,
+      );
+      const nextTemplateId = resolveDeleteFallbackTemplateId(
+        selectedTemplate,
+        remainingTemplates,
+      );
 
-    setLocalTemplates(remainingTemplates);
-    setLocalCreatedTemplateIds((current) =>
-      current.filter((templateId) => templateId !== selectedTemplate.template_id),
-    );
-    onTemplateDelete?.(selectedTemplate.template_id);
-    onTemplateChange(nextTemplateId);
+      setLocalTemplates(remainingTemplates);
+      setLocalCreatedTemplateIds((current) =>
+        current.filter((templateId) => templateId !== selectedTemplate.template_id),
+      );
+      onTemplateChange(nextTemplateId);
+    } catch (error) {
+      setTemplateSaveError(error);
+    } finally {
+      setTemplateSaveBusy(false);
+    }
   }
 
   return (
@@ -170,29 +208,6 @@ export function TemplateEmptyState({
         disabled={!isDraft || isTemplateChangeBusy}
       />
 
-      {selectedTemplate ? (
-        <section className="template-summary" aria-label="Selected template summary">
-          <div className="template-summary__header">
-            <span>{selectedTemplate.template_source.replace("_", " ")}</span>
-            <strong>
-              {selectedTemplate.auto_regression_enabled
-                ? `${selectedTemplate.max_auto_regression_retries} auto regression retry`
-                : "Auto regression off"}
-            </strong>
-          </div>
-          <ol className="template-stage-list">
-            {selectedTemplate.fixed_stage_sequence.map((stageType) => (
-              <li key={stageType}>{stageLabels[stageType]}</li>
-            ))}
-          </ol>
-          <div className="template-approvals" aria-label="Approval checkpoints">
-            {selectedTemplate.approval_checkpoints.map((approvalType) => (
-              <span key={approvalType}>{approvalLabels[approvalType]}</span>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
       {selectedTemplate && draft && isDraft ? (
         <TemplateEditor
           template={selectedTemplateDraftSource ?? selectedTemplate}
@@ -203,9 +218,20 @@ export function TemplateEmptyState({
           onOverwrite={handleOverwrite}
           onDelete={handleDelete}
           onDiscard={resetDraft}
+          isSaving={isTemplateSaveBusy}
+          error={templateSaveError}
         />
       ) : null}
     </article>
+  );
+}
+
+function isPipelineTemplateRead(value: unknown): value is PipelineTemplateRead {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    typeof (value as Partial<PipelineTemplateRead>).template_id === "string" &&
+    Array.isArray((value as Partial<PipelineTemplateRead>).stage_role_bindings)
   );
 }
 
@@ -217,12 +243,10 @@ function buildUserTemplate(
   return {
     ...sourceTemplate,
     ...draft,
+    name: draft.name.trim(),
     template_id: createSaveAsTemplateId(sourceTemplate.template_id, templates),
     template_source: "user_template",
-    base_template_id:
-      sourceTemplate.template_source === "system_template"
-        ? sourceTemplate.template_id
-        : sourceTemplate.base_template_id,
+    base_template_id: sourceTemplate.template_id,
     created_at: new Date(0).toISOString(),
     updated_at: new Date(0).toISOString(),
   };
@@ -257,6 +281,17 @@ function mergeIncomingTemplates(
   );
 
   return [...incomingTemplates, ...localTemplates];
+}
+
+function upsertTemplate(
+  templates: PipelineTemplateRead[],
+  savedTemplate: PipelineTemplateRead,
+): PipelineTemplateRead[] {
+  return templates.some((template) => template.template_id === savedTemplate.template_id)
+    ? templates.map((template) =>
+        template.template_id === savedTemplate.template_id ? savedTemplate : template,
+      )
+    : [...templates, savedTemplate];
 }
 
 function resolveDeleteFallbackTemplateId(

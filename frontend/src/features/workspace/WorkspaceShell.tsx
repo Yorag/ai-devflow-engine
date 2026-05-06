@@ -7,8 +7,19 @@ import {
   useSessionWorkspaceQuery,
 } from "../../api/hooks";
 import type { ApiRequestOptions } from "../../api/client";
-import type { ProjectRead, SessionEvent, SseEventType } from "../../api/types";
+import type {
+  PipelineTemplateRead,
+  PipelineTemplateWriteRequest,
+  ProjectRead,
+  SessionEvent,
+  SseEventType,
+} from "../../api/types";
 import { updateSessionTemplate } from "../../api/sessions";
+import {
+  deletePipelineTemplate,
+  patchPipelineTemplate,
+  saveAsPipelineTemplate,
+} from "../../api/templates";
 import { ErrorState } from "../errors/ErrorState";
 import { Composer } from "../composer/Composer";
 import { NarrativeFeed } from "../feed/NarrativeFeed";
@@ -17,12 +28,6 @@ import { useInspector } from "../inspector/useInspector";
 import { TerminateRunAction } from "../runs/TerminateRunAction";
 import { SettingsModal } from "../settings/SettingsModal";
 import { TemplateEmptyState } from "../templates/TemplateEmptyState";
-import {
-  createTemplateDraft,
-  resolveTemplateProviderBindings,
-  unavailableProviderMessage,
-  unavailableTemplateProviderIds,
-} from "../templates/template-state";
 import { ProjectSidebar } from "./ProjectSidebar";
 import { createSessionEventSource } from "./sse-client";
 import { useWorkspaceStore } from "./workspace-store";
@@ -40,6 +45,9 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
   const [templateSelections, setTemplateSelections] = useState<Record<string, string>>(
     {},
   );
+  const [configuredDraftSessionIds, setConfiguredDraftSessionIds] = useState<
+    string[]
+  >([]);
   const [templateChangeError, setTemplateChangeError] = useState<unknown | null>(
     null,
   );
@@ -105,24 +113,6 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
     () => new Set((templatesQuery.data ?? []).map((template) => template.template_id)),
     [templatesQuery.data],
   );
-  const selectedTemplate =
-    (templatesQuery.data ?? []).find(
-      (template) => template.template_id === selectedTemplateId,
-    ) ?? null;
-  const selectedTemplateForStart = selectedTemplate
-    ? resolveTemplateProviderBindings(selectedTemplate, providersQuery.data ?? [])
-    : null;
-  const unavailableProviderIds =
-    selectedTemplateForStart && workspace?.session.status === "draft"
-      ? unavailableTemplateProviderIds(
-          createTemplateDraft(selectedTemplateForStart),
-          providersQuery.data ?? [],
-        )
-      : [];
-  const startBlockedReason =
-    unavailableProviderIds.length > 0
-      ? unavailableProviderMessage(unavailableProviderIds)
-      : null;
   const isInspectorVisible = inspector.isOpen && inspector.target !== null;
   const shellClassName = isInspectorVisible
     ? "workspace-shell workspace-shell--inspector-open"
@@ -175,6 +165,7 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
     setCurrentProjectId(projectId);
     setCurrentSessionId("");
     setSessionSelectionCleared(false);
+    setConfiguredDraftSessionIds([]);
     inspector.close();
   }
 
@@ -215,6 +206,9 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
         ...current,
         [updatedSession.session_id]: updatedSession.selected_template_id,
       }));
+      setConfiguredDraftSessionIds((current) =>
+        current.filter((sessionId) => sessionId !== updatedSession.session_id),
+      );
       await sessionsQuery.refetch();
       await sessionWorkspaceQuery.refetch();
     } catch (error) {
@@ -223,6 +217,115 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
         ...current,
         [selectedSession.session_id]: selectedSession.selected_template_id,
       }));
+    } finally {
+      setWorkspaceActionBusy(false);
+    }
+  }
+
+  async function handleTemplateSaveAs(
+    _template: PipelineTemplateRead,
+    sourceTemplate: PipelineTemplateRead,
+    draft: PipelineTemplateWriteRequest,
+  ): Promise<PipelineTemplateRead> {
+    if (!selectedSession) {
+      return _template;
+    }
+
+    setWorkspaceActionBusy(true);
+    setTemplateChangeError(null);
+    try {
+      const savedTemplate = await saveAsPipelineTemplate(
+        sourceTemplate.template_id,
+        createTemplateWriteRequest(draft),
+        request ?? {},
+      );
+      const updatedSession = await updateSessionTemplate(
+        selectedSession.session_id,
+        { template_id: savedTemplate.template_id },
+        request ?? {},
+      );
+      setTemplateSelections((current) => ({
+        ...current,
+        [updatedSession.session_id]: updatedSession.selected_template_id,
+      }));
+      setConfiguredDraftSessionIds((current) =>
+        current.includes(updatedSession.session_id)
+          ? current
+          : [...current, updatedSession.session_id],
+      );
+      await templatesQuery.refetch();
+      await sessionsQuery.refetch();
+      await sessionWorkspaceQuery.refetch();
+      return savedTemplate;
+    } catch (error) {
+      setTemplateChangeError(error);
+      throw error;
+    } finally {
+      setWorkspaceActionBusy(false);
+    }
+  }
+
+  async function handleTemplateOverwrite(
+    _template: PipelineTemplateRead,
+    sourceTemplate: PipelineTemplateRead,
+    draft: PipelineTemplateWriteRequest,
+  ): Promise<PipelineTemplateRead> {
+    if (!selectedSession) {
+      return _template;
+    }
+
+    setWorkspaceActionBusy(true);
+    setTemplateChangeError(null);
+    try {
+      const patchedTemplate = await patchPipelineTemplate(
+        sourceTemplate.template_id,
+        createTemplateWriteRequest(draft),
+        request ?? {},
+      );
+      const updatedSession = await updateSessionTemplate(
+        selectedSession.session_id,
+        { template_id: patchedTemplate.template_id },
+        request ?? {},
+      );
+      setTemplateSelections((current) => ({
+        ...current,
+        [updatedSession.session_id]: updatedSession.selected_template_id,
+      }));
+      setConfiguredDraftSessionIds((current) =>
+        current.includes(updatedSession.session_id)
+          ? current
+          : [...current, updatedSession.session_id],
+      );
+      await templatesQuery.refetch();
+      await sessionsQuery.refetch();
+      await sessionWorkspaceQuery.refetch();
+      return patchedTemplate;
+    } catch (error) {
+      setTemplateChangeError(error);
+      throw error;
+    } finally {
+      setWorkspaceActionBusy(false);
+    }
+  }
+
+  async function handleTemplateDelete(templateId: string): Promise<void> {
+    if (!selectedSession) {
+      return;
+    }
+
+    setWorkspaceActionBusy(true);
+    setTemplateChangeError(null);
+    try {
+      await deletePipelineTemplate(templateId, request ?? {});
+      setConfiguredDraftSessionIds((current) =>
+        current.filter((sessionId) => sessionId !== selectedSession.session_id),
+      );
+      await templatesQuery.refetch();
+      await sessionsQuery.refetch();
+      await sessionWorkspaceQuery.refetch();
+    } catch (error) {
+      setTemplateChangeError(error);
+      throw error;
     } finally {
       setWorkspaceActionBusy(false);
     }
@@ -266,7 +369,8 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
                 Settings
               </button>
             </div>
-            {workspace?.session.status === "draft" ? (
+            {workspace?.session.status === "draft" &&
+            !configuredDraftSessionIds.includes(workspace.session.session_id) ? (
               <div className="workspace-main__panel workspace-main__panel--template">
                 <div className="narrative-feed" aria-label="Narrative Feed">
                   {templateChangeError ? (
@@ -279,8 +383,15 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
                     selectedTemplateId={selectedTemplateId}
                     onTemplateChange={handleTemplateChange}
                     isTemplateChangeBusy={isWorkspaceActionBusy}
+                    onTemplateSaveAs={handleTemplateSaveAs}
+                    onTemplateOverwrite={handleTemplateOverwrite}
+                    onTemplateDelete={handleTemplateDelete}
                   />
                 </div>
+              </div>
+            ) : workspace?.session.status === "draft" ? (
+              <div className="workspace-main__panel workspace-main__panel--feed">
+                <div className="narrative-feed" aria-label="Narrative Feed" />
               </div>
             ) : workspace ? (
               <div className="workspace-main__panel workspace-main__panel--feed">
@@ -325,7 +436,6 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
                 isBusy={isWorkspaceActionBusy}
                 onBusyChange={setWorkspaceActionBusy}
                 request={request}
-                startBlockedReason={startBlockedReason}
               />
             </div>
           </div>
@@ -364,3 +474,15 @@ const SSE_EVENT_TYPES: readonly SseEventType[] = [
   "system_status",
   "session_status_changed",
 ];
+
+function createTemplateWriteRequest(
+  draft: PipelineTemplateWriteRequest,
+): PipelineTemplateWriteRequest {
+  return {
+    name: draft.name.trim(),
+    description: draft.description,
+    stage_role_bindings: draft.stage_role_bindings,
+    auto_regression_enabled: draft.auto_regression_enabled,
+    max_auto_regression_retries: draft.max_auto_regression_retries,
+  };
+}

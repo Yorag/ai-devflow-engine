@@ -1,8 +1,12 @@
+import { useEffect, useMemo, useState } from "react";
+
 import type { PipelineTemplateRead, ProviderRead, StageType } from "../../api/types";
+import { ErrorState } from "../errors/ErrorState";
 import {
   availableTemplateProviders,
   isTemplateDirty,
   resolveTemplateStartGuard,
+  unavailableProviderMessage,
   unavailableTemplateProviderIds,
   type TemplateDraftState,
 } from "./template-state";
@@ -16,6 +20,17 @@ type TemplateEditorProps = {
   onOverwrite: () => void;
   onDelete: () => void;
   onDiscard: () => void;
+  isSaving?: boolean;
+  error?: unknown;
+};
+
+const stageLabels: Record<StageType, string> = {
+  requirement_analysis: "Requirement Analysis",
+  solution_design: "Solution Design",
+  code_generation: "Code Generation",
+  test_generation_execution: "Test Generation & Execution",
+  code_review: "Code Review",
+  delivery_integration: "Delivery Integration",
 };
 
 export function TemplateEditor({
@@ -27,16 +42,68 @@ export function TemplateEditor({
   onOverwrite,
   onDelete,
   onDiscard,
+  isSaving = false,
+  error = null,
 }: TemplateEditorProps): JSX.Element {
+  const firstStageType =
+    template.fixed_stage_sequence[0] ??
+    draft.stage_role_bindings[0]?.stage_type ??
+    "requirement_analysis";
+  const [activeStageType, setActiveStageType] = useState<StageType>(firstStageType);
   const dirty = isTemplateDirty(template, draft);
   const unavailableProviderIds = unavailableTemplateProviderIds(draft, providers);
-  const guard = resolveTemplateStartGuard(template, dirty, unavailableProviderIds);
+  const guard = resolveTemplateStartGuard(template, dirty);
   const retryError = getRetryValidationError(draft.max_auto_regression_retries);
-  const canSave = !retryError && unavailableProviderIds.length === 0;
-  const roleOptions = Array.from(
-    new Set(template.stage_role_bindings.map((binding) => binding.role_id)),
-  );
+  const nameError = getTemplateNameValidationError(template, draft.name);
   const providerOptions = availableTemplateProviders(providers);
+  const noConfiguredProviders = providerOptions.length === 0;
+  const activeBinding =
+    draft.stage_role_bindings.find(
+      (binding) => binding.stage_type === activeStageType,
+    ) ??
+    draft.stage_role_bindings.find((binding) => binding.stage_type === firstStageType) ??
+    draft.stage_role_bindings[0];
+  const activeStageLabel = activeBinding
+    ? stageLabels[activeBinding.stage_type]
+    : "Selected stage";
+  const canSave =
+    Boolean(activeBinding) &&
+    !isSaving &&
+    !retryError &&
+    !nameError &&
+    !noConfiguredProviders &&
+    unavailableProviderIds.length === 0;
+  const providerStatusReason =
+    noConfiguredProviders || unavailableProviderIds.length > 0
+      ? unavailableProviderMessage(unavailableProviderIds)
+      : null;
+  const statusMessages = [
+    providerStatusReason,
+    guard.reason && guard.reason !== providerStatusReason ? guard.reason : null,
+  ].filter((message): message is string => Boolean(message));
+  const stageSequence = useMemo(
+    () =>
+      template.fixed_stage_sequence.filter((stageType) =>
+        draft.stage_role_bindings.some((binding) => binding.stage_type === stageType),
+      ),
+    [draft.stage_role_bindings, template.fixed_stage_sequence],
+  );
+
+  useEffect(() => {
+    setActiveStageType(firstStageType);
+  }, [firstStageType, template.template_id]);
+
+  useEffect(() => {
+    if (
+      activeBinding ||
+      !draft.stage_role_bindings[0] ||
+      activeStageType === draft.stage_role_bindings[0].stage_type
+    ) {
+      return;
+    }
+
+    setActiveStageType(draft.stage_role_bindings[0].stage_type);
+  }, [activeBinding, activeStageType, draft.stage_role_bindings]);
 
   function updateDraft(next: Partial<TemplateDraftState>) {
     onDraftChange({ ...draft, ...next });
@@ -63,13 +130,23 @@ export function TemplateEditor({
         <span>{dirty ? "Unsaved" : "Saved"}</span>
       </div>
 
-      {!guard.canStart && guard.reason ? (
-        <p className="template-editor__guard" role="status">
-          {guard.reason}
+      {statusMessages.map((message) => (
+        <p className="template-editor__guard" role="status" key={message}>
+          {message}
         </p>
-      ) : null}
+      ))}
 
       <div className="template-editor__global">
+        {template.template_source === "user_template" ? (
+          <label>
+            <span>Template name</span>
+            <input
+              value={draft.name}
+              aria-invalid={Boolean(nameError)}
+              onChange={(event) => updateDraft({ name: event.target.value })}
+            />
+          </label>
+        ) : null}
         <label className="template-editor__checkbox">
           <input
             type="checkbox"
@@ -106,52 +183,65 @@ export function TemplateEditor({
           {retryError}
         </p>
       ) : null}
+      {nameError ? (
+        <p className="template-editor__field-error" role="alert">
+          {nameError}
+        </p>
+      ) : null}
+      {error ? <ErrorState error={error} /> : null}
+
+      <div
+        className="template-stage-tabs"
+        role="tablist"
+        aria-label="Template stages"
+      >
+        {stageSequence.map((stageType) => (
+          <button
+            className="template-stage-tab"
+            key={stageType}
+            type="button"
+            role="tab"
+            aria-selected={activeStageType === stageType}
+            onClick={() => setActiveStageType(stageType)}
+          >
+            {stageLabels[stageType]}
+          </button>
+        ))}
+      </div>
 
       <div className="template-editor__stages">
-        {draft.stage_role_bindings.map((binding) => (
-          <section className="template-editor-stage" key={binding.stage_type}>
+        {activeBinding ? (
+          <section className="template-editor-stage" key={activeBinding.stage_type}>
             <div className="template-editor-stage__title">
-              <strong>Stage slot</strong>
-              <span>{binding.stage_type}</span>
+              <strong>{activeStageLabel}</strong>
             </div>
             <div className="template-editor-stage__fields">
               <label>
-                <span>Role</span>
-                <select
-                  aria-label={`${binding.stage_type} role`}
-                  value={binding.role_id}
-                  onChange={(event) =>
-                    updateBinding(binding.stage_type, { role_id: event.target.value })
-                  }
-                >
-                  {roleOptions.map((roleId) => (
-                    <option key={roleId} value={roleId}>
-                      {roleId}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
                 <span>Provider</span>
                 <select
-                  aria-label={`${binding.stage_type} provider`}
-                  value={providerSelectValue(binding.provider_id, providerOptions)}
+                  aria-label={`${activeStageLabel} provider`}
+                  value={providerSelectValue(
+                    activeBinding.provider_id,
+                    providerOptions,
+                  )}
+                  disabled={noConfiguredProviders}
                   onChange={(event) =>
-                    updateBinding(binding.stage_type, {
+                    updateBinding(activeBinding.stage_type, {
                       provider_id: event.target.value,
                     })
                   }
                 >
-                  {!providerOptions.some(
-                    (provider) => provider.provider_id === binding.provider_id,
-                  ) ? (
-                    <option value={binding.provider_id} disabled>
-                      Unavailable provider: {binding.provider_id}
-                    </option>
-                  ) : null}
-                  {providerOptions.length === 0 ? (
+                  {noConfiguredProviders ? (
                     <option value="" disabled>
                       No provider configured
+                    </option>
+                  ) : null}
+                  {!noConfiguredProviders &&
+                  !providerOptions.some(
+                    (provider) => provider.provider_id === activeBinding.provider_id,
+                  ) ? (
+                    <option value={activeBinding.provider_id} disabled>
+                      Unavailable provider
                     </option>
                   ) : null}
                   {providerOptions.map((provider) => (
@@ -164,11 +254,11 @@ export function TemplateEditor({
               <label className="template-editor-stage__prompt">
                 <span>System prompt</span>
                 <textarea
-                  aria-label={`${binding.stage_type} system prompt`}
+                  aria-label={`${activeStageLabel} system prompt`}
                   rows={3}
-                  value={binding.system_prompt}
+                  value={activeBinding.system_prompt}
                   onChange={(event) =>
-                    updateBinding(binding.stage_type, {
+                    updateBinding(activeBinding.stage_type, {
                       system_prompt: event.target.value,
                     })
                   }
@@ -176,7 +266,7 @@ export function TemplateEditor({
               </label>
             </div>
           </section>
-        ))}
+        ) : null}
       </div>
 
       <div className="template-editor__actions">
@@ -194,29 +284,35 @@ export function TemplateEditor({
             Discard changes
           </button>
         ) : null}
+        {template.template_source === "user_template" ? (
+          <button
+            className="workspace-button workspace-button--secondary"
+            type="button"
+            onClick={onSaveAs}
+            disabled={!canSave}
+          >
+            {isSaving ? "Saving template" : "Save as new template"}
+          </button>
+        ) : null}
         <button
           className="workspace-button"
           type="button"
-          onClick={onSaveAs}
+          onClick={
+            template.template_source === "user_template"
+              ? onOverwrite
+              : onSaveAs
+          }
           disabled={!canSave}
         >
-          Save as user template
+          {isSaving ? "Saving template" : "Save template"}
         </button>
         {template.template_source === "user_template" ? (
           <>
             <button
-              className="workspace-button workspace-button--secondary"
-              type="button"
-              onClick={onOverwrite}
-              disabled={!dirty || !canSave}
-            >
-              Overwrite template
-            </button>
-            <button
               className="workspace-button workspace-button--danger"
               type="button"
               onClick={onDelete}
-              disabled={dirty}
+              disabled={dirty || isSaving}
             >
               Delete template
             </button>
@@ -231,6 +327,10 @@ function providerSelectValue(
   providerId: string,
   providerOptions: ProviderRead[],
 ): string {
+  if (providerOptions.length === 0) {
+    return "";
+  }
+
   if (providerOptions.some((provider) => provider.provider_id === providerId)) {
     return providerId;
   }
@@ -247,4 +347,17 @@ function getRetryValidationError(value: number): string | null {
   }
 
   return null;
+}
+
+function getTemplateNameValidationError(
+  template: PipelineTemplateRead,
+  value: string,
+): string | null {
+  if (template.template_source !== "user_template") {
+    return null;
+  }
+
+  return value.trim()
+    ? null
+    : "Cannot save current field: config_invalid_value. Template name is required.";
 }
