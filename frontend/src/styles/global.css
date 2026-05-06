@@ -1804,27 +1804,16 @@ a {
 }
 
 .template-editor-stage__title {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
   min-width: 0;
 }
 
-.template-editor-stage__title strong,
-.template-editor-stage__title span {
+.template-editor-stage__title strong {
   overflow-wrap: anywhere;
 }
 
 .template-editor-stage__title strong {
   color: oklch(28% 0.025 248);
   font-size: 0.86rem;
-}
-
-.template-editor-stage__title span {
-  color: var(--text-muted);
-  font-size: 0.72rem;
-  font-weight: 750;
 }
 
 .template-editor-stage__prompt {
@@ -2821,8 +2810,7 @@ a {
     grid-template-columns: 1fr;
   }
 
-  .template-editor__heading,
-  .template-editor-stage__title {
+  .template-editor__heading {
     align-items: flex-start;
     flex-direction: column;
     gap: 4px;

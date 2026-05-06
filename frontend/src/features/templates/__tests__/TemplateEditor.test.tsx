@@ -60,15 +60,15 @@ describe("template-state", () => {
       actions: [],
     });
     expect(resolveTemplateStartGuard(systemTemplate, true)).toEqual({
-      canStart: false,
+      canStart: true,
       reason:
-        "Save this edited system template as a user template or discard changes before starting a run.",
+        "Unsaved edits will not affect this session until you save as a user template.",
       actions: ["save_as", "discard"],
     });
     expect(resolveTemplateStartGuard(userTemplate, true)).toEqual({
-      canStart: false,
+      canStart: true,
       reason:
-        "Overwrite this user template or discard changes before starting a run.",
+        "Unsaved edits will not affect this session until you save the template.",
       actions: ["overwrite", "discard"],
     });
   });
@@ -89,6 +89,7 @@ describe("TemplateEditor", () => {
 
     const editor = screen.getByRole("region", { name: "Template editor" });
     expect(within(editor).getAllByRole("tab")).toHaveLength(6);
+    expect(editor.textContent ?? "").not.toContain("requirement_analysis");
     expect(
       within(editor)
         .getByRole("tab", { name: "Requirement Analysis" })
@@ -138,7 +139,35 @@ describe("TemplateEditor", () => {
     expect(within(editor).queryByText("role-requirement-analyst")).toBeNull();
   });
 
-  it("blocks start and preserves bindings when a template references an unavailable provider", async () => {
+  it("shows a no-provider configured state without leaking template provider ids", () => {
+    const workspace = mockSessionWorkspaces["session-draft"];
+
+    renderWithAppProviders(
+      <TemplateEmptyState
+        session={workspace.session}
+        templates={mockPipelineTemplates}
+        providers={[]}
+        selectedTemplateId="template-feature"
+        onTemplateChange={() => undefined}
+      />,
+    );
+
+    const editor = screen.getByRole("region", { name: "Template editor" });
+    const providerSelect = within(editor).getByLabelText(
+      "Requirement Analysis provider",
+    );
+
+    expect(within(editor).getByText("No provider configured.")).toBeTruthy();
+    expect(providerSelect).toHaveProperty("disabled", true);
+    expect(providerSelect).toHaveProperty("value", "");
+    expect(within(providerSelect).getByRole("option", {
+      name: "No provider configured",
+    })).toBeTruthy();
+    expect(editor.textContent ?? "").not.toContain("provider-deepseek");
+    expect(editor.textContent ?? "").not.toContain("provider-volcengine");
+  });
+
+  it("shows generic unavailable provider copy when configured providers do not match", async () => {
     const workspace = mockSessionWorkspaces["session-draft"];
     const providers: ProviderRead[] = [
       {
@@ -177,12 +206,13 @@ describe("TemplateEditor", () => {
     ).toBeTruthy();
     expect(
       within(providerSelect).getByRole("option", {
-        name: "Unavailable provider: provider-deepseek",
+        name: "Unavailable provider",
       }),
     ).toBeTruthy();
     expect(
-      within(editor).getByText(/This template references unavailable providers/u),
+      within(editor).getByText("This template references unavailable providers."),
     ).toBeTruthy();
+    expect(editor.textContent ?? "").not.toContain("provider-deepseek");
   });
 
   it("edits only allowed runtime configuration fields for a system template", () => {
@@ -221,16 +251,16 @@ describe("TemplateEditor", () => {
       target: { value: "Analyze the requirement and preserve explicit constraints." },
     });
 
-    expect(within(editor).getByText(/Save this edited system template/u)).toBeTruthy();
+    expect(within(editor).getByText(/Unsaved edits will not affect/u)).toBeTruthy();
     expect(
-      within(editor).getByRole("button", { name: "Save stage" }),
+      within(editor).getByRole("button", { name: "Save template" }),
     ).toBeTruthy();
     expect(
       within(editor).queryByRole("button", { name: "Overwrite template" }),
     ).toBeNull();
     expect(within(editor).queryByRole("button", { name: "Delete template" })).toBeNull();
 
-    fireEvent.click(within(editor).getByRole("button", { name: "Save stage" }));
+    fireEvent.click(within(editor).getByRole("button", { name: "Save template" }));
 
     expect(savedAsTemplateIds).toEqual(["template-user-template-feature-1"]);
   });
@@ -280,12 +310,12 @@ describe("TemplateEditor", () => {
     fireEvent.change(screen.getByLabelText("Requirement Analysis system prompt"), {
       target: { value: "Clarify checkout requirements." },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save stage" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
 
     expect(savedTemplates).toEqual(["Checkout feature flow"]);
   });
 
-  it("Save stage replaces only the current stage binding and preserves other bindings", async () => {
+  it("Save template persists all edited stage bindings in one full template payload", async () => {
     const workspace = mockSessionWorkspaces["session-draft"];
     let savedTemplate: PipelineTemplateRead | null = null;
 
@@ -306,13 +336,13 @@ describe("TemplateEditor", () => {
       (template) => template.template_id === "template-feature",
     )!;
     fireEvent.change(screen.getByLabelText("Requirement Analysis system prompt"), {
-      target: { value: "This unsaved non-current stage must not be included." },
+      target: { value: "Clarify all checkout constraints before design." },
     });
     fireEvent.click(screen.getByRole("tab", { name: "Solution Design" }));
     fireEvent.change(screen.getByLabelText("Solution Design system prompt"), {
       target: { value: "Design only the approved checkout solution." },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save stage" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
 
     await waitFor(() => {
       expect(savedTemplate?.stage_role_bindings).toEqual(
@@ -322,6 +352,11 @@ describe("TemplateEditor", () => {
                 ...binding,
                 system_prompt: "Design only the approved checkout solution.",
               }
+            : binding.stage_type === "requirement_analysis"
+              ? {
+                  ...binding,
+                  system_prompt: "Clarify all checkout constraints before design.",
+                }
             : binding,
         ),
       );
@@ -345,13 +380,13 @@ describe("TemplateEditor", () => {
 
     const systemEditor = screen.getByRole("region", { name: "Template editor" });
     fireEvent.click(
-      within(systemEditor).getByRole("button", { name: "Save stage" }),
+      within(systemEditor).getByRole("button", { name: "Save template" }),
     );
     await waitFor(() => {
       expect(systemSaveAsIds).toEqual(["template-user-template-feature-1"]);
     });
     fireEvent.click(
-      within(systemEditor).getByRole("button", { name: "Save stage" }),
+      within(systemEditor).getByRole("button", { name: "Save template" }),
     );
 
     await waitFor(() => {
@@ -362,7 +397,7 @@ describe("TemplateEditor", () => {
     });
   });
 
-  it("supports save stage overwrite, delete, and discard for user templates", async () => {
+  it("supports template overwrite, delete, and discard for user templates", async () => {
     const workspace = mockSessionWorkspaces["session-draft"];
     const systemTemplate = mockPipelineTemplates[1];
     const userTemplate = {
@@ -398,13 +433,13 @@ describe("TemplateEditor", () => {
 
     expect(
       within(editor).getByText(
-        "Overwrite this user template or discard changes before starting a run.",
+        "Unsaved edits will not affect this session until you save the template.",
       ),
     ).toBeTruthy();
-    fireEvent.click(within(editor).getByRole("button", { name: "Save stage" }));
+    fireEvent.click(within(editor).getByRole("button", { name: "Save template" }));
     await waitFor(() => {
       expect(overwrittenTemplateIds).toEqual(["template-user-existing"]);
-      expect(within(editor).queryByText(/Overwrite this user template/u)).toBeNull();
+      expect(within(editor).queryByText(/Unsaved edits will not affect/u)).toBeNull();
     });
 
     fireEvent.change(within(editor).getByLabelText("Maximum auto regression retries"), {
@@ -511,7 +546,7 @@ describe("TemplateEditor", () => {
       within(editor).getByText(/Cannot save current field: config_invalid_value/u),
     ).toBeTruthy();
     expect(
-      within(editor).getByRole("button", { name: "Save stage" }),
+      within(editor).getByRole("button", { name: "Save template" }),
     ).toHaveProperty("disabled", true);
     expect(within(editor).queryByRole("button", { name: "Overwrite template" })).toBeNull();
 
@@ -524,7 +559,7 @@ describe("TemplateEditor", () => {
     ).toBeTruthy();
     expect(within(editor).queryByText(/10 or less/u)).toBeNull();
     expect(
-      within(editor).getByRole("button", { name: "Save stage" }),
+      within(editor).getByRole("button", { name: "Save template" }),
     ).toHaveProperty("disabled", true);
     expect(within(editor).queryByRole("button", { name: "Overwrite template" })).toBeNull();
   });
@@ -559,7 +594,7 @@ describe("TemplateEditor", () => {
     renderWithAppProviders(<RefreshHarness />);
 
     expect(screen.getAllByRole("radio", { name: /新功能开发流程/u })).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "Save stage" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
     await waitFor(() => {
       expect(screen.getAllByRole("radio", { name: /新功能开发流程/u })).toHaveLength(2);
     });
@@ -583,7 +618,7 @@ describe("TemplateEditor", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Save stage" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
 
     await waitFor(() => {
       const featureOptions = screen.getAllByRole("radio", {
@@ -720,7 +755,7 @@ describe("TemplateEditor", () => {
       "2",
     );
     expect(screen.getByText("Saved")).toBeTruthy();
-    expect(screen.queryByText(/Save this edited system template/u)).toBeNull();
+    expect(screen.queryByText(/Unsaved edits will not affect/u)).toBeNull();
   });
 
   it("resets draft edits when switching draft sessions with the same template", () => {
@@ -767,7 +802,7 @@ describe("TemplateEditor", () => {
       "Analyze the requirement and ask clarifying questions when needed.",
     );
     expect(screen.getByText("Saved")).toBeTruthy();
-    expect(screen.queryByText(/Save this edited system template/u)).toBeNull();
+    expect(screen.queryByText(/Unsaved edits will not affect/u)).toBeNull();
   });
 
   it("keeps forbidden template and platform fields out of the editor", () => {

@@ -124,17 +124,17 @@ export function resolveTemplateStartGuard(
 
   if (template.template_source === "system_template") {
     return {
-      canStart: false,
+      canStart: true,
       reason:
-        "Save this edited system template as a user template or discard changes before starting a run.",
+        "Unsaved edits will not affect this session until you save as a user template.",
       actions: ["save_as", "discard"],
     };
   }
 
   return {
-    canStart: false,
+    canStart: true,
     reason:
-      "Overwrite this user template or discard changes before starting a run.",
+      "Unsaved edits will not affect this session until you save the template.",
     actions: ["overwrite", "discard"],
   };
 }
@@ -169,8 +169,13 @@ export function unavailableTemplateProviderIds(
   draft: TemplateDraftState,
   providers: ProviderRead[],
 ): string[] {
+  const availableProviders = availableTemplateProviders(providers);
+  if (availableProviders.length === 0) {
+    return [];
+  }
+
   const availableProviderIds = new Set(
-    availableTemplateProviders(providers).map((provider) => provider.provider_id),
+    availableProviders.map((provider) => provider.provider_id),
   );
   return Array.from(
     new Set(
@@ -182,7 +187,9 @@ export function unavailableTemplateProviderIds(
 }
 
 export function unavailableProviderMessage(providerIds: string[]): string {
-  return `This template references unavailable providers: ${providerIds.join(", ")}.`;
+  return providerIds.length > 0
+    ? "This template references unavailable providers."
+    : "No provider configured.";
 }
 
 function createDraftRecord(

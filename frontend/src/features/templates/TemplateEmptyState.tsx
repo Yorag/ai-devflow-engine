@@ -4,7 +4,6 @@ import type {
   PipelineTemplateRead,
   ProviderRead,
   SessionRead,
-  StageType,
 } from "../../api/types";
 import { TemplateEditor } from "./TemplateEditor";
 import { TemplateSelector } from "./TemplateSelector";
@@ -85,7 +84,7 @@ export function TemplateEmptyState({
     }
   }, [draft, providers, setDraft]);
 
-  async function handleSaveAs(stageType: StageType) {
+  async function handleSaveAs() {
     if (!selectedTemplate || !draft) {
       return;
     }
@@ -93,16 +92,15 @@ export function TemplateEmptyState({
     setTemplateSaveBusy(true);
     setTemplateSaveError(null);
     try {
-      const stageDraft = createStageSaveDraft(selectedTemplate, draft, stageType);
       const localTemplate = buildUserTemplate(
         selectedTemplate,
-        stageDraft,
+        draft,
         localTemplates,
       );
       const saveResult = await onTemplateSaveAs?.(
         localTemplate,
         selectedTemplate,
-        stageDraft,
+        draft,
       );
       const savedTemplate = isPipelineTemplateRead(saveResult)
         ? saveResult
@@ -123,7 +121,7 @@ export function TemplateEmptyState({
     }
   }
 
-  async function handleOverwrite(stageType: StageType) {
+  async function handleOverwrite() {
     if (
       !selectedTemplate ||
       !draft ||
@@ -135,17 +133,16 @@ export function TemplateEmptyState({
     setTemplateSaveBusy(true);
     setTemplateSaveError(null);
     try {
-      const stageDraft = createStageSaveDraft(selectedTemplate, draft, stageType);
       const localTemplate = {
         ...selectedTemplate,
-        ...stageDraft,
-        name: stageDraft.name.trim(),
+        ...draft,
+        name: draft.name.trim(),
         updated_at: new Date(0).toISOString(),
       };
       const overwriteResult = await onTemplateOverwrite?.(
         localTemplate,
         selectedTemplate,
-        stageDraft,
+        draft,
       );
       const overwrittenTemplate = isPipelineTemplateRead(overwriteResult)
         ? overwriteResult
@@ -227,30 +224,6 @@ export function TemplateEmptyState({
       ) : null}
     </article>
   );
-}
-
-function createStageSaveDraft(
-  sourceTemplate: PipelineTemplateRead,
-  draft: TemplateDraftState,
-  stageType: StageType,
-): TemplateDraftState {
-  return {
-    ...draft,
-    stage_role_bindings: sourceTemplate.stage_role_bindings.map((binding) => {
-      const draftBinding = draft.stage_role_bindings.find(
-        (candidate) => candidate.stage_type === stageType,
-      );
-
-      return binding.stage_type === stageType && draftBinding
-        ? {
-            ...binding,
-            ...draftBinding,
-            stage_type: binding.stage_type,
-            role_id: binding.role_id,
-          }
-        : { ...binding };
-    }),
-  };
 }
 
 function isPipelineTemplateRead(value: unknown): value is PipelineTemplateRead {

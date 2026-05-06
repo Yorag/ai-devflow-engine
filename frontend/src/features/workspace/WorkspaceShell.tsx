@@ -28,12 +28,6 @@ import { useInspector } from "../inspector/useInspector";
 import { TerminateRunAction } from "../runs/TerminateRunAction";
 import { SettingsModal } from "../settings/SettingsModal";
 import { TemplateEmptyState } from "../templates/TemplateEmptyState";
-import {
-  createTemplateDraft,
-  resolveTemplateProviderBindings,
-  unavailableProviderMessage,
-  unavailableTemplateProviderIds,
-} from "../templates/template-state";
 import { ProjectSidebar } from "./ProjectSidebar";
 import { createSessionEventSource } from "./sse-client";
 import { useWorkspaceStore } from "./workspace-store";
@@ -119,24 +113,6 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
     () => new Set((templatesQuery.data ?? []).map((template) => template.template_id)),
     [templatesQuery.data],
   );
-  const selectedTemplate =
-    (templatesQuery.data ?? []).find(
-      (template) => template.template_id === selectedTemplateId,
-    ) ?? null;
-  const selectedTemplateForStart = selectedTemplate
-    ? resolveTemplateProviderBindings(selectedTemplate, providersQuery.data ?? [])
-    : null;
-  const unavailableProviderIds =
-    selectedTemplateForStart && workspace?.session.status === "draft"
-      ? unavailableTemplateProviderIds(
-          createTemplateDraft(selectedTemplateForStart),
-          providersQuery.data ?? [],
-        )
-      : [];
-  const startBlockedReason =
-    unavailableProviderIds.length > 0
-      ? unavailableProviderMessage(unavailableProviderIds)
-      : null;
   const isInspectorVisible = inspector.isOpen && inspector.target !== null;
   const shellClassName = isInspectorVisible
     ? "workspace-shell workspace-shell--inspector-open"
@@ -460,7 +436,6 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
                 isBusy={isWorkspaceActionBusy}
                 onBusyChange={setWorkspaceActionBusy}
                 request={request}
-                startBlockedReason={startBlockedReason}
               />
             </div>
           </div>

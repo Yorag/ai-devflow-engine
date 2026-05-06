@@ -19,7 +19,6 @@ type ComposerProps = {
   isBusy?: boolean;
   onBusyChange?: (busy: boolean) => void;
   request?: ApiRequestOptions;
-  startBlockedReason?: string | null;
 };
 
 export function Composer({
@@ -29,7 +28,6 @@ export function Composer({
   isBusy = false,
   onBusyChange,
   request,
-  startBlockedReason = null,
 }: ComposerProps): JSX.Element {
   const queryClient = useQueryClient();
   const [value, setValue] = useState("");
@@ -38,10 +36,7 @@ export function Composer({
   const resolved = resolveComposerState(composerState, currentStageType);
   const isSharedBusy = isBusy;
   const isActionBusy = isSubmitting || isSharedBusy;
-  const isStartBlocked = Boolean(
-    startBlockedReason && resolved.messageType === "new_requirement",
-  );
-  const canSend = Boolean(session) && resolved.canSend && !isStartBlocked;
+  const canSend = Boolean(session) && resolved.canSend;
 
   useEffect(() => {
     setValue("");
@@ -135,7 +130,7 @@ export function Composer({
 
   const primaryButtonDisabled =
     resolved.lifecycle === "send"
-      ? !value.trim() || isStartBlocked || isActionBusy
+      ? !value.trim() || isActionBusy
       : resolved.lifecycle === "disabled" ||
         !composerState?.bound_run_id ||
         isActionBusy;
@@ -167,7 +162,7 @@ export function Composer({
               resizeTextarea(event.currentTarget);
               setValue(event.target.value);
             }}
-            disabled={!resolved.inputEnabled || isStartBlocked || isActionBusy}
+            disabled={!resolved.inputEnabled || isActionBusy}
             placeholder={
               resolved.mode === "waiting_clarification" ? "补充澄清信息" : "输入需求"
             }

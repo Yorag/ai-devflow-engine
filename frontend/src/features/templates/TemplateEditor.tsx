@@ -6,6 +6,7 @@ import {
   availableTemplateProviders,
   isTemplateDirty,
   resolveTemplateStartGuard,
+  unavailableProviderMessage,
   unavailableTemplateProviderIds,
   type TemplateDraftState,
 } from "./template-state";
@@ -15,8 +16,8 @@ type TemplateEditorProps = {
   providers: ProviderRead[];
   draft: TemplateDraftState;
   onDraftChange: (draft: TemplateDraftState) => void;
-  onSaveAs: (stageType: StageType) => void;
-  onOverwrite: (stageType: StageType) => void;
+  onSaveAs: () => void;
+  onOverwrite: () => void;
   onDelete: () => void;
   onDiscard: () => void;
   isSaving?: boolean;
@@ -51,10 +52,11 @@ export function TemplateEditor({
   const [activeStageType, setActiveStageType] = useState<StageType>(firstStageType);
   const dirty = isTemplateDirty(template, draft);
   const unavailableProviderIds = unavailableTemplateProviderIds(draft, providers);
-  const guard = resolveTemplateStartGuard(template, dirty, unavailableProviderIds);
+  const guard = resolveTemplateStartGuard(template, dirty);
   const retryError = getRetryValidationError(draft.max_auto_regression_retries);
   const nameError = getTemplateNameValidationError(template, draft.name);
   const providerOptions = availableTemplateProviders(providers);
+  const noConfiguredProviders = providerOptions.length === 0;
   const activeBinding =
     draft.stage_role_bindings.find(
       (binding) => binding.stage_type === activeStageType,
@@ -69,7 +71,16 @@ export function TemplateEditor({
     !isSaving &&
     !retryError &&
     !nameError &&
+    !noConfiguredProviders &&
     unavailableProviderIds.length === 0;
+  const providerStatusReason =
+    noConfiguredProviders || unavailableProviderIds.length > 0
+      ? unavailableProviderMessage(unavailableProviderIds)
+      : null;
+  const statusMessages = [
+    providerStatusReason,
+    guard.reason && guard.reason !== providerStatusReason ? guard.reason : null,
+  ].filter((message): message is string => Boolean(message));
   const stageSequence = useMemo(
     () =>
       template.fixed_stage_sequence.filter((stageType) =>
@@ -119,11 +130,11 @@ export function TemplateEditor({
         <span>{dirty ? "Unsaved" : "Saved"}</span>
       </div>
 
-      {!guard.canStart && guard.reason ? (
-        <p className="template-editor__guard" role="status">
-          {guard.reason}
+      {statusMessages.map((message) => (
+        <p className="template-editor__guard" role="status" key={message}>
+          {message}
         </p>
-      ) : null}
+      ))}
 
       <div className="template-editor__global">
         {template.template_source === "user_template" ? (
@@ -203,7 +214,6 @@ export function TemplateEditor({
           <section className="template-editor-stage" key={activeBinding.stage_type}>
             <div className="template-editor-stage__title">
               <strong>{activeStageLabel}</strong>
-              <span>{activeBinding.stage_type}</span>
             </div>
             <div className="template-editor-stage__fields">
               <label>
@@ -214,23 +224,24 @@ export function TemplateEditor({
                     activeBinding.provider_id,
                     providerOptions,
                   )}
+                  disabled={noConfiguredProviders}
                   onChange={(event) =>
                     updateBinding(activeBinding.stage_type, {
                       provider_id: event.target.value,
                     })
                   }
                 >
-                  {!providerOptions.some(
-                    (provider) =>
-                      provider.provider_id === activeBinding.provider_id,
-                  ) ? (
-                    <option value={activeBinding.provider_id} disabled>
-                      Unavailable provider: {activeBinding.provider_id}
-                    </option>
-                  ) : null}
-                  {providerOptions.length === 0 ? (
+                  {noConfiguredProviders ? (
                     <option value="" disabled>
                       No provider configured
+                    </option>
+                  ) : null}
+                  {!noConfiguredProviders &&
+                  !providerOptions.some(
+                    (provider) => provider.provider_id === activeBinding.provider_id,
+                  ) ? (
+                    <option value={activeBinding.provider_id} disabled>
+                      Unavailable provider
                     </option>
                   ) : null}
                   {providerOptions.map((provider) => (
@@ -278,12 +289,12 @@ export function TemplateEditor({
           type="button"
           onClick={
             template.template_source === "user_template"
-              ? () => activeBinding && onOverwrite(activeBinding.stage_type)
-              : () => activeBinding && onSaveAs(activeBinding.stage_type)
+              ? onOverwrite
+              : onSaveAs
           }
           disabled={!canSave}
         >
-          {isSaving ? "Saving stage" : "Save stage"}
+          {isSaving ? "Saving template" : "Save template"}
         </button>
         {template.template_source === "user_template" ? (
           <>
@@ -306,6 +317,10 @@ function providerSelectValue(
   providerId: string,
   providerOptions: ProviderRead[],
 ): string {
+  if (providerOptions.length === 0) {
+    return "";
+  }
+
   if (providerOptions.some((provider) => provider.provider_id === providerId)) {
     return providerId;
   }

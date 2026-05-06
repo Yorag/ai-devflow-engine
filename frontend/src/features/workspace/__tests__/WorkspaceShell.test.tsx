@@ -733,15 +733,15 @@ describe("WorkspaceShell", () => {
       target: { value: "Clarify only when missing facts block implementation." },
     });
 
-    expect(within(editor).getByText(/Save this edited system template/u)).toBeTruthy();
+    expect(within(editor).getByText(/Unsaved edits will not affect/u)).toBeTruthy();
     expect(
-      within(editor).getByRole("button", { name: "Save stage" }),
+      within(editor).getByRole("button", { name: "Save template" }),
     ).toBeTruthy();
     expect(document.body.textContent ?? "").not.toContain("DeliveryChannel");
     expect(document.body.textContent ?? "").not.toContain("deterministic test runtime");
   });
 
-  it("saves a system template stage as a user template and binds it to the draft session", async () => {
+  it("saves a system template as a user template and binds it to the draft session", async () => {
     const baseFetcher = createMockApiFetcher();
     const saveAsBodies: PipelineTemplateWriteRequest[] = [];
     let sessionTemplateBody: unknown = null;
@@ -794,11 +794,17 @@ describe("WorkspaceShell", () => {
     renderWithAppProviders(<ConsolePage request={request} />);
 
     const editor = await screen.findByRole("region", { name: "Template editor" });
+    fireEvent.change(
+      within(editor).getByLabelText("Requirement Analysis system prompt"),
+      {
+        target: { value: "Clarify the saved requirement before design." },
+      },
+    );
     fireEvent.click(within(editor).getByRole("tab", { name: "Solution Design" }));
     fireEvent.change(within(editor).getByLabelText("Solution Design system prompt"), {
       target: { value: "Design the saved stage only." },
     });
-    fireEvent.click(within(editor).getByRole("button", { name: "Save stage" }));
+    fireEvent.click(within(editor).getByRole("button", { name: "Save template" }));
 
     await waitFor(() => {
       expect(sessionTemplateBody).toEqual({
@@ -813,6 +819,11 @@ describe("WorkspaceShell", () => {
         .stage_role_bindings.map((binding) =>
           binding.stage_type === "solution_design"
             ? { ...binding, system_prompt: "Design the saved stage only." }
+            : binding.stage_type === "requirement_analysis"
+              ? {
+                  ...binding,
+                  system_prompt: "Clarify the saved requirement before design.",
+                }
             : binding,
         ),
     );
@@ -827,7 +838,7 @@ describe("WorkspaceShell", () => {
     fireEvent.change(within(editor).getByLabelText("Requirement Analysis system prompt"), {
       target: { value: "Clarify saved requirements before implementation." },
     });
-    fireEvent.click(within(editor).getByRole("button", { name: "Save stage" }));
+    fireEvent.click(within(editor).getByRole("button", { name: "Save template" }));
 
     await waitFor(() => {
       expect(screen.queryByRole("region", { name: "Template editor" })).toBeNull();
@@ -1456,7 +1467,7 @@ describe("WorkspaceShell", () => {
     expect(screen.getByLabelText("当前输入")).toBeTruthy();
   });
 
-  it("blocks first requirement input when the selected template has unavailable providers", async () => {
+  it("keeps first requirement input available when no provider is configured", async () => {
     const baseFetcher = createMockApiFetcher();
     const request: ApiRequestOptions = {
       fetcher: async (input, init) => {
@@ -1473,21 +1484,18 @@ describe("WorkspaceShell", () => {
 
     renderWithAppProviders(<ConsolePage request={request} />);
 
-    await waitFor(() => {
-      expect(
-        screen.getAllByText(
-          "This template references unavailable providers: provider-deepseek.",
-        ),
-      ).toHaveLength(1);
-    });
-    expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", true);
+    expect(await screen.findByText("No provider configured.")).toBeTruthy();
+    expect(document.body.textContent ?? "").not.toContain("provider-deepseek");
+    const input = screen.getByLabelText("当前输入");
+    expect(input).toHaveProperty("disabled", false);
+    fireEvent.change(input, { target: { value: "Start with the bound template." } });
     expect(screen.getByRole("button", { name: "发送" })).toHaveProperty(
       "disabled",
-      true,
+      false,
     );
   });
 
-  it("blocks first requirement input when configured providers do not include the selected template binding", async () => {
+  it("keeps first requirement input available when configured providers do not include the selected template binding", async () => {
     const baseFetcher = createMockApiFetcher();
     const mimoProvider: ProviderRead = {
       ...mockProviderList[2],
@@ -1527,21 +1535,69 @@ describe("WorkspaceShell", () => {
     ).toBeTruthy();
     expect(
       within(providerSelect).getByRole("option", {
-        name: "Unavailable provider: provider-deepseek",
+        name: "Unavailable provider",
       }),
     ).toBeTruthy();
     expect(
       screen.getAllByText(
-        "This template references unavailable providers: provider-deepseek.",
+        "This template references unavailable providers.",
       ),
     ).toHaveLength(1);
+    expect(document.body.textContent ?? "").not.toContain("provider-deepseek");
 
     const input = screen.getByLabelText("当前输入");
-    expect(input).toHaveProperty("disabled", true);
+    expect(input).toHaveProperty("disabled", false);
+    fireEvent.change(input, { target: { value: "Send with current template." } });
     expect(screen.getByRole("button", { name: "发送" })).toHaveProperty(
       "disabled",
-      true,
+      false,
     );
+  });
+
+  it("sends a draft requirement without persisting unsaved template edits", async () => {
+    const baseFetcher = createMockApiFetcher();
+    let messageBody: unknown = null;
+    let templateSaveCalls = 0;
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const path = normalizeTestPath(input);
+        const method = init?.method ?? "GET";
+
+        if (method === "POST" && path === "/api/sessions/session-draft/messages") {
+          messageBody = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+        }
+
+        if (
+          path.startsWith("/api/pipeline-templates/") &&
+          (method === "POST" || method === "PATCH")
+        ) {
+          templateSaveCalls += 1;
+        }
+
+        return baseFetcher(input, init);
+      },
+    };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    const editor = await screen.findByRole("region", { name: "Template editor" });
+    fireEvent.change(within(editor).getByLabelText("Requirement Analysis system prompt"), {
+      target: { value: "This unsaved edit should not be saved before sending." },
+    });
+    expect(within(editor).getByText(/Unsaved edits will not affect/u)).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("当前输入"), {
+      target: { value: "Start from the currently selected template." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => {
+      expect(messageBody).toEqual({
+        message_type: "new_requirement",
+        content: "Start from the currently selected template.",
+      });
+    });
+    expect(templateSaveCalls).toBe(0);
   });
 
   it("keeps Composer send-enabled for waiting clarification sessions", async () => {
