@@ -51,6 +51,7 @@ export function RunBoundary({ group, children }: RunBoundaryProps): JSX.Element 
 
   const runLabel = `Run ${group.run.attempt_index}`;
   const activeLabel = group.run.is_active ? "Current run" : "Historical run";
+  const shouldShowPendingStage = isActiveRunWithoutStageNode(group);
 
   return (
     <section
@@ -90,6 +91,7 @@ export function RunBoundary({ group, children }: RunBoundaryProps): JSX.Element 
         ) : null}
         <RunDatum label="Run id" value={group.run.run_id} />
       </div>
+      {shouldShowPendingStage ? <PendingStageIndicator run={group.run} /> : null}
       {children}
     </section>
   );
@@ -128,6 +130,42 @@ export function groupEntriesByRun(
 
 export function getRunBoundaryId(runId: string): string {
   return `run-boundary-${runId}`;
+}
+
+function isActiveRunWithoutStageNode(group: RunEntryGroup): boolean {
+  return Boolean(
+    group.run?.is_active &&
+      group.run.current_stage_type &&
+      !group.entries.some((entry) => entry.type === "stage_node"),
+  );
+}
+
+function PendingStageIndicator({
+  run,
+}: {
+  run: RunSummaryProjection;
+}): JSX.Element {
+  const stageLabel = run.current_stage_type
+    ? formatLabel(run.current_stage_type)
+    : "Current stage";
+
+  return (
+    <div
+      className="run-boundary__pending-stage"
+      role="status"
+      aria-label="Current stage is starting"
+      aria-live="polite"
+    >
+      <span className="run-boundary__pending-stage-motion" aria-hidden="true">
+        <span />
+      </span>
+      <strong>{stageLabel} is starting</strong>
+      <span>
+        The run has been accepted and stage activity will appear here as soon as
+        it is projected.
+      </span>
+    </div>
+  );
 }
 
 function RunDatum({ label, value }: { label: string; value: string }): JSX.Element {

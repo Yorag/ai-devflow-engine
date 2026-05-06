@@ -124,6 +124,28 @@ describe("RunBoundary grouping", () => {
     expect(within(fallbackBoundary).queryByText("Current run")).toBeNull();
   });
 
+  it("shows a pending stage indicator while an active run has no stage node yet", () => {
+    render(<NarrativeFeed entries={[secondRunMessage]} runs={[runs[1]]} />);
+
+    const currentRun = screen.getByRole("region", { name: "Run 2 boundary" });
+    expect(
+      within(currentRun).getByRole("status", {
+        name: "Current stage is starting",
+      }),
+    ).toBeTruthy();
+    expect(
+      currentRun.querySelector(
+        '.run-boundary__pending-stage-motion[aria-hidden="true"]',
+      ),
+    ).toBeTruthy();
+    expect(within(currentRun).getByText("Solution Design is starting")).toBeTruthy();
+    expect(
+      within(currentRun).getByText(
+        "The run has been accepted and stage activity will appear here as soon as it is projected.",
+      ),
+    ).toBeTruthy();
+  });
+
   it("renders switcher items only for backend-known runs", () => {
     const orphanEntry: TopLevelFeedEntry = {
       ...mockFeedEntriesByType.control_item,
