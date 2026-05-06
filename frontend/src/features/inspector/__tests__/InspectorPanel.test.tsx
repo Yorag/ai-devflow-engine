@@ -39,7 +39,7 @@ function InspectorHarness({
       className={
         inspector.isOpen
           ? "workspace-shell workspace-shell--inspector-open"
-          : "workspace-shell"
+          : "workspace-shell workspace-shell--inspector-closed"
       }
     >
       <main className="workspace-main">
@@ -117,7 +117,7 @@ describe("Inspector target mapping", () => {
 });
 
 describe("InspectorPanel", () => {
-  it("renders closed by default without a selected target", () => {
+  it("does not render the Inspector region while closed", () => {
     renderWithAppProviders(
       <InspectorPanel
         isOpen={false}
@@ -127,11 +127,8 @@ describe("InspectorPanel", () => {
       />,
     );
 
-    const inspector = screen.getByRole("complementary", { name: "Inspector" });
-    expect(within(inspector).getByText("Inspector closed")).toBeTruthy();
-    expect(
-      within(inspector).queryByRole("button", { name: "Close inspector" }),
-    ).toBeNull();
+    expect(screen.queryByRole("complementary", { name: "Inspector" })).toBeNull();
+    expect(screen.queryByText("Inspector closed")).toBeNull();
   });
 
   it("renders a selected stage target and closes with Escape", async () => {
@@ -153,7 +150,8 @@ describe("InspectorPanel", () => {
 
     fireEvent.keyDown(inspector, { key: "Escape" });
 
-    expect(screen.getByText("Inspector closed")).toBeTruthy();
+    expect(screen.queryByRole("complementary", { name: "Inspector" })).toBeNull();
+    expect(screen.queryByText("Inspector closed")).toBeNull();
   });
 });
 
@@ -170,7 +168,8 @@ describe("Feed Inspector opening", () => {
       <InspectorHarness entries={entries} request={mockApiRequestOptions} />,
     );
 
-    expect(screen.getByText("Inspector closed")).toBeTruthy();
+    expect(screen.queryByRole("complementary", { name: "Inspector" })).toBeNull();
+    expect(screen.queryByText("Inspector closed")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Open Solution Design details" }));
     expect(screen.getByRole("heading", { name: "Stage details" })).toBeTruthy();
@@ -221,7 +220,8 @@ describe("Feed Inspector opening", () => {
     expect(
       screen.queryByRole("button", { name: /open review solution design details/i }),
     ).toBeNull();
-    expect(screen.getByText("Inspector closed")).toBeTruthy();
+    expect(screen.queryByRole("complementary", { name: "Inspector" })).toBeNull();
+    expect(screen.queryByText("Inspector closed")).toBeNull();
   });
 
   it("closes the Inspector with the close button", () => {
@@ -237,7 +237,8 @@ describe("Feed Inspector opening", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Close inspector" }));
 
-    expect(screen.getByText("Inspector closed")).toBeTruthy();
+    expect(screen.queryByRole("complementary", { name: "Inspector" })).toBeNull();
+    expect(screen.queryByText("Inspector closed")).toBeNull();
   });
 
   it("closes the Inspector with Escape after focus leaves the panel", () => {
@@ -257,7 +258,8 @@ describe("Feed Inspector opening", () => {
     screen.getByRole("button", { name: "Outside action" }).focus();
     fireEvent.keyDown(document, { key: "Escape" });
 
-    expect(screen.getByText("Inspector closed")).toBeTruthy();
+    expect(screen.queryByRole("complementary", { name: "Inspector" })).toBeNull();
+    expect(screen.queryByText("Inspector closed")).toBeNull();
   });
 
   it("mounts the Inspector shell from the selected workspace projection", async () => {
@@ -294,9 +296,9 @@ describe("Feed Inspector opening", () => {
     );
 
     expect(await screen.findByText("Clarification needed")).toBeTruthy();
-    const inspector = screen.getByRole("complementary", { name: "Inspector" });
-    expect(within(inspector).getByText("Inspector closed")).toBeTruthy();
-    expect(within(inspector).queryByText("stage-solution-design-running")).toBeNull();
+    expect(screen.queryByRole("complementary", { name: "Inspector" })).toBeNull();
+    expect(screen.queryByText("Inspector closed")).toBeNull();
+    expect(screen.queryByText("stage-solution-design-running")).toBeNull();
   });
 
   it("closes and clears the Inspector target when the selected project changes", async () => {
@@ -322,9 +324,9 @@ describe("Feed Inspector opening", () => {
         name: "Checkout Service",
       }),
     ).toBeTruthy();
-    const inspector = screen.getByRole("complementary", { name: "Inspector" });
-    expect(within(inspector).getByText("Inspector closed")).toBeTruthy();
-    expect(within(inspector).queryByText("stage-solution-design-running")).toBeNull();
+    expect(screen.queryByRole("complementary", { name: "Inspector" })).toBeNull();
+    expect(screen.queryByText("Inspector closed")).toBeNull();
+    expect(screen.queryByText("stage-solution-design-running")).toBeNull();
   });
 });
 

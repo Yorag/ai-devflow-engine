@@ -25,7 +25,7 @@ export function InspectorPanel({
   target,
   onClose,
   request,
-}: InspectorPanelProps): JSX.Element {
+}: InspectorPanelProps): JSX.Element | null {
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const liveEntryRefreshKey = useWorkspaceStore((state) =>
@@ -59,6 +59,8 @@ export function InspectorPanel({
     enabled: isOpen && target !== null,
     retry: false,
   });
+
+  const shouldRenderInspector = isOpen && target !== null;
 
   useEffect(() => {
     if (isOpen && target) {
@@ -96,15 +98,8 @@ export function InspectorPanel({
     };
   }, [isOpen, onClose, target]);
 
-  if (!isOpen || !target) {
-    return (
-      <aside
-        className="workspace-inspector workspace-inspector--closed"
-        aria-label="Inspector"
-      >
-        <p>Inspector closed</p>
-      </aside>
-    );
+  if (!shouldRenderInspector) {
+    return null;
   }
 
   return (

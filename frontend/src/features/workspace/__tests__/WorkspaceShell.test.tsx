@@ -27,6 +27,7 @@ import {
 } from "../../../mocks/handlers";
 import { ConsolePage } from "../../../pages/ConsolePage";
 import { TerminateRunAction } from "../../runs/TerminateRunAction";
+import { SessionList } from "../SessionList";
 import { useWorkspaceStore } from "../workspace-store";
 
 vi.mock("../../../api/runs", async () => {
@@ -47,7 +48,7 @@ afterEach(() => {
 });
 
 describe("WorkspaceShell", () => {
-  it("renders the three workspace regions with inspector closed by default", async () => {
+  it("renders the workspace with inspector closed and no right-column placeholder by default", async () => {
     renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
     expect(
@@ -55,10 +56,64 @@ describe("WorkspaceShell", () => {
         name: "Project and session sidebar",
       }),
     ).toBeTruthy();
-    expect(screen.getByRole("region", { name: "Narrative workspace" })).toBeTruthy();
-    expect(screen.getByRole("complementary", { name: "Inspector" })).toBeTruthy();
-    expect(screen.getByText("Inspector closed")).toBeTruthy();
+    const shell = screen.getByRole("region", { name: "Workspace shell" });
+    expect(shell.getAttribute("class")).toContain(
+      "workspace-shell--inspector-closed",
+    );
+    expect(shell.getAttribute("class")).not.toContain(
+      "workspace-shell--inspector-open",
+    );
+    const main = screen.getByRole("region", { name: "Narrative workspace" });
+    expect(main).toBeTruthy();
+    const scrollArea = main.querySelector(".workspace-main__scroll");
+    expect(scrollArea).toBeTruthy();
+    expect(main.querySelector(".workspace-main__content")).toBeTruthy();
+    expect(
+      await screen.findByRole("region", { name: "Template empty state" }),
+    ).toBeTruthy();
+    const dock = main.querySelector(".workspace-main__composer-dock");
+    expect(dock).toBeTruthy();
+    expect(dock?.parentElement).toBe(main);
+    expect(
+      main.querySelector(".workspace-main__panel--template .template-empty-state"),
+    ).toBeTruthy();
+    expect(
+      dock?.querySelector(".workspace-main__composer-inner .composer"),
+    ).toBeTruthy();
+    expect(
+      scrollArea?.querySelector(".workspace-main__panel--composer"),
+    ).toBeNull();
+    expect(screen.queryByRole("complementary", { name: "Inspector" })).toBeNull();
+    expect(screen.queryByText("Inspector closed")).toBeNull();
     expect(screen.queryByText(/workflow surface comes online/i)).toBeNull();
+  });
+
+  it("switches to the open Inspector layout when a feed detail opens", async () => {
+    renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Add workspace shell" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Solution Design details" }),
+    );
+
+    const shell = screen.getByRole("region", { name: "Workspace shell" });
+    expect(shell.getAttribute("class")).toContain(
+      "workspace-shell--inspector-open",
+    );
+    expect(shell.getAttribute("class")).not.toContain(
+      "workspace-shell--inspector-closed",
+    );
+    const main = screen.getByRole("region", { name: "Narrative workspace" });
+    expect(
+      main.querySelector(".workspace-main__panel--feed .narrative-feed"),
+    ).toBeTruthy();
+    const dock = main.querySelector(".workspace-main__composer-dock");
+    expect(
+      dock?.querySelector(".workspace-main__composer-inner .composer"),
+    ).toBeTruthy();
+    expect(await screen.findByRole("complementary", { name: "Inspector" })).toBeTruthy();
   });
 
   it("shows project navigation, delivery summary, and session management affordances", async () => {
@@ -92,6 +147,85 @@ describe("WorkspaceShell", () => {
     ).toHaveProperty("disabled", true);
   });
 
+  it("keeps inline session rename and delete controls safe with a long name", async () => {
+    const longName =
+      "This is a very long session name that should stay on one protected row without pushing delete outside the card";
+    const renamedSession = {
+      ...mockSessionWorkspaces["session-running"].session,
+      display_name: "Renamed protected row",
+    };
+    const renameFetcher = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        jsonTestResponse(renamedSession),
+    );
+    const handleSessionRename = vi.fn();
+
+    render(
+      <SessionList
+        sessions={[
+          {
+            ...mockSessionWorkspaces["session-running"].session,
+            display_name: longName,
+          },
+        ]}
+        currentSessionId="session-running"
+        onSessionChange={() => undefined}
+        onSessionRename={handleSessionRename}
+        request={{ fetcher: renameFetcher }}
+      />,
+    );
+
+    const item = screen.getByRole("article", { name: `Session ${longName}` });
+    const titleRow = item.querySelector(".session-list-item__title-row");
+    expect(titleRow).toBeTruthy();
+    expect(item.querySelector(".session-list-item__name-text")).toBeTruthy();
+    expect(item.querySelector(".session-list-item__delete")).toBeTruthy();
+    expect(within(titleRow as HTMLElement).getByRole("button", {
+      name: `Open ${longName}`,
+    })).toBeTruthy();
+    expect(within(titleRow as HTMLElement).getByRole("button", {
+      name: `Delete ${longName} blocked by active run`,
+    })).toHaveProperty("disabled", true);
+
+    fireEvent.click(
+      within(item).getByRole("button", { name: `Rename ${longName}` }),
+    );
+
+    expect(
+      within(item).getByRole("textbox", { name: `Rename ${longName}` }),
+    ).toHaveProperty("value", longName);
+    expect(
+      within(item).getByRole("button", { name: "Save session name" }),
+    ).toHaveProperty("disabled", true);
+    expect(
+      within(item).getByRole("button", { name: "Cancel rename" }),
+    ).toBeTruthy();
+
+    const renameInput = within(item).getByRole("textbox", {
+      name: `Rename ${longName}`,
+    });
+    fireEvent.change(renameInput, { target: { value: "Renamed protected row" } });
+    const renameForm = renameInput.closest("form");
+    expect(renameForm).toBeTruthy();
+    expect(
+      within(renameForm as HTMLFormElement).getByRole("button", {
+        name: "Save session name",
+      }),
+    ).toBeTruthy();
+    fireEvent.submit(renameForm as HTMLFormElement);
+
+    await waitFor(() => {
+      expect(renameFetcher).toHaveBeenCalledWith(
+        "/api/sessions/session-running",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ display_name: "Renamed protected row" }),
+        }),
+      );
+    });
+    expect(handleSessionRename).toHaveBeenCalledWith(renamedSession);
+  });
+
   it("switches the current project and keeps shell-only destructive actions disabled", async () => {
     renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
@@ -102,10 +236,8 @@ describe("WorkspaceShell", () => {
       }),
     ).toBeTruthy();
     expect(
-      await screen.findByRole("button", {
-        name: "Delete Blank requirement unavailable",
-      }),
-    ).toHaveProperty("disabled", true);
+      await screen.findByRole("button", { name: "Open Blank requirement" }),
+    ).toHaveProperty("ariaCurrent", "page");
 
     fireEvent.change(await screen.findByLabelText("Switch project"), {
       target: { value: "project-loaded" },
@@ -520,7 +652,7 @@ describe("WorkspaceShell", () => {
     renderWithAppProviders(<ConsolePage request={mockApiRequestOptions} />);
 
     expect(await screen.findByText("Narrative Workspace")).toBeTruthy();
-    expect(screen.getByText("Inspector closed")).toBeTruthy();
+    expect(screen.queryByText("Inspector closed")).toBeNull();
     expect(screen.queryByText(/feature slices/i)).toBeNull();
     expect(screen.queryByText(/routing/i)).toBeNull();
     expect(screen.queryByText(/data layer/i)).toBeNull();
