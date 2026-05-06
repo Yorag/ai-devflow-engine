@@ -439,7 +439,16 @@ def append_session_message(
                 clarification_service=clarification_service,
                 trace_context=trace_context,
             )
-            session = service.get_session(sessionId, trace_context=trace_context)
+            runtime_dispatcher.resume(
+                interrupt=answer.runtime_interrupt,
+                resume_payload=answer.runtime_resume_payload,
+                trace_context=answer.runtime_trace_context,
+            )
+            session = service.get_session(
+                sessionId,
+                trace_context=trace_context,
+                refresh=True,
+            )
             if session is None:
                 raise ApiError(ErrorCode.NOT_FOUND, "Session was not found.", 404)
             return SessionMessageAppendResponse(
@@ -491,8 +500,16 @@ def append_session_message(
                 "stage_run_id": started.stage.stage_run_id,
             },
         )
+        raise
+    refreshed_session = service.get_session(
+        started.session.session_id,
+        trace_context=trace_context,
+        refresh=True,
+    )
+    if refreshed_session is None:
+        raise ApiError(ErrorCode.NOT_FOUND, "Session was not found.", 404)
     return SessionMessageAppendResponse(
-        session=_session_read(started.session),
+        session=_session_read(refreshed_session),
         message_item=started.message_item,
     )
 

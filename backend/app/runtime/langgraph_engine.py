@@ -104,6 +104,35 @@ class LangGraphRuntimeEngine:
         compiled_graph = self._compile_graph(context)
         config = langgraph_thread_config(thread_id=context.thread.thread_id)
         current_snapshot = compiled_graph.get_state(config)
+        if not current_snapshot.next and current_snapshot.values:
+            terminal_trace = context.trace_context.child_span(
+                span_id=f"langgraph-terminal-completed-{context.run_id}",
+                created_at=self._now(),
+                run_id=context.run_id,
+                graph_thread_id=context.thread.thread_id,
+            )
+            self._record_log(
+                "LangGraph main chain completed.",
+                trace_context=terminal_trace,
+                payload_type="langgraph_thread_completed",
+                summary={
+                    "action": "thread_completed",
+                    "run_id": context.run_id,
+                    "graph_thread_id": context.thread.thread_id,
+                },
+            )
+            return RuntimeTerminalResult(
+                run_id=context.run_id,
+                status=GraphThreadStatus.COMPLETED,
+                thread=context.thread.model_copy(
+                    update={
+                        "status": GraphThreadStatus.COMPLETED,
+                        "current_stage_run_id": None,
+                        "current_stage_type": None,
+                    }
+                ),
+                trace_context=terminal_trace,
+            )
         next_node = self._next_node(current_snapshot)
         graph_input: LangGraphRuntimeState | None = None
         if not current_snapshot.values:

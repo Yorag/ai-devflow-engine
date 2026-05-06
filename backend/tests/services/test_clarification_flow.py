@@ -627,7 +627,7 @@ def test_request_clarification_rejects_non_requirement_analysis_before_interrupt
         assert session.query(DomainEventModel).count() == 0
 
 
-def test_answer_clarification_restores_running_and_resumes_same_interrupt(
+def test_answer_clarification_restores_running_and_returns_resume_command(
     tmp_path: Path,
 ) -> None:
     manager = build_manager(tmp_path)
@@ -665,22 +665,23 @@ def test_answer_clarification_restores_running_and_resumes_same_interrupt(
     assert run is not None and run.status is RunStatus.RUNNING
     assert stage is not None and stage.status is StageStatus.RUNNING
     assert control_session is not None and control_session.status is SessionStatus.RUNNING
-    assert runtime_port.calls[0][0] == "resume_interrupt"
-    assert runtime_port.calls[0][1]["interrupt"].interrupt_id == (
+    assert runtime_port.calls == []
+    assert result.runtime_interrupt.interrupt_ref.interrupt_id == (
         clarification.graph_interrupt_ref
     )
     assert (
-        runtime_port.calls[0][1]["interrupt"].checkpoint_ref.checkpoint_id
+        result.runtime_interrupt.interrupt_ref.checkpoint_ref.checkpoint_id
         == "checkpoint-clarification-1"
     )
     assert (
-        runtime_port.calls[0][1]["interrupt"].checkpoint_ref.payload_ref
+        result.runtime_interrupt.interrupt_ref.checkpoint_ref.payload_ref
         == "graph-checkpoint://thread-1/checkpoint-clarification-1"
     )
-    assert runtime_port.calls[0][1]["resume_payload"].values == {
+    assert result.runtime_resume_payload.values == {
         "clarification_id": clarification_id,
         "answer": "Change backend only.",
     }
+    assert result.runtime_trace_context.span_id == "clarification-reply"
     assert result.message_item.content == "Change backend only."
     assert event.payload["message_item"]["content"] == "Change backend only."
     assert audit.records[-1]["action"] == "session.message.clarification_reply"
@@ -758,7 +759,7 @@ def test_answer_clarification_rejects_when_session_is_not_waiting(
         assert session.query(DomainEventModel).count() == 0
 
 
-def test_answer_clarification_rolls_back_when_runtime_resume_fails(
+def test_answer_clarification_commits_when_graph_port_resume_would_fail(
     tmp_path: Path,
 ) -> None:
     manager = build_manager(tmp_path)
@@ -768,24 +769,17 @@ def test_answer_clarification_rolls_back_when_runtime_resume_fails(
         manager,
         clarification_id=clarification_id,
     )
-    service, audit, _runtime_port = build_service(
+    service, audit, runtime_port = build_service(
         manager,
         fail_resume=True,
         include_graph_session=True,
     )
 
-    from backend.app.services.clarifications import ClarificationServiceError
-
-    with pytest.raises(ClarificationServiceError) as exc_info:
-        service.answer_clarification(
-            session_id="session-1",
-            answer="Change backend only.",
-            trace_context=build_trace(),
-        )
-
-    assert exc_info.value.error_code is ErrorCode.INTERNAL_ERROR
-    assert exc_info.value.status_code == 500
-    assert "runtime resume failed" in exc_info.value.message
+    result = service.answer_clarification(
+        session_id="session-1",
+        answer="Change backend only.",
+        trace_context=build_trace(),
+    )
     with manager.session(DatabaseRole.RUNTIME) as session:
         clarification = session.get(ClarificationRecordModel, clarification_id)
         run = session.get(PipelineRunModel, "run-1")
@@ -800,16 +794,16 @@ def test_answer_clarification_rolls_back_when_runtime_resume_fails(
         )
 
     assert clarification is not None
-    assert clarification.answer is None
-    assert clarification.answered_at is None
-    assert run is not None and run.status is RunStatus.WAITING_CLARIFICATION
-    assert stage is not None and stage.status is StageStatus.WAITING_CLARIFICATION
+    assert clarification.answer == "Change backend only."
+    assert clarification.answered_at is not None
+    assert run is not None and run.status is RunStatus.RUNNING
+    assert stage is not None and stage.status is StageStatus.RUNNING
     assert control_session is not None
-    assert control_session.status is SessionStatus.WAITING_CLARIFICATION
-    assert answered_count == 0
-    assert audit.records[-1]["method"] == "record_failed_command"
-    assert audit.records[-1]["action"] == "session.message.clarification_reply.resume_failed"
-    assert audit.records[-1]["metadata"]["stage_type"] == "requirement_analysis"
-    assert audit.records[-1]["metadata"]["session_status"] == "waiting_clarification"
-    assert audit.records[-1]["metadata"]["run_status"] == "waiting_clarification"
-    assert audit.records[-1]["metadata"]["stage_status"] == "waiting_clarification"
+    assert control_session.status is SessionStatus.RUNNING
+    assert answered_count == 1
+    assert runtime_port.calls == []
+    assert result.runtime_resume_payload.values == {
+        "clarification_id": clarification_id,
+        "answer": "Change backend only.",
+    }
+    assert audit.records[-1]["action"] == "session.message.clarification_reply"

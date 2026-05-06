@@ -57,6 +57,24 @@ from backend.tests.services.test_approval_commands import (
 )
 
 
+class CapturingRuntimeDispatcher:
+    def __init__(self) -> None:
+        self.resumes = []
+
+    def dispatch_started_run(self, command) -> None:  # noqa: ANN001
+        raise AssertionError("approval command should not dispatch a new run")
+
+    def resume(self, *, interrupt, resume_payload, trace_context):  # noqa: ANN001
+        self.resumes.append(
+            {
+                "interrupt": interrupt,
+                "resume_payload": resume_payload,
+                "trace_context": trace_context,
+            }
+        )
+        return None
+
+
 def build_app(tmp_path: Path):
     app = create_app(
         EnvironmentSettings(
@@ -76,6 +94,7 @@ def build_app(tmp_path: Path):
     app.state.h44_delivery_snapshot_service = RecordingDeliverySnapshotService(
         app.state.database_manager.session(DatabaseRole.RUNTIME)
     )
+    app.state.runtime_execution_dispatcher = CapturingRuntimeDispatcher()
     return app
 
 
@@ -391,6 +410,7 @@ def test_post_approval_approve_accepts_solution_design_and_returns_approval_resu
         approval_type=ApprovalType.SOLUTION_DESIGN_APPROVAL,
         stage_type=StageType.SOLUTION_DESIGN,
     )
+    graph_runtime_call_count = len(app.state.h44_runtime_port.calls)
 
     with TestClient(app) as client:
         response = client.post(
@@ -399,6 +419,16 @@ def test_post_approval_approve_accepts_solution_design_and_returns_approval_resu
         )
 
     assert response.status_code == 200
+    assert len(app.state.runtime_execution_dispatcher.resumes) == 1
+    resume = app.state.runtime_execution_dispatcher.resumes[0]
+    assert resume["interrupt"].interrupt_ref.interrupt_id == "interrupt-approval-1"
+    assert resume["resume_payload"].values == {
+        "decision": "approved",
+        "reason": None,
+        "approval_id": approval_id,
+        "next_stage_type": "code_generation",
+    }
+    assert len(app.state.h44_runtime_port.calls) == graph_runtime_call_count
     body = response.json()
     assert body["approval_result"]["approval_id"] == approval_id
     assert body["approval_result"]["decision"] == "approved"
@@ -494,7 +524,7 @@ def test_post_approval_approve_returns_delivery_readiness_conflict_for_code_revi
     assert response.json()["detail_ref"] == approval_id
 
 
-def test_post_approval_approve_rolls_back_real_snapshot_when_later_command_step_fails(
+def test_post_approval_approve_commits_real_snapshot_when_graph_port_resume_would_fail(
     tmp_path: Path,
 ) -> None:
     app = build_app(tmp_path)
@@ -514,13 +544,15 @@ def test_post_approval_approve_rolls_back_real_snapshot_when_later_command_step_
     with TestClient(app, raise_server_exceptions=False) as client:
         response = client.post(f"/api/approvals/{approval_id}/approve", json={})
 
-    assert response.status_code == 500
+    assert response.status_code == 200
+    assert len(app.state.runtime_execution_dispatcher.resumes) == 1
+    assert app.state.h44_runtime_port.calls == []
     with manager.session(DatabaseRole.RUNTIME) as session:
         approval = session.get(ApprovalRequestModel, approval_id)
         run = session.get(PipelineRunModel, "run-1")
-        assert approval is not None and approval.status is ApprovalStatus.PENDING
-        assert run is not None and run.delivery_channel_snapshot_ref is None
-        assert session.query(DeliveryChannelSnapshotModel).count() == 0
+        assert approval is not None and approval.status is ApprovalStatus.APPROVED
+        assert run is not None and run.delivery_channel_snapshot_ref is not None
+        assert session.query(DeliveryChannelSnapshotModel).count() == 1
 
 
 def test_post_approval_approve_maps_delivery_snapshot_domain_error_to_conflict(

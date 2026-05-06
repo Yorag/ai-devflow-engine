@@ -2,51 +2,68 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` to implement this plan task-by-task. Fallback to `superpowers:executing-plans` only if subagent dispatch is unavailable or the task boundary cannot be precisely limited. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Trigger a backend runtime dispatch boundary after the first `new_requirement` successfully creates the initial `PipelineRun`.
+**Goal:** Replace the no-op first-run dispatch handoff with a production `RuntimeExecutionService` that reconstructs persisted runtime context, calls the runtime engine, and projects startup execution failures.
 
-**Architecture:** Keep `RunLifecycleService.start_first_run()` as the transactional startup owner, then call an injectable runtime dispatcher from the `POST /api/sessions/{sessionId}/messages` route only after startup returns. The default dispatcher is a no-op boundary so production can wire a durable queue or runtime runner through `app.state` without forcing unsafe LangGraph execution inside the HTTP transaction.
+**Architecture:** `GraphRuntimeCommandPort` remains the graph command/status port. `RuntimeExecutionService` owns production execution dispatch: it opens fresh DB sessions, reconstructs `RuntimeExecutionContext` from committed run/stage/snapshot/thread rows, creates graph runtime/checkpoint ports, invokes `RuntimeEngine.start/run_next/resume`, and marks run/stage/session/thread failed if engine startup fails. `create_app()` wires the service by default; tests may override it with fakes.
 
-**Tech Stack:** Python 3.11+, FastAPI dependency injection, Pydantic v2, SQLAlchemy-backed tests, existing `TraceContext`, `PipelineRunModel`, `StageRunModel`, `StageType`, and pytest through `uv run --extra dev`.
+**Tech Stack:** Python 3.11+, FastAPI dependency injection, SQLAlchemy sessions split by role, Pydantic runtime contracts, LangGraph runtime engine protocol, pytest through `uv run --extra dev`.
 
 ---
 
 ## Source Trace
 
-- Product source: `docs/specs/function-one-product-overview-v1.md` acceptance item 11 says the first requirement message must automatically start the first `PipelineRun`.
-- Backend API source: `docs/specs/function-one-backend-engine-design-v1.md` section 9.1 says `POST /api/sessions/{sessionId}/messages` with `new_requirement` must create the run snapshots, graph definition, first graph thread, first workspace ref, first message event, and initial `requirement_analysis` `StageRun`.
-- Backend runtime source: `docs/specs/function-one-backend-engine-design-v1.md` section 4.2 says `PipelineRun` and `StageRun` status advancement belongs to the runtime orchestration boundary.
-- Existing plan source: `docs/plans/implementation/v6.1-backend-full-api-flow.md` records that current deterministic runtime advancement is in-process test harness only and no public/background runtime advance exists.
-- Current code fact: `backend/app/api/routes/sessions.py` calls `SessionService.start_run_from_new_requirement(...)`; `backend/app/services/runs.py` creates committed run/thread/stage/event/audit records but does not call `RuntimeEngine.start()`, `RuntimeEngine.run_next()`, `StageAgentRuntime`, a queue, or a worker.
+- User target: fix the production gap where `GraphRuntimeCommandPort` was only a status/command port and the default app path still no-oped after first `new_requirement`.
+- Product source: `docs/specs/function-one-product-overview-v1.md` requires first `new_requirement` to auto-start the first `PipelineRun` and failed/terminated tails to get top-level `system_status`.
+- Backend source: `docs/specs/function-one-backend-engine-design-v1.md` treats graph state as execution recovery truth, `PipelineRun`/`StageRun` as product truth, and failed `PipelineRun` as projecting to failed `Session`.
+- Platform plan source: `docs/plans/function-one-platform-plan.md` records runtime boundary first, production user runs through LangGraph, and deterministic test runtime remains test/demo harness only.
+- Code fact: current `backend/app/services/runtime_dispatch.py` has a no-op default dispatcher and `backend/app/main.py` does not register a real production dispatcher.
 
-No Source Trace Conflict Gate conflict is identified. This slice does not expose deterministic runtime to users, does not add a public runtime-advance API, and does not reinterpret first-run startup semantics.
+No Source Trace Conflict Gate conflict is identified. This slice does not expose `__test__/runtime/advance`, does not route production through `backend.app.testing`, and does not make `GraphRuntimeCommandPort` an executor.
 
 ## File Map
 
-- Create: `backend/app/services/runtime_dispatch.py`
-  - Owns `RuntimeDispatchCommand`, `RuntimeExecutionDispatcher`, `NoopRuntimeExecutionDispatcher`, and `runtime_dispatcher_from_app_state()`.
-  - Does not read or write database state and does not run LangGraph directly.
+- Modify: `backend/app/services/runtime_dispatch.py`
+  - Keep `RuntimeDispatchCommand` and `RuntimeExecutionDispatcher`.
+  - Add `RuntimeExecutionService`, context reconstruction, engine invocation methods, default engine factory, stage-scoped runner, bounded startup/resume continuation, and failure projection.
+  - Remove no-op as the default app-state fallback; tests can inject explicit fakes.
+- Create: `backend/app/runtime/persistent_checkpointer.py`
+  - Add a SQLite-backed LangGraph checkpointer for the default production engine factory.
+- Modify: `backend/app/runtime/langgraph_engine.py`
+  - Return a completed terminal result when the saved LangGraph state has no next node.
+- Modify: `backend/app/services/runs.py`
+  - Persist the run template snapshot as a runtime artifact at first-run startup.
+- Modify: `backend/app/services/publication_boundary.py`
+  - Delete staged `StageArtifactModel` rows before staged `StageRunModel` rows during startup publication cleanup.
+- Modify: `backend/app/main.py`
+  - Register `RuntimeExecutionService` on `app.state.runtime_execution_dispatcher` in `create_app()`.
 - Modify: `backend/app/api/routes/sessions.py`
-  - Adds a dispatcher dependency.
-  - Calls the dispatcher after `start_run_from_new_requirement(...)` returns successfully.
-  - Leaves clarification reply and error paths unchanged.
+  - Keep route schema unchanged.
+  - Call dispatcher after first-run startup; route no longer relies on missing app-state no-op and no longer suppresses escaped dispatcher failures.
+- Modify: clarification, approval, and tool-confirmation command routes/services
+  - Return `RuntimeInterrupt` and `RuntimeResumePayload` from command services and call the dispatcher resume boundary from routes.
+- Create: `backend/tests/services/test_runtime_execution_service.py`
+  - Service-level TDD coverage for context reconstruction, graph port boundary, engine start/run_next/resume calls, stage-scoped execution, startup/resume continuation, persisted template snapshots, durable checkpointer, terminal projection, and failed execution projection.
 - Modify: `backend/tests/api/test_session_message_api.py`
-  - Adds a fake dispatcher.
-  - Extends the first-requirement test to assert dispatch occurs exactly once with committed run/stage identity.
-  - Extends the duplicate requirement rejection test to assert no second dispatch occurs.
+  - Keep API contract assertions.
+  - Override dispatcher where route tests need isolation.
+  - Replace status-only failure expectation with service-level failure projection coverage.
+- Modify: `docs/plans/implementation/runtime-agent-dispatch.md`
+  - Record this plan and fresh verification evidence.
 
 ## API And OpenAPI Checklist
 
-- Route path remains `POST /api/sessions/{sessionId}/messages`.
-- Method, request schema, response schema, and documented error responses remain unchanged.
-- Existing OpenAPI assertion `test_session_message_route_is_documented_for_new_requirement` remains the contract check for this route.
-- No frontend API client, schema field, or status enum change is part of this slice.
+- Path remains `POST /api/sessions/{sessionId}/messages`.
+- Request and response schemas remain `SessionMessageAppendRequest` and `SessionMessageAppendResponse`.
+- Response codes remain covered by existing OpenAPI route test.
+- No frontend API client or public test runtime route is introduced.
 
 ## Log & Audit Integration
 
-- First-run startup audit/log behavior remains owned by `RunLifecycleService`.
-- This slice introduces a dispatch boundary, not a runtime state transition; it must not use logs as product truth and must not write run/stage status.
-- The dispatcher receives inherited `request_id`, `trace_id`, `correlation_id`, `span_id`, and run/stage/thread identifiers through `TraceContext`.
-- A later durable dispatcher slice can add enqueue logs, queue persistence, retry policy, failure-to-system-status projection, and background worker evidence. This slice only proves that the startup command hands off to that boundary after the transactional startup is visible.
+- Runtime execution failure writes product truth first: `PipelineRun.failed`, current `StageRun.failed`, `Session.failed`, `GraphThread.failed`, `StageUpdated`, and `RunFailed`/`system_status`.
+- Runtime failure audit action: `runtime.execution.failed`, actor `system`, target `run`, result `failed`, with `run_id`, `stage_run_id`, `graph_thread_id`, `error_type`, and redacted reason.
+- Runtime failure log payload type: `runtime_execution_failed`, category `runtime`, level `error`, with inherited `request_id`, run `trace_id`, `correlation_id`, `span_id`, `parent_span_id`, `stage_run_id`, and `graph_thread_id`.
+- Log/audit write failures do not replace domain state, domain event, or projection facts.
+- Sensitive error strings are summarized and bounded before stage summary/system status/audit/log metadata.
 
 ## Subagent Execution Contract
 
@@ -54,285 +71,215 @@ Implementer boundaries:
 
 - Allowed create/modify files:
   - `backend/app/services/runtime_dispatch.py`
+  - `backend/app/main.py`
   - `backend/app/api/routes/sessions.py`
+  - `backend/tests/services/test_runtime_execution_service.py`
   - `backend/tests/api/test_session_message_api.py`
   - `docs/plans/implementation/runtime-agent-dispatch.md`
 - Allowed commands:
   - `rg` and `Get-Content` read-only checks.
-  - `uv run --extra dev python -m pytest backend/tests/api/test_session_message_api.py::test_post_session_message_new_requirement_starts_first_run_and_returns_first_user_message -q`
+  - `uv run --extra dev python -m pytest backend/tests/services/test_runtime_execution_service.py -q`
   - `uv run --extra dev python -m pytest backend/tests/api/test_session_message_api.py -q`
-  - `uv run --extra dev python -m pytest backend/tests/api/test_session_message_api.py backend/tests/api/test_startup_publication_visibility.py backend/tests/services/test_start_first_run.py -q`
+  - `uv run --extra dev python -m pytest backend/tests/services/test_runtime_execution_service.py backend/tests/api/test_session_message_api.py backend/tests/services/test_start_first_run.py backend/tests/runtime/test_langgraph_engine.py -q`
 - Forbidden:
   - Do not modify current split specs.
-  - Do not expose deterministic runtime as a user route or setting.
-  - Do not run LangGraph inside the startup transaction.
-  - Do not update the historical coordination store or acceleration plan status.
+  - Do not use `backend.app.testing`, `DeterministicRuntimeEngine`, or `__test__/runtime/advance` in production wiring.
+  - Do not make `GraphRuntimeCommandPort` implement `RuntimeEngine`.
+  - Do not update coordination store, platform-plan final states, lock files, manifests, env files, or migrations.
   - Do not run Git write actions.
-  - Do not install or upgrade dependencies.
 
 Review order:
 
-1. Spec / plan compliance review.
-2. Code quality, test sufficiency, and regression risk review.
+1. Spec / plan compliance reviewer.
+2. Code quality, test sufficiency, and regression risk reviewer.
 3. Fix Critical or Important findings and re-review affected changes.
 
-## Task 1: Runtime Dispatch Hook
+## Task 1: Runtime Execution Service
 
 **Files:**
-- Create: `backend/app/services/runtime_dispatch.py`
-- Modify: `backend/app/api/routes/sessions.py`
-- Test: `backend/tests/api/test_session_message_api.py`
+- Create/modify: `backend/app/services/runtime_dispatch.py`
+- Test: `backend/tests/services/test_runtime_execution_service.py`
 
-- [x] **Step 1: Write the failing dispatch test**
+- [x] **Step 1: Write failing context reconstruction test**
 
-Add a fake dispatcher to `backend/tests/api/test_session_message_api.py`:
-
-```python
-class CapturingRuntimeDispatcher:
-    def __init__(self, app) -> None:  # noqa: ANN001
-        self.app = app
-        self.commands = []
-        self.visibility_checks = []
-
-    def dispatch_started_run(self, command) -> None:  # noqa: ANN001
-        self.commands.append(command)
-        with self.app.state.database_manager.session(DatabaseRole.RUNTIME) as session:
-            run = session.get(PipelineRunModel, command.run_id)
-            stage = session.get(StageRunModel, command.stage_run_id)
-            self.visibility_checks.append((run is not None, stage is not None))
-```
-
-In `test_post_session_message_new_requirement_starts_first_run_and_returns_first_user_message`, assign the dispatcher before creating the `TestClient`:
+Add a service test that starts a real first run through `RunLifecycleService` helpers, injects a fake engine factory, calls `RuntimeExecutionService.dispatch_started_run(...)`, and asserts:
 
 ```python
-dispatcher = CapturingRuntimeDispatcher(app)
-app.state.runtime_execution_dispatcher = dispatcher
-```
-
-After existing `run_id` and `stage_run_id` assertions, add:
-
-```python
-assert len(dispatcher.commands) == 1
-command = dispatcher.commands[0]
-assert command.session_id == created["session_id"]
-assert command.run_id == run_id
-assert command.stage_run_id == stage_run_id
-assert command.stage_type is StageType.REQUIREMENT_ANALYSIS
-assert command.graph_thread_id == run.graph_thread_ref
-assert command.trace_context.request_id == "req-new-requirement"
-assert command.trace_context.correlation_id == "corr-new-requirement"
-assert dispatcher.visibility_checks == [(True, True)]
+assert fake_engine.start_calls[0].context.run_id == result.run.run_id
+assert fake_engine.start_calls[0].context.session_id == result.session.session_id
+assert fake_engine.start_calls[0].context.thread.thread_id == result.run.graph_thread_ref
+assert fake_engine.start_calls[0].context.thread.status is GraphThreadStatus.RUNNING
+assert fake_engine.start_calls[0].context.provider_snapshot_refs
+assert fake_engine.start_calls[0].context.model_binding_snapshot_refs
+assert type(fake_engine.start_calls[0].runtime_port).__name__ == "GraphRuntimeCommandPort"
+assert type(fake_engine.start_calls[0].checkpoint_port).__name__ == "GraphCheckpointPort"
 ```
 
 Run:
 
 ```powershell
-uv run --extra dev python -m pytest backend/tests/api/test_session_message_api.py::test_post_session_message_new_requirement_starts_first_run_and_returns_first_user_message -q
+uv run --extra dev python -m pytest backend/tests/services/test_runtime_execution_service.py::test_dispatch_started_run_reconstructs_context_and_calls_runtime_engine_start -q
 ```
 
-Expected red result:
+Expected red: import error for `RuntimeExecutionService` or missing `engine.start` call.
 
-```text
-FAILED ... AttributeError: 'State' object has no attribute 'runtime_execution_dispatcher'
-```
+- [x] **Step 2: Implement minimal service and context builder**
 
-or:
+Implement `RuntimeExecutionService` with injected `DatabaseManager`, optional `engine_factory`, optional `log_writer_factory`, optional `audit_service_factory`, and `now`.
 
-```text
-FAILED ... assert 0 == 1
-```
-
-The expected failure must show that the route does not dispatch after startup.
-
-- [x] **Step 2: Add the dispatch service boundary**
-
-Create `backend/app/services/runtime_dispatch.py`:
+`dispatch_started_run(command)` must:
 
 ```python
-from __future__ import annotations
-
-from typing import Protocol
-
-from fastapi import Request
-from pydantic import BaseModel, ConfigDict, Field
-
-from backend.app.domain.enums import StageType
-from backend.app.domain.trace_context import TraceContext
-
-
-class RuntimeDispatchCommand(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    session_id: str = Field(min_length=1)
-    run_id: str = Field(min_length=1)
-    stage_run_id: str = Field(min_length=1)
-    stage_type: StageType
-    graph_thread_id: str = Field(min_length=1)
-    trace_context: TraceContext
-
-
-class RuntimeExecutionDispatcher(Protocol):
-    def dispatch_started_run(self, command: RuntimeDispatchCommand) -> None: ...
-
-
-class NoopRuntimeExecutionDispatcher:
-    def dispatch_started_run(self, command: RuntimeDispatchCommand) -> None:
-        del command
-
-
-def runtime_dispatcher_from_app_state(request: Request) -> RuntimeExecutionDispatcher:
-    dispatcher = getattr(request.app.state, "runtime_execution_dispatcher", None)
-    if dispatcher is None:
-        return NoopRuntimeExecutionDispatcher()
-    return dispatcher
-
-
-__all__ = [
-    "NoopRuntimeExecutionDispatcher",
-    "RuntimeDispatchCommand",
-    "RuntimeExecutionDispatcher",
-    "runtime_dispatcher_from_app_state",
-]
+with manager.session(DatabaseRole.CONTROL) as control_session, ...:
+    context = self._build_context(...)
+    engine = self._engine_factory(RuntimeEngineFactoryInput(...))
+    result = engine.start(
+        context=context,
+        runtime_port=GraphRuntimeCommandPort(graph_session),
+        checkpoint_port=GraphCheckpointPort(graph_session),
+    )
 ```
 
-- [x] **Step 3: Call the dispatcher after successful startup**
+It must load `PipelineRunModel`, current `StageRunModel`, `GraphThreadModel`, `ProviderSnapshotModel`, and `ModelBindingSnapshotModel`, validate command/run/thread identity, and build `RuntimeExecutionContext`.
 
-In `backend/app/api/routes/sessions.py`, import the new boundary:
+- [x] **Step 3: Add run_next and resume boundary tests**
+
+Add tests that call `service.run_next(run_id=..., trace_context=...)` and `service.resume(interrupt=..., resume_payload=...)` with fake engine methods, proving the service boundary can call all production `RuntimeEngine` execution entrypoints.
+
+Run:
+
+```powershell
+uv run --extra dev python -m pytest backend/tests/services/test_runtime_execution_service.py::test_run_next_reconstructs_context_and_calls_runtime_engine_run_next backend/tests/services/test_runtime_execution_service.py::test_resume_reconstructs_context_and_calls_runtime_engine_resume -q
+```
+
+Expected red before implementation: missing service methods.
+
+- [x] **Step 4: Implement run_next and resume**
+
+Add `run_next(...)` and `resume(...)` methods using the same context reconstruction and graph ports. These methods must not call deterministic runtime or test harness code.
+
+- [x] **Step 5: Add failing execution projection test**
+
+Add a fake engine whose `start()` raises `RuntimeError("provider unavailable: secret-token")`. Assert after dispatch:
 
 ```python
-from backend.app.services.runtime_dispatch import (
-    RuntimeDispatchCommand,
-    RuntimeExecutionDispatcher,
-    runtime_dispatcher_from_app_state,
+assert run.status is RunStatus.FAILED
+assert stage.status is StageStatus.FAILED
+assert control_session.status is SessionStatus.FAILED
+assert thread.status == "failed"
+assert system_status.payload["system_status"]["status"] == "failed"
+assert system_status.payload["system_status"]["retry_action"] == f"retry:{run_id}"
+assert "secret-token" not in stage.summary
+assert failed_audit.result is AuditResult.FAILED
+```
+
+Run:
+
+```powershell
+uv run --extra dev python -m pytest backend/tests/services/test_runtime_execution_service.py::test_dispatch_started_run_failure_marks_run_failed_and_projects_system_status -q
+```
+
+Expected red: current dispatcher leaves run/stage/session/thread running or has no service.
+
+- [x] **Step 6: Implement failure projection**
+
+When engine construction or `start/run_next/resume` raises, service must mark persisted product/graph facts failed, append `STAGE_UPDATED`, append terminal `RUN_FAILED` system status through `TerminalStatusProjector`, write best-effort audit/log, commit all product/event/graph facts, and not leave a started run silently running.
+
+## Task 2: Default App Wiring And API Regression
+
+**Files:**
+- Modify: `backend/app/main.py`
+- Modify: `backend/app/api/routes/sessions.py`
+- Modify: `backend/tests/api/test_session_message_api.py`
+
+- [x] **Step 1: Add failing default wiring test**
+
+Add an API or service test asserting:
+
+```python
+app = create_app(settings)
+assert type(app.state.runtime_execution_dispatcher).__name__ == "RuntimeExecutionService"
+```
+
+Run:
+
+```powershell
+uv run --extra dev python -m pytest backend/tests/api/test_session_message_api.py::test_create_app_registers_runtime_execution_service_by_default -q
+```
+
+Expected red: app state has no dispatcher or uses no-op.
+
+- [x] **Step 2: Wire production service in create_app**
+
+Set:
+
+```python
+app.state.runtime_execution_dispatcher = RuntimeExecutionService(
+    database_manager=app.state.database_manager,
+    environment_settings=environment_settings,
 )
 ```
 
-Add the dependency to `append_session_message`:
+Default app path must not use no-op, deterministic harness, or status-only dispatcher.
 
-```python
-    runtime_dispatcher: RuntimeExecutionDispatcher = Depends(
-        runtime_dispatcher_from_app_state
-    ),
-```
+- [x] **Step 3: Update route tests for explicit fakes**
 
-After `started = service.start_run_from_new_requirement(...)` succeeds and before returning the response, call the dispatcher with a run-trace-aligned command. Isolate dispatcher transport failures so a committed startup response is not turned into a 500:
+Route tests that assert first-run startup details may set `app.state.runtime_execution_dispatcher = CapturingRuntimeDispatcher(app)` so API tests stay isolated from live provider execution. Add a dedicated test proving production default is real.
 
-```python
-    try:
-        runtime_dispatcher.dispatch_started_run(
-            RuntimeDispatchCommand(
-                session_id=started.session.session_id,
-                run_id=started.run.run_id,
-                stage_run_id=started.stage.stage_run_id,
-                stage_type=started.stage.stage_type,
-                graph_thread_id=started.run.graph_thread_ref,
-                trace_context=TraceContext.model_validate(
-                    {
-                        **trace_context.model_dump(),
-                        "trace_id": started.run.trace_id,
-                        "parent_span_id": trace_context.span_id,
-                        "span_id": f"runtime-dispatch-started-{started.run.run_id}",
-                        "created_at": datetime.now(UTC),
-                        "session_id": started.session.session_id,
-                        "run_id": started.run.run_id,
-                        "stage_run_id": started.stage.stage_run_id,
-                        "graph_thread_id": started.run.graph_thread_ref,
-                    }
-                ),
-            )
-        )
-    except Exception:
-        _LOGGER.exception(
-            "Runtime dispatch failed after first run startup.",
-            extra={
-                "session_id": started.session.session_id,
-                "run_id": started.run.run_id,
-                "stage_run_id": started.stage.stage_run_id,
-            },
-        )
-```
-
-Do not call the dispatcher for `clarification_reply` or exception paths.
-
-- [x] **Step 4: Run focused green test**
+- [x] **Step 4: Run focused API and impacted tests**
 
 Run:
 
 ```powershell
-uv run --extra dev python -m pytest backend/tests/api/test_session_message_api.py::test_post_session_message_new_requirement_starts_first_run_and_returns_first_user_message -q
-```
-
-Expected green result:
-
-```text
-1 passed
-```
-
-- [x] **Step 5: Add duplicate rejection no-dispatch assertion**
-
-In `test_new_requirement_rejects_non_draft_or_existing_run_session`, assign a `CapturingRuntimeDispatcher` before `TestClient`, then assert after the second rejected post:
-
-```python
-assert len(dispatcher.commands) == 1
-```
-
-This proves the rejected duplicate request does not enqueue or dispatch a second runtime start.
-
-- [x] **Step 6: Run route and impacted regressions**
-
-Run:
-
-```powershell
+uv run --extra dev python -m pytest backend/tests/services/test_runtime_execution_service.py -q
 uv run --extra dev python -m pytest backend/tests/api/test_session_message_api.py -q
-uv run --extra dev python -m pytest backend/tests/api/test_session_message_api.py backend/tests/api/test_startup_publication_visibility.py backend/tests/services/test_start_first_run.py -q
+uv run --extra dev python -m pytest backend/tests/services/test_runtime_execution_service.py backend/tests/api/test_session_message_api.py backend/tests/services/test_start_first_run.py backend/tests/runtime/test_langgraph_engine.py -q
 ```
 
-Expected:
-
-```text
-all selected tests pass
-```
-
-Actual output:
-
-```text
-RED:
-uv run --extra dev python -m pytest backend/tests/api/test_session_message_api.py::test_post_session_message_new_requirement_starts_first_run_and_returns_first_user_message -q
-Exit code: 1
-FAILED ... assert 0 == 1
-
-GREEN:
-uv run --extra dev python -m pytest backend/tests/api/test_session_message_api.py::test_post_session_message_new_requirement_starts_first_run_and_returns_first_user_message -q
-Exit code: 0
-1 passed in 1.52s
-
-REVIEW RED:
-uv run --extra dev python -m pytest backend/tests/api/test_session_message_api.py::test_post_session_message_new_requirement_starts_first_run_and_returns_first_user_message backend/tests/api/test_session_message_api.py::test_new_requirement_dispatch_failure_does_not_hide_committed_startup -q
-Exit code: 1
-FAILED ... assert command.trace_context.trace_id == run_trace_id
-FAILED ... assert 500 == 200
-
-REVIEW GREEN:
-uv run --extra dev python -m pytest backend/tests/api/test_session_message_api.py::test_post_session_message_new_requirement_starts_first_run_and_returns_first_user_message backend/tests/api/test_session_message_api.py::test_new_requirement_dispatch_failure_does_not_hide_committed_startup -q
-Exit code: 0
-2 passed in 2.23s
-
-ROUTE:
-uv run --extra dev python -m pytest backend/tests/api/test_session_message_api.py -q
-Exit code: 0
-7 passed in 5.69s
-
-IMPACTED:
-uv run --extra dev python -m pytest backend/tests/api/test_session_message_api.py backend/tests/api/test_startup_publication_visibility.py backend/tests/services/test_start_first_run.py -q
-Exit code: 0
-24 passed in 10.77s
-```
+Expected green: all selected tests pass.
 
 ## Completion Checklist
 
-- [x] First `new_requirement` dispatches exactly once after run startup is committed and visible.
-- [x] Duplicate rejected `new_requirement` does not dispatch.
-- [x] Clarification reply path remains unchanged.
-- [x] Public API schema remains unchanged and OpenAPI route test still passes.
-- [x] No deterministic test runtime route or user-facing runtime mode is introduced.
-- [x] No split spec, coordination store, lock file, or dependency manifest is changed.
+- [x] `RuntimeExecutionDispatcher` and `RuntimeExecutionService` are explicit production boundaries.
+- [x] `GraphRuntimeCommandPort` remains graph command/status only.
+- [x] Dispatcher reconstructs `RuntimeExecutionContext` from persisted run/stage/snapshot/thread rows.
+- [x] Dispatcher invokes production `RuntimeEngine.start`, `run_next`, and `resume` entrypoints.
+- [x] `create_app()` default dispatcher is real, not no-op, deterministic harness, or status-only.
+- [x] First startup execution failure becomes failed run/stage/session/thread plus projectable `system_status`.
+- [x] `__test__/runtime/advance` remains test harness only.
+- [x] API/OpenAPI contract remains unchanged.
+- [x] Fresh verification evidence is recorded before commit gate.
+
+## Execution Notes
+
+- The default production dispatcher auto-continues completed `start` and `resume` results through bounded `run_next` calls until a waiting, failed, or terminal result is reached.
+- The default LangGraph factory uses a stage-scoped runner so each invoked stage gets its own persisted `StageRunModel`, `StageStarted` event, model binding, provider snapshot, objective, and output schema.
+- Continuation bound uses persisted graph stage count plus the run snapshot `max_auto_regression_retries` allowance for the current three-node regression retry loop.
+- Template snapshots are persisted as `StageArtifactModel(artifact_type="template_snapshot")` because this slice does not include schema/migration approval.
+- Production default uses `SQLiteLangGraphCheckpointSaver`; deterministic runtime and `__test__/runtime/advance` remain outside the default app path.
+
+## Review Findings Addressed
+
+- Dispatcher exceptions escaped from first-run startup are no longer swallowed by `POST /sessions/{sessionId}/messages`.
+- Default engine factory reads the persisted run template snapshot instead of rebuilding from the current mutable template.
+- Default checkpointer is persistent across service instances instead of `InMemorySaver`.
+- `RUN_TERMINATED` terminal projection writes a top-level `system_status` instead of using the session-status payload shape.
+- Resume failure after graph resume cancels the pending `GraphInterrupt`.
+- Later LangGraph stages are persisted before projection and use the correct stage-specific binding.
+- Startup and resume success paths continue after completed stage results instead of silently leaving the run running with no production caller.
+- Auto-regression retry routes fit within the continuation bound.
+
+## Verification Evidence
+
+- `uv run --extra dev python -m pytest backend/tests/services/test_runtime_execution_service.py -q` -> `16 passed`.
+- `uv run --extra dev python -m pytest backend/tests/runtime/test_langgraph_engine.py -q` -> `15 passed`.
+- `uv run --extra dev python -m pytest backend/tests/api/test_session_message_api.py -q` -> `11 passed` with a post-success Windows temp cleanup warning.
+- `uv run --extra dev python -m pytest backend/tests/services/test_runtime_execution_service.py backend/tests/api/test_session_message_api.py backend/tests/services/test_start_first_run.py backend/tests/runtime/test_langgraph_engine.py -q` -> `56 passed`.
+- `uv run --extra dev python -m pytest backend/tests/services/test_clarification_flow.py backend/tests/api/test_clarification_reply_api.py backend/tests/services/test_approval_commands.py backend/tests/api/test_approval_api.py backend/tests/services/test_tool_confirmation_commands.py backend/tests/api/test_tool_confirmation_api.py -q` -> `60 passed`.
+- Reviewer re-review: no Critical/Important findings remain.
+
+## Residual Risks
+
+- Continuation bound encodes the current auto-regression retry loop width as three steps; if the graph retry shape changes, the bound and regression test must change together.
+- The default `ToolRegistry()` is still empty unless a production registry wiring source is added in a later slice.
+- SQLite checkpointer persistence is covered for basic cross-service reuse; high-contention concurrent write behavior remains a later hardening concern.

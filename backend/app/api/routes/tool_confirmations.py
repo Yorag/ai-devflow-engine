@@ -28,6 +28,10 @@ from backend.app.services.tool_confirmations import (
     ToolConfirmationServiceError,
 )
 from backend.app.services.graph_runtime import GraphCheckpointPort, GraphRuntimeCommandPort
+from backend.app.services.runtime_dispatch import (
+    RuntimeExecutionDispatcher,
+    runtime_dispatcher_from_app_state,
+)
 from backend.app.services.runtime_orchestration import RuntimeOrchestrationService
 
 
@@ -109,6 +113,9 @@ def allow_tool_confirmation(
     toolConfirmationId: str,
     body: ToolConfirmationAllowRequest,
     service: ToolConfirmationService = Depends(get_tool_confirmation_service),
+    runtime_dispatcher: RuntimeExecutionDispatcher = Depends(
+        runtime_dispatcher_from_app_state
+    ),
 ) -> ToolConfirmationCommandResponse:
     del body
     try:
@@ -116,6 +123,11 @@ def allow_tool_confirmation(
             tool_confirmation_id=toolConfirmationId,
             actor_id="session-user",
             trace_context=get_trace_context(),
+        )
+        runtime_dispatcher.resume(
+            interrupt=result.runtime_interrupt,
+            resume_payload=result.runtime_resume_payload,
+            trace_context=result.runtime_trace_context,
         )
     except ToolConfirmationServiceError as exc:
         raise ApiError(
@@ -143,6 +155,9 @@ def deny_tool_confirmation(
     toolConfirmationId: str,
     body: ToolConfirmationDenyRequest,
     service: ToolConfirmationService = Depends(get_tool_confirmation_service),
+    runtime_dispatcher: RuntimeExecutionDispatcher = Depends(
+        runtime_dispatcher_from_app_state
+    ),
 ) -> ToolConfirmationCommandResponse:
     try:
         result = service.deny(
@@ -150,6 +165,11 @@ def deny_tool_confirmation(
             reason=body.reason,
             actor_id="session-user",
             trace_context=get_trace_context(),
+        )
+        runtime_dispatcher.resume(
+            interrupt=result.runtime_interrupt,
+            resume_payload=result.runtime_resume_payload,
+            trace_context=result.runtime_trace_context,
         )
     except ToolConfirmationServiceError as exc:
         raise ApiError(

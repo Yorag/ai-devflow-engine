@@ -36,6 +36,7 @@ from backend.app.domain.runtime_refs import (
 from backend.app.domain.trace_context import TraceContext
 from backend.app.observability.log_writer import LogPayloadSummary, LogRecordInput
 from backend.app.observability.redaction import RedactionPolicy
+from backend.app.runtime.base import RuntimeInterrupt
 from backend.app.schemas.feed import ToolConfirmationFeedEntry
 from backend.app.schemas.observability import AuditActorType, AuditResult, LogCategory, LogLevel
 from backend.app.services.control_records import ControlRecordService
@@ -75,6 +76,9 @@ class ToolConfirmationCreationResult:
 @dataclass(frozen=True)
 class ToolConfirmationCommandResult:
     tool_confirmation: ToolConfirmationFeedEntry
+    runtime_interrupt: RuntimeInterrupt
+    runtime_resume_payload: RuntimeResumePayload
+    runtime_trace_context: TraceContext
 
 
 @dataclass(frozen=True)
@@ -603,30 +607,40 @@ class ToolConfirmationService:
                 level=LogLevel.INFO,
                 duration_ms=self._duration_ms(started_at, timestamp),
             )
-            self._runtime_orchestration.resume_tool_confirmation(
-                interrupt=self._build_interrupt(request=request, run=run, stage=stage),
-                resume_payload=RuntimeResumePayload(
-                    resume_id=f"resume-{tool_confirmation_id}",
-                    payload_ref=tool_confirmation_id,
-                    values={
-                        "decision": decision.value,
-                        "tool_confirmation_id": tool_confirmation_id,
-                        "confirmation_object_ref": request.confirmation_object_ref,
-                        **(
-                            {
-                                "deny_followup_action": deny_followup_action,
-                                "deny_followup_summary": deny_followup_summary,
-                            }
-                            if decision is ToolConfirmationStatus.DENIED
-                            else {}
-                        ),
-                        **({"reason": reason} if reason is not None else {}),
-                    },
-                ),
+            interrupt = self._build_interrupt(request=request, run=run, stage=stage)
+            resume_payload = RuntimeResumePayload(
+                resume_id=f"resume-{tool_confirmation_id}",
+                payload_ref=tool_confirmation_id,
+                values={
+                    "decision": decision.value,
+                    "tool_confirmation_id": tool_confirmation_id,
+                    "confirmation_object_ref": request.confirmation_object_ref,
+                    **(
+                        {
+                            "deny_followup_action": deny_followup_action,
+                            "deny_followup_summary": deny_followup_summary,
+                        }
+                        if decision is ToolConfirmationStatus.DENIED
+                        else {}
+                    ),
+                    **({"reason": reason} if reason is not None else {}),
+                },
+            )
+            runtime_interrupt = RuntimeInterrupt(
+                run_id=run.run_id,
+                stage_run_id=stage.stage_run_id,
+                stage_type=stage.stage_type,
+                interrupt_ref=interrupt,
+                payload_ref=interrupt.payload_ref,
                 trace_context=command_trace,
             )
             self._commit_all()
-            return ToolConfirmationCommandResult(tool_confirmation=projection)
+            return ToolConfirmationCommandResult(
+                tool_confirmation=projection,
+                runtime_interrupt=runtime_interrupt,
+                runtime_resume_payload=resume_payload,
+                runtime_trace_context=command_trace,
+            )
         except Exception as exc:
             self._rollback_sessions()
             self._record_failed_command(

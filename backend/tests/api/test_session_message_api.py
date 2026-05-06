@@ -13,6 +13,10 @@ from backend.app.db.models.log import AuditLogEntryModel, LogBase
 from backend.app.db.models.runtime import PipelineRunModel, RuntimeBase, StageRunModel
 from backend.app.domain.enums import RunStatus, SessionStatus, StageStatus, StageType
 from backend.app.main import create_app
+from backend.app.runtime.base import RuntimeStepResult
+from backend.app.services.runtime_dispatch import (
+    RuntimeExecutionService,
+)
 from backend.app.schemas.observability import AuditResult
 
 
@@ -198,7 +202,7 @@ def test_post_session_message_new_requirement_starts_first_run_and_returns_first
     assert audit.correlation_id == "corr-new-requirement"
 
 
-def test_new_requirement_dispatch_failure_does_not_hide_committed_startup(
+def test_new_requirement_dispatcher_exception_returns_error_not_running_success(
     tmp_path: Path,
 ) -> None:
     app = build_app(tmp_path)
@@ -219,11 +223,10 @@ def test_new_requirement_dispatch_failure_does_not_hide_committed_startup(
             },
         )
 
-    assert response.status_code == 200
-    body = response.json()
-    run_id = body["session"]["current_run_id"]
-    assert body["session"]["status"] == "running"
+    assert response.status_code == 500
+    assert response.json()["error_code"] == "internal_error"
     assert len(dispatcher.commands) == 1
+    run_id = dispatcher.commands[0].run_id
     assert dispatcher.commands[0].run_id == run_id
     assert dispatcher.visibility_checks == [(True, True)]
 
@@ -239,10 +242,168 @@ def test_new_requirement_dispatch_failure_does_not_hide_committed_startup(
         assert run.status is RunStatus.RUNNING
 
 
+class FailingRuntimeEngine:
+    def start(self, *, context, runtime_port, checkpoint_port):  # noqa: ANN001
+        del context, runtime_port, checkpoint_port
+        raise RuntimeError("provider unavailable: secret-token")
+
+    def run_next(self, *, context, runtime_port, checkpoint_port):  # noqa: ANN001
+        del context, runtime_port, checkpoint_port
+        raise AssertionError("run_next should not be called")
+
+    def resume(  # noqa: ANN001
+        self,
+        *,
+        context,
+        interrupt,
+        resume_payload,
+        runtime_port,
+        checkpoint_port,
+    ):
+        del context, interrupt, resume_payload, runtime_port, checkpoint_port
+        raise AssertionError("resume should not be called")
+
+
+def test_new_requirement_runtime_execution_failure_returns_failed_projection(
+    tmp_path: Path,
+) -> None:
+    app = build_app(tmp_path)
+    app.state.runtime_execution_dispatcher = RuntimeExecutionService(
+        database_manager=app.state.database_manager,
+        environment_settings=app.state.environment_settings,
+        engine_factory=lambda _input: FailingRuntimeEngine(),
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        created = create_draft_session(client)
+        response = client.post(
+            f"/api/sessions/{created['session_id']}/messages",
+            json={
+                "message_type": "new_requirement",
+                "content": "Start and surface runtime execution failure.",
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    run_id = body["session"]["current_run_id"]
+    assert body["session"]["status"] == "failed"
+
+    with app.state.database_manager.session(DatabaseRole.RUNTIME) as session:
+        run = session.get(PipelineRunModel, run_id)
+        assert run is not None
+        assert run.status is RunStatus.FAILED
+
+    with app.state.database_manager.session(DatabaseRole.EVENT) as session:
+        system_status = (
+            session.query(DomainEventModel)
+            .filter(
+                DomainEventModel.run_id == run_id,
+                DomainEventModel.event_type == "system_status",
+            )
+            .one()
+        )
+    assert system_status.payload["system_status"]["status"] == "failed"
+    assert "secret-token" not in str(system_status.payload)
+
+
+class FailedResultRuntimeEngine:
+    def start(self, *, context, runtime_port, checkpoint_port):  # noqa: ANN001
+        del runtime_port, checkpoint_port
+        return RuntimeStepResult(
+            run_id=context.run_id,
+            stage_run_id=context.thread.current_stage_run_id,
+            stage_type=context.thread.current_stage_type,
+            status=StageStatus.FAILED,
+            trace_context=context.trace_context,
+        )
+
+    def run_next(self, *, context, runtime_port, checkpoint_port):  # noqa: ANN001
+        del context, runtime_port, checkpoint_port
+        raise AssertionError("run_next should not be called")
+
+    def resume(  # noqa: ANN001
+        self,
+        *,
+        context,
+        interrupt,
+        resume_payload,
+        runtime_port,
+        checkpoint_port,
+    ):
+        del context, interrupt, resume_payload, runtime_port, checkpoint_port
+        raise AssertionError("resume should not be called")
+
+
+def test_new_requirement_runtime_failed_result_returns_failed_projection(
+    tmp_path: Path,
+) -> None:
+    app = build_app(tmp_path)
+    app.state.runtime_execution_dispatcher = RuntimeExecutionService(
+        database_manager=app.state.database_manager,
+        environment_settings=app.state.environment_settings,
+        engine_factory=lambda _input: FailedResultRuntimeEngine(),
+    )
+
+    with TestClient(app) as client:
+        created = create_draft_session(client)
+        response = client.post(
+            f"/api/sessions/{created['session_id']}/messages",
+            json={
+                "message_type": "new_requirement",
+                "content": "Start and surface runtime failed result.",
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session"]["status"] == "failed"
+
+
+def test_default_runtime_execution_service_factory_uses_production_engine(
+    tmp_path: Path,
+) -> None:
+    app = build_app(tmp_path)
+    service = app.state.runtime_execution_dispatcher
+    assert isinstance(service, RuntimeExecutionService)
+
+    with TestClient(app) as client:
+        created = create_draft_session(client)
+        response = client.post(
+            f"/api/sessions/{created['session_id']}/messages",
+            json={
+                "message_type": "new_requirement",
+                "content": "Start the default production runtime path.",
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session"]["status"] == "failed"
+    run_id = body["session"]["current_run_id"]
+
+    with app.state.database_manager.session(DatabaseRole.RUNTIME) as session:
+        run = session.get(PipelineRunModel, run_id)
+        assert run is not None
+        assert run.status is RunStatus.FAILED
+
+    with app.state.database_manager.session(DatabaseRole.EVENT) as session:
+        event_types = [
+            row.event_type.value
+            for row in session.query(DomainEventModel)
+            .filter(DomainEventModel.run_id == run_id)
+            .order_by(DomainEventModel.sequence_index.asc())
+            .all()
+        ]
+    assert "stage_updated" in event_types
+    assert "system_status" in event_types
+
+
 def test_new_requirement_auto_titles_default_draft_session_and_list_reflects_name(
     tmp_path: Path,
 ) -> None:
     app = build_app(tmp_path)
+    app.state.runtime_execution_dispatcher = CapturingRuntimeDispatcher(app)
     content = (
         "Build   checkout\n\nworkspace history controls with very long trailing detail"
     )
@@ -269,6 +430,7 @@ def test_new_requirement_auto_titles_default_draft_session_and_list_reflects_nam
 
 def test_new_requirement_does_not_auto_title_renamed_session(tmp_path: Path) -> None:
     app = build_app(tmp_path)
+    app.state.runtime_execution_dispatcher = CapturingRuntimeDispatcher(app)
 
     with TestClient(app) as client:
         created = create_draft_session(client)
@@ -334,6 +496,7 @@ def test_new_requirement_rejects_non_draft_or_existing_run_session(tmp_path: Pat
 
 def test_new_requirement_missing_session_returns_not_found(tmp_path: Path) -> None:
     app = build_app(tmp_path)
+    app.state.runtime_execution_dispatcher = CapturingRuntimeDispatcher(app)
 
     with TestClient(app) as client:
         response = client.post(
@@ -379,3 +542,19 @@ def test_session_message_route_is_documented_for_new_requirement(tmp_path: Path)
         "clarification_reply",
         "new_requirement",
     }
+
+
+def test_create_app_registers_runtime_execution_service_by_default(
+    tmp_path: Path,
+) -> None:
+    app = create_app(
+        EnvironmentSettings(
+            platform_runtime_root=tmp_path / "runtime",
+            default_project_root=tmp_path / "default-project",
+        )
+    )
+
+    assert isinstance(
+        app.state.runtime_execution_dispatcher,
+        RuntimeExecutionService,
+    )

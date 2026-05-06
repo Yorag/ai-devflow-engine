@@ -44,6 +44,24 @@ from backend.tests.services.test_tool_confirmation_commands import (
 )
 
 
+class CapturingRuntimeDispatcher:
+    def __init__(self) -> None:
+        self.resumes = []
+
+    def dispatch_started_run(self, command) -> None:  # noqa: ANN001
+        raise AssertionError("tool confirmation command should not dispatch a new run")
+
+    def resume(self, *, interrupt, resume_payload, trace_context):  # noqa: ANN001
+        self.resumes.append(
+            {
+                "interrupt": interrupt,
+                "resume_payload": resume_payload,
+                "trace_context": trace_context,
+            }
+        )
+        return None
+
+
 def build_app(tmp_path: Path):
     app = create_app(
         EnvironmentSettings(
@@ -60,6 +78,7 @@ def build_app(tmp_path: Path):
     app.state.h44_runtime_port = app.state.h41_runtime_port
     app.state.h41_checkpoint_port = FakeCheckpointPort()
     app.state.h44_tool_confirmation_audit_service = RecordingAuditService()
+    app.state.runtime_execution_dispatcher = CapturingRuntimeDispatcher()
     return app
 
 
@@ -332,6 +351,7 @@ def test_post_tool_confirmation_allow_returns_tool_confirmation_projection(
 ) -> None:
     app = build_app(tmp_path)
     confirmation_id = seed_tool_confirmation(app)
+    graph_runtime_call_count = len(app.state.h41_runtime_port.calls)
 
     with TestClient(app) as client:
         response = client.post(
@@ -340,6 +360,18 @@ def test_post_tool_confirmation_allow_returns_tool_confirmation_projection(
         )
 
     assert response.status_code == 200
+    assert len(app.state.runtime_execution_dispatcher.resumes) == 1
+    resume = app.state.runtime_execution_dispatcher.resumes[0]
+    assert (
+        resume["interrupt"].interrupt_ref.interrupt_id
+        == "interrupt-tool-confirmation-1"
+    )
+    assert resume["resume_payload"].values == {
+        "decision": "allowed",
+        "tool_confirmation_id": confirmation_id,
+        "confirmation_object_ref": "tool-action-1",
+    }
+    assert len(app.state.h41_runtime_port.calls) == graph_runtime_call_count
     body = response.json()
     assert body["tool_confirmation"]["type"] == "tool_confirmation"
     assert body["tool_confirmation"]["tool_confirmation_id"] == confirmation_id
@@ -370,7 +402,9 @@ def test_post_tool_confirmation_deny_returns_tool_confirmation_projection(
     assert body["tool_confirmation"]["deny_followup_summary"] == (
         "Code Generation will continue with a low-risk fallback."
     )
-    assert app.state.h41_runtime_port.calls[-1][1]["resume_payload"].values == {
+    assert len(app.state.runtime_execution_dispatcher.resumes) == 1
+    resume = app.state.runtime_execution_dispatcher.resumes[0]
+    assert resume["resume_payload"].values == {
         "decision": "denied",
         "tool_confirmation_id": confirmation_id,
         "confirmation_object_ref": "tool-action-1",
@@ -378,6 +412,7 @@ def test_post_tool_confirmation_deny_returns_tool_confirmation_projection(
         "deny_followup_summary": "Code Generation will continue with a low-risk fallback.",
         "reason": "Risk is not acceptable.",
     }
+    assert app.state.h41_runtime_port.calls == []
     with app.state.database_manager.session(DatabaseRole.RUNTIME) as session:
         request = session.get(ToolConfirmationRequestModel, confirmation_id)
         assert request is not None
@@ -406,12 +441,13 @@ def test_post_tool_confirmation_deny_persists_run_failed_followup_fields(
         )
 
     assert response.status_code == 200
-    assert app.state.h41_runtime_port.calls[-1][1]["resume_payload"].values[
+    assert app.state.runtime_execution_dispatcher.resumes[0]["resume_payload"].values[
         "deny_followup_action"
     ] == "run_failed"
-    assert app.state.h41_runtime_port.calls[-1][1]["resume_payload"].values[
+    assert app.state.runtime_execution_dispatcher.resumes[0]["resume_payload"].values[
         "deny_followup_summary"
     ] == "The run will fail because no low-risk fallback is available."
+    assert app.state.h41_runtime_port.calls == []
     with app.state.database_manager.session(DatabaseRole.RUNTIME) as session:
         request = session.get(ToolConfirmationRequestModel, confirmation_id)
         assert request is not None
@@ -440,12 +476,13 @@ def test_post_tool_confirmation_deny_persists_awaiting_run_control_followup_fiel
         )
 
     assert response.status_code == 200
-    assert app.state.h41_runtime_port.calls[-1][1]["resume_payload"].values[
+    assert app.state.runtime_execution_dispatcher.resumes[0]["resume_payload"].values[
         "deny_followup_action"
     ] == "awaiting_run_control"
-    assert app.state.h41_runtime_port.calls[-1][1]["resume_payload"].values[
+    assert app.state.runtime_execution_dispatcher.resumes[0]["resume_payload"].values[
         "deny_followup_summary"
     ] == "The run is waiting for an explicit pause or terminate decision."
+    assert app.state.h41_runtime_port.calls == []
     with app.state.database_manager.session(DatabaseRole.RUNTIME) as session:
         request = session.get(ToolConfirmationRequestModel, confirmation_id)
         assert request is not None
@@ -637,7 +674,8 @@ def test_tool_confirmation_route_prefers_h44a_app_state_injection(
         )
 
     assert response.status_code == 200
-    assert app.state.h44a_runtime_port.calls[-1][0] == "resume_tool_confirmation"
+    assert len(app.state.runtime_execution_dispatcher.resumes) == 1
+    assert app.state.h44a_runtime_port.calls == []
     assert app.state.h44a_audit_service.records[0]["action"] == (
         "tool_confirmation.allow"
     )

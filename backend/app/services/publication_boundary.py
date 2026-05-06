@@ -19,6 +19,7 @@ from backend.app.db.models.runtime import (
     ProviderCallPolicySnapshotModel,
     ProviderSnapshotModel,
     RuntimeLimitSnapshotModel,
+    StageArtifactModel,
     StageRunModel,
 )
 from backend.app.domain.enums import SessionStatus, StageType
@@ -530,6 +531,9 @@ class PublicationBoundaryService:
             self._event_session.rollback()
 
     def _delete_staged_runtime_rows(self, *, run_id: str) -> None:
+        self._runtime_session.execute(
+            delete(StageArtifactModel).where(StageArtifactModel.run_id == run_id)
+        )
         self._runtime_session.execute(
             delete(ModelBindingSnapshotModel).where(ModelBindingSnapshotModel.run_id == run_id)
         )
