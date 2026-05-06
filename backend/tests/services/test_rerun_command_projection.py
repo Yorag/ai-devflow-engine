@@ -106,6 +106,10 @@ class RecordingAuditService:
         self.records.append({"method": "require_audit_record", **kwargs})
         return object()
 
+    def record_command_result(self, **kwargs: Any) -> object:
+        self.records.append({"method": "record_command_result", **kwargs})
+        return object()
+
     def record_rejected_command(self, **kwargs: Any) -> object:
         self.records.append({"method": "record_rejected_command", **kwargs})
         return object()
@@ -775,6 +779,82 @@ def test_create_rerun_accepts_failed_current_run_tail(
         assert events[0].payload["system_status"]["retry_action"] is None
         assert events[1].payload["system_status"]["status"] == "failed"
         assert events[1].payload["system_status"]["retry_action"] == "retry:run-1"
+
+
+def test_create_rerun_refreshes_system_template_provider_bindings(
+    tmp_path: Path,
+) -> None:
+    from backend.app.services.providers import ProviderService
+    from backend.app.services.templates import TemplateService
+
+    manager = build_manager(tmp_path)
+    seed_rerunnable_session(
+        manager,
+        run_status=RunStatus.TERMINATED,
+        session_status=SessionStatus.TERMINATED,
+        stage_status=StageStatus.TERMINATED,
+    )
+    seed_terminal_system_status(manager)
+    seed_audit = RecordingAuditService()
+    with manager.session(DatabaseRole.CONTROL) as session:
+        provider_test = session.get(ProviderModel, "provider-test")
+        assert provider_test is not None
+        provider_test.is_configured = False
+        provider_test.is_enabled = False
+        session.add(provider_test)
+        ProviderService(
+            session,
+            audit_service=seed_audit,
+            now=lambda: NOW,
+        ).seed_builtin_providers(trace_context=build_trace())
+        TemplateService(
+            session,
+            audit_service=seed_audit,
+            now=lambda: NOW,
+        ).seed_system_templates(trace_context=build_trace())
+        volcengine = session.get(ProviderModel, "provider-volcengine")
+        assert volcengine is not None
+        volcengine.is_configured = True
+        volcengine.is_enabled = True
+        session.add(volcengine)
+        saved_session = session.get(SessionModel, "session-1")
+        assert saved_session is not None
+        saved_session.selected_template_id = "template-feature"
+        session.add(saved_session)
+        settings = session.get(
+            PlatformRuntimeSettingsModel,
+            "platform-runtime-settings",
+        )
+        assert settings is not None
+        settings.agent_limits = AgentRuntimeLimits(
+            max_auto_regression_retries=2,
+        ).model_dump(mode="python")
+        session.add(settings)
+
+    service, _, _, _ = build_service(manager)
+
+    result = service.create_rerun(
+        session_id="session-1",
+        actor_id="session-user",
+        trace_context=build_trace(),
+    )
+
+    with manager.session(DatabaseRole.RUNTIME) as session:
+        provider_ids = {
+            snapshot.provider_id
+            for snapshot in session.query(ProviderSnapshotModel)
+            .filter(ProviderSnapshotModel.run_id == result.run.run_id)
+            .all()
+        }
+        binding_provider_ids = {
+            binding.provider_id
+            for binding in session.query(ModelBindingSnapshotModel)
+            .filter(ModelBindingSnapshotModel.run_id == result.run.run_id)
+            .all()
+        }
+
+    assert provider_ids == {"provider-volcengine"}
+    assert binding_provider_ids == {"provider-volcengine"}
 
 
 def test_build_rerun_trigger_metadata_returns_retry_machine_value_and_old_new_links(

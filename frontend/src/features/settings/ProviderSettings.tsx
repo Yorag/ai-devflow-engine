@@ -125,6 +125,9 @@ export function ProviderSettings({ request }: ProviderSettingsProps): JSX.Elemen
       queryClient.setQueryData<ProviderRead[]>(apiQueryKeys.providers, (current) =>
         upsertProvider(current ?? [], provider),
       );
+      void queryClient.invalidateQueries({
+        queryKey: apiQueryKeys.pipelineTemplates,
+      });
       setOpenProviderIds((current) => ({
         ...current,
         [provider.provider_id]: true,
@@ -260,6 +263,9 @@ function ProviderCard({
       queryClient.setQueryData<ProviderRead[]>(apiQueryKeys.providers, (current) =>
         replaceOrUpsertProvider(current ?? [], provider.provider_id, updatedProvider),
       );
+      void queryClient.invalidateQueries({
+        queryKey: apiQueryKeys.pipelineTemplates,
+      });
       onSaved(provider.provider_id, updatedProvider);
     },
   });
@@ -276,6 +282,9 @@ function ProviderCard({
           (candidate) => candidate.provider_id !== provider.provider_id,
         ),
       );
+      void queryClient.invalidateQueries({
+        queryKey: apiQueryKeys.pipelineTemplates,
+      });
       onDeleted(provider.provider_id);
     },
   });

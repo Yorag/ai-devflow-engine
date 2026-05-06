@@ -271,6 +271,14 @@ class ConfigurationPackageService:
                 package,
                 timestamp=timestamp,
             )
+            if package.providers:
+                TemplateService(
+                    self._session,
+                    audit_service=self._audit_service,
+                    now=self._now,
+                ).refresh_system_templates_in_transaction(
+                    trace_context=trace_context,
+                )
             changed_count = sum(
                 1 for item in changed_objects if item.action != "unchanged"
             )

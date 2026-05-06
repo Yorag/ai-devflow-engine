@@ -229,7 +229,7 @@ describe("TemplateEditor", () => {
     expect(editor.textContent ?? "").not.toContain("provider-volcengine");
   });
 
-  it("moves stage bindings to the configured provider when saved providers do not match", async () => {
+  it("shows unavailable template providers without silently changing bindings", async () => {
     const workspace = mockSessionWorkspaces["session-draft"];
     const providers: ProviderRead[] = [
       {
@@ -260,32 +260,22 @@ describe("TemplateEditor", () => {
     const editor = screen.getByRole("region", { name: "Template editor" });
     const providerSelect = within(editor).getByLabelText("Requirement Analysis provider");
 
-    await waitFor(() => {
-      expect(providerSelect).toHaveProperty("value", "provider-mimo");
-    });
+    expect(providerSelect).toHaveProperty("value", "provider-deepseek");
     expect(
       within(providerSelect).getByRole("option", { name: "MiMo" }),
     ).toBeTruthy();
     expect(
-      within(providerSelect).queryByRole("option", {
+      within(providerSelect).getByRole("option", {
         name: "Unavailable provider",
       }),
-    ).toBeNull();
-    expect(
-      within(editor).queryByText("This template references unavailable providers."),
-    ).toBeNull();
-    expect(within(editor).getByText("Unsaved")).toBeTruthy();
-    expect(
-      within(editor).getByText(
-        "Unsaved edits will not affect this session until you save as a user template.",
-      ),
     ).toBeTruthy();
+    expect(
+      within(editor).getByText("This template references unavailable providers."),
+    ).toBeTruthy();
+    expect(within(editor).getByText("Saved")).toBeTruthy();
     expect(
       within(editor).getByRole("button", { name: "Use template" }),
-    ).toBeTruthy();
-    expect(
-      within(editor).getByRole("button", { name: "Save as new template" }),
-    ).toBeTruthy();
+    ).toHaveProperty("disabled", true);
     expect(editor.textContent ?? "").not.toContain("provider-deepseek");
   });
 

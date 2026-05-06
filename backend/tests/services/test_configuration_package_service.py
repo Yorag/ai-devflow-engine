@@ -513,41 +513,42 @@ def test_import_package_updates_provider_delivery_channel_and_template_runtime_c
     assert log_writer.records[0].message == "Configuration package import processed."
 
 
-def test_import_package_configures_builtin_provider_when_values_match_seed(
+def test_import_package_refreshes_system_template_providers_after_provider_import(
     tmp_path: Path,
 ) -> None:
     from backend.app.services.configuration_packages import ConfigurationPackageService
     from backend.app.services.providers import ProviderService
+    from backend.app.services.templates import TemplateService
 
     manager = build_manager(tmp_path)
     audit = RecordingAuditService()
-    matching_seed_provider = provider_package_entry(
-        base_url="https://api.deepseek.com",
-        api_key_ref="sk-deepseek-seed-compatible-key",
-        default_model_id="deepseek-chat",
+    imported_provider = provider_package_entry(
+        provider_id="provider-volcengine",
+        display_name="火山引擎",
+        provider_source="builtin",
+        protocol_type="volcengine_native",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key_ref="sk-volcengine-package-key",
+        default_model_id="doubao-seed-1-6",
+        supported_model_ids=["doubao-seed-1-6"],
         runtime_capabilities=[
             {
-                "model_id": "deepseek-chat",
+                "model_id": "doubao-seed-1-6",
                 "context_window_tokens": 128000,
                 "max_output_tokens": 8192,
                 "supports_tool_calling": True,
-                "supports_structured_output": False,
+                "supports_structured_output": True,
                 "supports_native_reasoning": False,
-            },
-            {
-                "model_id": "deepseek-reasoner",
-                "context_window_tokens": 128000,
-                "max_output_tokens": 8192,
-                "supports_tool_calling": False,
-                "supports_structured_output": False,
-                "supports_native_reasoning": True,
-            },
+            }
         ],
     )
 
     with manager.session(DatabaseRole.CONTROL) as session:
         seed_project_with_channel(session)
         ProviderService(session, audit_service=audit, now=lambda: NOW).seed_builtin_providers(
+            trace_context=build_trace()
+        )
+        TemplateService(session, audit_service=audit, now=lambda: NOW).seed_system_templates(
             trace_context=build_trace()
         )
 
@@ -557,25 +558,35 @@ def test_import_package_configures_builtin_provider_when_values_match_seed(
             log_writer=RecordingLogWriter(),
             now=lambda: LATER,
         ).import_project_package(
-            DEFAULT_PROJECT_ID,
-            package_request(
-                "template-unused",
-                providers=[matching_seed_provider],
-                delivery_channels=[],
-                pipeline_templates=[],
-            ),
-            trace_context=build_trace(),
-        )
-        provider = session.get(ProviderModel, "provider-deepseek")
+                DEFAULT_PROJECT_ID,
+                package_request(
+                    "template-unused",
+                    providers=[imported_provider],
+                    delivery_channels=[],
+                    pipeline_templates=[],
+                ),
+                trace_context=build_trace(),
+            )
+        provider = session.get(ProviderModel, "provider-volcengine")
+        template = session.get(PipelineTemplateModel, "template-feature")
 
     assert result.field_errors == []
     assert [
         (item.object_type, item.object_id, item.action)
         for item in result.changed_objects
-    ] == [("provider", "provider-deepseek", "updated")]
+    ] == [("provider", "provider-volcengine", "updated")]
     assert provider is not None
     assert provider.is_configured is True
     assert provider.is_enabled is True
+    assert template is not None
+    assert {
+        binding["provider_id"] for binding in template.stage_role_bindings
+    } == {"provider-volcengine"}
+    assert template.run_auxiliary_model_binding == {
+        "provider_id": "provider-volcengine",
+        "model_id": "doubao-seed-1-6",
+        "model_parameters": {"temperature": 0},
+    }
 
 
 def test_import_package_preserves_new_custom_provider_ids_in_templates(

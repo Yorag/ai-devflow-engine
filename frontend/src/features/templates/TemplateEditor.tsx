@@ -10,7 +10,6 @@ import { ErrorState } from "../errors/ErrorState";
 import {
   availableTemplateProviders,
   isTemplateDirty,
-  resolveTemplateDraftProviders,
   resolveTemplateStartGuard,
   unavailableProviderMessage,
   unavailableTemplateProviderIds,
@@ -53,25 +52,21 @@ export function TemplateEditor({
   isSaving = false,
   error = null,
 }: TemplateEditorProps): JSX.Element {
-  const resolvedDraft = useMemo(
-    () => resolveTemplateDraftProviders(draft, providers),
-    [draft, providers],
-  );
   const firstStageType =
     template.fixed_stage_sequence[0] ??
-    resolvedDraft.stage_role_bindings[0]?.stage_type ??
+    draft.stage_role_bindings[0]?.stage_type ??
     "requirement_analysis";
   const [activeStageType, setActiveStageType] = useState<StageType>(firstStageType);
-  const dirty = isTemplateDirty(template, resolvedDraft);
+  const dirty = isTemplateDirty(template, draft);
   const unavailableProviderIds = unavailableTemplateProviderIds(
-    resolvedDraft,
+    draft,
     providers,
   );
   const guard = resolveTemplateStartGuard(template, dirty);
   const retryError = getRetryValidationError(
-    resolvedDraft.max_auto_regression_retries,
+    draft.max_auto_regression_retries,
   );
-  const nameError = getTemplateNameValidationError(template, resolvedDraft.name);
+  const nameError = getTemplateNameValidationError(template, draft.name);
   const providerOptions = availableTemplateProviders(providers);
   const auxiliaryModelOptions = useMemo(
     () => runAuxiliaryModelOptions(providerOptions),
@@ -79,14 +74,21 @@ export function TemplateEditor({
   );
   const noConfiguredProviders = providerOptions.length === 0;
   const noRunAuxiliaryModels = auxiliaryModelOptions.length === 0;
+  const runAuxiliaryValue = runAuxiliaryModelOptionValue(
+    draft.run_auxiliary_model_binding.provider_id,
+    draft.run_auxiliary_model_binding.model_id,
+  );
+  const isRunAuxiliaryBindingUnavailable =
+    !noRunAuxiliaryModels &&
+    !auxiliaryModelOptions.some((option) => option.value === runAuxiliaryValue);
   const activeBinding =
-    resolvedDraft.stage_role_bindings.find(
+    draft.stage_role_bindings.find(
       (binding) => binding.stage_type === activeStageType,
     ) ??
-    resolvedDraft.stage_role_bindings.find(
+    draft.stage_role_bindings.find(
       (binding) => binding.stage_type === firstStageType,
     ) ??
-    resolvedDraft.stage_role_bindings[0];
+    draft.stage_role_bindings[0];
   const activeStageLabel = activeBinding
     ? stageLabels[activeBinding.stage_type]
     : "Selected stage";
@@ -109,18 +111,12 @@ export function TemplateEditor({
   const stageSequence = useMemo(
     () =>
       template.fixed_stage_sequence.filter((stageType) =>
-        resolvedDraft.stage_role_bindings.some(
+        draft.stage_role_bindings.some(
           (binding) => binding.stage_type === stageType,
         ),
       ),
-    [resolvedDraft.stage_role_bindings, template.fixed_stage_sequence],
+    [draft.stage_role_bindings, template.fixed_stage_sequence],
   );
-
-  useEffect(() => {
-    if (resolvedDraft !== draft) {
-      onDraftChange(resolvedDraft);
-    }
-  }, [draft, onDraftChange, resolvedDraft]);
 
   useEffect(() => {
     setActiveStageType(firstStageType);
@@ -129,17 +125,17 @@ export function TemplateEditor({
   useEffect(() => {
     if (
       activeBinding ||
-      !resolvedDraft.stage_role_bindings[0] ||
-      activeStageType === resolvedDraft.stage_role_bindings[0].stage_type
+      !draft.stage_role_bindings[0] ||
+      activeStageType === draft.stage_role_bindings[0].stage_type
     ) {
       return;
     }
 
-    setActiveStageType(resolvedDraft.stage_role_bindings[0].stage_type);
-  }, [activeBinding, activeStageType, resolvedDraft.stage_role_bindings]);
+    setActiveStageType(draft.stage_role_bindings[0].stage_type);
+  }, [activeBinding, activeStageType, draft.stage_role_bindings]);
 
   function updateDraft(next: Partial<TemplateDraftState>) {
-    onDraftChange({ ...resolvedDraft, ...next });
+    onDraftChange({ ...draft, ...next });
   }
 
   function updateBinding(
@@ -147,7 +143,7 @@ export function TemplateEditor({
     nextBinding: Partial<TemplateDraftState["stage_role_bindings"][number]>,
   ) {
     updateDraft({
-      stage_role_bindings: resolvedDraft.stage_role_bindings.map((binding) =>
+      stage_role_bindings: draft.stage_role_bindings.map((binding) =>
         binding.stage_type === stageType ? { ...binding, ...nextBinding } : binding,
       ),
     });
@@ -174,7 +170,7 @@ export function TemplateEditor({
           <label>
             <span>Template name</span>
             <input
-              value={resolvedDraft.name}
+              value={draft.name}
               aria-invalid={Boolean(nameError)}
               onChange={(event) => updateDraft({ name: event.target.value })}
             />
@@ -185,7 +181,7 @@ export function TemplateEditor({
           <select
             aria-label="运行辅助模型"
             value={runAuxiliarySelectValue(
-              resolvedDraft.run_auxiliary_model_binding,
+              draft.run_auxiliary_model_binding,
               auxiliaryModelOptions,
             )}
             disabled={noRunAuxiliaryModels}
@@ -198,13 +194,13 @@ export function TemplateEditor({
               }
               updateDraft({
                 run_auxiliary_model_binding: {
-                  ...resolvedDraft.run_auxiliary_model_binding,
+                  ...draft.run_auxiliary_model_binding,
                   provider_id: option.providerId,
                   model_id: option.modelId,
                   model_parameters: {
-                    ...resolvedDraft.run_auxiliary_model_binding.model_parameters,
+                    ...draft.run_auxiliary_model_binding.model_parameters,
                     temperature:
-                      resolvedDraft.run_auxiliary_model_binding.model_parameters
+                      draft.run_auxiliary_model_binding.model_parameters
                         .temperature ?? 0,
                   },
                 },
@@ -214,6 +210,11 @@ export function TemplateEditor({
             {noRunAuxiliaryModels ? (
               <option value="" disabled>
                 No provider model configured
+              </option>
+            ) : null}
+            {isRunAuxiliaryBindingUnavailable ? (
+              <option value={runAuxiliaryValue} disabled>
+                Unavailable provider model
               </option>
             ) : null}
             {auxiliaryModelOptions.map((option) => (
@@ -229,7 +230,7 @@ export function TemplateEditor({
         <label className="template-editor__checkbox">
           <input
             type="checkbox"
-            checked={resolvedDraft.auto_regression_enabled}
+            checked={draft.auto_regression_enabled}
             onChange={(event) =>
               updateDraft({ auto_regression_enabled: event.target.checked })
             }
@@ -239,7 +240,7 @@ export function TemplateEditor({
         <label className="template-editor__checkbox">
           <input
             type="checkbox"
-            checked={resolvedDraft.skip_high_risk_tool_confirmations}
+            checked={draft.skip_high_risk_tool_confirmations}
             onChange={(event) =>
               updateDraft({
                 skip_high_risk_tool_confirmations: event.target.checked,
@@ -255,8 +256,8 @@ export function TemplateEditor({
             min="0"
             step="1"
             value={
-              Number.isFinite(resolvedDraft.max_auto_regression_retries)
-                ? resolvedDraft.max_auto_regression_retries
+              Number.isFinite(draft.max_auto_regression_retries)
+                ? draft.max_auto_regression_retries
                 : ""
             }
             aria-invalid={Boolean(retryError)}
@@ -442,7 +443,7 @@ function providerSelectValue(
   if (providerOptions.some((provider) => provider.provider_id === providerId)) {
     return providerId;
   }
-  return providerOptions[0]?.provider_id ?? "";
+  return providerId;
 }
 
 type RunAuxiliaryModelOption = {
@@ -480,9 +481,7 @@ function runAuxiliarySelectValue(
   }
 
   const value = runAuxiliaryModelOptionValue(binding.provider_id, binding.model_id);
-  return options.some((option) => option.value === value)
-    ? value
-    : options[0].value;
+  return value;
 }
 
 function runAuxiliaryModelOptionValue(providerId: string, modelId: string): string {

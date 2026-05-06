@@ -729,7 +729,10 @@ class SessionService:
                 "Run startup dependencies are unavailable.",
                 500,
             )
-        template = self._session.get(PipelineTemplateModel, model.selected_template_id)
+        template = self._templates.get_template_in_transaction(
+            model.selected_template_id,
+            trace_context=trace_context,
+        )
         if template is None:
             raise SessionServiceError(
                 ErrorCode.VALIDATION_ERROR,

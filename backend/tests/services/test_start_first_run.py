@@ -42,6 +42,11 @@ from backend.app.domain.enums import (
 from backend.app.domain.trace_context import TraceContext
 from backend.app.observability.log_writer import JsonlLogWriter
 from backend.app.observability.runtime_data import RuntimeDataSettings
+from backend.app.schemas.runtime_settings import (
+    InternalModelBindingSelection,
+    InternalModelBindings,
+    PlatformRuntimeSettingsUpdate,
+)
 
 
 NOW = datetime(2026, 5, 3, 18, 0, 0, tzinfo=UTC)
@@ -896,9 +901,6 @@ def test_session_service_start_run_rejects_unavailable_template_provider(
             provider.is_configured = False
             provider.is_enabled = False
             control_session.add(provider)
-        team_provider = _build_team_provider()
-        team_provider.api_key_ref = "sk-team-provider"
-        control_session.add(team_provider)
         control_session.commit()
 
         draft = SessionService(
@@ -926,7 +928,7 @@ def test_session_service_start_run_rejects_unavailable_template_provider(
                     now=lambda: NOW,
                 ).start_run_from_new_requirement(
                     session_id=draft.session_id,
-                    content="Use the only configured provider.",
+                    content="Use the unavailable system template provider.",
                     trace_context=build_trace(),
                 )
         finally:
@@ -937,11 +939,121 @@ def test_session_service_start_run_rejects_unavailable_template_provider(
     assert exc_info.value.status_code == 503
     assert exc_info.value.error_code is ErrorCode.CONFIG_SNAPSHOT_UNAVAILABLE
     assert "provider-deepseek" in str(exc_info.value)
-    assert "provider-volcengine" in str(exc_info.value)
     with manager.session(DatabaseRole.RUNTIME) as session:
         assert session.query(PipelineRunModel).count() == 0
         assert session.query(ProviderSnapshotModel).count() == 0
         assert session.query(ModelBindingSnapshotModel).count() == 0
+
+
+def test_session_service_start_run_refreshes_system_template_provider_bindings(
+    tmp_path: Path,
+) -> None:
+    from backend.app.services.runtime_settings import PlatformRuntimeSettingsService
+    from backend.app.services.sessions import SessionService
+
+    settings = build_settings(tmp_path)
+    manager = build_manager(settings)
+    audit = RecordingAuditService()
+    log_writer = RecordingLogWriter()
+
+    with manager.session(DatabaseRole.CONTROL) as control_session:
+        seed_control_plane(
+            control_session,
+            settings=settings,
+            audit=audit,
+            log_writer=log_writer,
+        )
+        draft = SessionService(
+            control_session,
+            audit_service=audit,
+            now=lambda: NOW,
+        ).create_session(
+            project_id="project-default",
+            trace_context=build_trace(),
+        )
+
+        deepseek = control_session.get(ProviderModel, "provider-deepseek")
+        assert deepseek is not None
+        deepseek.is_configured = False
+        deepseek.is_enabled = False
+        control_session.add(deepseek)
+        control_session.commit()
+
+        runtime_settings_service = PlatformRuntimeSettingsService(
+            control_session,
+            audit_service=audit,
+            log_writer=log_writer,
+            now=lambda: NOW,
+        )
+        current_settings = runtime_settings_service.get_current_settings(
+            trace_context=build_trace()
+        )
+        runtime_settings_service.update_settings(
+            PlatformRuntimeSettingsUpdate(
+                expected_config_version=current_settings.version.config_version,
+                internal_model_bindings=InternalModelBindings(
+                    context_compression=InternalModelBindingSelection(
+                        provider_id="provider-volcengine",
+                        model_id="doubao-seed-1-6",
+                        model_parameters={"temperature": 0},
+                        source_config_version=current_settings.version.config_version,
+                    ),
+                    structured_output_repair=InternalModelBindingSelection(
+                        provider_id="provider-volcengine",
+                        model_id="doubao-seed-1-6",
+                        model_parameters={"temperature": 0},
+                        source_config_version=current_settings.version.config_version,
+                    ),
+                    validation_pass=InternalModelBindingSelection(
+                        provider_id="provider-volcengine",
+                        model_id="doubao-seed-1-6",
+                        model_parameters={"temperature": 0},
+                        source_config_version=current_settings.version.config_version,
+                    ),
+                ),
+            ),
+            trace_context=build_trace(),
+        )
+
+        runtime_session = manager.session(DatabaseRole.RUNTIME)
+        event_session = manager.session(DatabaseRole.EVENT)
+        graph_session = manager.session(DatabaseRole.GRAPH)
+        try:
+            result = SessionService(
+                control_session,
+                runtime_session=runtime_session,
+                event_session=event_session,
+                graph_session=graph_session,
+                audit_service=audit,
+                log_writer=log_writer,
+                environment_settings=settings,
+                now=lambda: NOW,
+            ).start_run_from_new_requirement(
+                session_id=draft.session_id,
+                content="Start with the refreshed system template provider.",
+                trace_context=build_trace(),
+            )
+        finally:
+            runtime_session.close()
+            event_session.close()
+            graph_session.close()
+
+    with manager.session(DatabaseRole.RUNTIME) as session:
+        provider_ids = {
+            snapshot.provider_id
+            for snapshot in session.query(ProviderSnapshotModel)
+            .filter(ProviderSnapshotModel.run_id == result.run.run_id)
+            .all()
+        }
+        binding_provider_ids = {
+            binding.provider_id
+            for binding in session.query(ModelBindingSnapshotModel)
+            .filter(ModelBindingSnapshotModel.run_id == result.run.run_id)
+            .all()
+        }
+
+    assert provider_ids == {"provider-volcengine"}
+    assert binding_provider_ids == {"provider-volcengine"}
 
 
 def test_session_service_start_run_from_new_requirement_calls_prompt_validation_hook_once(
@@ -1106,8 +1218,17 @@ def test_session_service_start_run_from_new_requirement_maps_default_prompt_vali
             project_id="project-default",
             trace_context=build_trace(),
         )
-        template = control_session.get(PipelineTemplateModel, draft.selected_template_id)
-        assert template is not None
+        template = _create_user_template_with_provider(
+            control_session,
+            template_id="template-invalid-prompt",
+            provider_id="provider-deepseek",
+        )
+        control_session.add(template)
+        draft.selected_template_id = template.template_id
+        draft.updated_at = NOW
+        control_session.add(draft)
+        control_session.commit()
+
         bindings = list(template.stage_role_bindings)
         bindings[0] = {**bindings[0], "system_prompt": "   "}
         template.stage_role_bindings = bindings

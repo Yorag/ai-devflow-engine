@@ -1600,7 +1600,7 @@ describe("WorkspaceShell", () => {
     );
   });
 
-  it("keeps first requirement input available after moving unmatched template bindings to the configured provider", async () => {
+  it("keeps unmatched template providers visible instead of silently changing bindings", async () => {
     const baseFetcher = createMockApiFetcher();
     const mimoProvider: ProviderRead = {
       ...mockProviderList[2],
@@ -1632,22 +1632,20 @@ describe("WorkspaceShell", () => {
 
     const editor = await screen.findByRole("region", { name: "Template editor" });
     const providerSelect = within(editor).getByLabelText("Requirement Analysis provider");
-    await waitFor(() => {
-      expect(providerSelect).toHaveProperty("value", "provider-mimo");
-    });
+    expect(providerSelect).toHaveProperty("value", "provider-deepseek");
     expect(
       within(providerSelect).getByRole("option", { name: "MiMo" }),
     ).toBeTruthy();
     expect(
-      within(providerSelect).queryByRole("option", {
+      within(providerSelect).getByRole("option", {
         name: "Unavailable provider",
       }),
-    ).toBeNull();
+    ).toBeTruthy();
     expect(
-      screen.queryByText(
+      screen.getByText(
         "This template references unavailable providers.",
       ),
-    ).toBeNull();
+    ).toBeTruthy();
     expect(document.body.textContent ?? "").not.toContain("provider-deepseek");
 
     const input = screen.getByLabelText("当前输入");

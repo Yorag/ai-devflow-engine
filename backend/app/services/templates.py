@@ -111,14 +111,6 @@ TEMPLATE_SEEDS: tuple[dict[str, Any], ...] = (
         "description": (
             "Focused defect isolation with conservative tool use and regression depth."
         ),
-        "provider_by_stage": {
-            StageType.REQUIREMENT_ANALYSIS: "provider-deepseek",
-            StageType.SOLUTION_DESIGN: "provider-deepseek",
-            StageType.CODE_GENERATION: "provider-volcengine",
-            StageType.TEST_GENERATION_EXECUTION: "provider-volcengine",
-            StageType.CODE_REVIEW: "provider-deepseek",
-            StageType.DELIVERY_INTEGRATION: "provider-deepseek",
-        },
         "auto_regression_enabled": True,
         "max_auto_regression_retries": 2,
         "max_react_iterations_per_stage": 24,
@@ -131,14 +123,6 @@ TEMPLATE_SEEDS: tuple[dict[str, Any], ...] = (
         "description": (
             "Balanced feature delivery with enough iteration and tool budget for new behavior."
         ),
-        "provider_by_stage": {
-            StageType.REQUIREMENT_ANALYSIS: "provider-deepseek",
-            StageType.SOLUTION_DESIGN: "provider-deepseek",
-            StageType.CODE_GENERATION: "provider-volcengine",
-            StageType.TEST_GENERATION_EXECUTION: "provider-volcengine",
-            StageType.CODE_REVIEW: "provider-deepseek",
-            StageType.DELIVERY_INTEGRATION: "provider-deepseek",
-        },
         "auto_regression_enabled": True,
         "max_auto_regression_retries": 1,
         "max_react_iterations_per_stage": 30,
@@ -151,14 +135,6 @@ TEMPLATE_SEEDS: tuple[dict[str, Any], ...] = (
         "description": (
             "Behavior-preserving refactor flow with guarded execution and regression depth."
         ),
-        "provider_by_stage": {
-            StageType.REQUIREMENT_ANALYSIS: "provider-deepseek",
-            StageType.SOLUTION_DESIGN: "provider-deepseek",
-            StageType.CODE_GENERATION: "provider-volcengine",
-            StageType.TEST_GENERATION_EXECUTION: "provider-volcengine",
-            StageType.CODE_REVIEW: "provider-deepseek",
-            StageType.DELIVERY_INTEGRATION: "provider-deepseek",
-        },
         "auto_regression_enabled": True,
         "max_auto_regression_retries": 2,
         "max_react_iterations_per_stage": 28,
@@ -178,6 +154,12 @@ class AgentRoleSeed:
 @dataclass(frozen=True)
 class _ValidatedTemplateBindings:
     stage_role_bindings: list[dict[str, str]]
+    run_auxiliary_model_binding: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class _ResolvedSystemTemplateProviders:
+    provider_by_stage: dict[StageType, str]
     run_auxiliary_model_binding: dict[str, Any]
 
 
@@ -311,6 +293,37 @@ class TemplateService:
         *,
         trace_context: TraceContext,
     ) -> list[PipelineTemplateModel]:
+        return self._seed_system_templates(
+            trace_context=trace_context,
+            commit=True,
+            record_audit=True,
+        )
+
+    def refresh_system_templates_in_transaction(
+        self,
+        *,
+        trace_context: TraceContext,
+    ) -> list[PipelineTemplateModel]:
+        return self._seed_system_templates(
+            trace_context=trace_context,
+            commit=False,
+            record_audit=False,
+        )
+
+    def _seed_system_templates(
+        self,
+        *,
+        trace_context: TraceContext,
+        commit: bool,
+        record_audit: bool,
+    ) -> list[PipelineTemplateModel]:
+        configured_providers = self._configured_template_providers()
+        resolved_providers_by_template_id = {
+            seed["template_id"]: _resolve_system_template_providers(
+                configured_providers=configured_providers,
+            )
+            for seed in TEMPLATE_SEEDS
+        }
         existing_templates = {
             template.template_id: template
             for template in self._session.query(PipelineTemplateModel)
@@ -327,6 +340,9 @@ class TemplateService:
             _system_template_needs_asset_refresh(
                 existing_templates.get(seed["template_id"]),
                 seed=seed,
+                provider_by_stage=resolved_providers_by_template_id[
+                    seed["template_id"]
+                ].provider_by_stage,
             )
             for seed in TEMPLATE_SEEDS
         )
@@ -337,6 +353,9 @@ class TemplateService:
         timestamp = self._now()
         changed: list[PipelineTemplateModel] = []
         for seed in missing_seeds:
+            resolved_providers = resolved_providers_by_template_id[
+                seed["template_id"]
+            ]
             template = PipelineTemplateModel(
                 template_id=seed["template_id"],
                 name=seed["name"],
@@ -347,9 +366,11 @@ class TemplateService:
                 stage_role_bindings=_stage_role_bindings(
                     role_assets=role_assets,
                     stage_work_instructions=stage_work_instructions,
-                    provider_by_stage=seed["provider_by_stage"],
+                    provider_by_stage=resolved_providers.provider_by_stage,
                 ),
-                run_auxiliary_model_binding=_default_run_auxiliary_model_binding_dict(),
+                run_auxiliary_model_binding=(
+                    resolved_providers.run_auxiliary_model_binding
+                ),
                 approval_checkpoints=[
                     checkpoint.value for checkpoint in FIXED_APPROVAL_CHECKPOINTS
                 ],
@@ -376,6 +397,9 @@ class TemplateService:
             if self._refresh_existing_system_template(
                 template,
                 seed=seed,
+                resolved_providers=resolved_providers_by_template_id[
+                    seed["template_id"]
+                ],
                 role_assets=role_assets,
                 stage_work_instructions=stage_work_instructions,
                 timestamp=timestamp,
@@ -384,11 +408,15 @@ class TemplateService:
 
         if changed:
             try:
-                self._record_seed_audit(
-                    templates=changed,
-                    trace_context=trace_context,
-                )
-                self._session.commit()
+                if record_audit:
+                    self._record_seed_audit(
+                        templates=changed,
+                        trace_context=trace_context,
+                    )
+                if commit:
+                    self._session.commit()
+                else:
+                    self._session.flush()
             except Exception:
                 self._session.rollback()
                 raise
@@ -400,6 +428,7 @@ class TemplateService:
         template: PipelineTemplateModel,
         *,
         seed: dict[str, Any],
+        resolved_providers: _ResolvedSystemTemplateProviders,
         role_assets: dict[str, PromptAssetRead],
         stage_work_instructions: dict[StageType, str],
         timestamp: datetime,
@@ -414,7 +443,7 @@ class TemplateService:
                 checkpoint.value for checkpoint in FIXED_APPROVAL_CHECKPOINTS
             ],
             "run_auxiliary_model_binding": (
-                _default_run_auxiliary_model_binding_dict()
+                resolved_providers.run_auxiliary_model_binding
             ),
             "auto_regression_enabled": seed["auto_regression_enabled"],
             "max_auto_regression_retries": seed["max_auto_regression_retries"],
@@ -426,14 +455,18 @@ class TemplateService:
                 "skip_high_risk_tool_confirmations"
             ],
         }
-        if _system_template_needs_asset_refresh(template, seed=seed):
+        if _system_template_needs_asset_refresh(
+            template,
+            seed=seed,
+            provider_by_stage=resolved_providers.provider_by_stage,
+        ):
             if not role_assets or not stage_work_instructions:
                 role_assets = load_default_agent_role_seed_assets()
                 stage_work_instructions = load_default_stage_work_instruction_seed_assets()
             updates["stage_role_bindings"] = _stage_role_bindings(
                 role_assets=role_assets,
                 stage_work_instructions=stage_work_instructions,
-                provider_by_stage=seed["provider_by_stage"],
+                provider_by_stage=resolved_providers.provider_by_stage,
             )
         changed = False
         for field_name, value in updates.items():
@@ -446,6 +479,15 @@ class TemplateService:
             self._session.add(template)
             self._session.flush()
         return changed
+
+    def _configured_template_providers(self) -> tuple[ProviderModel, ...]:
+        return tuple(
+            self._session.query(ProviderModel)
+            .filter(ProviderModel.is_configured.is_(True))
+            .filter(ProviderModel.is_enabled.is_(True))
+            .order_by(ProviderModel.created_at.asc(), ProviderModel.provider_id.asc())
+            .all()
+        )
 
     def list_templates(
         self,
@@ -484,6 +526,15 @@ class TemplateService:
         trace_context: TraceContext,
     ) -> PipelineTemplateModel | None:
         self.seed_system_templates(trace_context=trace_context)
+        return self._session.get(PipelineTemplateModel, template_id)
+
+    def get_template_in_transaction(
+        self,
+        template_id: str,
+        *,
+        trace_context: TraceContext,
+    ) -> PipelineTemplateModel | None:
+        self.refresh_system_templates_in_transaction(trace_context=trace_context)
         return self._session.get(PipelineTemplateModel, template_id)
 
     def save_as_user_template(
@@ -1077,10 +1128,40 @@ def _template_run_auxiliary_model_binding_dict(
     )
 
 
+def _resolve_system_template_providers(
+    *,
+    configured_providers: tuple[ProviderModel, ...],
+) -> _ResolvedSystemTemplateProviders:
+    auxiliary_seed = default_run_auxiliary_model_binding()
+    selected_provider = configured_providers[0] if configured_providers else None
+    selected_provider_id = (
+        selected_provider.provider_id
+        if selected_provider is not None
+        else auxiliary_seed.provider_id
+    )
+    provider_by_stage = {
+        stage_type: selected_provider_id for stage_type in FIXED_STAGE_SEQUENCE
+    }
+
+    if selected_provider is None:
+        auxiliary_binding = _run_auxiliary_model_binding_dict(auxiliary_seed)
+    else:
+        auxiliary_binding = {
+            "provider_id": selected_provider.provider_id,
+            "model_id": selected_provider.default_model_id,
+            "model_parameters": dict(auxiliary_seed.model_parameters),
+        }
+    return _ResolvedSystemTemplateProviders(
+        provider_by_stage=provider_by_stage,
+        run_auxiliary_model_binding=auxiliary_binding,
+    )
+
+
 def _system_template_needs_asset_refresh(
     template: PipelineTemplateModel | None,
     *,
     seed: dict[str, Any],
+    provider_by_stage: dict[StageType, str],
 ) -> bool:
     if template is None:
         return False
@@ -1096,7 +1177,7 @@ def _system_template_needs_asset_refresh(
             return True
         if binding.get("role_id") != STAGE_ROLE_IDS[stage_type]:
             return True
-        if binding.get("provider_id") != seed["provider_by_stage"][stage_type]:
+        if binding.get("provider_id") != provider_by_stage[stage_type]:
             return True
         if not isinstance(stage_work_instruction, str) or not stage_work_instruction.strip():
             return True

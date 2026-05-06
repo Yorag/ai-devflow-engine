@@ -7,9 +7,9 @@ from typing import Any
 import pytest
 
 from backend.app.db.base import DatabaseRole
-from backend.app.db.models.control import ControlBase, PipelineTemplateModel
+from backend.app.db.models.control import ControlBase, PipelineTemplateModel, ProviderModel
 from backend.app.db.session import DatabaseManager
-from backend.app.domain.enums import StageType, TemplateSource
+from backend.app.domain.enums import ProviderProtocolType, ProviderSource, StageType, TemplateSource
 from backend.app.domain.trace_context import TraceContext
 from backend.app.schemas.observability import AuditActorType, AuditResult
 from backend.app.schemas.template import FIXED_APPROVAL_CHECKPOINTS, FIXED_STAGE_SEQUENCE
@@ -67,6 +67,42 @@ def build_manager(tmp_path: Path) -> DatabaseManager:
     )
     ControlBase.metadata.create_all(manager.engine(DatabaseRole.CONTROL))
     return manager
+
+
+def build_provider(
+    provider_id: str,
+    *,
+    configured: bool,
+    enabled: bool = True,
+    default_model_id: str | None = None,
+) -> ProviderModel:
+    model_id = default_model_id or f"{provider_id}-chat"
+    return ProviderModel(
+        provider_id=provider_id,
+        display_name=provider_id,
+        provider_source=ProviderSource.CUSTOM,
+        protocol_type=ProviderProtocolType.OPENAI_COMPLETIONS_COMPATIBLE,
+        base_url=f"https://{provider_id}.example.test/v1",
+        api_key_ref=f"env:{provider_id.upper().replace('-', '_')}_API_KEY"
+        if configured
+        else None,
+        default_model_id=model_id,
+        supported_model_ids=[model_id],
+        is_configured=configured,
+        is_enabled=enabled,
+        runtime_capabilities=[
+            {
+                "model_id": model_id,
+                "context_window_tokens": 128000,
+                "max_output_tokens": 8192,
+                "supports_tool_calling": True,
+                "supports_structured_output": True,
+                "supports_native_reasoning": False,
+            }
+        ],
+        created_at=NOW,
+        updated_at=NOW,
+    )
 
 
 def test_seed_system_templates_creates_three_templates_from_role_assets(
@@ -207,6 +243,100 @@ def test_template_bindings_use_stripped_prompt_bodies_and_fixed_stage_sequence(
         assert "prompt_version:" not in binding["system_prompt"]
         assert "---" not in binding["stage_work_instruction"]
         assert "---" not in binding["system_prompt"]
+
+
+def test_seed_system_templates_uses_first_configured_provider_for_all_system_stages(
+    tmp_path: Path,
+) -> None:
+    from backend.app.services.templates import TemplateService
+
+    manager = build_manager(tmp_path)
+
+    with manager.session(DatabaseRole.CONTROL) as session:
+        session.add_all(
+            [
+                build_provider(
+                    "provider-deepseek",
+                    configured=False,
+                    default_model_id="deepseek-chat",
+                ),
+                build_provider(
+                    "provider-volcengine",
+                    configured=True,
+                    default_model_id="doubao-seed-1-6",
+                ),
+                build_provider(
+                    "provider-mimo",
+                    configured=True,
+                    default_model_id="MiMo-V2.5",
+                ),
+            ]
+        )
+        session.commit()
+
+        template = TemplateService(
+            session,
+            audit_service=RecordingAuditService(),
+            now=lambda: NOW,
+        ).get_default_template(trace_context=build_trace())
+
+    assert {
+        binding["provider_id"] for binding in template.stage_role_bindings
+    } == {"provider-mimo"}
+    assert all(
+        binding["provider_id"] != "provider-deepseek"
+        for binding in template.stage_role_bindings
+    )
+    assert template.run_auxiliary_model_binding == {
+        "provider_id": "provider-mimo",
+        "model_id": "MiMo-V2.5",
+        "model_parameters": {"temperature": 0},
+    }
+
+
+def test_seed_system_templates_refreshes_provider_bindings_when_provider_becomes_unavailable(
+    tmp_path: Path,
+) -> None:
+    from backend.app.services.templates import TemplateService
+
+    manager = build_manager(tmp_path)
+    audit = RecordingAuditService()
+
+    with manager.session(DatabaseRole.CONTROL) as session:
+        deepseek = build_provider(
+            "provider-deepseek",
+            configured=True,
+            default_model_id="deepseek-chat",
+        )
+        replacement = build_provider(
+            "provider-mimo",
+            configured=True,
+            default_model_id="MiMo-V2.5",
+        )
+        session.add_all([deepseek, replacement])
+        session.commit()
+
+        service = TemplateService(
+            session,
+            audit_service=audit,
+            now=lambda: NOW,
+        )
+        service.get_default_template(trace_context=build_trace())
+        deepseek.is_configured = False
+        deepseek.api_key_ref = None
+        session.add(deepseek)
+        session.commit()
+
+        refreshed = service.get_default_template(trace_context=build_trace())
+
+    assert {
+        binding["provider_id"] for binding in refreshed.stage_role_bindings
+    } == {"provider-mimo"}
+    assert refreshed.run_auxiliary_model_binding == {
+        "provider_id": "provider-mimo",
+        "model_id": "MiMo-V2.5",
+        "model_parameters": {"temperature": 0},
+    }
 
 
 def test_seed_system_templates_is_idempotent_and_returns_ordered_rows(

@@ -184,52 +184,6 @@ export function availableTemplateProviders(providers: ProviderRead[]): ProviderR
   return providers.filter((provider) => provider.is_enabled);
 }
 
-export function resolveTemplateProviderBindings(
-  template: PipelineTemplateRead,
-  providers: ProviderRead[],
-): PipelineTemplateRead {
-  const resolvedBindings = resolveStageRoleBindingProviders(
-    template.stage_role_bindings,
-    providers,
-  );
-  const resolvedAuxiliaryBinding = resolveRunAuxiliaryModelBindingProvider(
-    template.run_auxiliary_model_binding,
-    providers,
-  );
-
-  return resolvedBindings === template.stage_role_bindings &&
-    resolvedAuxiliaryBinding === template.run_auxiliary_model_binding
-    ? template
-    : {
-        ...template,
-        stage_role_bindings: resolvedBindings,
-        run_auxiliary_model_binding: resolvedAuxiliaryBinding,
-      };
-}
-
-export function resolveTemplateDraftProviders(
-  draft: TemplateDraftState,
-  providers: ProviderRead[],
-): TemplateDraftState {
-  const resolvedBindings = resolveStageRoleBindingProviders(
-    draft.stage_role_bindings,
-    providers,
-  );
-  const resolvedAuxiliaryBinding = resolveRunAuxiliaryModelBindingProvider(
-    draft.run_auxiliary_model_binding,
-    providers,
-  );
-
-  return resolvedBindings === draft.stage_role_bindings &&
-    resolvedAuxiliaryBinding === draft.run_auxiliary_model_binding
-    ? draft
-    : {
-        ...draft,
-        stage_role_bindings: resolvedBindings,
-        run_auxiliary_model_binding: resolvedAuxiliaryBinding,
-      };
-}
-
 export function unavailableTemplateProviderIds(
   draft: TemplateDraftState,
   providers: ProviderRead[],
@@ -266,67 +220,6 @@ export function unavailableProviderMessage(providerIds: string[]): string {
   return providerIds.length > 0
     ? "This template references unavailable providers."
     : "No provider configured.";
-}
-
-function resolveStageRoleBindingProviders(
-  bindings: StageRoleBinding[],
-  providers: ProviderRead[],
-): StageRoleBinding[] {
-  const availableProviders = availableTemplateProviders(providers);
-  const fallbackProviderId = availableProviders[0]?.provider_id;
-
-  if (!fallbackProviderId) {
-    return bindings;
-  }
-
-  const availableProviderIds = new Set(
-    availableProviders.map((provider) => provider.provider_id),
-  );
-  let changed = false;
-  const resolvedBindings = bindings.map((binding) => {
-    if (availableProviderIds.has(binding.provider_id)) {
-      return binding;
-    }
-
-    changed = true;
-    return {
-      ...binding,
-      provider_id: fallbackProviderId,
-    };
-  });
-
-  return changed ? resolvedBindings : bindings;
-}
-
-function resolveRunAuxiliaryModelBindingProvider(
-  binding: RunAuxiliaryModelBinding,
-  providers: ProviderRead[],
-): RunAuxiliaryModelBinding {
-  const availableProviders = availableTemplateProviders(providers);
-  const fallbackProvider = availableProviders.find(
-    (provider) => providerModelIds(provider).length > 0,
-  );
-
-  if (!fallbackProvider) {
-    return binding;
-  }
-
-  const currentProvider = availableProviders.find(
-    (provider) => provider.provider_id === binding.provider_id,
-  );
-  const currentModelIds = currentProvider ? providerModelIds(currentProvider) : [];
-
-  if (currentProvider && currentModelIds.includes(binding.model_id)) {
-    return binding;
-  }
-
-  const fallbackModelId =
-    providerModelIds(fallbackProvider)[0] ?? fallbackProvider.default_model_id;
-  return {
-    ...binding,
-    provider_id: fallbackProvider.provider_id,
-    model_id: fallbackModelId,
-  };
 }
 
 function providerModelIds(provider: ProviderRead): string[] {

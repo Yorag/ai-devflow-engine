@@ -111,6 +111,7 @@ from backend.app.services.runtime_settings import (
     RuntimeSettingsServiceError,
 )
 from backend.app.services.stages import StageRunService
+from backend.app.services.templates import TemplateService
 
 
 class RunLogWriter(Protocol):
@@ -1894,9 +1895,13 @@ class RunLifecycleService:
         trace_context: TraceContext,
     ) -> TemplateSnapshot:
         del source_template_snapshot_ref
-        template = self._require_control_session().get(
-            PipelineTemplateModel,
+        template = TemplateService(
+            self._require_control_session(),
+            audit_service=self._audit_service,
+            now=self._now,
+        ).get_template_in_transaction(
             session.selected_template_id,
+            trace_context=trace_context,
         )
         if template is None:
             raise RunLifecycleServiceError(

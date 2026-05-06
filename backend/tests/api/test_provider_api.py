@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from backend.app.core.config import EnvironmentSettings
 from backend.app.db.base import DatabaseRole
-from backend.app.db.models.control import ControlBase, ProviderModel
+from backend.app.db.models.control import ControlBase, PipelineTemplateModel, ProviderModel
 from backend.app.db.models.log import AuditLogEntryModel, LogBase
 from backend.app.domain.enums import ProviderProtocolType, ProviderSource
 from backend.app.main import create_app
@@ -228,6 +228,71 @@ def test_provider_routes_patch_builtin_runtime_config_and_preserve_identity(
     assert "[blocked:sensitive_field]" in audit.metadata_excerpt
     assert "https://api.deepseek.example/v1" not in audit.metadata_excerpt
     assert "DeepSeek" not in audit.metadata_excerpt
+
+
+def test_provider_routes_refresh_system_templates_after_provider_configuration(
+    tmp_path: Path,
+) -> None:
+    app = build_provider_api_app(tmp_path)
+
+    with TestClient(app) as client:
+        response = client.patch(
+            "/api/providers/provider-deepseek",
+            json=provider_payload(
+                display_name=None,
+                base_url="https://api.deepseek.example/v1",
+                api_key_ref="sk-deepseek-system-template-api-key",
+                default_model_id="deepseek-chat",
+                supported_model_ids=["deepseek-chat"],
+                runtime_capabilities=[{"model_id": "deepseek-chat"}],
+            ),
+        )
+
+    assert response.status_code == 200
+    with app.state.database_manager.session(DatabaseRole.CONTROL) as session:
+        template = session.get(PipelineTemplateModel, "template-feature")
+        assert template is not None
+        assert {
+            binding["provider_id"] for binding in template.stage_role_bindings
+        } == {"provider-deepseek"}
+        assert template.run_auxiliary_model_binding == {
+            "provider_id": "provider-deepseek",
+            "model_id": "deepseek-chat",
+            "model_parameters": {"temperature": 0},
+        }
+
+
+def test_provider_routes_refresh_system_templates_after_custom_provider_create(
+    tmp_path: Path,
+) -> None:
+    app = build_provider_api_app(tmp_path)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/providers",
+            json=provider_payload(
+                display_name="MiMo",
+                base_url="https://mimo.example.test/v1",
+                api_key_ref="sk-mimo-system-template-api-key",
+                default_model_id="MiMo-V2.5",
+                supported_model_ids=["MiMo-V2.5"],
+                runtime_capabilities=[{"model_id": "MiMo-V2.5"}],
+            ),
+        )
+
+    assert response.status_code == 201
+    provider_id = response.json()["provider_id"]
+    with app.state.database_manager.session(DatabaseRole.CONTROL) as session:
+        template = session.get(PipelineTemplateModel, "template-feature")
+        assert template is not None
+        assert {
+            binding["provider_id"] for binding in template.stage_role_bindings
+        } == {provider_id}
+        assert template.run_auxiliary_model_binding == {
+            "provider_id": provider_id,
+            "model_id": "MiMo-V2.5",
+            "model_parameters": {"temperature": 0},
+        }
 
 
 def test_provider_routes_patch_builtin_display_name(tmp_path: Path) -> None:

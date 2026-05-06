@@ -16,6 +16,7 @@ from backend.app.observability.log_writer import JsonlLogWriter
 from backend.app.observability.runtime_data import RuntimeDataSettings
 from backend.app.schemas.provider import ProviderRead, ProviderWriteRequest
 from backend.app.services.providers import ProviderService, ProviderServiceError
+from backend.app.services.templates import TemplateService
 
 
 router = APIRouter(tags=["providers"])
@@ -48,6 +49,12 @@ def _raise_api_error(exc: ProviderServiceError) -> None:
     ) from exc
 
 
+def _refresh_system_templates_after_provider_change(
+    service: TemplateService,
+) -> None:
+    service.seed_system_templates(trace_context=get_trace_context())
+
+
 def get_control_session(request: Request) -> Iterator[Session]:
     manager: DatabaseManager = request.app.state.database_manager
     session = manager.session(DatabaseRole.CONTROL)
@@ -76,6 +83,24 @@ def get_provider_service(
         log_session.close()
 
 
+def get_template_service(
+    request: Request,
+    session: Session = Depends(get_control_session),
+) -> Iterator[TemplateService]:
+    manager: DatabaseManager = request.app.state.database_manager
+    settings = request.app.state.environment_settings
+    log_session = manager.session(DatabaseRole.LOG)
+    audit_writer = JsonlLogWriter(RuntimeDataSettings.from_environment_settings(settings))
+    audit_service = AuditService(log_session, audit_writer=audit_writer)
+    try:
+        yield TemplateService(
+            session,
+            audit_service=audit_service,
+        )
+    finally:
+        log_session.close()
+
+
 @router.get(
     "/providers",
     response_model=list[ProviderRead],
@@ -97,12 +122,14 @@ def list_providers(
 def create_provider(
     body: ProviderWriteRequest,
     service: ProviderService = Depends(get_provider_service),
+    template_service: TemplateService = Depends(get_template_service),
 ) -> ProviderRead:
     try:
         provider = service.create_custom_provider(
             body,
             trace_context=get_trace_context(),
         )
+        _refresh_system_templates_after_provider_change(template_service)
     except ProviderServiceError as exc:
         _raise_api_error(exc)
     return _provider_read(provider, service=service)
@@ -141,6 +168,7 @@ def patch_provider(
     providerId: str,
     body: ProviderWriteRequest,
     service: ProviderService = Depends(get_provider_service),
+    template_service: TemplateService = Depends(get_template_service),
 ) -> ProviderRead:
     try:
         provider = service.patch_provider(
@@ -148,6 +176,7 @@ def patch_provider(
             body,
             trace_context=get_trace_context(),
         )
+        _refresh_system_templates_after_provider_change(template_service)
     except ProviderServiceError as exc:
         _raise_api_error(exc)
     return _provider_read(provider, service=service)
@@ -165,9 +194,11 @@ def patch_provider(
 def delete_provider(
     providerId: str,
     service: ProviderService = Depends(get_provider_service),
+    template_service: TemplateService = Depends(get_template_service),
 ) -> Response:
     try:
         service.delete_provider(providerId, trace_context=get_trace_context())
+        _refresh_system_templates_after_provider_change(template_service)
     except ProviderServiceError as exc:
         _raise_api_error(exc)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
