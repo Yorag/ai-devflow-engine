@@ -483,6 +483,13 @@ a {
   color: var(--accent);
 }
 
+.session-list-item__rename-form {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  margin: 0;
+}
+
 .session-list-item__rename {
   min-width: 0;
 }

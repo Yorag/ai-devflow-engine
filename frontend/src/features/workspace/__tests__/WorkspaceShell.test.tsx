@@ -192,11 +192,18 @@ describe("WorkspaceShell", () => {
       within(item).getByRole("button", { name: "Cancel rename" }),
     ).toBeTruthy();
 
-    fireEvent.change(
-      within(item).getByRole("textbox", { name: `Rename ${longName}` }),
-      { target: { value: "Renamed protected row" } },
-    );
-    fireEvent.click(within(item).getByRole("button", { name: "Save session name" }));
+    const renameInput = within(item).getByRole("textbox", {
+      name: `Rename ${longName}`,
+    });
+    fireEvent.change(renameInput, { target: { value: "Renamed protected row" } });
+    const renameForm = renameInput.closest("form");
+    expect(renameForm).toBeTruthy();
+    expect(
+      within(renameForm as HTMLFormElement).getByRole("button", {
+        name: "Save session name",
+      }),
+    ).toBeTruthy();
+    fireEvent.submit(renameForm as HTMLFormElement);
 
     await waitFor(() => {
       expect(renameFetcher).toHaveBeenCalledWith(

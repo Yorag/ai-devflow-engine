@@ -130,78 +130,93 @@ export function SessionList({
               key={session.session_id}
             >
               <div className="session-list-item__body">
-                <div className="session-list-item__title-row">
-                  {isEditing ? (
-                    <label className="session-list-item__rename">
-                      <span className="sr-only">
-                        Rename {displayName}
-                      </span>
-                      <input
-                        className="session-list-item__rename-input"
-                        type="text"
-                        value={draftName}
-                        onChange={(event) => setDraftName(event.target.value)}
-                        aria-label={`Rename ${displayName}`}
-                      />
-                    </label>
-                  ) : (
-                    <button
-                      className="session-list-item__open"
-                      type="button"
-                      onClick={() => onSessionChange(session.session_id)}
-                      aria-current={isCurrent ? "page" : undefined}
-                      aria-label={`Open ${displayName}`}
-                    >
-                      <span className="session-list-item__title session-list-item__name-text">
-                        {displayName}
-                      </span>
-                    </button>
-                  )}
-                  <button
-                    className="session-list-item__delete"
-                    type="button"
-                    disabled
-                    aria-label={
-                      isActiveSession(session.status)
-                        ? `Delete ${displayName} blocked by active run`
-                        : `Delete ${displayName} unavailable`
-                    }
-                  >
-                    Delete
-                  </button>
-                </div>
                 {isEditing ? (
                   <form
-                    className="session-list-item__rename-actions"
+                    className="session-list-item__rename-form"
                     onSubmit={(event) => handleRenameSubmit(event, session)}
                   >
-                    <button
-                      className="session-list-item__rename-save"
-                      type="submit"
-                      disabled={isSaveDisabled}
-                      aria-label="Save session name"
-                    >
-                      {savingSessionId === session.session_id ? "Saving" : "Save"}
-                    </button>
-                    <button
-                      className="session-list-item__rename-cancel"
-                      type="button"
-                      disabled={savingSessionId === session.session_id}
-                      onClick={cancelRename}
-                      aria-label="Cancel rename"
-                    >
-                      Cancel
-                    </button>
+                    <div className="session-list-item__title-row">
+                      <label className="session-list-item__rename">
+                        <span className="sr-only">
+                          Rename {displayName}
+                        </span>
+                        <input
+                          className="session-list-item__rename-input"
+                          type="text"
+                          value={draftName}
+                          onChange={(event) => setDraftName(event.target.value)}
+                          aria-label={`Rename ${displayName}`}
+                        />
+                      </label>
+                      <button
+                        className="session-list-item__delete"
+                        type="button"
+                        disabled
+                        aria-label={
+                          isActiveSession(session.status)
+                            ? `Delete ${displayName} blocked by active run`
+                            : `Delete ${displayName} unavailable`
+                        }
+                      >
+                        Delete
+                      </button>
+                    </div>
+                    <div className="session-list-item__rename-actions">
+                      <button
+                        className="session-list-item__rename-save"
+                        type="submit"
+                        disabled={isSaveDisabled}
+                        aria-label="Save session name"
+                      >
+                        {savingSessionId === session.session_id ? "Saving" : "Save"}
+                      </button>
+                      <button
+                        className="session-list-item__rename-cancel"
+                        type="button"
+                        disabled={savingSessionId === session.session_id}
+                        onClick={cancelRename}
+                        aria-label="Cancel rename"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </form>
                 ) : (
-                  <button
-                    className="session-list-item__rename-trigger"
-                    type="button"
-                    onClick={() => startRename(session)}
-                    aria-label={`Rename ${displayName}`}
-                  >
-                    Rename
-                  </button>
+                  <>
+                    <div className="session-list-item__title-row">
+                      <button
+                        className="session-list-item__open"
+                        type="button"
+                        onClick={() => onSessionChange(session.session_id)}
+                        aria-current={isCurrent ? "page" : undefined}
+                        aria-label={`Open ${displayName}`}
+                      >
+                        <span className="session-list-item__title session-list-item__name-text">
+                          {displayName}
+                        </span>
+                      </button>
+                      <button
+                        className="session-list-item__delete"
+                        type="button"
+                        disabled
+                        aria-label={
+                          isActiveSession(session.status)
+                            ? `Delete ${displayName} blocked by active run`
+                            : `Delete ${displayName} unavailable`
+                        }
+                      >
+                        Delete
+                      </button>
+                    </div>
+                    <button
+                      className="session-list-item__rename-trigger"
+                      type="button"
+                      onClick={() => startRename(session)}
+                      aria-label={`Rename ${displayName}`}
+                    >
+                      Rename
+                    </button>
+                  </>
                 )}
                 {isEditing && renameError ? (
                   <p className="session-list-item__rename-error" role="alert">
