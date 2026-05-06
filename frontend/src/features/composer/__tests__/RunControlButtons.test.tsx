@@ -128,6 +128,29 @@ describe("RunControlButtons", () => {
 });
 
 describe("Composer run controls", () => {
+  it("renders only the primary send action in the compact waiting clarification composer", () => {
+    renderComposer({
+      queryClient: createQueryClient(),
+      session: buildSession({
+        session_id: "session-waiting-clarification",
+        status: "waiting_clarification",
+        current_run_id: "run-waiting-clarification",
+      }),
+      composerState: buildComposerState({
+        mode: "waiting_clarification",
+        is_input_enabled: true,
+        primary_action: "send",
+        secondary_actions: ["pause", "terminate"],
+        bound_run_id: "run-waiting-clarification",
+      }),
+      currentStageType: "requirement_analysis",
+    });
+
+    expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "暂停当前运行" })).toBeNull();
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+  });
+
   it("uses the main lifecycle button to pause a running active run", async () => {
     vi.mocked(pauseRun).mockResolvedValue({
       run_id: "run-running",
@@ -216,53 +239,6 @@ describe("Composer run controls", () => {
     });
   });
 
-  it("disables send while a secondary pause action is in flight", async () => {
-    let releasePause = () => {};
-    vi.mocked(pauseRun).mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          releasePause = () =>
-            resolve({
-              run_id: "run-waiting-clarification",
-              attempt_index: 1,
-              status: "paused",
-              trigger_source: "initial_requirement",
-              started_at: "2026-05-01T09:30:00.000Z",
-              ended_at: null,
-              current_stage_type: "requirement_analysis",
-              is_active: true,
-            });
-        }),
-    );
-
-    renderComposer({
-      queryClient: createQueryClient(),
-      session: buildSession({
-        session_id: "session-waiting-clarification",
-        status: "waiting_clarification",
-        current_run_id: "run-waiting-clarification",
-      }),
-      composerState: buildComposerState({
-        mode: "waiting_clarification",
-        is_input_enabled: true,
-        primary_action: "send",
-        secondary_actions: ["pause", "terminate"],
-        bound_run_id: "run-waiting-clarification",
-      }),
-      currentStageType: "requirement_analysis",
-    });
-
-    fireEvent.change(screen.getByLabelText("当前输入"), {
-      target: { value: "Clarification reply" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "暂停当前运行" }));
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "发送" })).toHaveProperty("disabled", true);
-    });
-
-    releasePause();
-  });
 });
 
 function renderComposer({

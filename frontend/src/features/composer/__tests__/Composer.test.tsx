@@ -146,6 +146,42 @@ describe("Composer component", () => {
     expect(screen.getByLabelText("当前输入")).toHaveProperty("value", "");
   });
 
+  it("renders a compact single-row input surface without helper or run binding text", () => {
+    renderComposerForWorkspace(mockSessionWorkspaces["session-draft"]);
+
+    const composer = screen.getByRole("form", { name: "Composer" });
+    const input = screen.getByLabelText("当前输入");
+    const label = composer.querySelector(".composer__label");
+
+    expect(composer.getAttribute("class")).toContain("composer--compact");
+    expect(input.getAttribute("rows")).toBe("1");
+    expect(label?.classList.contains("sr-only")).toBe(true);
+    expect(screen.queryByText("尚未绑定 run")).toBeNull();
+    expect(screen.queryByText(/绑定 run/u)).toBeNull();
+    expect(screen.queryByText(/当前 run|当前输入框|unavailable providers/u)).toBeNull();
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
+  });
+
+  it("grows the textarea with wrapped content while leaving max height to CSS", () => {
+    renderComposerForWorkspace(mockSessionWorkspaces["session-draft"]);
+
+    const input = screen.getByLabelText("当前输入") as HTMLTextAreaElement;
+    Object.defineProperty(input, "scrollHeight", {
+      configurable: true,
+      value: 96,
+    });
+
+    fireEvent.change(input, {
+      target: {
+        value:
+          "A longer requirement that wraps into more than one visible input line.",
+      },
+    });
+
+    expect(input.style.height).toBe("96px");
+  });
+
   it("submits clarification replies in waiting clarification mode", async () => {
     const fetcher = vi.fn(createMockApiFetcher());
 
@@ -190,14 +226,14 @@ describe("Composer component", () => {
     expect(input).toHaveProperty("disabled", true);
     expect(button).toHaveProperty("disabled", false);
     expect(button.getAttribute("type")).toBe("button");
-    expect(screen.getByText(/当前输入框不承担发送动作/u)).toBeTruthy();
+    expect(screen.queryByText(/当前输入框不承担发送动作/u)).toBeNull();
   });
 
-  it("keeps the lifecycle button bound to the current active run during waiting approval while remaining executable", () => {
+  it("keeps the lifecycle button executable during waiting approval without showing run binding text", () => {
     renderComposerForWorkspace(mockSessionWorkspaces["session-waiting-approval"]);
 
     const button = screen.getByRole("button", { name: "暂停" });
-    expect(screen.getByText("绑定 run run-waiting-approval")).toBeTruthy();
+    expect(screen.queryByText("绑定 run run-waiting-approval")).toBeNull();
     expect(button).toHaveProperty("disabled", false);
     expect(button.getAttribute("type")).toBe("button");
     expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", true);
@@ -218,7 +254,7 @@ describe("Composer component", () => {
     const button = screen.getByRole("button", { name: "不可用" });
     expect(button).toHaveProperty("disabled", true);
     expect(button.getAttribute("type")).toBe("button");
-    expect(screen.getByText("绑定 run run-completed")).toBeTruthy();
+    expect(screen.queryByText("绑定 run run-completed")).toBeNull();
     expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", true);
   });
 

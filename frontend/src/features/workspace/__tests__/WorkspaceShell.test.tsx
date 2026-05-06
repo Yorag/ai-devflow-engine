@@ -71,8 +71,15 @@ describe("WorkspaceShell", () => {
     expect(css).toMatch(
       /\.workspace-main__composer-dock\s*\{[^}]*position:\s*fixed;[^}]*left:\s*var\(--workspace-sidebar-width\);[^}]*right:\s*var\(--workspace-inspector-width\);/su,
     );
-    expect(css).toMatch(/\.composer\s*\{[^}]*max-height:\s*min\(42vh,\s*260px\);[^}]*overflow:\s*auto;/su);
-    expect(css).toMatch(/\.composer\s+textarea\s*\{[^}]*resize:\s*none;/su);
+    expect(css).toMatch(
+      /\.composer\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto;[^}]*align-items:\s*end;[^}]*overflow:\s*visible;/su,
+    );
+    expect(css).toMatch(
+      /\.composer\s+textarea\s*\{[^}]*min-height:\s*40px;[^}]*max-height:\s*calc\(1\.45em\s*\*\s*5\s*\+\s*20px\);[^}]*resize:\s*none;[^}]*overflow-y:\s*auto;/su,
+    );
+    expect(css).toMatch(
+      /\.composer__primary-actions\s+\.workspace-button\s*\{[^}]*width:\s*auto;[^}]*min-height:\s*40px;/su,
+    );
     expect(css).not.toMatch(
       /@media\s*\(max-width:\s*900px\)[\s\S]*\.workspace-shell,\s*\.workspace-shell--inspector-open\s*\{[^}]*height:\s*auto;/u,
     );
@@ -1471,7 +1478,7 @@ describe("WorkspaceShell", () => {
         screen.getAllByText(
           "This template references unavailable providers: provider-deepseek.",
         ),
-      ).toHaveLength(2);
+      ).toHaveLength(1);
     });
     expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", true);
     expect(screen.getByRole("button", { name: "发送" })).toHaveProperty(
@@ -1527,7 +1534,7 @@ describe("WorkspaceShell", () => {
       screen.getAllByText(
         "This template references unavailable providers: provider-deepseek.",
       ),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
 
     const input = screen.getByLabelText("当前输入");
     expect(input).toHaveProperty("disabled", true);
@@ -1547,8 +1554,8 @@ describe("WorkspaceShell", () => {
     );
 
     expect(await screen.findByRole("button", { name: "发送" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "暂停当前运行" })).toBeTruthy();
-    expect(screen.getByText(/等待你的澄清回复/u)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "暂停当前运行" })).toBeNull();
+    expect(screen.queryByText(/等待你的澄清回复/u)).toBeNull();
   });
 
   it("resets unsent Composer input when the selected session changes", async () => {

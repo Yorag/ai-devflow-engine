@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import type { ApiRequestOptions } from "../../api/client";
@@ -10,9 +10,7 @@ import type {
   SessionRead,
   StageType,
 } from "../../api/types";
-import { getComposerHelperText } from "./composer-mode";
 import { resolveComposerState } from "./composer-state";
-import { RunControlButtons } from "./RunControlButtons";
 
 type ComposerProps = {
   session: SessionRead | null;
@@ -35,11 +33,11 @@ export function Composer({
 }: ComposerProps): JSX.Element {
   const queryClient = useQueryClient();
   const [value, setValue] = useState("");
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const [isSubmitting, setSubmitting] = useState(false);
-  const [isNestedActionBusy, setNestedActionBusy] = useState(false);
   const resolved = resolveComposerState(composerState, currentStageType);
   const isSharedBusy = isBusy;
-  const isActionBusy = isSubmitting || isSharedBusy || isNestedActionBusy;
+  const isActionBusy = isSubmitting || isSharedBusy;
   const isStartBlocked = Boolean(
     startBlockedReason && resolved.messageType === "new_requirement",
   );
@@ -48,6 +46,21 @@ export function Composer({
   useEffect(() => {
     setValue("");
   }, [session?.session_id]);
+
+  useEffect(() => {
+    resizeTextarea(inputRef.current);
+  }, [value]);
+
+  function resizeTextarea(textarea: HTMLTextAreaElement | null) {
+    if (!textarea) {
+      return;
+    }
+
+    textarea.style.height = "auto";
+    if (textarea.value) {
+      textarea.style.height = `${textarea.scrollHeight}px`;
+    }
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -137,49 +150,32 @@ export function Composer({
           : resolved.actionLabel;
 
   return (
-    <form className="composer" aria-label="Composer" onSubmit={handleSubmit}>
+    <form
+      className="composer composer--compact"
+      aria-label="Composer"
+      onSubmit={handleSubmit}
+    >
       <div className="composer__body">
         <label className="composer__field" htmlFor="workspace-composer-input">
-          <span className="composer__label">当前输入</span>
+          <span className="composer__label sr-only">当前输入</span>
           <textarea
+            ref={inputRef}
             id="workspace-composer-input"
             aria-label="当前输入"
             value={value}
-            onChange={(event) => setValue(event.target.value)}
+            onChange={(event) => {
+              resizeTextarea(event.currentTarget);
+              setValue(event.target.value);
+            }}
             disabled={!resolved.inputEnabled || isStartBlocked || isActionBusy}
             placeholder={
               resolved.mode === "waiting_clarification" ? "补充澄清信息" : "输入需求"
             }
-            rows={3}
+            rows={1}
           />
         </label>
-        <p className="composer__helper">
-          {isStartBlocked
-            ? startBlockedReason
-            : getComposerHelperText(composerState, currentStageType)}
-        </p>
       </div>
       <div className="composer__actions">
-        <span className="composer__binding">
-          {composerState?.bound_run_id
-            ? `绑定 run ${composerState.bound_run_id}`
-            : "尚未绑定 run"}
-        </span>
-        {session ? (
-          <RunControlButtons
-            projectId={session.project_id}
-            sessionId={session.session_id}
-            runId={composerState?.bound_run_id ?? null}
-            lifecycle={resolved.lifecycle}
-            secondaryActions={composerState?.secondary_actions ?? []}
-            isBusy={isActionBusy}
-            onBusyChange={(busy) => {
-              setNestedActionBusy(busy);
-              onBusyChange?.(busy);
-            }}
-            request={request}
-          />
-        ) : null}
         <div className="composer__primary-actions">
           <button
             type={resolved.lifecycle === "send" ? "submit" : "button"}
