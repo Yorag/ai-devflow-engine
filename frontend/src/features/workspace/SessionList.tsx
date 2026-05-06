@@ -65,7 +65,9 @@ export function SessionList({
                   aria-current={isCurrent ? "page" : undefined}
                   aria-label={`Open ${session.display_name}`}
                 >
-                  <span>{session.display_name}</span>
+                  <span className="session-list-item__title">
+                    {session.display_name}
+                  </span>
                 </button>
                 <p>{formatStatus(session.status)}</p>
                 <p>Updated {formatTimestamp(session.updated_at)}</p>

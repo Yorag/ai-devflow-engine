@@ -270,6 +270,8 @@ class RunLifecycleService:
         content: str,
         trace_context: TraceContext,
         runtime_settings_service: PlatformRuntimeSettingsService,
+        session_display_name: str | None = None,
+        session_display_name_expected_current: str | None = None,
     ) -> StartFirstRunResult:
         started_at = self._now()
         session = self._load_visible_session_for_start(session.session_id)
@@ -596,6 +598,10 @@ class RunLifecycleService:
                 publication_id=publication.publication_id if publication else None,
                 trace_context=run_trace,
                 occurred_at=started_at,
+                session_display_name=session_display_name,
+                session_display_name_expected_current=(
+                    session_display_name_expected_current
+                ),
             )
             session = self._load_visible_session_for_start(session.session_id)
             self._record_run_log(
@@ -2444,6 +2450,8 @@ class RunLifecycleService:
         publication_id: str | None,
         trace_context: TraceContext,
         occurred_at: datetime,
+        session_display_name: str | None = None,
+        session_display_name_expected_current: str | None = None,
     ) -> PublishedStartupVisibility:
         if publication_id is None:
             raise RunLifecycleServiceError(
@@ -2463,6 +2471,8 @@ class RunLifecycleService:
             stage_run_id=stage_run_id,
             trace_context=trace_context,
             published_at=occurred_at,
+            session_display_name=session_display_name,
+            session_display_name_expected_current=session_display_name_expected_current,
         )
 
     def _commit_rerun_all(

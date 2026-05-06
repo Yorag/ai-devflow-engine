@@ -425,6 +425,12 @@ a {
   overflow-wrap: anywhere;
 }
 
+.session-list-item__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .session-list-item p {
   margin: 4px 0 0;
   color: var(--text-muted);

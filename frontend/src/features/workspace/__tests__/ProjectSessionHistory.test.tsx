@@ -2,11 +2,16 @@ import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiRequestOptions } from "../../../api/client";
-import type { SessionWorkspaceProjection, TopLevelFeedEntry } from "../../../api/types";
+import type {
+  SessionRead,
+  SessionWorkspaceProjection,
+  TopLevelFeedEntry,
+} from "../../../api/types";
 import { renderWithAppProviders } from "../../../app/test-utils";
 import { mockFeedEntriesByType, mockSessionWorkspaces } from "../../../mocks/fixtures";
 import { createMockApiFetcher, mockApiRequestOptions } from "../../../mocks/handlers";
 import { ConsolePage } from "../../../pages/ConsolePage";
+import { SessionList } from "../SessionList";
 import { useWorkspaceStore } from "../workspace-store";
 
 afterEach(() => {
@@ -116,6 +121,35 @@ describe("Project session history regression", () => {
         name: "Remove Checkout Service unavailable",
       }),
     ).toHaveProperty("disabled", true);
+  });
+
+  it("displays backend session names with a truncating title span while preserving the full open label", () => {
+    const displayName =
+      "Backend provided session title that is intentionally long enough to require sidebar truncation without changing the accessible name";
+    const session: SessionRead = {
+      session_id: "session-long-title",
+      project_id: "project-default",
+      display_name: displayName,
+      status: "completed",
+      selected_template_id: "template-feature",
+      current_run_id: "run-long-title",
+      latest_stage_type: "delivery_integration",
+      created_at: "2026-05-01T09:00:00.000Z",
+      updated_at: "2026-05-01T10:00:00.000Z",
+    };
+
+    renderWithAppProviders(
+      <SessionList
+        sessions={[session]}
+        currentSessionId={session.session_id}
+        onSessionChange={vi.fn()}
+      />,
+    );
+
+    const openButton = screen.getByRole("button", { name: `Open ${displayName}` });
+    const title = within(openButton).getByText(displayName);
+
+    expect(title.classList.contains("session-list-item__title")).toBe(true);
   });
 });
 

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from backend.app.core.config import EnvironmentSettings
 from backend.app.db.base import DatabaseRole
-from backend.app.db.models.control import ControlBase
+from backend.app.db.models.control import ControlBase, SessionModel
 from backend.app.db.models.event import DomainEventModel, EventBase
 from backend.app.db.models.graph import GraphBase
 from backend.app.db.models.log import AuditLogEntryModel, LogBase
@@ -17,6 +17,7 @@ from backend.app.db.models.runtime import (
 )
 from backend.app.domain.enums import RunStatus, SseEventType
 from backend.app.main import create_app
+from backend.app.services.sessions import DEFAULT_SESSION_DISPLAY_NAME
 
 
 def build_app(tmp_path: Path):
@@ -127,8 +128,38 @@ def test_post_session_message_accepts_clarification_reply_and_restores_running(
             .filter(AuditLogEntryModel.action == "session.message.clarification_reply")
             .one()
         )
-        assert audit.request_id == "req-clarification-reply"
-        assert audit.correlation_id == "corr-clarification-reply"
+    assert audit.request_id == "req-clarification-reply"
+    assert audit.correlation_id == "corr-clarification-reply"
+
+
+def test_clarification_reply_does_not_auto_title_default_named_session(
+    tmp_path: Path,
+) -> None:
+    app = build_app(tmp_path)
+    seed_waiting_clarification_via_service(app)
+
+    with app.state.database_manager.session(DatabaseRole.CONTROL) as session:
+        model = session.get(SessionModel, "session-1")
+        assert model is not None
+        model.display_name = DEFAULT_SESSION_DISPLAY_NAME
+        session.add(model)
+        session.commit()
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/sessions/session-1/messages",
+            json={
+                "message_type": "clarification_reply",
+                "content": "Keep the existing default title.",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["session"]["display_name"] == DEFAULT_SESSION_DISPLAY_NAME
+    with app.state.database_manager.session(DatabaseRole.CONTROL) as session:
+        saved = session.get(SessionModel, "session-1")
+        assert saved is not None
+        assert saved.display_name == DEFAULT_SESSION_DISPLAY_NAME
 
 
 def test_clarification_reply_rejects_illegal_state_with_conflict_and_audit(
