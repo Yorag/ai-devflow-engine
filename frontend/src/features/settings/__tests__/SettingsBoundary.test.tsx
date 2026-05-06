@@ -208,10 +208,11 @@ describe("SettingsBoundary", () => {
 
     const editor = screen.getByRole("region", { name: "Template editor" });
     expect(within(editor).getByText("Run configuration")).toBeTruthy();
-    expect(within(editor).getByLabelText("requirement_analysis role")).toBeTruthy();
-    expect(within(editor).getByLabelText("requirement_analysis provider")).toBeTruthy();
+    expect(within(editor).queryByLabelText(/ role$/u)).toBeNull();
+    expect(within(editor).queryByText("role-requirement-analyst")).toBeNull();
+    expect(within(editor).getByLabelText("Requirement Analysis provider")).toBeTruthy();
     expect(
-      within(editor).getByLabelText("requirement_analysis system prompt"),
+      within(editor).getByLabelText("Requirement Analysis system prompt"),
     ).toBeTruthy();
     expect(within(editor).getByLabelText("Auto regression")).toBeTruthy();
     expect(

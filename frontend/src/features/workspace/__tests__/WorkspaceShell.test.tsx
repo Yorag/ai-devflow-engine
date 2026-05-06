@@ -10,6 +10,8 @@ import type { ApiRequestOptions } from "../../../api/client";
 import { terminateRun } from "../../../api/runs";
 import type {
   ExecutionNodeProjection,
+  PipelineTemplateRead,
+  PipelineTemplateWriteRequest,
   ProviderRead,
   ProjectRead,
   SessionRead,
@@ -20,6 +22,7 @@ import { createQueryClient } from "../../../app/query-client";
 import { renderWithAppProviders } from "../../../app/test-utils";
 import {
   mockFeedEntriesByType,
+  mockPipelineTemplates,
   mockProviderList,
   mockSessionWorkspaces,
   mockStageInspectorProjection,
@@ -715,20 +718,197 @@ describe("WorkspaceShell", () => {
     const editor = await screen.findByRole("region", { name: "Template editor" });
     expect(within(editor).getByText("Run configuration")).toBeTruthy();
     expect(
-      within(editor).getByLabelText("requirement_analysis system prompt"),
+      within(editor).getByLabelText("Requirement Analysis system prompt"),
     ).toBeTruthy();
-    expect(within(editor).getByLabelText("requirement_analysis provider")).toBeTruthy();
+    expect(within(editor).getByLabelText("Requirement Analysis provider")).toBeTruthy();
 
-    fireEvent.change(within(editor).getByLabelText("requirement_analysis system prompt"), {
+    fireEvent.change(within(editor).getByLabelText("Requirement Analysis system prompt"), {
       target: { value: "Clarify only when missing facts block implementation." },
     });
 
     expect(within(editor).getByText(/Save this edited system template/u)).toBeTruthy();
     expect(
-      within(editor).getByRole("button", { name: "Save as user template" }),
+      within(editor).getByRole("button", { name: "Save stage" }),
     ).toBeTruthy();
     expect(document.body.textContent ?? "").not.toContain("DeliveryChannel");
     expect(document.body.textContent ?? "").not.toContain("deterministic test runtime");
+  });
+
+  it("saves a system template stage as a user template and binds it to the draft session", async () => {
+    const baseFetcher = createMockApiFetcher();
+    const saveAsBodies: PipelineTemplateWriteRequest[] = [];
+    let sessionTemplateBody: unknown = null;
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const path = normalizeTestPath(input);
+        const method = init?.method ?? "GET";
+
+        if (
+          method === "POST" &&
+          path === "/api/pipeline-templates/template-feature/save-as"
+        ) {
+          const saveAsBody =
+            typeof init?.body === "string"
+              ? (JSON.parse(init.body) as PipelineTemplateWriteRequest)
+              : null;
+          if (!saveAsBody) {
+            return jsonTestResponse({ message: "Missing template body" }, 400);
+          }
+          saveAsBodies.push(saveAsBody);
+          return jsonTestResponse(
+            {
+              ...mockPipelineTemplates.find(
+                (template) => template.template_id === "template-feature",
+              )!,
+              ...saveAsBody,
+              template_id: "template-user-saved-stage",
+              template_source: "user_template",
+              base_template_id: "template-feature",
+              created_at: "2026-05-05T08:30:00.000Z",
+              updated_at: "2026-05-05T08:30:00.000Z",
+            },
+            201,
+          );
+        }
+
+        if (method === "PUT" && path === "/api/sessions/session-draft/template") {
+          sessionTemplateBody =
+            typeof init?.body === "string" ? JSON.parse(init.body) : null;
+          return jsonTestResponse({
+            ...mockSessionWorkspaces["session-draft"].session,
+            selected_template_id: "template-user-saved-stage",
+          });
+        }
+
+        return baseFetcher(input, init);
+      },
+    };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    const editor = await screen.findByRole("region", { name: "Template editor" });
+    fireEvent.click(within(editor).getByRole("tab", { name: "Solution Design" }));
+    fireEvent.change(within(editor).getByLabelText("Solution Design system prompt"), {
+      target: { value: "Design the saved stage only." },
+    });
+    fireEvent.click(within(editor).getByRole("button", { name: "Save stage" }));
+
+    await waitFor(() => {
+      expect(sessionTemplateBody).toEqual({
+        template_id: "template-user-saved-stage",
+      });
+    });
+    expect(saveAsBodies).toHaveLength(1);
+    expect(saveAsBodies[0].stage_role_bindings).toHaveLength(6);
+    expect(saveAsBodies[0].stage_role_bindings).toEqual(
+      mockPipelineTemplates
+        .find((template) => template.template_id === "template-feature")!
+        .stage_role_bindings.map((binding) =>
+          binding.stage_type === "solution_design"
+            ? { ...binding, system_prompt: "Design the saved stage only." }
+            : binding,
+        ),
+    );
+  });
+
+  it("hides the template panel after saving and binding while Composer stays ready", async () => {
+    renderWithAppProviders(
+      <ConsolePage request={{ fetcher: createMockApiFetcher() }} />,
+    );
+
+    const editor = await screen.findByRole("region", { name: "Template editor" });
+    fireEvent.change(within(editor).getByLabelText("Requirement Analysis system prompt"), {
+      target: { value: "Clarify saved requirements before implementation." },
+    });
+    fireEvent.click(within(editor).getByRole("button", { name: "Save stage" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("region", { name: "Template editor" })).toBeNull();
+      expect(
+        screen.queryByRole("region", { name: "Template empty state" }),
+      ).toBeNull();
+    });
+    expect(screen.getByRole("form", { name: "Composer" })).toBeTruthy();
+    expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", false);
+  });
+
+  it("deletes a user template through the template API before selecting fallback", async () => {
+    const userTemplate: PipelineTemplateRead = {
+      ...mockPipelineTemplates[1],
+      template_id: "template-user-shell-delete",
+      template_source: "user_template",
+      base_template_id: "template-feature",
+      name: "Shell user template",
+    };
+    const draftSession: SessionRead = {
+      ...mockSessionWorkspaces["session-draft"].session,
+      selected_template_id: userTemplate.template_id,
+    };
+    const draftWorkspace: SessionWorkspaceProjection = {
+      ...mockSessionWorkspaces["session-draft"],
+      session: draftSession,
+    };
+    const baseFetcher = createMockApiFetcher();
+    const deletedTemplateIds: string[] = [];
+    const templateUpdates: unknown[] = [];
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const path = normalizeTestPath(input);
+        const method = init?.method ?? "GET";
+
+        if (
+          method === "GET" &&
+          path === "/api/projects/project-default/sessions"
+        ) {
+          return jsonTestResponse(
+            Object.values(mockSessionWorkspaces)
+              .map((workspace) => workspace.session)
+              .map((session) =>
+                session.session_id === "session-draft" ? draftSession : session,
+              )
+              .filter((session) => session.project_id === "project-default"),
+          );
+        }
+
+        if (method === "GET" && path === "/api/pipeline-templates") {
+          return jsonTestResponse([...mockPipelineTemplates, userTemplate]);
+        }
+
+        if (method === "GET" && path === "/api/sessions/session-draft/workspace") {
+          return jsonTestResponse(draftWorkspace);
+        }
+
+        if (
+          method === "DELETE" &&
+          path === "/api/pipeline-templates/template-user-shell-delete"
+        ) {
+          deletedTemplateIds.push(userTemplate.template_id);
+          return new Response(null, { status: 204 });
+        }
+
+        if (method === "PUT" && path === "/api/sessions/session-draft/template") {
+          templateUpdates.push(
+            typeof init?.body === "string" ? JSON.parse(init.body) : null,
+          );
+          draftSession.selected_template_id = "template-feature";
+          draftWorkspace.session = draftSession;
+          return jsonTestResponse(draftSession);
+        }
+
+        return baseFetcher(input, init);
+      },
+    };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    const editor = await screen.findByRole("region", { name: "Template editor" });
+    expect(await screen.findByRole("heading", { name: "Shell user template" })).toBeTruthy();
+    fireEvent.click(within(editor).getByRole("button", { name: "Delete template" }));
+
+    await waitFor(() => {
+      expect(deletedTemplateIds).toEqual(["template-user-shell-delete"]);
+      expect(templateUpdates).toEqual([{ template_id: "template-feature" }]);
+    });
   });
 
   it("initializes the workspace store from the loaded session snapshot", async () => {
@@ -1331,7 +1511,7 @@ describe("WorkspaceShell", () => {
     renderWithAppProviders(<ConsolePage request={request} />);
 
     const editor = await screen.findByRole("region", { name: "Template editor" });
-    const providerSelect = within(editor).getByLabelText("requirement_analysis provider");
+    const providerSelect = within(editor).getByLabelText("Requirement Analysis provider");
     await waitFor(() => {
       expect(providerSelect).toHaveProperty("value", "provider-deepseek");
     });

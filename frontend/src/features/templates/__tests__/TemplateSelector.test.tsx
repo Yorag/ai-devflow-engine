@@ -34,9 +34,10 @@ describe("TemplateEmptyState", () => {
         name: "新功能开发流程",
       }),
     ).toBeTruthy();
-    expect(screen.getByText("Requirement Analysis")).toBeTruthy();
-    expect(screen.getByText("Solution Design")).toBeTruthy();
-    expect(screen.getByText("Code Review")).toBeTruthy();
+    expect(screen.getAllByRole("tab")).toHaveLength(6);
+    expect(screen.getByRole("tab", { name: "Requirement Analysis" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Solution Design" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Code Review" })).toBeTruthy();
     expect(screen.getByRole("radio", { name: /Bug 修复流程/u })).toBeTruthy();
     expect(
       screen.getByRole("radio", { name: /新功能开发流程/u }),
@@ -96,7 +97,9 @@ describe("TemplateEmptyState", () => {
     );
 
     expect(document.querySelector(".template-empty-state")).toBeTruthy();
+    expect(document.querySelector(".template-selector--compact")).toBeTruthy();
     expect(document.querySelector(".template-selector__options")).toBeTruthy();
-    expect(document.querySelector(".template-stage-list")).toBeTruthy();
+    expect(document.querySelector(".template-stage-list")).toBeNull();
+    expect(document.querySelector(".template-stage-tabs")).toBeTruthy();
   });
 });

@@ -9,6 +9,8 @@ import type {
 
 export type TemplateDraftState = Pick<
   PipelineTemplateWriteRequest,
+  | "name"
+  | "description"
   | "stage_role_bindings"
   | "auto_regression_enabled"
   | "max_auto_regression_retries"
@@ -32,6 +34,8 @@ export function createTemplateDraft(
   template: PipelineTemplateRead,
 ): TemplateDraftState {
   return {
+    name: template.name,
+    description: template.description,
     stage_role_bindings: cloneStageRoleBindings(template.stage_role_bindings),
     auto_regression_enabled: template.auto_regression_enabled,
     max_auto_regression_retries: template.max_auto_regression_retries,
@@ -130,8 +134,8 @@ export function resolveTemplateStartGuard(
   return {
     canStart: false,
     reason:
-      "Overwrite this user template, save it as a new template, or discard changes before starting a run.",
-    actions: ["overwrite", "save_as", "discard"],
+      "Overwrite this user template or discard changes before starting a run.",
+    actions: ["overwrite", "discard"],
   };
 }
 
@@ -197,6 +201,8 @@ function createDraftRecord(
 
 function serializeDraft(draft: TemplateDraftState): string {
   return JSON.stringify({
+    name: draft.name.trim(),
+    description: draft.description ?? null,
     stage_role_bindings: draft.stage_role_bindings.map((binding) => ({
       stage_type: binding.stage_type,
       role_id: binding.role_id,
