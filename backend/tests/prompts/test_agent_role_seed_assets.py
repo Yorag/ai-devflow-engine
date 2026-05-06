@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 import pytest
 from pydantic import ValidationError
@@ -12,6 +13,30 @@ from backend.app.schemas.prompts import (
     PromptAuthorityLevel,
     PromptCacheScope,
     PromptType,
+)
+from backend.app.schemas.runtime_settings import (
+    AgentRuntimeLimits,
+    ContextLimits,
+    LogPolicy,
+    ProviderCallPolicy,
+)
+from backend.tests.fixtures.settings import runtime_settings_snapshot_fixture
+
+
+FORBIDDEN_ROLE_CONTROL_PATTERNS = (
+    r"\bruntime[_\s-]+instructions?\b",
+    r"\bstage[_\s-]+contracts?\b",
+    r"\bresponse[_\s-]+schemas?\b",
+    r"\bstage\s+prompts?\b",
+    r"\bschema-defined\b",
+    r"\bstructured\s+output\b",
+    r"\boutput\s+(?:contracts?|formats?|schemas?|shapes?)\b",
+    r"\bpermissions?\b",
+    r"\bapprovals?\b",
+    r"\baudit\b",
+    r"\bdelivery\s+controls?\b",
+    r"\bruntime\s+states?\b",
+    r"\bconfirmation\s+boundar(?:y|ies)\b",
 )
 
 
@@ -42,7 +67,7 @@ def test_agent_role_seed_assets_parse_front_matter_and_hash_body() -> None:
         asset = load_agent_role_seed_asset(path)
 
         assert asset.prompt_id == prompt_id
-        assert asset.prompt_version == "2026-05-06.1"
+        assert asset.prompt_version == "2026-05-06.2"
         assert asset.prompt_type is PromptType.AGENT_ROLE_SEED
         assert asset.authority_level is PromptAuthorityLevel.AGENT_ROLE_PROMPT
         assert asset.model_call_type is ModelCallType.STAGE_EXECUTION
@@ -60,13 +85,46 @@ def test_agent_role_seed_assets_parse_front_matter_and_hash_body() -> None:
         assert "## Workflow" in body
         assert "## Quality Gates" in body
         assert "## Failure And Escalation" in body
-        assert "runtime_instructions" in body
-        assert "stage_contract" in body
-        assert "response_schema" in body
+        assert "runtime_instructions" not in body
+        assert "stage_contract" not in body
+        assert "response_schema" not in body
+        assert "stage prompt" not in body.lower()
+        for pattern in FORBIDDEN_ROLE_CONTROL_PATTERNS:
+            assert re.search(pattern, body, flags=re.IGNORECASE) is None
         assert "prompt_id:" not in body
         assert "prompt_version:" not in body
         assert "---" not in asset.sections[0].body
         assert asset.applies_to_stage_types
+
+
+def test_agent_role_seed_assets_pass_runtime_prompt_validation() -> None:
+    from backend.app.runtime.prompt_validation import PromptValidationService
+    from backend.app.services.templates import load_default_agent_role_seed_assets
+
+    validator = PromptValidationService(
+        settings_read=runtime_settings_snapshot_fixture(
+            agent_limits=AgentRuntimeLimits.model_validate(
+                AgentRuntimeLimits().model_dump(mode="python")
+            ),
+            provider_call_policy=ProviderCallPolicy.model_validate(
+                ProviderCallPolicy().model_dump(mode="python")
+            ),
+            context_limits=ContextLimits.model_validate(
+                ContextLimits().model_dump(mode="python")
+            ),
+            log_policy=LogPolicy.model_validate(LogPolicy().model_dump(mode="python")),
+        )
+    )
+
+    for asset in load_default_agent_role_seed_assets().values():
+        for stage_type in asset.applies_to_stage_types:
+            result = validator.validate_system_prompt(
+                prompt_text=asset.sections[0].body,
+                stage_type=stage_type,
+            )
+
+            assert result.accepted is True
+            assert result.rule_ids == []
 
 
 def test_agent_role_seed_assets_declare_full_builtin_metadata() -> None:

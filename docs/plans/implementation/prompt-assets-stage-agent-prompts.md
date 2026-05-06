@@ -57,6 +57,7 @@ All stage fragments and role seeds must follow these rules:
 - Do not duplicate exact allowed tool lists. The actual tool list remains rendered dynamically from `stage_contract` and `ToolRegistry`.
 - Stage fragments may describe how to use the already-rendered contract: read the current contract, respect `allowed_tools`, submit only the required structured artifact, record evidence, and stop on unsafe or impossible states.
 - Role seeds may describe role discipline, workflow, quality standards, and output preferences, but remain low-authority `agent_role_prompt` content.
+- Role seeds must not repeat the runtime/contract/schema section names or define output/failure mechanics. Those details stay in higher-authority rendered sections and current stage fragments.
 
 ## Files
 
@@ -275,9 +276,10 @@ assert "## Mission" in body
 assert "## Workflow" in body
 assert "## Quality Gates" in body
 assert "## Failure And Escalation" in body
-assert "runtime_instructions" in body
-assert "stage_contract" in body
-assert "response_schema" in body
+assert "runtime_instructions" not in body
+assert "stage_contract" not in body
+assert "response_schema" not in body
+assert "stage prompt" not in body.lower()
 assert "prompt_id:" not in body
 assert "prompt_version:" not in body
 ```
@@ -306,23 +308,25 @@ Run:
 uv run --no-sync python -m pytest backend/tests/prompts/test_agent_role_seed_assets.py::test_agent_role_seed_assets_parse_front_matter_and_hash_body backend/tests/prompts/test_prompt_asset_loading.py::test_runtime_instructions_define_real_development_boundaries -q
 ```
 
-Expected before prompt expansion:
+Expected before prompt expansion and later layering adjustment:
 
 ```text
 FAILED ... AssertionError ... '## Mission' ...
+FAILED ... AssertionError: assert '2026-05-06.1' == '2026-05-06.2'
 ```
 
 - [ ] **Step 3: Expand prompt bodies**
 
 Update runtime instructions into a multi-section prompt covering platform role, authority order, untrusted context, stage execution discipline, tool and side-effect policy, structured output, evidence, audit, and failure behavior.
 
-Update each role seed with concrete sections:
+Update each role seed with concrete sections. Keep role seed text focused on durable role behavior and avoid repeating the runtime/contract/schema section names:
 
 - `Requirement Analyst`: clarify scope, acceptance criteria, assumptions, non-goals, open questions, source refs.
 - `Solution Designer`: read-only design, internal validation, approval-ready artifact, no file edits.
 - `Code Generator`: approved-plan implementation only, minimal diffs, changed files, evidence refs, no delivery actions.
 - `Test Runner`: tests and verification, command evidence, failure classification, no hidden failures.
 - `Code Reviewer`: findings-first review, regression decision, fix requirements, delivery-stage behavior when bound to delivery integration.
+- Prompt versions: bump edited role seed assets to `2026-05-06.2` when the layering adjustment removes duplicated contract terms.
 
 - [ ] **Step 4: Run tests to verify GREEN**
 
@@ -463,6 +467,82 @@ Exit code: 0
 Key output: 16 passed in 0.38s
 ```
 
+Role seed layering adjustment RED:
+
+```text
+Command: C:\Users\lkw\Desktop\github\agent-project\ai-devflow-engine\.venv\Scripts\python.exe -m pytest backend/tests/prompts/test_agent_role_seed_assets.py::test_agent_role_seed_assets_parse_front_matter_and_hash_body -q
+Exit code: 1
+Key output:
+FAILED backend/tests/prompts/test_agent_role_seed_assets.py::test_agent_role_seed_assets_parse_front_matter_and_hash_body
+AssertionError: assert '2026-05-06.1' == '2026-05-06.2'
+```
+
+Role seed layering adjustment GREEN:
+
+```text
+Command: C:\Users\lkw\Desktop\github\agent-project\ai-devflow-engine\.venv\Scripts\python.exe -m pytest backend/tests/prompts/test_agent_role_seed_assets.py::test_agent_role_seed_assets_parse_front_matter_and_hash_body -q
+Exit code: 0
+Key output: 1 passed in 0.08s
+```
+
+Reviewer-driven semantic layering RED:
+
+```text
+Command: C:\Users\lkw\Desktop\github\agent-project\ai-devflow-engine\.venv\Scripts\python.exe -m pytest backend/tests/prompts/test_agent_role_seed_assets.py::test_agent_role_seed_assets_parse_front_matter_and_hash_body -q
+Exit code: 1
+Key output:
+FAILED backend/tests/prompts/test_agent_role_seed_assets.py::test_agent_role_seed_assets_parse_front_matter_and_hash_body
+AssertionError: assert 'permission' not in lowered_body
+```
+
+Prompt validation coverage RED:
+
+```text
+Command: C:\Users\lkw\Desktop\github\agent-project\ai-devflow-engine\.venv\Scripts\python.exe -m pytest backend/tests/prompts/test_agent_role_seed_assets.py -q
+Exit code: 1
+Key output:
+FAILED backend/tests/prompts/test_agent_role_seed_assets.py::test_agent_role_seed_assets_parse_front_matter_and_hash_body
+AssertionError: pattern matched 'output shape'
+FAILED backend/tests/prompts/test_agent_role_seed_assets.py::test_agent_role_seed_assets_pass_runtime_prompt_validation
+RuntimeLimitSnapshotBuilderError: Current PlatformRuntimeSettings are invalid: agent_limits is missing persisted fields.
+```
+
+Reviewer-driven layering and validation GREEN:
+
+```text
+Command: C:\Users\lkw\Desktop\github\agent-project\ai-devflow-engine\.venv\Scripts\python.exe -m pytest backend/tests/prompts/test_agent_role_seed_assets.py -q
+Exit code: 0
+Key output: 5 passed in 0.17s
+```
+
+Layering regression scan and impacted validation:
+
+```text
+Command: rg -n "runtime_instructions|stage_contract|response_schema|stage prompt|2026-05-06\.1" backend\app\prompts\assets\roles backend\tests\prompts\test_agent_role_seed_assets.py
+Exit code: 0
+Key output: only negative assertions in backend/tests/prompts/test_agent_role_seed_assets.py matched; no role asset body matched.
+
+Command: C:\Users\lkw\Desktop\github\agent-project\ai-devflow-engine\.venv\Scripts\python.exe -m pytest backend/tests/prompts/test_agent_role_seed_assets.py backend/tests/services/test_template_seed.py backend/tests/runtime/test_prompt_validation.py -q
+Exit code: 0
+Key output: 33 passed in 1.10s
+```
+
+Final semantic layering scan and verification:
+
+```text
+Command: rg -n "runtime_instructions|stage_contract|response_schema|stage prompt|stage contract|response schema|schema-defined|structured output|output contract|output format|output schema|output shape|permission|approval|audit|delivery control|runtime state|confirmation boundary|2026-05-06\.1" backend\app\prompts\assets\roles backend\tests\prompts\test_agent_role_seed_assets.py
+Exit code: 0
+Key output: only forbidden-pattern definitions and negative assertions in backend/tests/prompts/test_agent_role_seed_assets.py matched; no role asset body matched.
+
+Command: C:\Users\lkw\Desktop\github\agent-project\ai-devflow-engine\.venv\Scripts\python.exe -m pytest backend/tests/prompts/test_prompt_asset_loading.py backend/tests/prompts/test_prompt_registry.py backend/tests/prompts/test_agent_role_seed_assets.py backend/tests/prompts/test_prompt_renderer.py backend/tests/prompts/test_prompt_renderer_manifest_metadata.py backend/tests/runtime/test_prompt_validation.py backend/tests/services/test_template_seed.py backend/tests/context/test_context_envelope_builder.py backend/tests/context/test_context_compression.py backend/tests/regression/test_prompt_asset_boundary_regression.py -q
+Exit code: 0
+Key output: 84 passed in 1.38s
+
+Command: git diff --check
+Exit code: 0
+Key output: no whitespace errors; Windows autocrlf warnings only.
+```
+
 Focused prompt suite:
 
 ```text
@@ -535,4 +615,6 @@ Review findings after fixes:
 ```text
 Spec compliance re-review: no Critical or Important findings. Previous stale role/runtime versions, response_schema authority ambiguity, and missing custom registry fixtures are closed. Minor finding: this evidence section was stale before this update.
 Code quality re-review: no Critical findings. Important commit-hygiene finding: required files under backend/app/prompts/assets/stages/ are untracked and must be included in any commit. Minor findings: line-ending warnings remain; a future parametrized renderer test across all StageType values would add coverage beyond the current asset-loading coverage.
+Role-seed layering re-review: no Critical, Important, or Minor prompt-layering findings. Previous Important finding about role seed control-policy duplication is closed.
+Role-seed test coverage re-review: previous Important findings are closed. Remaining Minor findings: the role seed version assertion is intentionally coupled for this shared prompt-asset bump, and the semantic forbidden-pattern list may need future maintenance if benign wording changes.
 ```
