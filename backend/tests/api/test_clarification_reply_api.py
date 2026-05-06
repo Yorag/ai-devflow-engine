@@ -27,6 +27,24 @@ from backend.app.services.sessions import DEFAULT_SESSION_DISPLAY_NAME
 from backend.tests.services.test_clarification_flow import NOW
 
 
+class CapturingRuntimeDispatcher:
+    def __init__(self) -> None:
+        self.resumes = []
+
+    def dispatch_started_run(self, command) -> None:  # noqa: ANN001
+        raise AssertionError("clarification reply should not dispatch a new run")
+
+    def resume(self, *, interrupt, resume_payload, trace_context):  # noqa: ANN001
+        self.resumes.append(
+            {
+                "interrupt": interrupt,
+                "resume_payload": resume_payload,
+                "trace_context": trace_context,
+            }
+        )
+        return None
+
+
 def build_app(tmp_path: Path):
     from backend.tests.services.test_clarification_flow import (
         FakeCheckpointPort,
@@ -50,6 +68,7 @@ def build_app(tmp_path: Path):
     app.state.h41_runtime_port = FakeRuntimePort()
     app.state.h41_checkpoint_port = FakeCheckpointPort()
     app.state.h41_audit_service = RecordingAuditService()
+    app.state.runtime_execution_dispatcher = CapturingRuntimeDispatcher()
     return app
 
 
@@ -163,6 +182,7 @@ def test_post_session_message_accepts_clarification_reply_and_restores_running(
 ) -> None:
     app = build_app(tmp_path)
     clarification_id = seed_waiting_clarification_via_service(app)
+    graph_runtime_call_count = len(app.state.h41_runtime_port.calls)
 
     with TestClient(app) as client:
         response = client.post(
@@ -178,6 +198,16 @@ def test_post_session_message_accepts_clarification_reply_and_restores_running(
         )
 
     assert response.status_code == 200
+    assert len(app.state.runtime_execution_dispatcher.resumes) == 1
+    resume = app.state.runtime_execution_dispatcher.resumes[0]
+    assert resume["interrupt"].interrupt_ref.interrupt_id == (
+        f"interrupt-{clarification_id}"
+    )
+    assert resume["resume_payload"].values == {
+        "clarification_id": clarification_id,
+        "answer": "Change backend only.",
+    }
+    assert len(app.state.h41_runtime_port.calls) == graph_runtime_call_count
     body = response.json()
     assert body["session"]["status"] == "running"
     assert body["message_item"]["type"] == "user_message"

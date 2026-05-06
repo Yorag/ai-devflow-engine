@@ -495,6 +495,12 @@ class RunLifecycleService:
                 summary="Requirement Analysis started from the first user requirement.",
                 trace_context=stage_trace,
             )
+            self._persist_template_snapshot_artifact(
+                run=run,
+                stage=stage,
+                template_snapshot=template_snapshot,
+                created_at=started_at,
+            )
             event_trace = run_trace.child_span(
                 span_id=f"event-run-created-{run_id}",
                 created_at=started_at,
@@ -1369,6 +1375,28 @@ class RunLifecycleService:
         run.updated_at = self._now()
         self._runtime_session.add(run)
         return run
+
+    def _persist_template_snapshot_artifact(
+        self,
+        *,
+        run: PipelineRunModel,
+        stage: StageRunModel,
+        template_snapshot: TemplateSnapshot,
+        created_at: datetime,
+    ) -> StageArtifactModel:
+        artifact = StageArtifactModel(
+            artifact_id=_bounded_id("artifact-template-snapshot", run.run_id),
+            run_id=run.run_id,
+            stage_run_id=stage.stage_run_id,
+            artifact_type="template_snapshot",
+            payload_ref=template_snapshot.snapshot_ref,
+            process={"template_snapshot": template_snapshot.model_dump(mode="json")},
+            metrics={},
+            created_at=created_at,
+        )
+        self._runtime_session.add(artifact)
+        self._runtime_session.flush()
+        return artifact
 
     def attach_provider_snapshots(
         self,

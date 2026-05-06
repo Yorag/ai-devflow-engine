@@ -42,6 +42,7 @@ from backend.app.domain.runtime_refs import (
 from backend.app.domain.trace_context import TraceContext
 from backend.app.observability.log_writer import LogPayloadSummary, LogRecordInput
 from backend.app.observability.redaction import RedactionPolicy
+from backend.app.runtime.base import RuntimeInterrupt
 from backend.app.schemas.feed import (
     ApprovalRequestFeedEntry,
     ApprovalResultFeedEntry,
@@ -84,6 +85,9 @@ class ApprovalCreationResult:
 @dataclass(frozen=True)
 class ApprovalCommandResult:
     approval_result: ApprovalResultFeedEntry
+    runtime_interrupt: RuntimeInterrupt
+    runtime_resume_payload: RuntimeResumePayload
+    runtime_trace_context: TraceContext
     control_item: ControlItemFeedEntry | None = None
 
 
@@ -753,23 +757,30 @@ class ApprovalService:
                 duration_ms=self._duration_ms(started_at, timestamp),
             )
             interrupt = self._build_interrupt(approval=approval, run=run, stage=stage)
-            self._runtime_orchestration.resume_interrupt(
-                interrupt=interrupt,
-                resume_payload=RuntimeResumePayload(
-                    resume_id=f"resume-{decision_model.decision_id}",
-                    payload_ref=decision_model.decision_id,
-                    values={
-                        "decision": decision.value,
-                        "reason": reason,
-                        "approval_id": approval.approval_id,
-                        "next_stage_type": next_stage_type.value,
-                    },
-                ),
+            resume_payload = RuntimeResumePayload(
+                resume_id=f"resume-{decision_model.decision_id}",
+                payload_ref=decision_model.decision_id,
+                values={
+                    "decision": decision.value,
+                    "reason": reason,
+                    "approval_id": approval.approval_id,
+                    "next_stage_type": next_stage_type.value,
+                },
+            )
+            runtime_interrupt = RuntimeInterrupt(
+                run_id=run.run_id,
+                stage_run_id=stage.stage_run_id,
+                stage_type=stage.stage_type,
+                interrupt_ref=interrupt,
+                payload_ref=interrupt.payload_ref,
                 trace_context=child_trace,
             )
             self._commit_all()
             return ApprovalCommandResult(
                 approval_result=approval_result,
+                runtime_interrupt=runtime_interrupt,
+                runtime_resume_payload=resume_payload,
+                runtime_trace_context=child_trace,
                 control_item=control_item,
             )
         except DeliverySnapshotServiceError as exc:

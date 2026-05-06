@@ -220,15 +220,18 @@ class SessionService:
         session_id: str,
         *,
         trace_context: TraceContext,
+        refresh: bool = False,
     ) -> SessionModel | None:
-        return (
+        query = (
             self._session.query(SessionModel)
             .filter(
                 SessionModel.session_id == session_id,
                 SessionModel.is_visible.is_(True),
             )
-            .one_or_none()
         )
+        if refresh:
+            query = query.populate_existing()
+        return query.one_or_none()
 
     def assert_session_deletable(
         self,

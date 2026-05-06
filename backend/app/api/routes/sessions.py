@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request, status
@@ -11,6 +13,7 @@ from backend.app.api.errors import ApiError, ErrorResponse
 from backend.app.db.base import DatabaseRole
 from backend.app.db.session import DatabaseManager
 from backend.app.domain.enums import StageType
+from backend.app.domain.trace_context import TraceContext
 from backend.app.db.models.control import SessionModel
 from backend.app.db.models.runtime import PipelineRunModel
 from backend.app.observability.audit import AuditService
@@ -31,6 +34,11 @@ from backend.app.services.clarifications import (
     ClarificationService,
     ClarificationServiceError,
 )
+from backend.app.services.runtime_dispatch import (
+    RuntimeDispatchCommand,
+    RuntimeExecutionDispatcher,
+    runtime_dispatcher_from_app_state,
+)
 from backend.app.services.runs import RunLifecycleService, RunLifecycleServiceError
 from backend.app.services.runtime_orchestration import RuntimeOrchestrationService
 from backend.app.services.graph_runtime import GraphCheckpointPort, GraphRuntimeCommandPort
@@ -38,6 +46,7 @@ from backend.app.services.sessions import SessionService, SessionServiceError
 
 
 router = APIRouter(tags=["sessions"])
+_LOGGER = logging.getLogger(__name__)
 
 
 def _session_read(session: Any) -> SessionRead:
@@ -417,6 +426,9 @@ def append_session_message(
     body: SessionMessageAppendRequest,
     service: SessionService = Depends(get_session_service),
     clarification_service: ClarificationService = Depends(get_clarification_service),
+    runtime_dispatcher: RuntimeExecutionDispatcher = Depends(
+        runtime_dispatcher_from_app_state
+    ),
 ) -> SessionMessageAppendResponse:
     trace_context = get_trace_context()
     try:
@@ -427,7 +439,16 @@ def append_session_message(
                 clarification_service=clarification_service,
                 trace_context=trace_context,
             )
-            session = service.get_session(sessionId, trace_context=trace_context)
+            runtime_dispatcher.resume(
+                interrupt=answer.runtime_interrupt,
+                resume_payload=answer.runtime_resume_payload,
+                trace_context=answer.runtime_trace_context,
+            )
+            session = service.get_session(
+                sessionId,
+                trace_context=trace_context,
+                refresh=True,
+            )
             if session is None:
                 raise ApiError(ErrorCode.NOT_FOUND, "Session was not found.", 404)
             return SessionMessageAppendResponse(
@@ -447,8 +468,48 @@ def append_session_message(
         ) from exc
     except SessionServiceError as exc:
         _raise_api_error(exc)
+    try:
+        runtime_dispatcher.dispatch_started_run(
+            RuntimeDispatchCommand(
+                session_id=started.session.session_id,
+                run_id=started.run.run_id,
+                stage_run_id=started.stage.stage_run_id,
+                stage_type=started.stage.stage_type,
+                graph_thread_id=started.run.graph_thread_ref,
+                trace_context=TraceContext.model_validate(
+                    {
+                        **trace_context.model_dump(),
+                        "trace_id": started.run.trace_id,
+                        "parent_span_id": trace_context.span_id,
+                        "span_id": f"runtime-dispatch-started-{started.run.run_id}",
+                        "created_at": datetime.now(UTC),
+                        "session_id": started.session.session_id,
+                        "run_id": started.run.run_id,
+                        "stage_run_id": started.stage.stage_run_id,
+                        "graph_thread_id": started.run.graph_thread_ref,
+                    }
+                ),
+            )
+        )
+    except Exception:
+        _LOGGER.exception(
+            "Runtime dispatch failed after first run startup.",
+            extra={
+                "session_id": started.session.session_id,
+                "run_id": started.run.run_id,
+                "stage_run_id": started.stage.stage_run_id,
+            },
+        )
+        raise
+    refreshed_session = service.get_session(
+        started.session.session_id,
+        trace_context=trace_context,
+        refresh=True,
+    )
+    if refreshed_session is None:
+        raise ApiError(ErrorCode.NOT_FOUND, "Session was not found.", 404)
     return SessionMessageAppendResponse(
-        session=_session_read(started.session),
+        session=_session_read(refreshed_session),
         message_item=started.message_item,
     )
 

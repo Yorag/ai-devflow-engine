@@ -31,6 +31,7 @@ from backend.app.domain.runtime_refs import (
     RuntimeResumePayload,
 )
 from backend.app.domain.trace_context import TraceContext
+from backend.app.runtime.base import RuntimeInterrupt
 from backend.app.schemas.feed import ControlItemFeedEntry, MessageFeedEntry
 from backend.app.schemas.observability import AuditActorType, AuditResult
 from backend.app.services.events import DomainEventType, EventStore
@@ -59,6 +60,9 @@ class ClarificationRequestResult:
 class ClarificationAnswerResult:
     clarification_id: str
     message_item: MessageFeedEntry
+    runtime_interrupt: RuntimeInterrupt
+    runtime_resume_payload: RuntimeResumePayload
+    runtime_trace_context: TraceContext
 
 
 class ClarificationServiceError(RuntimeError):
@@ -383,41 +387,14 @@ class ClarificationService:
                 "answer": answer,
             },
         )
-        try:
-            self._runtime_orchestration.resume_interrupt(
-                interrupt=interrupt,
-                resume_payload=resume_payload,
-                trace_context=reply_trace,
-            )
-        except Exception as exc:
-            self._rollback_sessions()
-            self._audit_service.record_failed_command(
-                actor_type=AuditActorType.USER,
-                actor_id="api-user",
-                action="session.message.clarification_reply.resume_failed",
-                target_type="clarification",
-                target_id=clarification.clarification_id,
-                reason=str(exc),
-                metadata={
-                    "session_id": session_id,
-                    "session_status": session.status.value,
-                    "run_status": run.status.value,
-                    "stage_status": stage.status.value,
-                    "stage_type": stage.stage_type.value,
-                    "run_id": run.run_id,
-                    "stage_run_id": stage.stage_run_id,
-                    "clarification_id": clarification.clarification_id,
-                    "graph_interrupt_ref": clarification.graph_interrupt_ref,
-                    "answer_length": len(answer),
-                },
-                trace_context=reply_trace,
-                created_at=timestamp,
-            )
-            raise ClarificationServiceError(
-                ErrorCode.INTERNAL_ERROR,
-                CLARIFICATION_REPLY_RESUME_FAILED_MESSAGE,
-                500,
-            ) from exc
+        runtime_interrupt = RuntimeInterrupt(
+            run_id=run.run_id,
+            stage_run_id=stage.stage_run_id,
+            stage_type=stage.stage_type,
+            interrupt_ref=interrupt,
+            payload_ref=interrupt.payload_ref,
+            trace_context=reply_trace,
+        )
 
         try:
             self._audit_service.require_audit_record(
@@ -451,6 +428,9 @@ class ClarificationService:
         return ClarificationAnswerResult(
             clarification_id=clarification.clarification_id,
             message_item=message_item,
+            runtime_interrupt=runtime_interrupt,
+            runtime_resume_payload=resume_payload,
+            runtime_trace_context=reply_trace,
         )
 
     def _load_visible_session(self, session_id: str) -> SessionModel | None:

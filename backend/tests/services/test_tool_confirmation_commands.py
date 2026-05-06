@@ -590,7 +590,9 @@ def test_create_request_persists_confirmation_control_record_event_and_waiting_s
     assert '"result_status":"created"' in log_writer.records[-1].payload.excerpt
 
 
-def test_allow_updates_request_result_projection_and_resumes_runtime(tmp_path: Path) -> None:
+def test_allow_updates_request_result_projection_and_returns_resume_command(
+    tmp_path: Path,
+) -> None:
     manager = build_manager(tmp_path)
     confirmation_id = seed_pending_confirmation(manager)
     service, runtime_port, audit, _log_writer = build_service(manager)
@@ -605,18 +607,22 @@ def test_allow_updates_request_result_projection_and_resumes_runtime(tmp_path: P
     assert result.tool_confirmation.status is ToolConfirmationStatus.ALLOWED
     assert result.tool_confirmation.decision is ToolConfirmationStatus.ALLOWED
     assert result.tool_confirmation.is_actionable is False
-    assert runtime_port.calls[-1][0] == "resume_tool_confirmation"
-    interrupt = runtime_port.calls[-1][1]["interrupt"]
+    assert runtime_port.calls == []
+    interrupt = result.runtime_interrupt.interrupt_ref
     assert interrupt.checkpoint_ref.checkpoint_id == "checkpoint-tool-1"
     assert (
         interrupt.checkpoint_ref.payload_ref
         == "graph-checkpoint://thread-1/checkpoint-tool-1"
     )
-    assert runtime_port.calls[-1][1]["resume_payload"].values == {
+    assert result.runtime_resume_payload.values == {
         "decision": "allowed",
         "tool_confirmation_id": confirmation_id,
         "confirmation_object_ref": "tool-action-1",
     }
+    assert (
+        result.runtime_trace_context.span_id
+        == f"tool-confirmation-allowed-{confirmation_id}"
+    )
     with manager.session(DatabaseRole.RUNTIME) as session:
         request = session.get(ToolConfirmationRequestModel, confirmation_id)
         assert request is not None
@@ -633,7 +639,9 @@ def test_allow_updates_request_result_projection_and_resumes_runtime(tmp_path: P
     assert callable(audit.records[0]["rollback"])
 
 
-def test_deny_updates_request_result_projection_and_resumes_runtime(tmp_path: Path) -> None:
+def test_deny_updates_request_result_projection_and_returns_resume_command(
+    tmp_path: Path,
+) -> None:
     manager = build_manager(tmp_path)
     confirmation_id = seed_pending_confirmation(manager)
     service, runtime_port, audit, log_writer = build_service(manager)
@@ -651,7 +659,8 @@ def test_deny_updates_request_result_projection_and_resumes_runtime(tmp_path: Pa
     assert result.tool_confirmation.deny_followup_summary == (
         "Code Generation will continue with a low-risk fallback."
     )
-    assert runtime_port.calls[-1][1]["resume_payload"].values == {
+    assert runtime_port.calls == []
+    assert result.runtime_resume_payload.values == {
         "decision": "denied",
         "tool_confirmation_id": confirmation_id,
         "confirmation_object_ref": "tool-action-1",
@@ -712,12 +721,8 @@ def test_deny_persists_non_continue_followup_fields(
     )
 
     assert result.tool_confirmation.status is ToolConfirmationStatus.DENIED
-    assert runtime_port.calls[-1][1]["resume_payload"].values["deny_followup_action"] == (
-        planned_action
-    )
-    assert runtime_port.calls[-1][1]["resume_payload"].values["deny_followup_summary"] == (
-        planned_summary
-    )
+    assert result.runtime_resume_payload.values["deny_followup_action"] == planned_action
+    assert result.runtime_resume_payload.values["deny_followup_summary"] == planned_summary
     with manager.session(DatabaseRole.RUNTIME) as session:
         request = session.get(ToolConfirmationRequestModel, confirmation_id)
         assert request is not None
@@ -1009,7 +1014,7 @@ def test_cancel_for_terminal_run_can_defer_commit_for_shared_terminal_transactio
     ]
 
 
-def test_allow_rolls_back_status_and_events_when_runtime_resume_fails(
+def test_allow_commits_status_when_graph_port_resume_would_fail(
     tmp_path: Path,
 ) -> None:
     manager = build_manager(tmp_path)
@@ -1020,23 +1025,23 @@ def test_allow_rolls_back_status_and_events_when_runtime_resume_fails(
         runtime_port=runtime_port,
     )
 
-    with pytest.raises(ToolConfirmationServiceError) as exc_info:
-        service.allow(
-            tool_confirmation_id=confirmation_id,
-            actor_id="session-user",
-            trace_context=build_trace(),
-        )
+    result = service.allow(
+        tool_confirmation_id=confirmation_id,
+        actor_id="session-user",
+        trace_context=build_trace(),
+    )
 
-    assert exc_info.value.error_code is ErrorCode.INTERNAL_ERROR
+    assert result.runtime_resume_payload.values["decision"] == "allowed"
     with manager.session(DatabaseRole.RUNTIME) as session:
         request = session.get(ToolConfirmationRequestModel, confirmation_id)
         assert request is not None
-        assert request.status is ToolConfirmationStatus.PENDING
-        assert request.user_decision is None
-        assert request.responded_at is None
+        assert request.status is ToolConfirmationStatus.ALLOWED
+        assert request.user_decision is ToolConfirmationStatus.ALLOWED
+        assert request.responded_at is not None
     with manager.session(DatabaseRole.EVENT) as session:
-        assert session.query(DomainEventModel).count() == 0
-    assert audit.records[-1]["action"] == "tool_confirmation.allow.failed"
+        assert session.query(DomainEventModel).count() == 1
+    assert runtime_port.calls == []
+    assert audit.records[-1]["action"] == "tool_confirmation.allow"
 
 
 def test_allow_uses_run_session_id_when_other_visible_session_shares_current_run_id(
@@ -1054,7 +1059,8 @@ def test_allow_uses_run_session_id_when_other_visible_session_shares_current_run
     )
 
     assert result.tool_confirmation.status is ToolConfirmationStatus.ALLOWED
-    assert runtime_port.calls[-1][0] == "resume_tool_confirmation"
+    assert runtime_port.calls == []
+    assert result.runtime_resume_payload.values["decision"] == "allowed"
     with manager.session(DatabaseRole.CONTROL) as session:
         primary = session.get(SessionModel, "session-1")
         shadow = session.get(SessionModel, "session-shadow")

@@ -542,7 +542,7 @@ def seed_approval_request_event(
         )
 
 
-def test_approve_solution_design_creates_decision_approval_result_and_resumes_runtime(
+def test_approve_solution_design_creates_decision_and_returns_resume_command(
     tmp_path: Path,
 ) -> None:
     manager = build_manager(tmp_path)
@@ -562,19 +562,20 @@ def test_approve_solution_design_creates_decision_approval_result_and_resumes_ru
     assert result.approval_result.decision is ApprovalStatus.APPROVED
     assert result.approval_result.next_stage_type is StageType.CODE_GENERATION
     assert result.control_item is None
-    assert runtime_port.calls[-1][0] == "resume_interrupt"
-    interrupt = runtime_port.calls[-1][1]["interrupt"]
+    assert runtime_port.calls == []
+    interrupt = result.runtime_interrupt.interrupt_ref
     assert interrupt.checkpoint_ref.checkpoint_id == "checkpoint-approval-1"
     assert (
         interrupt.checkpoint_ref.payload_ref
         == "graph-checkpoint://thread-1/checkpoint-approval-1"
     )
-    assert runtime_port.calls[-1][1]["resume_payload"].values == {
+    assert result.runtime_resume_payload.values == {
         "decision": "approved",
         "reason": None,
         "approval_id": approval_id,
         "next_stage_type": "code_generation",
     }
+    assert result.runtime_trace_context.span_id == f"approval-approve-{approval_id}"
     assert log_writer.records[-1].duration_ms == 0
     assert log_writer.records[-1].payload.excerpt is not None
     assert '"result_status":"accepted"' in log_writer.records[-1].payload.excerpt
@@ -593,7 +594,7 @@ def test_approve_solution_design_creates_decision_approval_result_and_resumes_ru
     assert audit.records[0]["action"] == "approval.approve"
 
 
-def test_reject_code_review_creates_decision_approval_result_rollback_and_resumes_runtime(
+def test_reject_code_review_creates_decision_rollback_and_returns_resume_command(
     tmp_path: Path,
 ) -> None:
     manager = build_manager(tmp_path)
@@ -622,7 +623,8 @@ def test_reject_code_review_creates_decision_approval_result_rollback_and_resume
         result.control_item.summary
         == "Rejected approval: Tests are incomplete and one risk is unresolved. Continue in code_generation."
     )
-    assert runtime_port.calls[-1][1]["resume_payload"].values == {
+    assert runtime_port.calls == []
+    assert result.runtime_resume_payload.values == {
         "decision": "rejected",
         "reason": "Tests are incomplete and one risk is unresolved.",
         "approval_id": approval_id,
@@ -868,7 +870,7 @@ def test_approve_maps_delivery_snapshot_domain_error_without_creating_decision(
         assert session.query(ApprovalDecisionModel).count() == 0
 
 
-def test_approve_rolls_back_decision_snapshot_and_events_when_runtime_resume_fails(
+def test_approve_commits_decision_snapshot_when_graph_port_resume_would_fail(
     tmp_path: Path,
 ) -> None:
     manager = build_manager(tmp_path)
@@ -902,20 +904,20 @@ def test_approve_rolls_back_decision_snapshot_and_events_when_runtime_resume_fai
         now=lambda: NOW,
     )
 
-    with pytest.raises(ApprovalServiceError) as exc_info:
-        service.approve(
-            approval_id=approval_id,
-            actor_id="session-user",
-            trace_context=build_trace(),
-        )
+    result = service.approve(
+        approval_id=approval_id,
+        actor_id="session-user",
+        trace_context=build_trace(),
+    )
 
-    assert exc_info.value.error_code is ErrorCode.INTERNAL_ERROR
+    assert result.runtime_resume_payload.values["decision"] == "approved"
     with manager.session(DatabaseRole.RUNTIME) as session:
         approval = session.get(ApprovalRequestModel, approval_id)
         run = session.get(PipelineRunModel, "run-1")
-        assert approval is not None and approval.status is ApprovalStatus.PENDING
-        assert session.query(ApprovalDecisionModel).count() == 0
-        assert run is not None and run.delivery_channel_snapshot_ref is None
+        assert approval is not None and approval.status is ApprovalStatus.APPROVED
+        assert session.query(ApprovalDecisionModel).count() == 1
+        assert run is not None and run.delivery_channel_snapshot_ref == "delivery-snapshot-1"
     with manager.session(DatabaseRole.EVENT) as session:
-        assert session.query(DomainEventModel).count() == 0
-    assert audit.records[-1]["action"] == "approval.approve.failed"
+        assert session.query(DomainEventModel).count() == 1
+    assert runtime_port.calls == []
+    assert audit.records[-1]["action"] == "approval.approve"

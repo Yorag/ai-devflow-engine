@@ -27,6 +27,10 @@ from backend.app.schemas.approval import (
     ApprovalRejectRequest,
 )
 from backend.app.services.approvals import ApprovalService, ApprovalServiceError
+from backend.app.services.runtime_dispatch import (
+    RuntimeExecutionDispatcher,
+    runtime_dispatcher_from_app_state,
+)
 
 
 router = APIRouter(tags=["approvals"])
@@ -106,6 +110,9 @@ def approve_approval(
     approvalId: str,
     body: ApprovalApproveRequest,
     service: ApprovalService = Depends(get_approval_service),
+    runtime_dispatcher: RuntimeExecutionDispatcher = Depends(
+        runtime_dispatcher_from_app_state
+    ),
 ) -> ApprovalCommandResponse:
     del body
     try:
@@ -113,6 +120,11 @@ def approve_approval(
             approval_id=approvalId,
             actor_id="session-user",
             trace_context=get_trace_context(),
+        )
+        runtime_dispatcher.resume(
+            interrupt=result.runtime_interrupt,
+            resume_payload=result.runtime_resume_payload,
+            trace_context=result.runtime_trace_context,
         )
     except ApprovalServiceError as exc:
         raise ApiError(
@@ -141,6 +153,9 @@ def reject_approval(
     approvalId: str,
     body: ApprovalRejectRequest,
     service: ApprovalService = Depends(get_approval_service),
+    runtime_dispatcher: RuntimeExecutionDispatcher = Depends(
+        runtime_dispatcher_from_app_state
+    ),
 ) -> ApprovalCommandResponse:
     try:
         result = service.reject(
@@ -148,6 +163,11 @@ def reject_approval(
             reason=body.reason,
             actor_id="session-user",
             trace_context=get_trace_context(),
+        )
+        runtime_dispatcher.resume(
+            interrupt=result.runtime_interrupt,
+            resume_payload=result.runtime_resume_payload,
+            trace_context=result.runtime_trace_context,
         )
     except ApprovalServiceError as exc:
         raise ApiError(

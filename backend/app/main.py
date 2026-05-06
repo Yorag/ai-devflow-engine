@@ -19,6 +19,7 @@ from backend.app.observability.log_writer import JsonlLogWriter
 from backend.app.observability.runtime_data import RuntimeDataPreflight, RuntimeDataSettings
 from backend.app.services.providers import ProviderService
 from backend.app.services.projects import ProjectService
+from backend.app.services.runtime_dispatch import RuntimeExecutionService
 from backend.app.services.templates import TemplateService
 
 
@@ -95,6 +96,10 @@ def create_app(settings: EnvironmentSettings | None = None) -> FastAPI:
     app.state.environment_settings = environment_settings
     app.state.database_manager = DatabaseManager.from_environment_settings(
         environment_settings
+    )
+    app.state.runtime_execution_dispatcher = RuntimeExecutionService(
+        database_manager=app.state.database_manager,
+        environment_settings=environment_settings,
     )
     app.add_middleware(
         CORSMiddleware,
