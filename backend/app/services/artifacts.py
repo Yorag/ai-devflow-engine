@@ -326,16 +326,23 @@ class ArtifactStore:
         )
         return artifact
 
-    def get_stage_artifact(self, artifact_id: str) -> StageArtifactModel:
+    def get_stage_artifact(
+        self,
+        artifact_id: str,
+        *,
+        trace_context: TraceContext | None = None,
+        log_missing_failure: bool = True,
+    ) -> StageArtifactModel:
         try:
             artifact = self._load_stage_artifact(artifact_id)
         except ArtifactStoreError as exc:
-            self._write_failure_log(
-                action="get_stage_artifact",
-                metadata={"artifact_id": artifact_id},
-                error=exc,
-                trace_context=self._fallback_trace_context(),
-            )
+            if log_missing_failure or "not found" not in str(exc).lower():
+                self._write_failure_log(
+                    action="get_stage_artifact",
+                    metadata={"artifact_id": artifact_id},
+                    error=exc,
+                    trace_context=trace_context or self._fallback_trace_context(),
+                )
             raise
         return artifact
 
@@ -357,8 +364,19 @@ class ArtifactStore:
     ) -> None:
         if self._log_writer is None:
             return
+        payload = {"action": action, **metadata}
+        log_trace_context = self._trace_for_log(
+            trace_context,
+            metadata=payload,
+            action=action,
+        )
+        if log_trace_context.run_id is None:
+            _LOGGER.warning(
+                "Stage artifact log write skipped because run_id is missing for artifact_id=%s",
+                metadata.get("artifact_id"),
+            )
+            return
         try:
-            payload = {"action": action, **metadata}
             redacted_payload = self._redaction_policy.summarize_payload(
                 payload,
                 payload_type="stage_artifact",
@@ -376,11 +394,7 @@ class ArtifactStore:
                     category=LogCategory.RUNTIME,
                     level=LogLevel.INFO,
                     message=f"Stage artifact {action}.",
-                    trace_context=self._trace_for_log(
-                        trace_context,
-                        metadata=payload,
-                        action=action,
-                    ),
+                    trace_context=log_trace_context,
                     payload=payload_summary,
                     created_at=self._now(),
                 )

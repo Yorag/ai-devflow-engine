@@ -613,6 +613,76 @@ def test_get_stage_artifact_rejects_unknown_artifact(tmp_path: Path) -> None:
             store.get_stage_artifact("missing-artifact")
 
 
+def test_get_stage_artifact_failure_log_uses_supplied_trace_context(
+    tmp_path: Path,
+) -> None:
+    manager = build_manager(tmp_path)
+    log_writer = CapturingLogWriter()
+    trace_context = build_trace(stage_run_id="stage-run-1")
+    with manager.session(DatabaseRole.RUNTIME) as runtime_session:
+        seed_run(runtime_session)
+        store = ArtifactStore(
+            runtime_session=runtime_session,
+            log_writer=log_writer,
+            now=lambda: NOW,
+        )
+
+        with pytest.raises(ArtifactStoreError, match="Stage artifact was not found"):
+            store.get_stage_artifact(
+                "missing-artifact",
+                trace_context=trace_context,
+            )
+
+    record = log_writer.records[0]
+    assert record.trace_context.run_id == "run-1"
+    assert record.trace_context.stage_run_id == "stage-run-1"
+    assert record.payload.summary["action"] == "get_stage_artifact_failed"
+    assert record.payload.summary["artifact_id"] == "missing-artifact"
+
+
+def test_get_stage_artifact_can_skip_expected_missing_artifact_failure_log(
+    tmp_path: Path,
+) -> None:
+    manager = build_manager(tmp_path)
+    log_writer = CapturingLogWriter()
+    trace_context = build_trace(stage_run_id="stage-run-1")
+    with manager.session(DatabaseRole.RUNTIME) as runtime_session:
+        seed_run(runtime_session)
+        store = ArtifactStore(
+            runtime_session=runtime_session,
+            log_writer=log_writer,
+            now=lambda: NOW,
+        )
+
+        with pytest.raises(ArtifactStoreError, match="Stage artifact was not found"):
+            store.get_stage_artifact(
+                "missing-artifact",
+                trace_context=trace_context,
+                log_missing_failure=False,
+            )
+
+    assert log_writer.records == []
+
+
+def test_get_stage_artifact_without_run_context_skips_run_log(
+    tmp_path: Path,
+) -> None:
+    manager = build_manager(tmp_path)
+    log_writer = CapturingLogWriter()
+    with manager.session(DatabaseRole.RUNTIME) as runtime_session:
+        seed_run(runtime_session)
+        store = ArtifactStore(
+            runtime_session=runtime_session,
+            log_writer=log_writer,
+            now=lambda: NOW,
+        )
+
+        with pytest.raises(ArtifactStoreError, match="Stage artifact was not found"):
+            store.get_stage_artifact("missing-artifact")
+
+    assert log_writer.records == []
+
+
 def test_storage_get_failures_raise_artifact_store_error_and_write_failure_log() -> None:
     log_writer = CapturingLogWriter()
     store = ArtifactStore(
@@ -622,9 +692,13 @@ def test_storage_get_failures_raise_artifact_store_error_and_write_failure_log()
     )
 
     with pytest.raises(ArtifactStoreError, match="Stage artifact storage is unavailable"):
-        store.get_stage_artifact("artifact-stage-1")
+        store.get_stage_artifact(
+            "artifact-stage-1",
+            trace_context=build_trace(stage_run_id="stage-run-1"),
+        )
 
     record = log_writer.records[0]
+    assert record.trace_context.run_id == "run-1"
     assert record.payload.summary["action"] == "get_stage_artifact_failed"
     assert record.payload.summary["artifact_id"] == "artifact-stage-1"
     assert record.payload.summary["error_message"] == (

@@ -115,6 +115,7 @@ class FakeArtifactStore:
     def __init__(self) -> None:
         self.process: dict[str, Any] = {}
         self.create_calls: list[dict[str, Any]] = []
+        self.get_calls: list[dict[str, Any]] = []
         self.append_calls: list[dict[str, Any]] = []
         self.complete_calls: list[dict[str, Any]] = []
 
@@ -144,7 +145,20 @@ class FakeArtifactStore:
         )
         return SimpleNamespace(artifact_id=artifact_id, payload_ref=payload_ref)
 
-    def get_stage_artifact(self, artifact_id: str) -> object:
+    def get_stage_artifact(
+        self,
+        artifact_id: str,
+        *,
+        trace_context: TraceContext | None = None,
+        log_missing_failure: bool = True,
+    ) -> object:
+        self.get_calls.append(
+            {
+                "artifact_id": artifact_id,
+                "trace_context": trace_context,
+                "log_missing_failure": log_missing_failure,
+            }
+        )
         if self.create_calls and self.create_calls[-1]["artifact_id"] == artifact_id:
             return SimpleNamespace(artifact_id=artifact_id)
         raise ArtifactStoreError("Stage artifact was not found.")
@@ -871,6 +885,32 @@ def test_stage_agent_creates_stage_input_before_process_records() -> None:
     assert runtime.artifact_store.append_calls[0]["process_key"] == (
         "stage_agent_started"
     )
+
+
+def test_stage_agent_passes_invocation_trace_to_stage_artifact_lookup() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "CodeGenerationArtifact",
+                    "artifact_payload": code_generation_payload(),
+                    "evidence_refs": ["stage-process://stage-run-1/model-call/1"],
+                }
+            )
+        ]
+    )
+    request = invocation()
+
+    runtime.run_stage(request)
+
+    assert runtime.artifact_store.get_calls[0]["artifact_id"] == (
+        "artifact-stage-run-1"
+    )
+    assert runtime.artifact_store.get_calls[0]["trace_context"] is (
+        request.trace_context
+    )
+    assert runtime.artifact_store.get_calls[0]["log_missing_failure"] is False
 
 
 def test_stage_agent_passes_context_sources_to_context_builder() -> None:

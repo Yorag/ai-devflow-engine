@@ -713,7 +713,11 @@ class StageAgentRuntime:
 
     def _ensure_stage_input(self, request: StageExecutionRequest) -> None:
         try:
-            self._artifact_store.get_stage_artifact(request.stage_artifact_id)
+            self._artifact_store.get_stage_artifact(
+                request.stage_artifact_id,
+                trace_context=request.invocation.trace_context,
+                log_missing_failure=False,
+            )
             return
         except ArtifactStoreError as exc:
             if "not found" not in str(exc).lower():
