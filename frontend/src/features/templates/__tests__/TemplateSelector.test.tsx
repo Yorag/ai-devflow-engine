@@ -15,6 +15,8 @@ afterEach(() => {
 describe("TemplateEmptyState", () => {
   it("renders the draft template empty state inside the narrative feed", () => {
     const workspace = mockSessionWorkspaces["session-draft"];
+    const selectedDescription =
+      "Balanced feature delivery with enough iteration and tool budget for new behavior.";
 
     renderWithAppProviders(
       <TemplateEmptyState
@@ -34,6 +36,7 @@ describe("TemplateEmptyState", () => {
         name: "新功能开发流程",
       }),
     ).toBeTruthy();
+    expect(screen.getByText(selectedDescription)).toBeTruthy();
     expect(screen.getAllByRole("tab")).toHaveLength(6);
     expect(screen.getByRole("tab", { name: "Requirement Analysis" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Solution Design" })).toBeTruthy();
@@ -43,6 +46,17 @@ describe("TemplateEmptyState", () => {
       screen.getByRole("radio", { name: /新功能开发流程/u }),
     ).toHaveProperty("checked", true);
     expect(screen.getByRole("radio", { name: /重构流程/u })).toBeTruthy();
+    expect(screen.getAllByText(selectedDescription)).toHaveLength(1);
+    expect(
+      screen.queryByText(
+        "Focused defect isolation with conservative tool use and regression depth.",
+      ),
+    ).toBeNull();
+    expect(
+      screen.queryByText(
+        "Behavior-preserving refactor flow with guarded execution and regression depth.",
+      ),
+    ).toBeNull();
   });
 
   it("updates the selected template when the user chooses another template", () => {

@@ -24,26 +24,21 @@ export function TemplateSelector({
     >
       <legend>Templates</legend>
       <div className="template-selector__options">
-        {templates.map((template) => {
-          const description = template.description ?? "No description";
-
-          return (
-            <label className="template-option" key={template.template_id}>
-              <input
-                type="radio"
-                name="pipeline-template"
-                value={template.template_id}
-                checked={template.template_id === selectedTemplateId}
-                disabled={disabled || disabledIds.has(template.template_id)}
-                onChange={() => onTemplateChange(template.template_id)}
-              />
-              <span>
-                <strong>{template.name}</strong>
-                <small>{description}</small>
-              </span>
-            </label>
-          );
-        })}
+        {templates.map((template) => (
+          <label className="template-option" key={template.template_id}>
+            <input
+              type="radio"
+              name="pipeline-template"
+              value={template.template_id}
+              checked={template.template_id === selectedTemplateId}
+              disabled={disabled || disabledIds.has(template.template_id)}
+              onChange={() => onTemplateChange(template.template_id)}
+            />
+            <span>
+              <strong>{template.name}</strong>
+            </span>
+          </label>
+        ))}
       </div>
     </fieldset>
   );

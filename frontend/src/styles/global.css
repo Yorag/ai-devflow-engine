@@ -1563,12 +1563,13 @@ a {
 .template-option {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
   gap: 8px;
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
-  padding: 9px 10px;
+  padding: 12px 14px;
   cursor: pointer;
 }
 
@@ -1585,7 +1586,7 @@ a {
 .template-option input {
   width: 16px;
   height: 16px;
-  margin: 2px 0 0;
+  margin: 0;
   accent-color: var(--accent);
 }
 
@@ -1599,13 +1600,6 @@ a {
   color: oklch(28% 0.025 248);
   font-size: 0.88rem;
   line-height: 1.3;
-  overflow-wrap: anywhere;
-}
-
-.template-option small {
-  color: var(--text-muted);
-  font-size: 0.72rem;
-  line-height: 1.4;
   overflow-wrap: anywhere;
 }
 
