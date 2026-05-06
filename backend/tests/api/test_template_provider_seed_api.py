@@ -80,6 +80,29 @@ def test_get_pipeline_templates_returns_seeded_templates_without_prompt_metadata
         "新功能开发流程",
         "重构流程",
     ]
+    assert [template["description"] for template in body] == [
+        "Focused defect isolation with conservative tool use and regression depth.",
+        "Balanced feature delivery with enough iteration and tool budget for new behavior.",
+        "Behavior-preserving refactor flow with guarded execution and regression depth.",
+    ]
+    assert [template["max_auto_regression_retries"] for template in body] == [
+        2,
+        1,
+        2,
+    ]
+    assert [template["max_react_iterations_per_stage"] for template in body] == [
+        24,
+        30,
+        28,
+    ]
+    assert [template["max_tool_calls_per_stage"] for template in body] == [
+        48,
+        80,
+        60,
+    ]
+    assert [
+        template["skip_high_risk_tool_confirmations"] for template in body
+    ] == [False, False, False]
     for template in body:
         assert template["template_source"] == "system_template"
         assert template["fixed_stage_sequence"] == [
@@ -125,6 +148,9 @@ def test_get_pipeline_template_returns_one_template_and_audit_shape(
     assert body["name"] == "新功能开发流程"
     assert body["auto_regression_enabled"] is True
     assert body["max_auto_regression_retries"] == 1
+    assert body["max_react_iterations_per_stage"] == 30
+    assert body["max_tool_calls_per_stage"] == 80
+    assert body["skip_high_risk_tool_confirmations"] is False
 
     with app.state.database_manager.session(DatabaseRole.LOG) as session:
         seed_audit = (
@@ -233,6 +259,10 @@ def test_template_provider_routes_are_documented_in_openapi(tmp_path: Path) -> N
     assert "StageRoleBinding" in schemas
     assert "ProviderRead" in schemas
     assert "ModelRuntimeCapabilities" in schemas
+    template_properties = schemas["PipelineTemplateRead"]["properties"]
+    assert template_properties["max_react_iterations_per_stage"]["exclusiveMinimum"] == 0
+    assert template_properties["max_tool_calls_per_stage"]["exclusiveMinimum"] == 0
+    assert template_properties["skip_high_risk_tool_confirmations"]["type"] == "boolean"
     assert "PromptAssetRead" not in schemas
     assert "prompt_version" not in schemas["StageRoleBinding"]["properties"]
     assert "api_key" not in schemas["ProviderRead"]["properties"]

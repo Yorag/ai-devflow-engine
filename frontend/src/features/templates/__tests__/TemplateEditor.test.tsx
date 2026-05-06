@@ -39,6 +39,15 @@ describe("template-state", () => {
     expect(isTemplateDirty(template, changedDraft)).toBe(true);
     expect(cleanDraft.name).toBe(template.name);
     expect(cleanDraft.description).toBe(template.description);
+    expect(cleanDraft.max_react_iterations_per_stage).toBe(30);
+    expect(cleanDraft.max_tool_calls_per_stage).toBe(80);
+    expect(cleanDraft.skip_high_risk_tool_confirmations).toBe(false);
+    expect(
+      isTemplateDirty(template, {
+        ...cleanDraft,
+        skip_high_risk_tool_confirmations: true,
+      }),
+    ).toBe(true);
     expect((cleanDraft as Record<string, unknown>).fixed_stage_sequence).toBeUndefined();
     expect((cleanDraft as Record<string, unknown>).approval_checkpoints).toBeUndefined();
   });
@@ -244,6 +253,18 @@ describe("TemplateEditor", () => {
     expect(
       within(editor).getByLabelText("Maximum auto regression retries"),
     ).toHaveProperty("value", "1");
+    expect(within(editor).getByLabelText("Max ReAct iterations")).toHaveProperty(
+      "value",
+      "30",
+    );
+    expect(within(editor).getByLabelText("Max tool calls")).toHaveProperty(
+      "value",
+      "80",
+    );
+    expect(within(editor).getByLabelText("Skip high-risk confirmations")).toHaveProperty(
+      "checked",
+      false,
+    );
     expect(within(editor).queryByLabelText("Template name")).toBeNull();
     expect(within(editor).queryByLabelText("Template description")).toBeNull();
 
@@ -263,6 +284,42 @@ describe("TemplateEditor", () => {
     fireEvent.click(within(editor).getByRole("button", { name: "Save template" }));
 
     expect(savedAsTemplateIds).toEqual(["template-user-template-feature-1"]);
+  });
+
+  it("saves template-level run policy fields with the edited template", async () => {
+    const workspace = mockSessionWorkspaces["session-draft"];
+    let savedTemplate: PipelineTemplateRead | null = null;
+
+    renderWithAppProviders(
+      <TemplateEmptyState
+        session={workspace.session}
+        templates={mockPipelineTemplates}
+        providers={mockProviderList}
+        selectedTemplateId="template-feature"
+        onTemplateChange={() => undefined}
+        onTemplateSaveAs={(template) => {
+          savedTemplate = template;
+        }}
+      />,
+    );
+
+    const editor = screen.getByRole("region", { name: "Template editor" });
+    fireEvent.change(within(editor).getByLabelText("Max ReAct iterations"), {
+      target: { value: "32" },
+    });
+    fireEvent.change(within(editor).getByLabelText("Max tool calls"), {
+      target: { value: "95" },
+    });
+    fireEvent.click(within(editor).getByLabelText("Skip high-risk confirmations"));
+    fireEvent.click(within(editor).getByRole("button", { name: "Save template" }));
+
+    await waitFor(() => {
+      expect(savedTemplate).toMatchObject({
+        max_react_iterations_per_stage: 32,
+        max_tool_calls_per_stage: 95,
+        skip_high_risk_tool_confirmations: true,
+      });
+    });
   });
 
   it("shows system template names as read-only and supports inline rename for user templates", () => {
@@ -615,6 +672,68 @@ describe("TemplateEditor", () => {
       within(editor).getByRole("button", { name: "Save template" }),
     ).toHaveProperty("disabled", true);
     expect(within(editor).queryByRole("button", { name: "Overwrite template" })).toBeNull();
+  });
+
+  it("blocks saving invalid template runtime policy limits", () => {
+    const workspace = mockSessionWorkspaces["session-draft"];
+    const userTemplate = {
+      ...mockPipelineTemplates[1],
+      template_id: "template-user-existing",
+      template_source: "user_template" as const,
+      base_template_id: "template-feature",
+    };
+
+    renderWithAppProviders(
+      <TemplateEmptyState
+        session={workspace.session}
+        templates={[...mockPipelineTemplates, userTemplate]}
+        providers={mockProviderList}
+        selectedTemplateId="template-user-existing"
+        onTemplateChange={() => undefined}
+      />,
+    );
+
+    const editor = screen.getByRole("region", { name: "Template editor" });
+    fireEvent.change(within(editor).getByLabelText("Max ReAct iterations"), {
+      target: { value: "" },
+    });
+
+    expect(
+      within(editor).getByText(/Cannot save current field: config_invalid_value/u),
+    ).toBeTruthy();
+    expect(
+      within(editor).getByRole("button", { name: "Save template" }),
+    ).toHaveProperty("disabled", true);
+
+    fireEvent.change(within(editor).getByLabelText("Max ReAct iterations"), {
+      target: { value: "1.5" },
+    });
+
+    expect(
+      within(editor).getByText(/Cannot save current field: config_invalid_value/u),
+    ).toBeTruthy();
+
+    fireEvent.change(within(editor).getByLabelText("Max ReAct iterations"), {
+      target: { value: "51" },
+    });
+
+    expect(
+      within(editor).getByText(/Cannot save current field: config_hard_limit_exceeded/u),
+    ).toBeTruthy();
+
+    fireEvent.change(within(editor).getByLabelText("Max ReAct iterations"), {
+      target: { value: "30" },
+    });
+    fireEvent.change(within(editor).getByLabelText("Max tool calls"), {
+      target: { value: "151" },
+    });
+
+    expect(
+      within(editor).getByText(/Cannot save current field: config_hard_limit_exceeded/u),
+    ).toBeTruthy();
+    expect(
+      within(editor).getByRole("button", { name: "Save template" }),
+    ).toHaveProperty("disabled", true);
   });
 
   it("keeps local save-as templates when incoming templates refresh", async () => {

@@ -65,6 +65,9 @@ def template_snapshot(
         ),
         auto_regression_enabled=auto_regression_enabled,
         max_auto_regression_retries=max_auto_regression_retries,
+        max_react_iterations_per_stage=30,
+        max_tool_calls_per_stage=80,
+        skip_high_risk_tool_confirmations=False,
         created_at=NOW,
     )
 

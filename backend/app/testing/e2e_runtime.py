@@ -328,6 +328,7 @@ class DeterministicRuntimeAdvancementHarness:
             control_session=sessions.control,
             runtime_session=sessions.runtime,
             event_session=sessions.event,
+            graph_session=sessions.graph,
             audit_service=audit_service,
             delivery_service=delivery_service,
             log_writer=log_writer,

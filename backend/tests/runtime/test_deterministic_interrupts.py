@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from backend.app.db.base import DatabaseRole, ROLE_METADATA
 from backend.app.db.models.control import ProjectModel, SessionModel
 from backend.app.db.models.event import DomainEventModel
+from backend.app.db.models.graph import GraphDefinitionModel
 from backend.app.db.models.runtime import (
     ApprovalRequestModel,
     ClarificationRecordModel,
@@ -380,6 +381,7 @@ def build_engine(
     manager: RuntimeInterruptTestDatabase,
     *,
     log_writer: RecordingRunLogWriter | None = None,
+    with_graph_session: bool = False,
 ) -> tuple[
     DeterministicRuntimeEngine,
     CapturingRuntimePort,
@@ -391,6 +393,9 @@ def build_engine(
         control_session=manager.open_session(DatabaseRole.CONTROL),
         runtime_session=manager.open_session(DatabaseRole.RUNTIME),
         event_session=manager.open_session(DatabaseRole.EVENT),
+        graph_session=(
+            manager.open_session(DatabaseRole.GRAPH) if with_graph_session else None
+        ),
         audit_service=RecordingAuditService(),
         log_writer=resolved_log_writer,
         now=clock(),
@@ -442,6 +447,44 @@ def seed_stale_event_from_other_run(manager: RuntimeInterruptTestDatabase) -> No
                 payload={"control_item": {"payload_ref": "stale"}},
                 correlation_id="correlation-stale",
                 causation_event_id=None,
+                created_at=NOW,
+            )
+        )
+
+
+def seed_graph_definition(
+    manager: RuntimeInterruptTestDatabase,
+    *,
+    skip_high_risk_tool_confirmations: bool,
+) -> None:
+    with manager.session(DatabaseRole.GRAPH) as session:
+        session.add(
+            GraphDefinitionModel(
+                graph_definition_id="graph-definition-1",
+                run_id="run-1",
+                template_snapshot_ref="template-snapshot-1",
+                graph_version="function-one-mainline-v1",
+                stage_nodes=[
+                    {"node_key": stage.value, "stage_type": stage.value}
+                    for stage in deterministic.DETERMINISTIC_STAGE_SEQUENCE
+                ],
+                stage_contracts={
+                    stage.value: {
+                        "stage_type": stage.value,
+                        "stage_contract_ref": stage.value,
+                        "allowed_tools": [],
+                        "runtime_limits": {
+                            "skip_high_risk_tool_confirmations": (
+                                skip_high_risk_tool_confirmations
+                            )
+                        },
+                    }
+                    for stage in deterministic.DETERMINISTIC_STAGE_SEQUENCE
+                },
+                interrupt_policy={"approval_interrupts": []},
+                retry_policy={"max_auto_regression_retries": 1},
+                delivery_routing_policy={"stage": "delivery_integration"},
+                schema_version="graph-definition-v1",
                 created_at=NOW,
             )
         )
@@ -672,6 +715,52 @@ def test_configured_tool_confirmation_interrupt_persists_distinct_high_risk_conf
     assert event.payload["tool_confirmation"]["type"] == "tool_confirmation"
     assert "approval_id" not in event.payload["tool_confirmation"]
     assert checkpoint_port.calls[-1]["purpose"] is CheckpointPurpose.WAITING_TOOL_CONFIRMATION
+
+
+def test_configured_tool_confirmation_interrupt_is_skipped_by_graph_runtime_policy(
+    tmp_path: Path,
+) -> None:
+    manager = build_manager(tmp_path)
+    seed_run(manager)
+    seed_graph_definition(manager, skip_high_risk_tool_confirmations=True)
+    engine, runtime_port, checkpoint_port, _log_writer = build_engine(
+        manager,
+        with_graph_session=True,
+    )
+    tool_config = deterministic.DeterministicToolConfirmationConfig(
+        stage_type=StageType.TEST_GENERATION_EXECUTION,
+        tool_name="bash",
+        command_preview="Remove-Item -Recurse build",
+        target_summary="Deletes generated build outputs.",
+        risk_categories=[ToolRiskCategory.FILE_DELETE_OR_MOVE],
+    )
+    engine.configure_interrupts(tool_confirmation=tool_config)
+
+    advance_to_stage(
+        engine,
+        StageType.TEST_GENERATION_EXECUTION,
+        runtime_port,
+        checkpoint_port,
+        manager,
+    )
+    result = engine.run_next(
+        context=build_context_for_current_thread(manager),
+        runtime_port=runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+
+    assert isinstance(result, RuntimeStepResult)
+    assert result.status is StageStatus.COMPLETED
+    assert result.stage_type is StageType.TEST_GENERATION_EXECUTION
+    assert [call[0] for call in runtime_port.calls] == []
+    confirmation_count = engine._runtime_session.query(
+        ToolConfirmationRequestModel
+    ).count()
+    run = engine._runtime_session.get(PipelineRunModel, "run-1")
+    stage = engine._runtime_session.get(StageRunModel, result.stage_run_id)
+    assert confirmation_count == 0
+    assert run is not None and run.status is RunStatus.RUNNING
+    assert stage is not None and stage.status is StageStatus.COMPLETED
 
 
 def test_resume_from_clarification_interrupt_uses_runtime_boundary_and_continues_source_stage(

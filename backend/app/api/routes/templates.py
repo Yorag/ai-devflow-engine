@@ -34,6 +34,13 @@ def _pipeline_template_read(template: Any) -> PipelineTemplateRead:
             "approval_checkpoints": template.approval_checkpoints,
             "auto_regression_enabled": template.auto_regression_enabled,
             "max_auto_regression_retries": template.max_auto_regression_retries,
+            "max_react_iterations_per_stage": (
+                template.max_react_iterations_per_stage
+            ),
+            "max_tool_calls_per_stage": template.max_tool_calls_per_stage,
+            "skip_high_risk_tool_confirmations": (
+                template.skip_high_risk_tool_confirmations
+            ),
             "created_at": template.created_at,
             "updated_at": template.updated_at,
         }

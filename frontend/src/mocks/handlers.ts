@@ -541,7 +541,10 @@ function readTemplateWriteRequest(
     typeof candidate.name !== "string" ||
     !Array.isArray(candidate.stage_role_bindings) ||
     typeof candidate.auto_regression_enabled !== "boolean" ||
-    typeof candidate.max_auto_regression_retries !== "number"
+    typeof candidate.max_auto_regression_retries !== "number" ||
+    typeof candidate.max_react_iterations_per_stage !== "number" ||
+    typeof candidate.max_tool_calls_per_stage !== "number" ||
+    typeof candidate.skip_high_risk_tool_confirmations !== "boolean"
   ) {
     return null;
   }
@@ -557,6 +560,10 @@ function readTemplateWriteRequest(
     })),
     auto_regression_enabled: candidate.auto_regression_enabled,
     max_auto_regression_retries: candidate.max_auto_regression_retries,
+    max_react_iterations_per_stage: candidate.max_react_iterations_per_stage,
+    max_tool_calls_per_stage: candidate.max_tool_calls_per_stage,
+    skip_high_risk_tool_confirmations:
+      candidate.skip_high_risk_tool_confirmations,
   };
 }
 

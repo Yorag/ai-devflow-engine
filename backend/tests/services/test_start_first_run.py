@@ -25,6 +25,7 @@ from backend.app.db.models.runtime import (
     ModelBindingSnapshotModel,
     PipelineRunModel,
     ProviderSnapshotModel,
+    RuntimeLimitSnapshotModel,
     RuntimeBase,
     StageRunModel,
 )
@@ -299,6 +300,9 @@ def _create_user_template_with_provider(
         approval_checkpoints=list(source.approval_checkpoints),
         auto_regression_enabled=source.auto_regression_enabled,
         max_auto_regression_retries=source.max_auto_regression_retries,
+        max_react_iterations_per_stage=source.max_react_iterations_per_stage,
+        max_tool_calls_per_stage=source.max_tool_calls_per_stage,
+        skip_high_risk_tool_confirmations=source.skip_high_risk_tool_confirmations,
         created_at=NOW,
         updated_at=NOW,
     )
@@ -373,6 +377,10 @@ def test_session_service_start_run_from_new_requirement_creates_first_run_state(
     with manager.session(DatabaseRole.RUNTIME) as session:
         saved_run = session.get(PipelineRunModel, result.run.run_id)
         saved_stage = session.get(StageRunModel, result.stage.stage_run_id)
+        runtime_limit = session.get(
+            RuntimeLimitSnapshotModel,
+            result.run.runtime_limit_snapshot_ref,
+        )
         assert saved_run is not None
         assert saved_run.attempt_index == 1
         assert saved_run.trigger_source.value == "initial_requirement"
@@ -386,12 +394,21 @@ def test_session_service_start_run_from_new_requirement_creates_first_run_state(
         assert saved_stage.stage_type is StageType.REQUIREMENT_ANALYSIS
         assert saved_stage.status is StageStatus.RUNNING
         assert saved_stage.graph_node_key == "requirement_analysis"
+        assert runtime_limit is not None
+        assert runtime_limit.agent_limits["max_react_iterations_per_stage"] == 30
+        assert runtime_limit.agent_limits["max_tool_calls_per_stage"] == 80
 
     with manager.session(DatabaseRole.GRAPH) as session:
         definition = session.get(GraphDefinitionModel, result.run.graph_definition_ref)
         thread = session.get(GraphThreadModel, result.run.graph_thread_ref)
         assert definition is not None
         assert definition.run_id == result.run.run_id
+        runtime_limits = definition.stage_contracts["requirement_analysis"][
+            "runtime_limits"
+        ]
+        assert runtime_limits["max_react_iterations_per_stage"] == 30
+        assert runtime_limits["max_tool_calls_per_stage"] == 80
+        assert runtime_limits["skip_high_risk_tool_confirmations"] is False
         assert thread is not None
         assert thread.run_id == result.run.run_id
         assert thread.current_node_key == "requirement_analysis"

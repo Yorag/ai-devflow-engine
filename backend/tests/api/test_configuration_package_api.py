@@ -70,6 +70,9 @@ def template_payload(
         ],
         "auto_regression_enabled": False,
         "max_auto_regression_retries": 1,
+        "max_react_iterations_per_stage": 25,
+        "max_tool_calls_per_stage": 55,
+        "skip_high_risk_tool_confirmations": True,
     }
 
 
@@ -147,6 +150,9 @@ def write_template_payload(name: str = "Exported user flow") -> dict:
         ],
         "auto_regression_enabled": True,
         "max_auto_regression_retries": 2,
+        "max_react_iterations_per_stage": 30,
+        "max_tool_calls_per_stage": 80,
+        "skip_high_risk_tool_confirmations": False,
     }
 
 

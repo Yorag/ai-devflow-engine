@@ -832,6 +832,13 @@ describe("WorkspaceShell", () => {
     fireEvent.change(within(editor).getByLabelText("Solution Design system prompt"), {
       target: { value: "Design the saved stage only." },
     });
+    fireEvent.change(within(editor).getByLabelText("Max ReAct iterations"), {
+      target: { value: "34" },
+    });
+    fireEvent.change(within(editor).getByLabelText("Max tool calls"), {
+      target: { value: "90" },
+    });
+    fireEvent.click(within(editor).getByLabelText("Skip high-risk confirmations"));
     fireEvent.click(within(editor).getByRole("button", { name: "Save template" }));
 
     await waitFor(() => {
@@ -840,6 +847,11 @@ describe("WorkspaceShell", () => {
       });
     });
     expect(saveAsBodies).toHaveLength(1);
+    expect(saveAsBodies[0]).toMatchObject({
+      max_react_iterations_per_stage: 34,
+      max_tool_calls_per_stage: 90,
+      skip_high_risk_tool_confirmations: true,
+    });
     expect(saveAsBodies[0].stage_role_bindings).toHaveLength(6);
     expect(saveAsBodies[0].stage_role_bindings).toEqual(
       mockPipelineTemplates

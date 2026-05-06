@@ -39,6 +39,9 @@ class TemplateSnapshot(BaseModel):
     approval_checkpoints: tuple[ApprovalType, ...]
     auto_regression_enabled: StrictBool
     max_auto_regression_retries: StrictInt = Field(ge=0)
+    max_react_iterations_per_stage: StrictInt = Field(gt=0)
+    max_tool_calls_per_stage: StrictInt = Field(gt=0)
+    skip_high_risk_tool_confirmations: StrictBool
     schema_version: Literal["template-snapshot-v1"] = TEMPLATE_SNAPSHOT_SCHEMA_VERSION
     created_at: datetime
 
@@ -180,6 +183,18 @@ class TemplateSnapshotBuilder:
             max_auto_regression_retries=TemplateSnapshotBuilder._require_int(
                 template,
                 "max_auto_regression_retries",
+            ),
+            max_react_iterations_per_stage=TemplateSnapshotBuilder._require_int(
+                template,
+                "max_react_iterations_per_stage",
+            ),
+            max_tool_calls_per_stage=TemplateSnapshotBuilder._require_int(
+                template,
+                "max_tool_calls_per_stage",
+            ),
+            skip_high_risk_tool_confirmations=TemplateSnapshotBuilder._require_bool(
+                template,
+                "skip_high_risk_tool_confirmations",
             ),
             created_at=created_at,
         )

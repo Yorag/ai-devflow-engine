@@ -155,6 +155,9 @@ def write_request(
     *,
     name: str = "Custom feature flow",
     provider_id: str = "provider-custom",
+    max_react_iterations_per_stage: int = 25,
+    max_tool_calls_per_stage: int = 55,
+    skip_high_risk_tool_confirmations: bool = True,
 ) -> PipelineTemplateWriteRequest:
     return PipelineTemplateWriteRequest(
         name=name,
@@ -179,6 +182,9 @@ def write_request(
         approval_checkpoints=list(FIXED_APPROVAL_CHECKPOINTS),
         auto_regression_enabled=False,
         max_auto_regression_retries=3,
+        max_react_iterations_per_stage=max_react_iterations_per_stage,
+        max_tool_calls_per_stage=max_tool_calls_per_stage,
+        skip_high_risk_tool_confirmations=skip_high_risk_tool_confirmations,
     )
 
 
@@ -223,6 +229,9 @@ def test_save_as_user_template_from_system_template_creates_user_template_and_au
     ]
     assert saved.auto_regression_enabled is False
     assert saved.max_auto_regression_retries == 3
+    assert saved.max_react_iterations_per_stage == 25
+    assert saved.max_tool_calls_per_stage == 55
+    assert saved.skip_high_risk_tool_confirmations is True
     assert saved.created_at == LATER
     assert saved.updated_at == LATER
     assert all(
@@ -254,6 +263,9 @@ def test_save_as_user_template_from_system_template_creates_user_template_and_au
         "role-code-reviewer",
     ]
     assert record["metadata"]["provider_ids"] == ["provider-custom"]
+    assert record["metadata"]["max_react_iterations_per_stage"] == 25
+    assert record["metadata"]["max_tool_calls_per_stage"] == 55
+    assert record["metadata"]["skip_high_risk_tool_confirmations"] is True
     assert "Prompt for" not in _metadata_text(record)
     assert "system_prompt" not in _metadata_text(record)
 
@@ -329,7 +341,13 @@ def test_patch_user_template_updates_allowed_fields_keeps_identity_and_audits(
             now=lambda: LATER,
         ).patch_user_template(
             template_id=created.template_id,
-            body=write_request(name="Updated flow", provider_id="provider-deepseek"),
+            body=write_request(
+                name="Updated flow",
+                provider_id="provider-deepseek",
+                max_react_iterations_per_stage=20,
+                max_tool_calls_per_stage=40,
+                skip_high_risk_tool_confirmations=False,
+            ),
             trace_context=build_trace(),
         )
 
@@ -342,12 +360,18 @@ def test_patch_user_template_updates_allowed_fields_keeps_identity_and_audits(
     assert {binding["provider_id"] for binding in updated.stage_role_bindings} == {
         "provider-deepseek"
     }
+    assert updated.max_react_iterations_per_stage == 20
+    assert updated.max_tool_calls_per_stage == 40
+    assert updated.skip_high_risk_tool_confirmations is False
 
     records = _action_records(audit, "template.patch")
     assert len(records) == 1
     assert records[0]["target_id"] == created.template_id
     assert records[0]["metadata"]["template_id"] == created.template_id
     assert records[0]["metadata"]["base_template_id"] == "template-feature"
+    assert records[0]["metadata"]["max_react_iterations_per_stage"] == 20
+    assert records[0]["metadata"]["max_tool_calls_per_stage"] == 40
+    assert records[0]["metadata"]["skip_high_risk_tool_confirmations"] is False
     assert "Prompt for" not in _metadata_text(records[0])
     assert "system_prompt" not in _metadata_text(records[0])
 

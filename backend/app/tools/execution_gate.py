@@ -113,6 +113,7 @@ class ToolExecutionContext:
     run_log_recorder: ToolRunLogRecorderPort | None = None
     risk_policy: ToolRiskInspectionPort | None = None
     confirmation_port: ToolConfirmationRequestPort | None = None
+    skip_high_risk_tool_confirmations: bool = False
 
     @property
     def allowed_tools(self) -> tuple[str, ...]:
@@ -509,6 +510,9 @@ class ToolExecutionGate:
             )
 
         if not assessment.requires_confirmation:
+            return None
+
+        if context.skip_high_risk_tool_confirmations:
             return None
 
         if self._grant_matches(

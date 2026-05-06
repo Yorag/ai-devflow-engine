@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.db.models.event import DomainEventModel
+from backend.app.db.models.graph import GraphDefinitionModel
 from backend.app.db.models.control import SessionModel
 from backend.app.db.models.runtime import (
     ApprovalRequestModel,
@@ -213,6 +214,7 @@ class DeterministicRuntimeEngine:
         *,
         runtime_session: Session,
         event_session: Session,
+        graph_session: Session | None = None,
         control_session: Session | None = None,
         audit_service: Any | None = None,
         delivery_snapshot_service: Any | None = None,
@@ -227,6 +229,7 @@ class DeterministicRuntimeEngine:
         self._control_session = control_session
         self._runtime_session = runtime_session
         self._event_session = event_session
+        self._graph_session = graph_session
         self._audit_service = audit_service or _NoopAuditService()
         self._delivery_snapshot_service = delivery_snapshot_service
         self._now = now or (lambda: datetime.now(UTC))
@@ -721,6 +724,11 @@ class DeterministicRuntimeEngine:
             )
         tool_config = self._interrupt_config.tool_confirmation
         if tool_config is not None and stage.stage_type is tool_config.stage_type:
+            if self._skip_high_risk_tool_confirmation_for_stage(
+                context=context,
+                stage=stage,
+            ):
+                return None
             if self._has_pending_tool_confirmation(stage):
                 return None
             return self._emit_tool_confirmation_interrupt(
@@ -1002,6 +1010,32 @@ class DeterministicRuntimeEngine:
             event_refs=event_refs,
             log_ref=log_ref,
             trace_context=trace_context,
+        )
+
+    def _skip_high_risk_tool_confirmation_for_stage(
+        self,
+        *,
+        context: RuntimeExecutionContext,
+        stage: StageRunModel,
+    ) -> bool:
+        if self._graph_session is None:
+            return False
+        definition = self._graph_session.get(
+            GraphDefinitionModel,
+            context.graph_definition_ref,
+        )
+        if definition is None:
+            return False
+        stage_contracts = definition.stage_contracts
+        if not isinstance(stage_contracts, Mapping):
+            return False
+        stage_contract = stage_contracts.get(stage.stage_type.value)
+        if not isinstance(stage_contract, Mapping):
+            return False
+        runtime_limits = stage_contract.get("runtime_limits")
+        return (
+            isinstance(runtime_limits, Mapping)
+            and runtime_limits.get("skip_high_risk_tool_confirmations") is True
         )
 
     def terminate(

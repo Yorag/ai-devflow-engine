@@ -84,6 +84,21 @@ class PipelineTemplateModel(ControlBase, TimestampMixin):
     approval_checkpoints: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     auto_regression_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
     max_auto_regression_retries: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_react_iterations_per_stage: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=30,
+    )
+    max_tool_calls_per_stage: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=80,
+    )
+    skip_high_risk_tool_confirmations: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
 
 
 class SessionModel(ControlBase, TimestampMixin):

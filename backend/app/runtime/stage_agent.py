@@ -10,7 +10,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from backend.app.context.builder import ContextBuildRequest, ContextEnvelopeBuilder
-from backend.app.domain.enums import StageStatus, StageType
+from backend.app.domain.enums import StageStatus, StageType, ToolRiskLevel
 from backend.app.domain.graph_definition import GraphDefinition
 from backend.app.domain.provider_snapshot import ProviderSnapshot
 from backend.app.domain.template_snapshot import TemplateSnapshot
@@ -391,6 +391,41 @@ class StageAgentRuntime:
             )
             return (None, None, request)
 
+        if (
+            decision.decision_type is AgentDecisionType.REQUEST_TOOL_CONFIRMATION
+            and self._should_skip_structured_tool_confirmation(request, decision)
+        ):
+            limits = request.runtime_limit_snapshot.agent_limits
+            if len(tool_results) >= limits.max_tool_calls_per_stage:
+                return (
+                    self._failed_result(
+                        request,
+                        reason="max_tool_calls_exceeded",
+                        iteration_index=iteration_index,
+                        **cursor_kwargs,
+                    ),
+                    None,
+                    request,
+                )
+            tool_result = self.execute_tool_confirmation_decision(
+                request,
+                decision,
+                iteration_index,
+            )
+            result = self._result_from_tool_result(
+                request,
+                decision,
+                tool_result,
+                iteration_index,
+                completed_tool_call_ids=tuple(
+                    item.call_id
+                    for item in tool_results
+                    if item.status is ToolResultStatus.SUCCEEDED
+                ),
+                **cursor_kwargs,
+            )
+            return result, tool_result, request
+
         self.persist_recovery_checkpoint(
             request,
             self._recovery_cursor(
@@ -419,6 +454,7 @@ class StageAgentRuntime:
         del iteration_index
         if decision.tool_call is None:
             raise ValueError("Tool decision payload is required")
+        stage_contract = self._stage_contract(request)
         tool_request = ToolExecutionRequest(
             tool_name=decision.tool_call.tool_name,
             call_id=decision.tool_call.call_id,
@@ -428,13 +464,59 @@ class StageAgentRuntime:
                 f"{request.invocation.stage_run_id}:{decision.tool_call.call_id}"
             ),
         )
+        return self._execute_tool_request(
+            request,
+            tool_request,
+            stage_contract=stage_contract,
+        )
+
+    def execute_tool_confirmation_decision(
+        self,
+        request: StageExecutionRequest,
+        decision: AgentDecision,
+        iteration_index: int,
+    ) -> ToolResult:
+        del iteration_index
+        if decision.tool_confirmation is None:
+            raise ValueError("Tool confirmation decision payload is required")
+        stage_contract = self._stage_contract(request)
+        call_id = self._structured_tool_confirmation_call_id(decision)
+        self._append_process_record(
+            request,
+            "tool_confirmation_trace",
+            {
+                **decision.tool_confirmation.model_dump(mode="json"),
+                "status": "skipped",
+                "skip_high_risk_tool_confirmations": True,
+                "tool_call_id": call_id,
+                "decision_trace_ref": decision.decision_trace.trace_ref,
+            },
+        )
+        tool_request = ToolExecutionRequest(
+            tool_name=decision.tool_confirmation.tool_name,
+            call_id=call_id,
+            input_payload=dict(decision.tool_confirmation.input_payload),
+            trace_context=request.invocation.trace_context,
+            coordination_key=f"{request.invocation.stage_run_id}:{call_id}",
+        )
+        return self._execute_tool_request(
+            request,
+            tool_request,
+            stage_contract=stage_contract,
+        )
+
+    def _execute_tool_request(
+        self,
+        request: StageExecutionRequest,
+        tool_request: ToolExecutionRequest,
+        *,
+        stage_contract: dict[str, object],
+    ) -> ToolResult:
         return self._tool_registry.execute(
             tool_request,
             ToolExecutionContext(
                 stage_type=request.invocation.stage_type,
-                stage_contracts={
-                    request.invocation.stage_type.value: self._stage_contract(request)
-                },
+                stage_contracts={request.invocation.stage_type.value: stage_contract},
                 trace_context=request.invocation.trace_context,
                 runtime_tool_timeout_seconds=self._runtime_tool_timeout_seconds,
                 platform_tool_timeout_hard_limit_seconds=(
@@ -445,6 +527,9 @@ class StageAgentRuntime:
                 run_log_recorder=self._run_log_recorder,
                 risk_policy=self._risk_policy,
                 confirmation_port=self._confirmation_port,
+                skip_high_risk_tool_confirmations=(
+                    self._skip_high_risk_tool_confirmations(stage_contract)
+                ),
             ),
         )
 
@@ -1015,6 +1100,28 @@ class StageAgentRuntime:
             request.graph_definition.stage_contracts[request.invocation.stage_type.value]
         )
 
+    def _should_skip_structured_tool_confirmation(
+        self,
+        request: StageExecutionRequest,
+        decision: AgentDecision,
+    ) -> bool:
+        confirmation = decision.tool_confirmation
+        return (
+            confirmation is not None
+            and confirmation.risk_level is ToolRiskLevel.HIGH_RISK
+            and self._skip_high_risk_tool_confirmations(self._stage_contract(request))
+        )
+
+    @staticmethod
+    def _skip_high_risk_tool_confirmations(
+        stage_contract: Mapping[str, object],
+    ) -> bool:
+        runtime_limits = stage_contract.get("runtime_limits", {})
+        return (
+            isinstance(runtime_limits, Mapping)
+            and runtime_limits.get("skip_high_risk_tool_confirmations") is True
+        )
+
     @staticmethod
     def _provider_messages(messages: Sequence[object]) -> tuple[BaseMessage, ...]:
         converted: list[BaseMessage] = []
@@ -1044,6 +1151,13 @@ class StageAgentRuntime:
         }
         encoded = json.dumps(source, sort_keys=True, separators=(",", ":"))
         return f"model-call:{sha256(encoded.encode('utf-8')).hexdigest()}"
+
+    @staticmethod
+    def _structured_tool_confirmation_call_id(decision: AgentDecision) -> str:
+        digest = sha256(
+            decision.decision_trace.trace_ref.encode("utf-8")
+        ).hexdigest()[:16]
+        return f"structured-confirmation-{digest}"
 
     @staticmethod
     def _tool_trace(

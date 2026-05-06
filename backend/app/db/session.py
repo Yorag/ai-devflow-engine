@@ -148,7 +148,8 @@ def _upgrade_control_schema(engine: Engine) -> None:
 
     with engine.begin() as connection:
         inspector = inspect(connection)
-        if "providers" not in inspector.get_table_names():
+        table_names = inspector.get_table_names()
+        if "providers" not in table_names:
             return
         provider_columns = {
             column["name"] for column in inspector.get_columns("providers")
@@ -176,3 +177,32 @@ def _upgrade_control_schema(engine: Engine) -> None:
                     "ADD COLUMN is_enabled BOOLEAN NOT NULL DEFAULT 1"
                 )
             )
+
+        if "pipeline_templates" in table_names:
+            template_columns = {
+                column["name"] for column in inspector.get_columns("pipeline_templates")
+            }
+            if "max_react_iterations_per_stage" not in template_columns:
+                connection.execute(
+                    text(
+                        "ALTER TABLE pipeline_templates "
+                        "ADD COLUMN max_react_iterations_per_stage "
+                        "INTEGER NOT NULL DEFAULT 30"
+                    )
+                )
+            if "max_tool_calls_per_stage" not in template_columns:
+                connection.execute(
+                    text(
+                        "ALTER TABLE pipeline_templates "
+                        "ADD COLUMN max_tool_calls_per_stage "
+                        "INTEGER NOT NULL DEFAULT 80"
+                    )
+                )
+            if "skip_high_risk_tool_confirmations" not in template_columns:
+                connection.execute(
+                    text(
+                        "ALTER TABLE pipeline_templates "
+                        "ADD COLUMN skip_high_risk_tool_confirmations "
+                        "BOOLEAN NOT NULL DEFAULT 0"
+                    )
+                )
