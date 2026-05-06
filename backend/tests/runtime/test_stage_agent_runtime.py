@@ -414,6 +414,18 @@ def waiting_confirmation_tool_result(call_id: str) -> ToolResult:
     )
 
 
+def succeeded_write_file_result(call_id: str) -> ToolResult:
+    return ToolResult(
+        tool_name="write_file",
+        call_id=call_id,
+        status=ToolResultStatus.SUCCEEDED,
+        output_payload={"content_ref": f"tool-result://{call_id}/content"},
+        artifact_refs=[f"tool-result://{call_id}"],
+        trace_context=trace_context(),
+        coordination_key=f"stage-run-1:{call_id}",
+    )
+
+
 def read_file_description() -> ToolBindableDescription:
     return ToolBindableDescription(
         name="read_file",
@@ -476,6 +488,7 @@ def code_generation_payload() -> dict[str, Any]:
 def graph_definition(
     *,
     allowed_tools: Sequence[str] = ("read_file",),
+    skip_high_risk_tool_confirmations: bool = False,
 ) -> GraphDefinition:
     stage_contracts: dict[str, dict[str, Any]] = {
         stage.value: {
@@ -488,6 +501,9 @@ def graph_definition(
             "allowed_tools": list(allowed_tools)
             if stage is StageType.CODE_GENERATION
             else [],
+            "runtime_limits": {
+                "skip_high_risk_tool_confirmations": skip_high_risk_tool_confirmations
+            },
         }
         for stage in StageType
     }
@@ -534,6 +550,9 @@ def template_snapshot() -> TemplateSnapshot:
         ),
         auto_regression_enabled=True,
         max_auto_regression_retries=2,
+        max_react_iterations_per_stage=30,
+        max_tool_calls_per_stage=80,
+        skip_high_risk_tool_confirmations=False,
         created_at=NOW,
     )
 
@@ -675,6 +694,37 @@ def test_stage_agent_executes_tool_decision_through_tool_registry_and_continues(
     assert "tool_trace" in runtime.artifact_store.append_keys()
 
 
+def test_stage_agent_passes_template_tool_confirmation_skip_policy_to_tool_context() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(tool_call_requests=(read_file_call("call-1"),)),
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "CodeGenerationArtifact",
+                    "artifact_payload": code_generation_payload(),
+                    "evidence_refs": ["tool-result://call-1"],
+                }
+            ),
+        ],
+        tool_results=[succeeded_tool_result("call-1")],
+        allowed_tools=["read_file"],
+    )
+    runtime._graph_definition = graph_definition(
+        allowed_tools=["read_file"],
+        skip_high_risk_tool_confirmations=True,
+    )
+
+    runtime.run_stage(invocation())
+
+    assert (
+        runtime.tool_registry.execute_calls[0][
+            "context"
+        ].skip_high_risk_tool_confirmations
+        is True
+    )
+
+
 def test_stage_agent_high_risk_tool_result_waits_for_confirmation_without_completing_stage() -> None:
     runtime = build_runtime(
         provider_results=[model_result(tool_call_requests=(write_file_call("call-1"),))],
@@ -690,6 +740,61 @@ def test_stage_agent_high_risk_tool_result_waits_for_confirmation_without_comple
     assert "tool_confirmation_trace" in runtime.artifact_store.append_keys()
     assert "recovery_checkpoint" in runtime.artifact_store.append_keys()
     assert runtime.artifact_store.complete_calls == []
+
+
+def test_stage_agent_skips_structured_high_risk_tool_confirmation_when_template_allows() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(
+                structured_output={
+                    "decision_type": "request_tool_confirmation",
+                    "tool_name": "write_file",
+                    "command_summary": "Write backend/app/runtime/stage_agent.py",
+                    "target_resource": "backend/app/runtime/stage_agent.py",
+                    "risk_level": "high_risk",
+                    "risk_categories": ["broad_write"],
+                    "expected_side_effects": [
+                        "Modify backend/app/runtime/stage_agent.py"
+                    ],
+                    "alternative_path_summary": "Ask for a manual patch instead.",
+                    "input_payload": {
+                        "path": "backend/app/runtime/stage_agent.py",
+                        "content": "x",
+                    },
+                }
+            ),
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "CodeGenerationArtifact",
+                    "artifact_payload": code_generation_payload(),
+                    "evidence_refs": ["tool-result://tool-confirmation-decision-1"],
+                }
+            ),
+        ],
+        tool_results=[succeeded_write_file_result("tool-confirmation-decision-1")],
+        allowed_tools=["write_file"],
+        available_tools=(write_file_description(),),
+    )
+    runtime._graph_definition = graph_definition(
+        allowed_tools=["write_file"],
+        skip_high_risk_tool_confirmations=True,
+    )
+
+    result = runtime.run_stage(invocation())
+
+    assert result.status is StageStatus.COMPLETED
+    assert runtime.tool_registry.execute_calls[0]["request"].tool_name == "write_file"
+    assert (
+        runtime.tool_registry.execute_calls[0][
+            "context"
+        ].skip_high_risk_tool_confirmations
+        is True
+    )
+    trace = runtime.artifact_store.process["tool_confirmation_trace"]
+    assert trace["status"] == "skipped"
+    assert trace["skip_high_risk_tool_confirmations"] is True
+    assert runtime.artifact_store.complete_calls
 
 
 def test_stage_agent_rejects_tool_call_when_model_binding_lacks_tool_calling() -> None:

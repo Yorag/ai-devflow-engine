@@ -110,6 +110,9 @@ def template_snapshot(
     *,
     run_id: str = "run-runtime-limits",
     max_auto_regression_retries: int = 1,
+    max_react_iterations_per_stage: int = 30,
+    max_tool_calls_per_stage: int = 80,
+    skip_high_risk_tool_confirmations: bool = False,
 ) -> TemplateSnapshot:
     return TemplateSnapshot(
         snapshot_ref=f"template-snapshot-{run_id}",
@@ -134,6 +137,9 @@ def template_snapshot(
         ),
         auto_regression_enabled=True,
         max_auto_regression_retries=max_auto_regression_retries,
+        max_react_iterations_per_stage=max_react_iterations_per_stage,
+        max_tool_calls_per_stage=max_tool_calls_per_stage,
+        skip_high_risk_tool_confirmations=skip_high_risk_tool_confirmations,
         created_at=NOW,
     )
 
@@ -228,7 +234,11 @@ def test_runtime_limit_snapshot_freezes_current_settings_version_and_template_li
 
     snapshot = RuntimeLimitSnapshotBuilder.build_for_run(
         updated,
-        template_snapshot=template_snapshot(max_auto_regression_retries=2),
+        template_snapshot=template_snapshot(
+            max_auto_regression_retries=2,
+            max_react_iterations_per_stage=35,
+            max_tool_calls_per_stage=70,
+        ),
         run_id="run-runtime-limits",
         created_at=SNAPSHOT_AT,
     )
@@ -250,8 +260,8 @@ def test_runtime_limit_snapshot_freezes_current_settings_version_and_template_li
 
     assert snapshot.snapshot_id == "runtime-limit-snapshot-run-runtime-limits"
     assert snapshot.run_id == "run-runtime-limits"
-    assert snapshot.agent_limits.max_react_iterations_per_stage == 40
-    assert snapshot.agent_limits.max_tool_calls_per_stage == 90
+    assert snapshot.agent_limits.max_react_iterations_per_stage == 35
+    assert snapshot.agent_limits.max_tool_calls_per_stage == 70
     assert snapshot.agent_limits.max_auto_regression_retries == 2
     assert snapshot.context_limits.tool_output_preview_chars == 5000
     assert snapshot.context_limits.compression_threshold_ratio == 0.75
@@ -281,6 +291,38 @@ def test_runtime_limit_snapshot_rejects_template_limit_above_current_settings(
 
     assert error.value.error_code is ErrorCode.CONFIG_HARD_LIMIT_EXCEEDED
     assert "max_auto_regression_retries" in error.value.message
+
+
+@pytest.mark.parametrize(
+    ("field_name", "template_value"),
+    [
+        ("max_react_iterations_per_stage", 31),
+        ("max_tool_calls_per_stage", 81),
+    ],
+)
+def test_runtime_limit_snapshot_rejects_template_agent_limit_above_current_settings(
+    tmp_path: Path,
+    field_name: str,
+    template_value: int,
+) -> None:
+    from backend.app.domain.runtime_limit_snapshot import (
+        RuntimeLimitSnapshotBuilder,
+        RuntimeLimitSnapshotBuilderError,
+    )
+
+    template = template_snapshot()
+    template = template.model_copy(update={field_name: template_value})
+
+    with pytest.raises(RuntimeLimitSnapshotBuilderError) as error:
+        RuntimeLimitSnapshotBuilder.build_for_run(
+            current_settings(tmp_path),
+            template_snapshot=template,
+            run_id="run-runtime-limits",
+            created_at=SNAPSHOT_AT,
+        )
+
+    assert error.value.error_code is ErrorCode.CONFIG_HARD_LIMIT_EXCEEDED
+    assert field_name in error.value.message
 
 
 def test_runtime_limit_snapshot_rejects_template_limit_above_hard_limit(

@@ -291,6 +291,7 @@ def context(
     log_recorder: RecordingLog | None = None,
     runtime_tool_timeout_seconds: float | None = 5,
     platform_tool_timeout_hard_limit_seconds: float | None = 30,
+    skip_high_risk_tool_confirmations: bool = False,
 ) -> ToolExecutionContext:
     return ToolExecutionContext(
         stage_type=StageType.CODE_GENERATION,
@@ -298,6 +299,7 @@ def context(
             StageType.CODE_GENERATION.value: {"allowed_tools": allowed_tools}
         },
         trace_context=build_trace(),
+        skip_high_risk_tool_confirmations=skip_high_risk_tool_confirmations,
         workspace_boundary=workspace_boundary,
         audit_recorder=audit_recorder,
         risk_policy=risk_policy,
@@ -999,6 +1001,45 @@ def test_execute_high_risk_action_returns_waiting_confirmation_without_running_t
     assert tool.calls == []
 
 
+def test_execute_high_risk_action_runs_without_confirmation_when_skip_policy_enabled() -> None:
+    tool = ExecutableFakeTool(
+        name="bash",
+        side_effect_level=ToolSideEffectLevel.PROCESS_EXECUTION,
+        permission_boundary=ToolPermissionBoundary(
+            boundary_type="workspace",
+            requires_workspace=False,
+            resource_scopes=(),
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"command": {"type": "string", "minLength": 1}},
+            "required": ["command"],
+            "additionalProperties": False,
+        },
+    )
+    registry = ToolRegistry([tool])
+    confirmations = RecordingConfirmationPort()
+    audit = RecordingAudit()
+    base_context = context(
+        allowed_tools=["bash"],
+        audit_recorder=audit,
+        skip_high_risk_tool_confirmations=True,
+    )
+    execution_context = ToolExecutionContext(
+        **{**base_context.__dict__, "confirmation_port": confirmations}
+    )
+
+    result = registry.execute(
+        request("bash", {"command": "npm install vite"}),
+        execution_context,
+    )
+
+    assert result.status is ToolResultStatus.SUCCEEDED
+    assert confirmations.calls == []
+    assert audit.intents == ["bash"]
+    assert tool.calls
+
+
 def test_confirmation_port_protocol_accepts_planned_deny_followup_fields() -> None:
     from inspect import signature
 
@@ -1029,6 +1070,7 @@ def test_execute_blocked_action_returns_tool_risk_blocked_without_confirmation()
         allowed_tools=["write_file"],
         workspace_boundary=WorkspaceBoundary(),
         audit_recorder=audit,
+        skip_high_risk_tool_confirmations=True,
     )
     execution_context = ToolExecutionContext(
         **{**base_context.__dict__, "confirmation_port": confirmations}

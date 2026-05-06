@@ -198,6 +198,9 @@ def template_write_request(
     provider_id: str = "provider-deepseek",
     auto_regression_enabled: bool = True,
     max_auto_regression_retries: int = 2,
+    max_react_iterations_per_stage: int = 30,
+    max_tool_calls_per_stage: int = 80,
+    skip_high_risk_tool_confirmations: bool = False,
 ) -> PipelineTemplateWriteRequest:
     return PipelineTemplateWriteRequest(
         name=name,
@@ -222,6 +225,9 @@ def template_write_request(
         approval_checkpoints=list(FIXED_APPROVAL_CHECKPOINTS),
         auto_regression_enabled=auto_regression_enabled,
         max_auto_regression_retries=max_auto_regression_retries,
+        max_react_iterations_per_stage=max_react_iterations_per_stage,
+        max_tool_calls_per_stage=max_tool_calls_per_stage,
+        skip_high_risk_tool_confirmations=skip_high_risk_tool_confirmations,
     )
 
 
@@ -315,6 +321,9 @@ def template_package_entry(
         ],
         "auto_regression_enabled": auto_regression_enabled,
         "max_auto_regression_retries": 1,
+        "max_react_iterations_per_stage": 25,
+        "max_tool_calls_per_stage": 55,
+        "skip_high_risk_tool_confirmations": True,
     }
 
 

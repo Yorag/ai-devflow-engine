@@ -257,6 +257,9 @@ export type PipelineTemplateRead = {
   approval_checkpoints: ApprovalType[];
   auto_regression_enabled: boolean;
   max_auto_regression_retries: number;
+  max_react_iterations_per_stage: number;
+  max_tool_calls_per_stage: number;
+  skip_high_risk_tool_confirmations: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -267,6 +270,9 @@ export type PipelineTemplateWriteRequest = {
   stage_role_bindings: StageRoleBinding[];
   auto_regression_enabled: boolean;
   max_auto_regression_retries: number;
+  max_react_iterations_per_stage: number;
+  max_tool_calls_per_stage: number;
+  skip_high_risk_tool_confirmations: boolean;
 };
 
 export type ModelRuntimeCapabilities = {
@@ -366,6 +372,9 @@ export type ConfigurationPackageTemplateConfig = {
   stage_role_bindings: StageRoleBinding[];
   auto_regression_enabled: boolean;
   max_auto_regression_retries: number;
+  max_react_iterations_per_stage: number;
+  max_tool_calls_per_stage: number;
+  skip_high_risk_tool_confirmations: boolean;
 };
 
 export type ConfigurationPackageImportRequest = {

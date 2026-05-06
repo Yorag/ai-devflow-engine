@@ -152,6 +152,9 @@ def test_project_session_template_models_express_control_history_boundary(tmp_pa
             approval_checkpoints=["solution_design_approval", "code_review_approval"],
             auto_regression_enabled=True,
             max_auto_regression_retries=2,
+            max_react_iterations_per_stage=30,
+            max_tool_calls_per_stage=80,
+            skip_high_risk_tool_confirmations=False,
             created_at=NOW,
             updated_at=NOW,
         )
@@ -182,6 +185,11 @@ def test_project_session_template_models_express_control_history_boundary(tmp_pa
     assert {"fixed_stage_sequence", "stage_role_bindings", "approval_checkpoints"}.issubset(
         template_columns
     )
+    assert {
+        "max_react_iterations_per_stage",
+        "max_tool_calls_per_stage",
+        "skip_high_risk_tool_confirmations",
+    }.issubset(template_columns)
     assert {
         "deletes_local_project_folder",
         "deletes_target_repository",

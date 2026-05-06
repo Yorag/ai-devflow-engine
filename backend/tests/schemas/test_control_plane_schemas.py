@@ -182,6 +182,9 @@ def test_pipeline_template_and_agent_role_schemas_keep_fixed_stage_contract() ->
         ],
         auto_regression_enabled=True,
         max_auto_regression_retries=2,
+        max_react_iterations_per_stage=30,
+        max_tool_calls_per_stage=80,
+        skip_high_risk_tool_confirmations=False,
         created_at=NOW,
         updated_at=NOW,
     )
@@ -221,6 +224,9 @@ def test_pipeline_template_and_agent_role_schemas_keep_fixed_stage_contract() ->
             ],
             auto_regression_enabled=False,
             max_auto_regression_retries=0,
+            max_react_iterations_per_stage=30,
+            max_tool_calls_per_stage=80,
+            skip_high_risk_tool_confirmations=False,
             created_at=NOW,
             updated_at=NOW,
         )
@@ -237,6 +243,9 @@ def test_pipeline_template_and_agent_role_schemas_keep_fixed_stage_contract() ->
             approval_checkpoints=[common.ApprovalType.SOLUTION_DESIGN_APPROVAL],
             auto_regression_enabled=False,
             max_auto_regression_retries=0,
+            max_react_iterations_per_stage=30,
+            max_tool_calls_per_stage=80,
+            skip_high_risk_tool_confirmations=False,
             created_at=NOW,
             updated_at=NOW,
         )
@@ -476,6 +485,9 @@ def test_configuration_package_schemas_allow_user_visible_config_only() -> None:
                 ],
                 "auto_regression_enabled": True,
                 "max_auto_regression_retries": 2,
+                "max_react_iterations_per_stage": 30,
+                "max_tool_calls_per_stage": 80,
+                "skip_high_risk_tool_confirmations": False,
             }
         ],
     }
@@ -496,6 +508,12 @@ def test_configuration_package_schemas_allow_user_visible_config_only() -> None:
     assert import_request.providers[0].api_key_ref == "env:DEEPSEEK_API_KEY"
     assert package_export.pipeline_templates[0].stage_role_bindings[0].role_id == (
         "role-requirement-analyst"
+    )
+    assert package_export.pipeline_templates[0].max_react_iterations_per_stage == 30
+    assert package_export.pipeline_templates[0].max_tool_calls_per_stage == 80
+    assert (
+        package_export.pipeline_templates[0].skip_high_risk_tool_confirmations
+        is False
     )
 
     package_with_defaulted_capabilities = deepcopy(package_payload)

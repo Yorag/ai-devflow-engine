@@ -148,9 +148,36 @@ export const mockDeletedSession: SessionRead = {
 };
 
 export const mockPipelineTemplates: PipelineTemplateRead[] = [
-  createTemplate("template-bugfix", "Bug 修复流程", "Diagnose and repair a defect."),
-  createTemplate("template-feature", "新功能开发流程", "Build a new feature."),
-  createTemplate("template-refactor", "重构流程", "Refactor existing code safely."),
+  createTemplate(
+    "template-bugfix",
+    "Bug 修复流程",
+    "Focused defect isolation with conservative tool use and regression depth.",
+    {
+      max_auto_regression_retries: 2,
+      max_react_iterations_per_stage: 24,
+      max_tool_calls_per_stage: 48,
+    },
+  ),
+  createTemplate(
+    "template-feature",
+    "新功能开发流程",
+    "Balanced feature delivery with enough iteration and tool budget for new behavior.",
+    {
+      max_auto_regression_retries: 1,
+      max_react_iterations_per_stage: 30,
+      max_tool_calls_per_stage: 80,
+    },
+  ),
+  createTemplate(
+    "template-refactor",
+    "重构流程",
+    "Behavior-preserving refactor flow with guarded execution and regression depth.",
+    {
+      max_auto_regression_retries: 2,
+      max_react_iterations_per_stage: 28,
+      max_tool_calls_per_stage: 60,
+    },
+  ),
 ];
 
 export const mockProviderList: ProviderRead[] = [
@@ -1332,6 +1359,9 @@ export const mockConfigurationPackageExport: ConfigurationPackageExport = {
       stage_role_bindings: createStageRoleBindings(),
       auto_regression_enabled: true,
       max_auto_regression_retries: 1,
+      max_react_iterations_per_stage: 30,
+      max_tool_calls_per_stage: 80,
+      skip_high_risk_tool_confirmations: false,
     },
   ],
 };
@@ -1389,6 +1419,12 @@ function createTemplate(
   templateId: string,
   name: string,
   description: string,
+  options: {
+    max_auto_regression_retries?: number;
+    max_react_iterations_per_stage?: number;
+    max_tool_calls_per_stage?: number;
+    skip_high_risk_tool_confirmations?: boolean;
+  } = {},
 ): PipelineTemplateRead {
   return {
     template_id: templateId,
@@ -1410,7 +1446,12 @@ function createTemplate(
       "code_review_approval",
     ],
     auto_regression_enabled: true,
-    max_auto_regression_retries: 1,
+    max_auto_regression_retries: options.max_auto_regression_retries ?? 1,
+    max_react_iterations_per_stage:
+      options.max_react_iterations_per_stage ?? 30,
+    max_tool_calls_per_stage: options.max_tool_calls_per_stage ?? 80,
+    skip_high_risk_tool_confirmations:
+      options.skip_high_risk_tool_confirmations ?? false,
     created_at: timestamp,
     updated_at: timestamp,
   };

@@ -92,6 +92,9 @@ def write_payload(name: str = "Custom feature flow") -> dict:
         ],
         "auto_regression_enabled": False,
         "max_auto_regression_retries": 3,
+        "max_react_iterations_per_stage": 25,
+        "max_tool_calls_per_stage": 55,
+        "skip_high_risk_tool_confirmations": True,
     }
 
 
@@ -519,7 +522,15 @@ def test_template_command_routes_are_documented_in_openapi(tmp_path: Path) -> No
         "stage_role_bindings",
         "auto_regression_enabled",
         "max_auto_regression_retries",
+        "max_react_iterations_per_stage",
+        "max_tool_calls_per_stage",
+        "skip_high_risk_tool_confirmations",
     }
+    assert {
+        "max_react_iterations_per_stage",
+        "max_tool_calls_per_stage",
+        "skip_high_risk_tool_confirmations",
+    }.issubset(schemas["PipelineTemplateRead"]["properties"])
     assert "template_source" not in schemas["PipelineTemplateWriteRequest"]["properties"]
     assert "base_template_id" not in schemas["PipelineTemplateWriteRequest"]["properties"]
     assert "role_name" not in schemas["PipelineTemplateWriteRequest"]["properties"]

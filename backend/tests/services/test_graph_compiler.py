@@ -29,6 +29,7 @@ def build_template_snapshot(
     *,
     run_id: str = "run-graph-1",
     fixed_stage_sequence: tuple[StageType, ...] = FIXED_STAGES,
+    skip_high_risk_tool_confirmations: bool = False,
 ) -> TemplateSnapshot:
     return TemplateSnapshot(
         snapshot_ref=f"template-snapshot-{run_id}",
@@ -53,6 +54,9 @@ def build_template_snapshot(
         ),
         auto_regression_enabled=True,
         max_auto_regression_retries=2,
+        max_react_iterations_per_stage=30,
+        max_tool_calls_per_stage=80,
+        skip_high_risk_tool_confirmations=skip_high_risk_tool_confirmations,
         created_at=NOW,
     )
 
@@ -299,6 +303,12 @@ def test_compile_populates_stage_contracts_with_fixed_allowed_tools_and_runtime_
         == "runtime-limit-snapshot-run-graph-1"
     )
     assert code_review_contract["runtime_limits"]["max_auto_regression_retries"] == 2
+    assert code_review_contract["runtime_limits"]["max_react_iterations_per_stage"] == 30
+    assert code_review_contract["runtime_limits"]["max_tool_calls_per_stage"] == 80
+    assert (
+        code_review_contract["runtime_limits"]["skip_high_risk_tool_confirmations"]
+        is False
+    )
     assert definition.stage_contracts[StageType.REQUIREMENT_ANALYSIS.value][
         "stage_responsibility"
     ] == "Understand the requirement, resolve scope ambiguity, and produce the requirement analysis artifact."
@@ -317,6 +327,23 @@ def test_compile_populates_stage_contracts_with_fixed_allowed_tools_and_runtime_
     assert definition.stage_contracts[StageType.DELIVERY_INTEGRATION.value][
         "stage_responsibility"
     ] == "Assemble the delivery record and route delivery through the configured integration path."
+
+
+def test_compile_carries_template_skip_high_risk_confirmation_policy() -> None:
+    from backend.app.services.graph_compiler import GraphCompiler
+
+    definition = GraphCompiler().compile(
+        template_snapshot=build_template_snapshot(
+            skip_high_risk_tool_confirmations=True
+        ),
+        runtime_limit_snapshot=build_runtime_limit_snapshot(),
+    )
+
+    for contract in definition.stage_contracts.values():
+        assert (
+            contract["runtime_limits"]["skip_high_risk_tool_confirmations"]
+            is True
+        )
 
 
 def test_compile_rejects_template_and_runtime_limit_run_id_mismatch() -> None:
@@ -415,6 +442,37 @@ def test_compile_rejects_retry_setting_drift_between_template_and_runtime_limit(
 
     assert error.value.error_code is ErrorCode.VALIDATION_ERROR
     assert "max_auto_regression_retries" in error.value.message
+
+
+@pytest.mark.parametrize(
+    ("field_name", "mismatched_value"),
+    [
+        ("max_react_iterations_per_stage", 29),
+        ("max_tool_calls_per_stage", 79),
+    ],
+)
+def test_compile_rejects_template_runtime_limit_drift_for_template_overrides(
+    field_name: str,
+    mismatched_value: int,
+) -> None:
+    from backend.app.services.graph_compiler import GraphCompiler, GraphCompilerError
+
+    mismatched_runtime_limit_snapshot = build_runtime_limit_snapshot().model_copy(
+        update={
+            "agent_limits": build_runtime_limit_snapshot().agent_limits.model_copy(
+                update={field_name: mismatched_value}
+            )
+        }
+    )
+
+    with pytest.raises(GraphCompilerError) as error:
+        GraphCompiler().compile(
+            template_snapshot=build_template_snapshot(),
+            runtime_limit_snapshot=mismatched_runtime_limit_snapshot,
+        )
+
+    assert error.value.error_code is ErrorCode.VALIDATION_ERROR
+    assert field_name in error.value.message
 
 
 def test_compile_emits_log_summary_for_success_and_failure() -> None:

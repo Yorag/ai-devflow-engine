@@ -91,6 +91,9 @@ def test_build_for_run_freezes_template_fields_before_later_template_mutation(
             binding["provider_id"] = f"provider-mutated-{index}"
         template.auto_regression_enabled = False
         template.max_auto_regression_retries = 99
+        template.max_react_iterations_per_stage = 99
+        template.max_tool_calls_per_stage = 199
+        template.skip_high_risk_tool_confirmations = True
         template.updated_at = LATER
         session.add(template)
         session.commit()
@@ -122,6 +125,9 @@ def test_build_for_run_freezes_template_fields_before_later_template_mutation(
     ] == source_bindings
     assert snapshot.auto_regression_enabled is True
     assert snapshot.max_auto_regression_retries == 1
+    assert snapshot.max_react_iterations_per_stage == 30
+    assert snapshot.max_tool_calls_per_stage == 80
+    assert snapshot.skip_high_risk_tool_confirmations is False
     dumped = snapshot.model_dump(mode="json")
     assert set(dumped) == {
         "snapshot_ref",
@@ -135,6 +141,9 @@ def test_build_for_run_freezes_template_fields_before_later_template_mutation(
         "approval_checkpoints",
         "auto_regression_enabled",
         "max_auto_regression_retries",
+        "max_react_iterations_per_stage",
+        "max_tool_calls_per_stage",
+        "skip_high_risk_tool_confirmations",
         "schema_version",
         "created_at",
     }
@@ -283,6 +292,63 @@ def test_builder_rejects_non_integer_auto_regression_retry_count(
             TemplateSnapshotBuilder.build_for_run(
                 template,
                 run_id="run-string-retry-count",
+                created_at=NOW,
+            )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "bad_value"),
+    [
+        ("max_react_iterations_per_stage", "30"),
+        ("max_tool_calls_per_stage", True),
+    ],
+)
+def test_builder_rejects_non_integer_template_runtime_limits(
+    tmp_path: Path,
+    field_name: str,
+    bad_value: object,
+) -> None:
+    from backend.app.domain.template_snapshot import TemplateSnapshotBuilder
+    from backend.app.services.templates import TemplateService
+
+    manager = build_manager(tmp_path)
+
+    with manager.session(DatabaseRole.CONTROL) as session:
+        template = TemplateService(
+            session,
+            audit_service=RecordingAuditService(),
+            now=lambda: NOW,
+        ).get_default_template(trace_context=build_trace())
+        setattr(template, field_name, bad_value)
+
+        with pytest.raises(ValueError, match=field_name):
+            TemplateSnapshotBuilder.build_for_run(
+                template,
+                run_id="run-invalid-template-runtime-limit",
+                created_at=NOW,
+            )
+
+
+def test_builder_rejects_non_boolean_skip_confirmation_policy(
+    tmp_path: Path,
+) -> None:
+    from backend.app.domain.template_snapshot import TemplateSnapshotBuilder
+    from backend.app.services.templates import TemplateService
+
+    manager = build_manager(tmp_path)
+
+    with manager.session(DatabaseRole.CONTROL) as session:
+        template = TemplateService(
+            session,
+            audit_service=RecordingAuditService(),
+            now=lambda: NOW,
+        ).get_default_template(trace_context=build_trace())
+        template.skip_high_risk_tool_confirmations = "true"
+
+        with pytest.raises(ValueError, match="skip_high_risk_tool_confirmations"):
+            TemplateSnapshotBuilder.build_for_run(
+                template,
+                run_id="run-invalid-skip-policy",
                 created_at=NOW,
             )
 

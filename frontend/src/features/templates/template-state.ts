@@ -14,6 +14,9 @@ export type TemplateDraftState = Pick<
   | "stage_role_bindings"
   | "auto_regression_enabled"
   | "max_auto_regression_retries"
+  | "max_react_iterations_per_stage"
+  | "max_tool_calls_per_stage"
+  | "skip_high_risk_tool_confirmations"
 >;
 export type TemplateGuardAction = "overwrite" | "save_as" | "discard";
 
@@ -39,6 +42,16 @@ export function createTemplateDraft(
     stage_role_bindings: cloneStageRoleBindings(template.stage_role_bindings),
     auto_regression_enabled: template.auto_regression_enabled,
     max_auto_regression_retries: template.max_auto_regression_retries,
+    max_react_iterations_per_stage: Number.isFinite(
+      template.max_react_iterations_per_stage,
+    )
+      ? template.max_react_iterations_per_stage
+      : 30,
+    max_tool_calls_per_stage: Number.isFinite(template.max_tool_calls_per_stage)
+      ? template.max_tool_calls_per_stage
+      : 80,
+    skip_high_risk_tool_confirmations:
+      template.skip_high_risk_tool_confirmations === true,
   };
 }
 
@@ -218,5 +231,9 @@ function serializeDraft(draft: TemplateDraftState): string {
     })),
     auto_regression_enabled: draft.auto_regression_enabled,
     max_auto_regression_retries: draft.max_auto_regression_retries,
+    max_react_iterations_per_stage: draft.max_react_iterations_per_stage,
+    max_tool_calls_per_stage: draft.max_tool_calls_per_stage,
+    skip_high_risk_tool_confirmations:
+      draft.skip_high_risk_tool_confirmations,
   });
 }

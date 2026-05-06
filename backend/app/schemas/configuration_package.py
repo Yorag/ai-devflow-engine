@@ -67,6 +67,9 @@ class ConfigurationPackageTemplateConfig(_StrictBaseModel):
     )
     auto_regression_enabled: bool
     max_auto_regression_retries: int = Field(ge=0)
+    max_react_iterations_per_stage: int = Field(gt=0)
+    max_tool_calls_per_stage: int = Field(gt=0)
+    skip_high_risk_tool_confirmations: bool
 
 
 class ConfigurationPackageImportRequest(_StrictBaseModel):

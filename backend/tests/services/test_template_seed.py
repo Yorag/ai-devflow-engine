@@ -94,7 +94,24 @@ def test_seed_system_templates_creates_three_templates_from_role_assets(
         "新功能开发流程",
         "重构流程",
     ]
-    assert [template.description for template in templates] == [None, None, None]
+    assert [template.description for template in templates] == [
+        "Focused defect isolation with conservative tool use and regression depth.",
+        "Balanced feature delivery with enough iteration and tool budget for new behavior.",
+        "Behavior-preserving refactor flow with guarded execution and regression depth.",
+    ]
+    assert [
+        template.max_react_iterations_per_stage
+        for template in templates
+    ] == [24, 30, 28]
+    assert [template.max_tool_calls_per_stage for template in templates] == [
+        48,
+        80,
+        60,
+    ]
+    assert [
+        template.skip_high_risk_tool_confirmations
+        for template in templates
+    ] == [False, False, False]
     assert all(
         template.template_source is TemplateSource.SYSTEM_TEMPLATE
         for template in templates
@@ -188,6 +205,90 @@ def test_seed_system_templates_is_idempotent_and_returns_ordered_rows(
         template.template_id for template in first
     ]
     assert len(audit.records) == 1
+
+
+def test_seed_system_templates_refreshes_existing_system_template_defaults(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from backend.app.services import templates as template_module
+    from backend.app.services.templates import TemplateService
+
+    manager = build_manager(tmp_path)
+    audit = RecordingAuditService()
+    with manager.session(DatabaseRole.CONTROL) as session:
+        for template_id in (
+            "template-bugfix",
+            "template-feature",
+            "template-refactor",
+        ):
+            session.add(
+                PipelineTemplateModel(
+                    template_id=template_id,
+                    name=template_id,
+                    description="Old indistinguishable template.",
+                    template_source=TemplateSource.SYSTEM_TEMPLATE,
+                    base_template_id=None,
+                    fixed_stage_sequence=[stage.value for stage in FIXED_STAGE_SEQUENCE],
+                    stage_role_bindings=[],
+                    approval_checkpoints=[
+                        checkpoint.value for checkpoint in FIXED_APPROVAL_CHECKPOINTS
+                    ],
+                    auto_regression_enabled=True,
+                    max_auto_regression_retries=1,
+                    max_react_iterations_per_stage=30,
+                    max_tool_calls_per_stage=80,
+                    skip_high_risk_tool_confirmations=True,
+                    created_at=NOW,
+                    updated_at=NOW,
+                )
+            )
+        session.commit()
+
+        def fail_asset_load() -> dict[str, object]:
+            raise RuntimeError("prompt assets should not be loaded")
+
+        monkeypatch.setattr(
+            template_module,
+            "load_default_agent_role_seed_assets",
+            fail_asset_load,
+        )
+
+        templates = TemplateService(
+            session,
+            audit_service=audit,
+            now=lambda: NOW,
+        ).seed_system_templates(trace_context=build_trace())
+
+    assert [template.name for template in templates] == [
+        "Bug 修复流程",
+        "新功能开发流程",
+        "重构流程",
+    ]
+    assert [template.description for template in templates] == [
+        "Focused defect isolation with conservative tool use and regression depth.",
+        "Balanced feature delivery with enough iteration and tool budget for new behavior.",
+        "Behavior-preserving refactor flow with guarded execution and regression depth.",
+    ]
+    assert [template.max_auto_regression_retries for template in templates] == [
+        2,
+        1,
+        2,
+    ]
+    assert [
+        template.max_react_iterations_per_stage
+        for template in templates
+    ] == [24, 30, 28]
+    assert [template.max_tool_calls_per_stage for template in templates] == [
+        48,
+        80,
+        60,
+    ]
+    assert [
+        template.skip_high_risk_tool_confirmations
+        for template in templates
+    ] == [False, False, False]
+    assert [record["action"] for record in audit.records] == ["template.seed_system"]
 
 
 def test_existing_templates_do_not_require_prompt_assets_for_read_paths(

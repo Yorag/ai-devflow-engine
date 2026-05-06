@@ -79,18 +79,35 @@ class RuntimeLimitSnapshotBuilder:
                 "Template snapshot run_id must match the PipelineRun run_id.",
             )
 
-        template_retries = cls._template_auto_regression_retries(template_snapshot)
-        platform_retries = current.agent_limits.max_auto_regression_retries
-        hard_retries = current.hard_limits.agent_limits.max_auto_regression_retries
-        if template_retries > platform_retries or template_retries > hard_retries:
-            raise RuntimeLimitSnapshotBuilderError(
-                ErrorCode.CONFIG_HARD_LIMIT_EXCEEDED,
-                "template max_auto_regression_retries exceeds the effective "
-                "platform runtime limit.",
-            )
+        template_overrides = {
+            "max_auto_regression_retries": cls._template_int(
+                template_snapshot,
+                "max_auto_regression_retries",
+                ge=0,
+            ),
+            "max_react_iterations_per_stage": cls._template_int(
+                template_snapshot,
+                "max_react_iterations_per_stage",
+                gt=0,
+            ),
+            "max_tool_calls_per_stage": cls._template_int(
+                template_snapshot,
+                "max_tool_calls_per_stage",
+                gt=0,
+            ),
+        }
+        for field_name, template_value in template_overrides.items():
+            platform_value = getattr(current.agent_limits, field_name)
+            hard_value = getattr(current.hard_limits.agent_limits, field_name)
+            if template_value > platform_value or template_value > hard_value:
+                raise RuntimeLimitSnapshotBuilderError(
+                    ErrorCode.CONFIG_HARD_LIMIT_EXCEEDED,
+                    f"template {field_name} exceeds the effective platform "
+                    "runtime limit.",
+                )
 
         agent_limits = current.agent_limits.model_dump(mode="python")
-        agent_limits["max_auto_regression_retries"] = template_retries
+        agent_limits.update(template_overrides)
         try:
             return RuntimeLimitSnapshot(
                 snapshot_id=_snapshot_id("runtime-limit-snapshot", run_id),
@@ -142,15 +159,30 @@ class RuntimeLimitSnapshotBuilder:
             )
 
     @staticmethod
-    def _template_auto_regression_retries(template_snapshot: object) -> int:
-        value = getattr(template_snapshot, "max_auto_regression_retries", None)
-        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+    def _template_int(
+        template_snapshot: object,
+        field_name: str,
+        *,
+        ge: int | None = None,
+        gt: int | None = None,
+    ) -> int:
+        value = getattr(template_snapshot, field_name, None)
+        if not isinstance(value, int) or isinstance(value, bool):
             raise RuntimeLimitSnapshotBuilderError(
                 ErrorCode.CONFIG_SNAPSHOT_UNAVAILABLE,
-                "Template max_auto_regression_retries is unavailable.",
+                f"Template {field_name} is unavailable.",
+            )
+        if ge is not None and value < ge:
+            raise RuntimeLimitSnapshotBuilderError(
+                ErrorCode.CONFIG_SNAPSHOT_UNAVAILABLE,
+                f"Template {field_name} is unavailable.",
+            )
+        if gt is not None and value <= gt:
+            raise RuntimeLimitSnapshotBuilderError(
+                ErrorCode.CONFIG_SNAPSHOT_UNAVAILABLE,
+                f"Template {field_name} is unavailable.",
             )
         return value
-
 
 def _snapshot_id(prefix: str, run_id: str) -> str:
     candidate = f"{prefix}-{run_id}"

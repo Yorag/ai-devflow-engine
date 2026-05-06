@@ -309,6 +309,13 @@ class PromptValidationService:
             max_auto_regression_retries=(
                 self._settings_read.agent_limits.max_auto_regression_retries
             ),
+            max_react_iterations_per_stage=(
+                self._settings_read.agent_limits.max_react_iterations_per_stage
+            ),
+            max_tool_calls_per_stage=(
+                self._settings_read.agent_limits.max_tool_calls_per_stage
+            ),
+            skip_high_risk_tool_confirmations=False,
             created_at=created_at,
         )
 

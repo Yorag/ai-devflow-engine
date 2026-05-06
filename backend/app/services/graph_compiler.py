@@ -63,20 +63,25 @@ class GraphCompiler:
                 "TemplateSnapshot.fixed_stage_sequence must match the Function One fixed stage order.",
             )
 
-        if (
-            template_snapshot.max_auto_regression_retries
-            != runtime_limit_snapshot.agent_limits.max_auto_regression_retries
+        for field_name in (
+            "max_auto_regression_retries",
+            "max_react_iterations_per_stage",
+            "max_tool_calls_per_stage",
         ):
+            template_value = getattr(template_snapshot, field_name)
+            runtime_value = getattr(runtime_limit_snapshot.agent_limits, field_name)
+            if template_value == runtime_value:
+                continue
             self._record(
                 status="failed",
                 run_id=template_snapshot.run_id,
                 error_code=ErrorCode.VALIDATION_ERROR.value,
-                reason="max_auto_regression_retries_mismatch",
+                reason=f"{field_name}_mismatch",
             )
             raise GraphCompilerError(
                 ErrorCode.VALIDATION_ERROR,
-                "TemplateSnapshot.max_auto_regression_retries must match "
-                "RuntimeLimitSnapshot.agent_limits.max_auto_regression_retries.",
+                f"TemplateSnapshot.{field_name} must match "
+                f"RuntimeLimitSnapshot.agent_limits.{field_name}.",
             )
 
         definition = GraphDefinition(
@@ -88,7 +93,10 @@ class GraphCompiler:
             stage_nodes=tuple(
                 self._build_stage_nodes(template_snapshot.auto_regression_enabled)
             ),
-            stage_contracts=self._build_stage_contracts(runtime_limit_snapshot),
+            stage_contracts=self._build_stage_contracts(
+                runtime_limit_snapshot,
+                template_snapshot=template_snapshot,
+            ),
             interrupt_policy=self._build_interrupt_policy(),
             retry_policy=self._build_retry_policy(
                 template_snapshot,
@@ -162,6 +170,8 @@ class GraphCompiler:
     def _build_stage_contracts(
         self,
         runtime_limit_snapshot: RuntimeLimitSnapshot,
+        *,
+        template_snapshot: TemplateSnapshot,
     ) -> dict[str, dict[str, object]]:
         def build_runtime_limits() -> dict[str, object]:
             return {
@@ -173,6 +183,7 @@ class GraphCompiler:
                 "max_auto_regression_retries": runtime_limit_snapshot.agent_limits.max_auto_regression_retries,
                 "max_clarification_rounds": runtime_limit_snapshot.agent_limits.max_clarification_rounds,
                 "max_no_progress_iterations": runtime_limit_snapshot.agent_limits.max_no_progress_iterations,
+                "skip_high_risk_tool_confirmations": template_snapshot.skip_high_risk_tool_confirmations,
             }
 
         allowed_tools = stage_allowed_tools()

@@ -762,6 +762,11 @@ class ConfigurationPackageService:
             ],
             "auto_regression_enabled": body.auto_regression_enabled,
             "max_auto_regression_retries": body.max_auto_regression_retries,
+            "max_react_iterations_per_stage": body.max_react_iterations_per_stage,
+            "max_tool_calls_per_stage": body.max_tool_calls_per_stage,
+            "skip_high_risk_tool_confirmations": (
+                body.skip_high_risk_tool_confirmations
+            ),
         }
         if existing is None:
             saved = PipelineTemplateModel(
@@ -824,6 +829,11 @@ class ConfigurationPackageService:
             ],
             auto_regression_enabled=template.auto_regression_enabled,
             max_auto_regression_retries=template.max_auto_regression_retries,
+            max_react_iterations_per_stage=template.max_react_iterations_per_stage,
+            max_tool_calls_per_stage=template.max_tool_calls_per_stage,
+            skip_high_risk_tool_confirmations=(
+                template.skip_high_risk_tool_confirmations
+            ),
         )
 
     def _export_delivery_channels(
@@ -1063,6 +1073,11 @@ class ConfigurationPackageService:
             approval_checkpoints=list(FIXED_APPROVAL_CHECKPOINTS),
             auto_regression_enabled=template.auto_regression_enabled,
             max_auto_regression_retries=template.max_auto_regression_retries,
+            max_react_iterations_per_stage=template.max_react_iterations_per_stage,
+            max_tool_calls_per_stage=template.max_tool_calls_per_stage,
+            skip_high_risk_tool_confirmations=(
+                template.skip_high_risk_tool_confirmations
+            ),
         )
 
     def _delivery_payload(

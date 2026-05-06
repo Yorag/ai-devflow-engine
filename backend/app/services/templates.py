@@ -93,7 +93,9 @@ TEMPLATE_SEEDS: tuple[dict[str, Any], ...] = (
     {
         "template_id": "template-bugfix",
         "name": "Bug 修复流程",
-        "description": None,
+        "description": (
+            "Focused defect isolation with conservative tool use and regression depth."
+        ),
         "provider_by_stage": {
             StageType.REQUIREMENT_ANALYSIS: "provider-deepseek",
             StageType.SOLUTION_DESIGN: "provider-deepseek",
@@ -104,11 +106,16 @@ TEMPLATE_SEEDS: tuple[dict[str, Any], ...] = (
         },
         "auto_regression_enabled": True,
         "max_auto_regression_retries": 2,
+        "max_react_iterations_per_stage": 24,
+        "max_tool_calls_per_stage": 48,
+        "skip_high_risk_tool_confirmations": False,
     },
     {
         "template_id": "template-feature",
         "name": "新功能开发流程",
-        "description": None,
+        "description": (
+            "Balanced feature delivery with enough iteration and tool budget for new behavior."
+        ),
         "provider_by_stage": {
             StageType.REQUIREMENT_ANALYSIS: "provider-deepseek",
             StageType.SOLUTION_DESIGN: "provider-deepseek",
@@ -119,11 +126,16 @@ TEMPLATE_SEEDS: tuple[dict[str, Any], ...] = (
         },
         "auto_regression_enabled": True,
         "max_auto_regression_retries": 1,
+        "max_react_iterations_per_stage": 30,
+        "max_tool_calls_per_stage": 80,
+        "skip_high_risk_tool_confirmations": False,
     },
     {
         "template_id": "template-refactor",
         "name": "重构流程",
-        "description": None,
+        "description": (
+            "Behavior-preserving refactor flow with guarded execution and regression depth."
+        ),
         "provider_by_stage": {
             StageType.REQUIREMENT_ANALYSIS: "provider-deepseek",
             StageType.SOLUTION_DESIGN: "provider-deepseek",
@@ -134,6 +146,9 @@ TEMPLATE_SEEDS: tuple[dict[str, Any], ...] = (
         },
         "auto_regression_enabled": True,
         "max_auto_regression_retries": 2,
+        "max_react_iterations_per_stage": 28,
+        "max_tool_calls_per_stage": 60,
+        "skip_high_risk_tool_confirmations": False,
     },
 )
 
@@ -260,21 +275,21 @@ class TemplateService:
         *,
         trace_context: TraceContext,
     ) -> list[PipelineTemplateModel]:
-        existing_ids = {
-            template_id
-            for (template_id,) in self._session.query(PipelineTemplateModel.template_id)
+        existing_templates = {
+            template.template_id: template
+            for template in self._session.query(PipelineTemplateModel)
             .filter(PipelineTemplateModel.template_id.in_(SYSTEM_TEMPLATE_IDS))
             .all()
         }
         missing_seeds = [
-            seed for seed in TEMPLATE_SEEDS if seed["template_id"] not in existing_ids
+            seed
+            for seed in TEMPLATE_SEEDS
+            if seed["template_id"] not in existing_templates
         ]
-        if not missing_seeds:
-            return self._ordered_system_templates()
 
-        assets = load_default_agent_role_seed_assets()
+        assets = load_default_agent_role_seed_assets() if missing_seeds else {}
         timestamp = self._now()
-        created: list[PipelineTemplateModel] = []
+        changed: list[PipelineTemplateModel] = []
         for seed in missing_seeds:
             template = PipelineTemplateModel(
                 template_id=seed["template_id"],
@@ -292,17 +307,35 @@ class TemplateService:
                 ],
                 auto_regression_enabled=seed["auto_regression_enabled"],
                 max_auto_regression_retries=seed["max_auto_regression_retries"],
+                max_react_iterations_per_stage=seed[
+                    "max_react_iterations_per_stage"
+                ],
+                max_tool_calls_per_stage=seed["max_tool_calls_per_stage"],
+                skip_high_risk_tool_confirmations=seed[
+                    "skip_high_risk_tool_confirmations"
+                ],
                 created_at=timestamp,
                 updated_at=timestamp,
             )
             self._session.add(template)
             self._session.flush()
-            created.append(template)
+            changed.append(template)
 
-        if created:
+        for seed in TEMPLATE_SEEDS:
+            template = existing_templates.get(seed["template_id"])
+            if template is None:
+                continue
+            if self._refresh_existing_system_template(
+                template,
+                seed=seed,
+                timestamp=timestamp,
+            ):
+                changed.append(template)
+
+        if changed:
             try:
                 self._record_seed_audit(
-                    templates=created,
+                    templates=changed,
                     trace_context=trace_context,
                 )
                 self._session.commit()
@@ -311,6 +344,44 @@ class TemplateService:
                 raise
 
         return self._ordered_system_templates()
+
+    def _refresh_existing_system_template(
+        self,
+        template: PipelineTemplateModel,
+        *,
+        seed: dict[str, Any],
+        timestamp: datetime,
+    ) -> bool:
+        updates: dict[str, Any] = {
+            "name": seed["name"],
+            "description": seed["description"],
+            "template_source": TemplateSource.SYSTEM_TEMPLATE,
+            "base_template_id": None,
+            "fixed_stage_sequence": [stage.value for stage in FIXED_STAGE_SEQUENCE],
+            "approval_checkpoints": [
+                checkpoint.value for checkpoint in FIXED_APPROVAL_CHECKPOINTS
+            ],
+            "auto_regression_enabled": seed["auto_regression_enabled"],
+            "max_auto_regression_retries": seed["max_auto_regression_retries"],
+            "max_react_iterations_per_stage": seed[
+                "max_react_iterations_per_stage"
+            ],
+            "max_tool_calls_per_stage": seed["max_tool_calls_per_stage"],
+            "skip_high_risk_tool_confirmations": seed[
+                "skip_high_risk_tool_confirmations"
+            ],
+        }
+        changed = False
+        for field_name, value in updates.items():
+            if getattr(template, field_name) == value:
+                continue
+            setattr(template, field_name, value)
+            changed = True
+        if changed:
+            template.updated_at = timestamp
+            self._session.add(template)
+            self._session.flush()
+        return changed
 
     def list_templates(
         self,
@@ -411,6 +482,9 @@ class TemplateService:
             ],
             auto_regression_enabled=body.auto_regression_enabled,
             max_auto_regression_retries=body.max_auto_regression_retries,
+            max_react_iterations_per_stage=body.max_react_iterations_per_stage,
+            max_tool_calls_per_stage=body.max_tool_calls_per_stage,
+            skip_high_risk_tool_confirmations=body.skip_high_risk_tool_confirmations,
             created_at=timestamp,
             updated_at=timestamp,
         )
@@ -492,6 +566,11 @@ class TemplateService:
         ]
         template.auto_regression_enabled = body.auto_regression_enabled
         template.max_auto_regression_retries = body.max_auto_regression_retries
+        template.max_react_iterations_per_stage = body.max_react_iterations_per_stage
+        template.max_tool_calls_per_stage = body.max_tool_calls_per_stage
+        template.skip_high_risk_tool_confirmations = (
+            body.skip_high_risk_tool_confirmations
+        )
         template.updated_at = self._now()
         self._session.add(template)
         self._session.flush()
@@ -786,6 +865,13 @@ class TemplateService:
             "provider_ids": provider_ids,
             "auto_regression_enabled": template.auto_regression_enabled,
             "max_auto_regression_retries": template.max_auto_regression_retries,
+            "max_react_iterations_per_stage": (
+                template.max_react_iterations_per_stage
+            ),
+            "max_tool_calls_per_stage": template.max_tool_calls_per_stage,
+            "skip_high_risk_tool_confirmations": (
+                template.skip_high_risk_tool_confirmations
+            ),
         }
 
     def _record_success(
