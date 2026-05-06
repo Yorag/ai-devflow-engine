@@ -31,7 +31,7 @@ from backend.app.services.publication_boundary import (
     PublicationBoundaryService,
     PublicationBoundaryServiceError,
 )
-from backend.app.services.sessions import SessionService
+from backend.app.services.sessions import DEFAULT_SESSION_DISPLAY_NAME, SessionService
 from backend.tests.projections.test_workspace_projection import _trace
 from backend.tests.services.test_start_first_run import (
     NOW,
@@ -424,6 +424,56 @@ def test_publish_startup_visibility_marks_session_running_and_exposes_run(
     assert publication is not None
     assert publication.publication_state == "published"
     assert publication.pending_session_id is None
+
+
+def test_publish_startup_visibility_does_not_auto_title_over_concurrent_rename(
+    tmp_path: Path,
+) -> None:
+    manager, session_id = _build_seeded_manager_with_draft_session(tmp_path)
+    seeded = _seed_pending_startup_product_set(manager, session_id=session_id)
+
+    with (
+        manager.session(DatabaseRole.CONTROL) as control_session,
+        manager.session(DatabaseRole.RUNTIME) as runtime_session,
+        manager.session(DatabaseRole.GRAPH) as graph_session,
+        manager.session(DatabaseRole.EVENT) as event_session,
+    ):
+        stale_session = control_session.get(SessionModel, session_id)
+        assert stale_session is not None
+        assert stale_session.display_name == DEFAULT_SESSION_DISPLAY_NAME
+
+        with manager.session(DatabaseRole.CONTROL) as concurrent_session:
+            renamed = concurrent_session.get(SessionModel, session_id)
+            assert renamed is not None
+            renamed.display_name = "Manual planning session"
+            concurrent_session.add(renamed)
+            concurrent_session.commit()
+
+        service = PublicationBoundaryService(
+            control_session=control_session,
+            runtime_session=runtime_session,
+            graph_session=graph_session,
+            event_session=event_session,
+            now=lambda: NOW,
+        )
+        service.publish_startup_visibility(
+            publication_id=seeded.publication_id,
+            session_id=seeded.session_id,
+            run_id=seeded.run_id,
+            stage_run_id=seeded.stage_run_id,
+            trace_context=build_trace(),
+            published_at=NOW,
+            session_display_name="Auto generated session name",
+            session_display_name_expected_current=DEFAULT_SESSION_DISPLAY_NAME,
+        )
+
+    with manager.session(DatabaseRole.CONTROL) as session:
+        saved_session = session.get(SessionModel, seeded.session_id)
+
+    assert saved_session is not None
+    assert saved_session.display_name == "Manual planning session"
+    assert saved_session.status is SessionStatus.RUNNING
+    assert saved_session.current_run_id == seeded.run_id
 
 
 def test_abort_startup_publication_deletes_staged_rows_and_marks_aborted(

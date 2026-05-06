@@ -48,6 +48,7 @@ from backend.app.services.templates import TemplateService, TemplateServiceError
 
 
 DEFAULT_SESSION_DISPLAY_NAME = "Untitled requirement"
+SESSION_AUTO_TITLE_MAX_LENGTH = 32
 PROJECT_NOT_FOUND_MESSAGE = "Project was not found."
 SESSION_NOT_FOUND_MESSAGE = "Session was not found."
 TEMPLATE_NOT_FOUND_MESSAGE = "Pipeline template was not found."
@@ -63,6 +64,15 @@ SESSION_RUNTIME_UNAVAILABLE_MESSAGE = (
 SESSION_DELETE_BLOCKED_ERROR_CODE = "session_active_run_blocks_delete"
 SESSION_DELETE_ACTION = "session.delete"
 SESSION_DELETE_REJECTED_ACTION = "session.delete.rejected"
+
+
+def session_auto_title_from_requirement(content: str) -> str:
+    normalized = " ".join(content.split())
+    if not normalized:
+        return DEFAULT_SESSION_DISPLAY_NAME
+    if len(normalized) <= SESSION_AUTO_TITLE_MAX_LENGTH:
+        return normalized
+    return f"{normalized[: SESSION_AUTO_TITLE_MAX_LENGTH - 3].rstrip()}..."
 
 
 class SessionServiceError(RuntimeError):
@@ -723,6 +733,11 @@ class SessionService:
                 TEMPLATE_NOT_FOUND_MESSAGE,
                 422,
             )
+        auto_display_name = (
+            session_auto_title_from_requirement(content)
+            if model.display_name == DEFAULT_SESSION_DISPLAY_NAME
+            else None
+        )
         try:
             result = RunLifecycleService(
                 control_session=self._session,
@@ -741,6 +756,8 @@ class SessionService:
                 content=content,
                 trace_context=trace_context,
                 runtime_settings_service=self._runtime_settings_service(),
+                session_display_name=auto_display_name,
+                session_display_name_expected_current=DEFAULT_SESSION_DISPLAY_NAME,
             )
         except RunLifecycleServiceError as exc:
             raise SessionServiceError(
@@ -922,6 +939,7 @@ class _TemplatePromptValidationAdapter:
 
 __all__ = [
     "DEFAULT_SESSION_DISPLAY_NAME",
+    "SESSION_AUTO_TITLE_MAX_LENGTH",
     "PROJECT_NOT_FOUND_MESSAGE",
     "SESSION_NOT_FOUND_MESSAGE",
     "SESSION_ALREADY_REMOVED_MESSAGE",
@@ -934,4 +952,5 @@ __all__ = [
     "SessionService",
     "SessionStartRunResult",
     "SessionServiceError",
+    "session_auto_title_from_requirement",
 ]

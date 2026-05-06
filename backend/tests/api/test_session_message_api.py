@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from backend.app.core.config import EnvironmentSettings
 from backend.app.db.base import DatabaseRole
-from backend.app.db.models.control import ControlBase, SessionModel
+from backend.app.db.models.control import ControlBase, ProviderModel, SessionModel
 from backend.app.db.models.event import DomainEventModel, EventBase
 from backend.app.db.models.graph import GraphBase, GraphDefinitionModel, GraphThreadModel
 from backend.app.db.models.log import AuditLogEntryModel, LogBase
@@ -36,7 +36,30 @@ def build_app(tmp_path: Path):
 def create_draft_session(client: TestClient) -> dict:
     response = client.post("/api/projects/project-default/sessions")
     assert response.status_code == 201
+    configure_required_providers(client.app)
     return response.json()
+
+
+def configure_required_providers(app) -> None:  # noqa: ANN001
+    with app.state.database_manager.session(DatabaseRole.CONTROL) as session:
+        providers = (
+            session.query(ProviderModel)
+            .filter(
+                ProviderModel.provider_id.in_(
+                    ["provider-deepseek", "provider-volcengine"]
+                )
+            )
+            .all()
+        )
+        assert {provider.provider_id for provider in providers} == {
+            "provider-deepseek",
+            "provider-volcengine",
+        }
+        for provider in providers:
+            provider.is_configured = True
+            provider.is_enabled = True
+            session.add(provider)
+        session.commit()
 
 
 def test_post_session_message_new_requirement_starts_first_run_and_returns_first_user_message(
@@ -133,6 +156,59 @@ def test_post_session_message_new_requirement_starts_first_run_and_returns_first
     assert audit.result is AuditResult.SUCCEEDED
     assert audit.request_id == "req-new-requirement"
     assert audit.correlation_id == "corr-new-requirement"
+
+
+def test_new_requirement_auto_titles_default_draft_session_and_list_reflects_name(
+    tmp_path: Path,
+) -> None:
+    app = build_app(tmp_path)
+    content = (
+        "Build   checkout\n\nworkspace history controls with very long trailing detail"
+    )
+    expected_title = "Build checkout workspace hist..."
+
+    with TestClient(app) as client:
+        created = create_draft_session(client)
+        response = client.post(
+            f"/api/sessions/{created['session_id']}/messages",
+            json={"message_type": "new_requirement", "content": content},
+        )
+        list_response = client.get("/api/projects/project-default/sessions")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session"]["session_id"] == created["session_id"]
+    assert body["session"]["display_name"] == expected_title
+
+    assert list_response.status_code == 200
+    listed = list_response.json()
+    assert listed[0]["session_id"] == created["session_id"]
+    assert listed[0]["display_name"] == expected_title
+
+
+def test_new_requirement_does_not_auto_title_renamed_session(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+
+    with TestClient(app) as client:
+        created = create_draft_session(client)
+        rename = client.patch(
+            f"/api/sessions/{created['session_id']}",
+            json={"display_name": "Manual planning session"},
+        )
+        assert rename.status_code == 200
+        response = client.post(
+            f"/api/sessions/{created['session_id']}/messages",
+            json={
+                "message_type": "new_requirement",
+                "content": "This text must not replace a user-selected name.",
+            },
+        )
+        list_response = client.get("/api/projects/project-default/sessions")
+
+    assert response.status_code == 200
+    assert response.json()["session"]["display_name"] == "Manual planning session"
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["display_name"] == "Manual planning session"
 
 
 def test_new_requirement_rejects_non_draft_or_existing_run_session(tmp_path: Path) -> None:

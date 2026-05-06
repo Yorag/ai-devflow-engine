@@ -4,7 +4,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import delete, insert, literal, select
+from sqlalchemy import case, delete, insert, literal, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -161,6 +161,8 @@ class PublicationBoundaryService:
         stage_run_id: str,
         trace_context: TraceContext,
         published_at: datetime,
+        session_display_name: str | None = None,
+        session_display_name_expected_current: str | None = None,
     ) -> PublishedStartupVisibility:
         del trace_context
         publication = self._require_publication(
@@ -177,25 +179,46 @@ class PublicationBoundaryService:
 
         self._assert_startup_product_set(run_id=run_id, stage_run_id=stage_run_id)
 
-        session = self._control_session.get(SessionModel, session_id)
-        if session is None or not session.is_visible:
-            raise PublicationBoundaryServiceError(
-                ErrorCode.NOT_FOUND,
-                "Session was not found.",
-                404,
-            )
-
-        session.status = SessionStatus.RUNNING
-        session.current_run_id = run_id
-        session.latest_stage_type = StageType.REQUIREMENT_ANALYSIS
-        session.updated_at = published_at
+        session_values = {
+            "status": SessionStatus.RUNNING,
+            "current_run_id": run_id,
+            "latest_stage_type": StageType.REQUIREMENT_ANALYSIS,
+            "updated_at": published_at,
+        }
+        if session_display_name is not None:
+            if session_display_name_expected_current is None:
+                session_values["display_name"] = session_display_name
+            else:
+                session_values["display_name"] = case(
+                    (
+                        SessionModel.display_name
+                        == session_display_name_expected_current,
+                        literal(session_display_name),
+                    ),
+                    else_=SessionModel.display_name,
+                )
         publication.publication_state = PUBLICATION_STATE_PUBLISHED
         publication.pending_session_id = None
         publication.published_at = published_at
         publication.updated_at = published_at
-        self._control_session.add(session)
-        self._control_session.add(publication)
         try:
+            result = self._control_session.execute(
+                update(SessionModel)
+                .where(
+                    SessionModel.session_id == session_id,
+                    SessionModel.is_visible.is_(True),
+                )
+                .values(**session_values)
+                .execution_options(synchronize_session=False)
+            )
+            if result.rowcount != 1:
+                self._control_session.rollback()
+                raise PublicationBoundaryServiceError(
+                    ErrorCode.NOT_FOUND,
+                    "Session was not found.",
+                    404,
+                )
+            self._control_session.add(publication)
             self._control_session.commit()
         except SQLAlchemyError as exc:
             self._control_session.rollback()
