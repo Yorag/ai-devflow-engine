@@ -179,7 +179,7 @@ describe("TemplateEditor", () => {
     expect(editor.textContent ?? "").not.toContain("provider-volcengine");
   });
 
-  it("shows generic unavailable provider copy when configured providers do not match", async () => {
+  it("moves stage bindings to the configured provider when saved providers do not match", async () => {
     const workspace = mockSessionWorkspaces["session-draft"];
     const providers: ProviderRead[] = [
       {
@@ -211,19 +211,19 @@ describe("TemplateEditor", () => {
     const providerSelect = within(editor).getByLabelText("Requirement Analysis provider");
 
     await waitFor(() => {
-      expect(providerSelect).toHaveProperty("value", "provider-deepseek");
+      expect(providerSelect).toHaveProperty("value", "provider-mimo");
     });
     expect(
       within(providerSelect).getByRole("option", { name: "MiMo" }),
     ).toBeTruthy();
     expect(
-      within(providerSelect).getByRole("option", {
+      within(providerSelect).queryByRole("option", {
         name: "Unavailable provider",
       }),
-    ).toBeTruthy();
+    ).toBeNull();
     expect(
-      within(editor).getByText("This template references unavailable providers."),
-    ).toBeTruthy();
+      within(editor).queryByText("This template references unavailable providers."),
+    ).toBeNull();
     expect(editor.textContent ?? "").not.toContain("provider-deepseek");
   });
 

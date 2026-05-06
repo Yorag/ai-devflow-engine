@@ -92,7 +92,12 @@ const providerTemplates: ProviderTemplate[] = [
     apiKeyRef: null,
     defaultModelId: "gpt-4.1",
     supportedModelIds: ["gpt-4.1"],
-    capabilities: [createDefaultCapability("gpt-4.1")],
+    capabilities: [
+      createDefaultCapability("gpt-4.1", {
+        supports_tool_calling: true,
+        supports_structured_output: true,
+      }),
+    ],
   },
 ];
 
@@ -397,6 +402,7 @@ function ProviderCard({
             <label>
               <span>Base URL</span>
               <input
+                placeholder="https://api.example.com/v1"
                 value={draft.baseUrl}
                 onChange={(event) => updateDraft({ baseUrl: event.target.value })}
               />
@@ -405,6 +411,7 @@ function ProviderCard({
               <span>API key</span>
               <input
                 autoComplete="new-password"
+                placeholder="sk-..."
                 type="password"
                 value={draft.apiKeyInput}
                 onChange={(event) =>
@@ -418,6 +425,7 @@ function ProviderCard({
             <label>
               <span>Supported models</span>
               <input
+                placeholder="model-a, model-b"
                 value={draft.supportedModels}
                 onChange={(event) =>
                   updateDraft({ supportedModels: event.target.value })
@@ -428,6 +436,7 @@ function ProviderCard({
               <span>Default model</span>
               <input
                 list={`provider-models-${provider.provider_id}`}
+                placeholder="model-a"
                 value={draft.defaultModel}
                 onChange={(event) =>
                   updateDraft({ defaultModel: event.target.value })
@@ -689,8 +698,8 @@ function createDefaultCapability(
     model_id: modelId,
     context_window_tokens: 128000,
     max_output_tokens: 4096,
-    supports_tool_calling: false,
-    supports_structured_output: false,
+    supports_tool_calling: true,
+    supports_structured_output: true,
     supports_native_reasoning: false,
     ...overrides,
   };

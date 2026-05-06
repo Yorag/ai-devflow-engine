@@ -166,16 +166,34 @@ export function resolveTemplateProviderBindings(
   template: PipelineTemplateRead,
   providers: ProviderRead[],
 ): PipelineTemplateRead {
-  void providers;
-  return template;
+  const resolvedBindings = resolveStageRoleBindingProviders(
+    template.stage_role_bindings,
+    providers,
+  );
+
+  return resolvedBindings === template.stage_role_bindings
+    ? template
+    : {
+        ...template,
+        stage_role_bindings: resolvedBindings,
+      };
 }
 
 export function resolveTemplateDraftProviders(
   draft: TemplateDraftState,
   providers: ProviderRead[],
 ): TemplateDraftState {
-  void providers;
-  return draft;
+  const resolvedBindings = resolveStageRoleBindingProviders(
+    draft.stage_role_bindings,
+    providers,
+  );
+
+  return resolvedBindings === draft.stage_role_bindings
+    ? draft
+    : {
+        ...draft,
+        stage_role_bindings: resolvedBindings,
+      };
 }
 
 export function unavailableTemplateProviderIds(
@@ -203,6 +221,36 @@ export function unavailableProviderMessage(providerIds: string[]): string {
   return providerIds.length > 0
     ? "This template references unavailable providers."
     : "No provider configured.";
+}
+
+function resolveStageRoleBindingProviders(
+  bindings: StageRoleBinding[],
+  providers: ProviderRead[],
+): StageRoleBinding[] {
+  const availableProviders = availableTemplateProviders(providers);
+  const fallbackProviderId = availableProviders[0]?.provider_id;
+
+  if (!fallbackProviderId) {
+    return bindings;
+  }
+
+  const availableProviderIds = new Set(
+    availableProviders.map((provider) => provider.provider_id),
+  );
+  let changed = false;
+  const resolvedBindings = bindings.map((binding) => {
+    if (availableProviderIds.has(binding.provider_id)) {
+      return binding;
+    }
+
+    changed = true;
+    return {
+      ...binding,
+      provider_id: fallbackProviderId,
+    };
+  });
+
+  return changed ? resolvedBindings : bindings;
 }
 
 function createDraftRecord(

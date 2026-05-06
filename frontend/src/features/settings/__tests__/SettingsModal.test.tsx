@@ -118,11 +118,13 @@ describe("SettingsModal", () => {
 
     const dialog = screen.getByRole("dialog", { name: "Settings" });
     expect(await within(dialog).findByDisplayValue("demo_delivery")).toBeTruthy();
-    fireEvent.change(within(dialog).getByLabelText("Repository"), {
-      target: { value: "example/new-repo" },
-    });
-    expect(within(dialog).getByDisplayValue("example/new-repo")).toBeTruthy();
     expect(within(dialog).getByText("ready")).toBeTruthy();
+    expect(within(dialog).queryByLabelText("Credential status")).toBeNull();
+    expect(within(dialog).queryByLabelText("SCM provider")).toBeNull();
+    expect(within(dialog).queryByLabelText("Repository")).toBeNull();
+    expect(within(dialog).queryByLabelText("Default branch")).toBeNull();
+    expect(within(dialog).queryByLabelText("Review request")).toBeNull();
+    expect(within(dialog).queryByLabelText("Credential reference")).toBeNull();
     expect(
       within(dialog).getByRole("button", { name: "Validate delivery channel" }),
     ).toBeTruthy();
@@ -147,6 +149,18 @@ describe("SettingsModal", () => {
     expect(within(dialog).getByDisplayValue("example/checkout-service")).toBeTruthy();
     expect(within(dialog).getByDisplayValue("main")).toBeTruthy();
     expect(within(dialog).getByDisplayValue("env:GITHUB_TOKEN")).toBeTruthy();
+    expect(within(dialog).getByLabelText("Repository")).toHaveProperty(
+      "placeholder",
+      "owner/repository",
+    );
+    expect(within(dialog).getByLabelText("Default branch")).toHaveProperty(
+      "placeholder",
+      "main",
+    );
+    expect(within(dialog).getByLabelText("Credential reference")).toHaveProperty(
+      "placeholder",
+      "env:GITHUB_TOKEN",
+    );
     expect(
       within(dialog).getByText("Credential reference cannot be resolved."),
     ).toBeTruthy();
@@ -434,13 +448,20 @@ describe("SettingsModal", () => {
     const miniCapabilities = await within(card).findByRole("group", {
       name: "Runtime capabilities for gpt-4.1-mini",
     });
+    expect(within(miniCapabilities).getByLabelText("Tool calling")).toHaveProperty(
+      "checked",
+      true,
+    );
+    expect(within(miniCapabilities).getByLabelText("Structured output")).toHaveProperty(
+      "checked",
+      true,
+    );
     fireEvent.change(within(miniCapabilities).getByLabelText("Context window"), {
       target: { value: "256000" },
     });
     fireEvent.change(within(miniCapabilities).getByLabelText("Max output tokens"), {
       target: { value: "16384" },
     });
-    fireEvent.click(within(miniCapabilities).getByLabelText("Tool calling"));
     fireEvent.click(within(miniCapabilities).getByLabelText("Native reasoning"));
     fireEvent.click(within(card).getByRole("button", { name: "Save" }));
 
@@ -471,6 +492,7 @@ describe("SettingsModal", () => {
       context_window_tokens: 256000,
       max_output_tokens: 16384,
       supports_tool_calling: true,
+      supports_structured_output: true,
       supports_native_reasoning: true,
     });
   });
@@ -692,6 +714,22 @@ describe("SettingsModal", () => {
     expect(within(dialog).queryByText("[configured:api_key]")).toBeNull();
     const providerCard = within(dialog).getByRole("article", { name: "火山引擎" });
     fireEvent.click(within(providerCard).getByRole("button", { name: "Configure" }));
+    expect(within(providerCard).getByLabelText("Base URL")).toHaveProperty(
+      "placeholder",
+      "https://api.example.com/v1",
+    );
+    expect(within(providerCard).getByLabelText("API key")).toHaveProperty(
+      "placeholder",
+      "sk-...",
+    );
+    expect(within(providerCard).getByLabelText("Supported models")).toHaveProperty(
+      "placeholder",
+      "model-a, model-b",
+    );
+    expect(within(providerCard).getByLabelText("Default model")).toHaveProperty(
+      "placeholder",
+      "model-a",
+    );
     fireEvent.change(
       within(providerCard).getByDisplayValue(
         "https://ark.cn-beijing.volces.com/api/v3",
@@ -751,6 +789,12 @@ describe("SettingsModal", () => {
     );
     expect(css).toMatch(
       /\.capability-toggle-row\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/u,
+    );
+    expect(css).toMatch(
+      /\.settings-form-grid input,\s*\.settings-form-grid select,\s*\.settings-form-grid output\s*\{[^}]*min-height:\s*34px;/u,
+    );
+    expect(css).toMatch(
+      /\.capability-grid__number-fields input\s*\{[^}]*min-height:\s*30px;/u,
     );
     expect(css).not.toMatch(/\.capability-grid__group\s*\{[^}]*border:/u);
     expect(css).not.toMatch(/\.capability-toggle-row label\s*\{[^}]*border:/u);

@@ -5,6 +5,7 @@ import { ErrorState } from "../errors/ErrorState";
 import {
   availableTemplateProviders,
   isTemplateDirty,
+  resolveTemplateDraftProviders,
   resolveTemplateStartGuard,
   unavailableProviderMessage,
   unavailableTemplateProviderIds,
@@ -45,24 +46,35 @@ export function TemplateEditor({
   isSaving = false,
   error = null,
 }: TemplateEditorProps): JSX.Element {
+  const resolvedDraft = useMemo(
+    () => resolveTemplateDraftProviders(draft, providers),
+    [draft, providers],
+  );
   const firstStageType =
     template.fixed_stage_sequence[0] ??
-    draft.stage_role_bindings[0]?.stage_type ??
+    resolvedDraft.stage_role_bindings[0]?.stage_type ??
     "requirement_analysis";
   const [activeStageType, setActiveStageType] = useState<StageType>(firstStageType);
-  const dirty = isTemplateDirty(template, draft);
-  const unavailableProviderIds = unavailableTemplateProviderIds(draft, providers);
+  const dirty = isTemplateDirty(template, resolvedDraft);
+  const unavailableProviderIds = unavailableTemplateProviderIds(
+    resolvedDraft,
+    providers,
+  );
   const guard = resolveTemplateStartGuard(template, dirty);
-  const retryError = getRetryValidationError(draft.max_auto_regression_retries);
-  const nameError = getTemplateNameValidationError(template, draft.name);
+  const retryError = getRetryValidationError(
+    resolvedDraft.max_auto_regression_retries,
+  );
+  const nameError = getTemplateNameValidationError(template, resolvedDraft.name);
   const providerOptions = availableTemplateProviders(providers);
   const noConfiguredProviders = providerOptions.length === 0;
   const activeBinding =
-    draft.stage_role_bindings.find(
+    resolvedDraft.stage_role_bindings.find(
       (binding) => binding.stage_type === activeStageType,
     ) ??
-    draft.stage_role_bindings.find((binding) => binding.stage_type === firstStageType) ??
-    draft.stage_role_bindings[0];
+    resolvedDraft.stage_role_bindings.find(
+      (binding) => binding.stage_type === firstStageType,
+    ) ??
+    resolvedDraft.stage_role_bindings[0];
   const activeStageLabel = activeBinding
     ? stageLabels[activeBinding.stage_type]
     : "Selected stage";
@@ -84,10 +96,18 @@ export function TemplateEditor({
   const stageSequence = useMemo(
     () =>
       template.fixed_stage_sequence.filter((stageType) =>
-        draft.stage_role_bindings.some((binding) => binding.stage_type === stageType),
+        resolvedDraft.stage_role_bindings.some(
+          (binding) => binding.stage_type === stageType,
+        ),
       ),
-    [draft.stage_role_bindings, template.fixed_stage_sequence],
+    [resolvedDraft.stage_role_bindings, template.fixed_stage_sequence],
   );
+
+  useEffect(() => {
+    if (resolvedDraft !== draft) {
+      onDraftChange(resolvedDraft);
+    }
+  }, [draft, onDraftChange, resolvedDraft]);
 
   useEffect(() => {
     setActiveStageType(firstStageType);
@@ -96,17 +116,17 @@ export function TemplateEditor({
   useEffect(() => {
     if (
       activeBinding ||
-      !draft.stage_role_bindings[0] ||
-      activeStageType === draft.stage_role_bindings[0].stage_type
+      !resolvedDraft.stage_role_bindings[0] ||
+      activeStageType === resolvedDraft.stage_role_bindings[0].stage_type
     ) {
       return;
     }
 
-    setActiveStageType(draft.stage_role_bindings[0].stage_type);
-  }, [activeBinding, activeStageType, draft.stage_role_bindings]);
+    setActiveStageType(resolvedDraft.stage_role_bindings[0].stage_type);
+  }, [activeBinding, activeStageType, resolvedDraft.stage_role_bindings]);
 
   function updateDraft(next: Partial<TemplateDraftState>) {
-    onDraftChange({ ...draft, ...next });
+    onDraftChange({ ...resolvedDraft, ...next });
   }
 
   function updateBinding(
@@ -114,7 +134,7 @@ export function TemplateEditor({
     nextBinding: Partial<TemplateDraftState["stage_role_bindings"][number]>,
   ) {
     updateDraft({
-      stage_role_bindings: draft.stage_role_bindings.map((binding) =>
+      stage_role_bindings: resolvedDraft.stage_role_bindings.map((binding) =>
         binding.stage_type === stageType ? { ...binding, ...nextBinding } : binding,
       ),
     });
@@ -141,7 +161,7 @@ export function TemplateEditor({
           <label>
             <span>Template name</span>
             <input
-              value={draft.name}
+              value={resolvedDraft.name}
               aria-invalid={Boolean(nameError)}
               onChange={(event) => updateDraft({ name: event.target.value })}
             />
@@ -153,7 +173,7 @@ export function TemplateEditor({
         <label className="template-editor__checkbox">
           <input
             type="checkbox"
-            checked={draft.auto_regression_enabled}
+            checked={resolvedDraft.auto_regression_enabled}
             onChange={(event) =>
               updateDraft({ auto_regression_enabled: event.target.checked })
             }
@@ -163,7 +183,7 @@ export function TemplateEditor({
         <label className="template-editor__checkbox">
           <input
             type="checkbox"
-            checked={draft.skip_high_risk_tool_confirmations}
+            checked={resolvedDraft.skip_high_risk_tool_confirmations}
             onChange={(event) =>
               updateDraft({
                 skip_high_risk_tool_confirmations: event.target.checked,
@@ -179,8 +199,8 @@ export function TemplateEditor({
             min="0"
             step="1"
             value={
-              Number.isFinite(draft.max_auto_regression_retries)
-                ? draft.max_auto_regression_retries
+              Number.isFinite(resolvedDraft.max_auto_regression_retries)
+                ? resolvedDraft.max_auto_regression_retries
                 : ""
             }
             aria-invalid={Boolean(retryError)}
@@ -350,7 +370,7 @@ function providerSelectValue(
   if (providerOptions.some((provider) => provider.provider_id === providerId)) {
     return providerId;
   }
-  return providerId || "";
+  return providerOptions[0]?.provider_id ?? "";
 }
 
 function getRetryValidationError(value: number): string | null {

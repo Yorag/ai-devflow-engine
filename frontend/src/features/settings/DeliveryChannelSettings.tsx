@@ -159,74 +159,81 @@ export function DeliveryChannelSettings({
           <span>Readiness</span>
           <output>{channel?.readiness_status ?? "unconfigured"}</output>
         </label>
-        <label>
-          <span>Credential status</span>
-          <output>
-            {channel?.credential_status
-              ? `credential ${channel.credential_status}`
-              : "credential unbound"}
-          </output>
-        </label>
-        <label>
-          <span>SCM provider</span>
-          <select
-            value={scmProviderType}
-            onChange={(event) => {
-              markDirty("scmProviderType");
-              setScmProviderType(event.target.value as ScmProviderType | "");
-            }}
-          >
-            <option value="">Not required</option>
-            <option value="github">github</option>
-            <option value="gitlab">gitlab</option>
-          </select>
-        </label>
-        <label>
-          <span>Repository</span>
-          <input
-            value={repositoryIdentifier}
-            onChange={(event) => {
-              markDirty("repositoryIdentifier");
-              setRepositoryIdentifier(event.target.value);
-            }}
-          />
-        </label>
-        <label>
-          <span>Default branch</span>
-          <input
-            value={defaultBranch}
-            onChange={(event) => {
-              markDirty("defaultBranch");
-              setDefaultBranch(event.target.value);
-            }}
-          />
-        </label>
-        <label>
-          <span>Review request</span>
-          <select
-            value={codeReviewRequestType}
-            onChange={(event) => {
-              markDirty("codeReviewRequestType");
-              setCodeReviewRequestType(
-                event.target.value as CodeReviewRequestType | "",
-              );
-            }}
-          >
-            <option value="">Not required</option>
-            <option value="pull_request">pull_request</option>
-            <option value="merge_request">merge_request</option>
-          </select>
-        </label>
-        <label>
-          <span>Credential reference</span>
-          <input
-            value={credentialRef}
-            onChange={(event) => {
-              markDirty("credentialRef");
-              setCredentialRef(event.target.value);
-            }}
-          />
-        </label>
+        {deliveryMode === "git_auto_delivery" ? (
+          <>
+            <label>
+              <span>Credential status</span>
+              <output>
+                {channel?.credential_status
+                  ? `credential ${channel.credential_status}`
+                  : "credential unbound"}
+              </output>
+            </label>
+            <label>
+              <span>SCM provider</span>
+              <select
+                value={scmProviderType}
+                onChange={(event) => {
+                  markDirty("scmProviderType");
+                  setScmProviderType(event.target.value as ScmProviderType | "");
+                }}
+              >
+                <option value="">Not required</option>
+                <option value="github">github</option>
+                <option value="gitlab">gitlab</option>
+              </select>
+            </label>
+            <label>
+              <span>Repository</span>
+              <input
+                placeholder="owner/repository"
+                value={repositoryIdentifier}
+                onChange={(event) => {
+                  markDirty("repositoryIdentifier");
+                  setRepositoryIdentifier(event.target.value);
+                }}
+              />
+            </label>
+            <label>
+              <span>Default branch</span>
+              <input
+                placeholder="main"
+                value={defaultBranch}
+                onChange={(event) => {
+                  markDirty("defaultBranch");
+                  setDefaultBranch(event.target.value);
+                }}
+              />
+            </label>
+            <label>
+              <span>Review request</span>
+              <select
+                value={codeReviewRequestType}
+                onChange={(event) => {
+                  markDirty("codeReviewRequestType");
+                  setCodeReviewRequestType(
+                    event.target.value as CodeReviewRequestType | "",
+                  );
+                }}
+              >
+                <option value="">Not required</option>
+                <option value="pull_request">pull_request</option>
+                <option value="merge_request">merge_request</option>
+              </select>
+            </label>
+            <label>
+              <span>Credential reference</span>
+              <input
+                placeholder="env:GITHUB_TOKEN"
+                value={credentialRef}
+                onChange={(event) => {
+                  markDirty("credentialRef");
+                  setCredentialRef(event.target.value);
+                }}
+              />
+            </label>
+          </>
+        ) : null}
       </div>
       {channel?.readiness_message ? (
         <p className="settings-inline-error">{channel.readiness_message}</p>
