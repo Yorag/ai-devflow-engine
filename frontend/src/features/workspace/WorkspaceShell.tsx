@@ -36,6 +36,7 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
   const [currentProjectId, setCurrentProjectId] = useState("");
   const [currentProject, setCurrentProject] = useState<ProjectRead | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState("");
+  const [isSessionSelectionCleared, setSessionSelectionCleared] = useState(false);
   const [templateSelections, setTemplateSelections] = useState<Record<string, string>>(
     {},
   );
@@ -51,10 +52,15 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
   const templatesQuery = usePipelineTemplatesQuery({ request });
   const providersQuery = useProvidersQuery({ request });
   const sessions = useMemo(() => sessionsQuery.data ?? [], [sessionsQuery.data]);
-  const selectedSession =
-    sessions.find((session) => session.session_id === currentSessionId) ??
-    sessions[0] ??
-    null;
+  const shouldAutoSelectSession =
+    currentSessionId === "" &&
+    !isSessionSelectionCleared &&
+    sessions.length > 0 &&
+    Boolean(projectId) &&
+    sessionsQuery.isSuccess;
+  const selectedSession = shouldAutoSelectSession
+    ? sessions[0]
+    : (sessions.find((session) => session.session_id === currentSessionId) ?? null);
   const sessionWorkspaceQuery = useSessionWorkspaceQuery(
     selectedSession?.session_id ?? "",
     { request },
@@ -168,11 +174,13 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
   function handleProjectChange(projectId: string) {
     setCurrentProjectId(projectId);
     setCurrentSessionId("");
+    setSessionSelectionCleared(false);
     inspector.close();
   }
 
   function handleSessionChange(sessionId: string) {
     setCurrentSessionId(sessionId);
+    setSessionSelectionCleared(sessionId === "");
     setTemplateChangeError(null);
     inspector.close();
   }

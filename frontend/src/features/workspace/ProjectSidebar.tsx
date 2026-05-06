@@ -278,7 +278,7 @@ export function ProjectSidebar({
             queryKey: apiQueryKeys.sessionWorkspace(session.session_id),
           });
           if (currentSessionId === session.session_id) {
-            onSessionChange(nextSessions[0]?.session_id ?? "");
+            onSessionChange("");
           }
           void queryClient.invalidateQueries({
             queryKey: apiQueryKeys.projectSessions(projectId),
