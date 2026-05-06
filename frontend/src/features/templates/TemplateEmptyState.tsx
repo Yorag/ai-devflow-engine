@@ -210,7 +210,7 @@ export function TemplateEmptyState({
 
       {selectedTemplate && draft && isDraft ? (
         <TemplateEditor
-          template={selectedTemplateDraftSource ?? selectedTemplate}
+          template={selectedTemplate}
           providers={providers}
           draft={draft}
           onDraftChange={setDraft}

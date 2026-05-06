@@ -87,6 +87,11 @@ def test_build_for_run_freezes_template_fields_before_later_template_mutation(
             created_at=NOW,
         )
 
+        template.run_auxiliary_model_binding = {
+            "provider_id": "provider-mutated",
+            "model_id": "mutated-chat",
+            "model_parameters": {"temperature": 1},
+        }
         for index, binding in enumerate(template.stage_role_bindings):
             binding["stage_work_instruction"] = f"# Mutated prompt {index}"
             binding["system_prompt"] = f"# Mutated prompt {index}"
@@ -132,6 +137,11 @@ def test_build_for_run_freezes_template_fields_before_later_template_mutation(
     assert snapshot.max_react_iterations_per_stage == 30
     assert snapshot.max_tool_calls_per_stage == 80
     assert snapshot.skip_high_risk_tool_confirmations is False
+    assert snapshot.run_auxiliary_model_binding.model_dump(mode="json") == {
+        "provider_id": "provider-deepseek",
+        "model_id": "deepseek-chat",
+        "model_parameters": {"temperature": 0},
+    }
     dumped = snapshot.model_dump(mode="json")
     assert set(dumped) == {
         "snapshot_ref",
@@ -142,6 +152,7 @@ def test_build_for_run_freezes_template_fields_before_later_template_mutation(
         "source_template_updated_at",
         "fixed_stage_sequence",
         "stage_role_bindings",
+        "run_auxiliary_model_binding",
         "approval_checkpoints",
         "auto_regression_enabled",
         "max_auto_regression_retries",

@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type { PipelineTemplateRead, ProviderRead, StageType } from "../../api/types";
+import type {
+  PipelineTemplateRead,
+  ProviderRead,
+  RunAuxiliaryModelBinding,
+  StageType,
+} from "../../api/types";
 import { ErrorState } from "../errors/ErrorState";
 import {
   availableTemplateProviders,
@@ -66,7 +71,12 @@ export function TemplateEditor({
   );
   const nameError = getTemplateNameValidationError(template, resolvedDraft.name);
   const providerOptions = availableTemplateProviders(providers);
+  const auxiliaryModelOptions = useMemo(
+    () => runAuxiliaryModelOptions(providerOptions),
+    [providerOptions],
+  );
   const noConfiguredProviders = providerOptions.length === 0;
+  const noRunAuxiliaryModels = auxiliaryModelOptions.length === 0;
   const activeBinding =
     resolvedDraft.stage_role_bindings.find(
       (binding) => binding.stage_type === activeStageType,
@@ -84,6 +94,7 @@ export function TemplateEditor({
     !retryError &&
     !nameError &&
     !noConfiguredProviders &&
+    !noRunAuxiliaryModels &&
     unavailableProviderIds.length === 0;
   const providerStatusReason =
     noConfiguredProviders || unavailableProviderIds.length > 0
@@ -156,8 +167,8 @@ export function TemplateEditor({
         </p>
       ))}
 
-      {template.template_source === "user_template" ? (
-        <div className="template-editor__global">
+      <div className="template-editor__global">
+        {template.template_source === "user_template" ? (
           <label>
             <span>Template name</span>
             <input
@@ -166,8 +177,51 @@ export function TemplateEditor({
               onChange={(event) => updateDraft({ name: event.target.value })}
             />
           </label>
-        </div>
-      ) : null}
+        ) : null}
+        <label>
+          <span>运行辅助模型</span>
+          <select
+            aria-label="运行辅助模型"
+            value={runAuxiliarySelectValue(
+              resolvedDraft.run_auxiliary_model_binding,
+              auxiliaryModelOptions,
+            )}
+            disabled={noRunAuxiliaryModels}
+            onChange={(event) => {
+              const option = auxiliaryModelOptions.find(
+                (candidate) => candidate.value === event.target.value,
+              );
+              if (!option) {
+                return;
+              }
+              updateDraft({
+                run_auxiliary_model_binding: {
+                  ...resolvedDraft.run_auxiliary_model_binding,
+                  provider_id: option.providerId,
+                  model_id: option.modelId,
+                  model_parameters: {
+                    ...resolvedDraft.run_auxiliary_model_binding.model_parameters,
+                    temperature:
+                      resolvedDraft.run_auxiliary_model_binding.model_parameters
+                        .temperature ?? 0,
+                  },
+                },
+              });
+            }}
+          >
+            {noRunAuxiliaryModels ? (
+              <option value="" disabled>
+                No provider model configured
+              </option>
+            ) : null}
+            {auxiliaryModelOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
 
       <div className="template-editor__policy-row">
         <label className="template-editor__checkbox">
@@ -371,6 +425,50 @@ function providerSelectValue(
     return providerId;
   }
   return providerOptions[0]?.provider_id ?? "";
+}
+
+type RunAuxiliaryModelOption = {
+  value: string;
+  label: string;
+  providerId: string;
+  modelId: string;
+};
+
+function runAuxiliaryModelOptions(
+  providers: ProviderRead[],
+): RunAuxiliaryModelOption[] {
+  return providers.flatMap((provider) =>
+    provider.supported_model_ids
+      .filter((modelId) =>
+        provider.runtime_capabilities.some(
+          (capability) => capability.model_id === modelId,
+        ),
+      )
+      .map((modelId) => ({
+        value: runAuxiliaryModelOptionValue(provider.provider_id, modelId),
+        label: `${provider.display_name} / ${modelId}`,
+        providerId: provider.provider_id,
+        modelId,
+      })),
+  );
+}
+
+function runAuxiliarySelectValue(
+  binding: RunAuxiliaryModelBinding,
+  options: RunAuxiliaryModelOption[],
+): string {
+  if (options.length === 0) {
+    return "";
+  }
+
+  const value = runAuxiliaryModelOptionValue(binding.provider_id, binding.model_id);
+  return options.some((option) => option.value === value)
+    ? value
+    : options[0].value;
+}
+
+function runAuxiliaryModelOptionValue(providerId: string, modelId: string): string {
+  return `${providerId}/${modelId}`;
 }
 
 function getRetryValidationError(value: number): string | null {

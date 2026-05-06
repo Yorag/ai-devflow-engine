@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,13 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.core.config import EnvironmentSettings
 from backend.app.db.base import DATABASE_FILE_NAMES, ROLE_METADATA, DatabaseRole
+
+
+DEFAULT_RUN_AUXILIARY_MODEL_BINDING = {
+    "provider_id": "provider-deepseek",
+    "model_id": "deepseek-chat",
+    "model_parameters": {"temperature": 0},
+}
 
 
 def _sqlite_url_for_path(path: Path) -> str:
@@ -206,3 +214,22 @@ def _upgrade_control_schema(engine: Engine) -> None:
                         "BOOLEAN NOT NULL DEFAULT 0"
                     )
                 )
+            if "run_auxiliary_model_binding" not in template_columns:
+                connection.execute(
+                    text(
+                        "ALTER TABLE pipeline_templates "
+                        "ADD COLUMN run_auxiliary_model_binding JSON"
+                    )
+                )
+            default_binding = json.dumps(
+                DEFAULT_RUN_AUXILIARY_MODEL_BINDING,
+                separators=(",", ":"),
+            )
+            connection.execute(
+                text(
+                    "UPDATE pipeline_templates "
+                    "SET run_auxiliary_model_binding = :binding "
+                    "WHERE run_auxiliary_model_binding IS NULL"
+                ),
+                {"binding": default_binding},
+            )

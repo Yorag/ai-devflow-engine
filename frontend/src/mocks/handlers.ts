@@ -79,6 +79,12 @@ function createMockRoutes(
   let providers = mockProviderList.map((provider) => ({ ...provider }));
   let templates = mockPipelineTemplates.map((template) => ({
     ...template,
+    run_auxiliary_model_binding: {
+      ...template.run_auxiliary_model_binding,
+      model_parameters: {
+        ...template.run_auxiliary_model_binding.model_parameters,
+      },
+    },
     stage_role_bindings: template.stage_role_bindings.map((binding) => ({
       ...binding,
     })),
@@ -540,6 +546,9 @@ function readTemplateWriteRequest(
   if (
     typeof candidate.name !== "string" ||
     !Array.isArray(candidate.stage_role_bindings) ||
+    !candidate.run_auxiliary_model_binding ||
+    typeof candidate.run_auxiliary_model_binding.provider_id !== "string" ||
+    typeof candidate.run_auxiliary_model_binding.model_id !== "string" ||
     typeof candidate.auto_regression_enabled !== "boolean" ||
     typeof candidate.max_auto_regression_retries !== "number" ||
     typeof candidate.max_react_iterations_per_stage !== "number" ||
@@ -561,6 +570,13 @@ function readTemplateWriteRequest(
         binding.stage_work_instruction || binding.system_prompt,
       system_prompt: binding.system_prompt || binding.stage_work_instruction,
     })),
+    run_auxiliary_model_binding: {
+      provider_id: candidate.run_auxiliary_model_binding.provider_id,
+      model_id: candidate.run_auxiliary_model_binding.model_id,
+      model_parameters: {
+        ...(candidate.run_auxiliary_model_binding.model_parameters ?? {}),
+      },
+    },
     auto_regression_enabled: candidate.auto_regression_enabled,
     max_auto_regression_retries: candidate.max_auto_regression_retries,
     max_react_iterations_per_stage: candidate.max_react_iterations_per_stage,

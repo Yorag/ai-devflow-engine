@@ -25,6 +25,14 @@ from backend.app.domain.enums import (
 JsonObject = dict[str, Any]
 
 
+def _default_run_auxiliary_model_binding() -> JsonObject:
+    return {
+        "provider_id": "provider-deepseek",
+        "model_id": "deepseek-chat",
+        "model_parameters": {"temperature": 0},
+    }
+
+
 def _contract_enum(enum_type: type, name: str) -> SqlEnum:
     return SqlEnum(
         enum_type,
@@ -81,6 +89,11 @@ class PipelineTemplateModel(ControlBase, TimestampMixin):
     )
     fixed_stage_sequence: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     stage_role_bindings: Mapped[list[JsonObject]] = mapped_column(JSON, nullable=False)
+    run_auxiliary_model_binding: Mapped[JsonObject] = mapped_column(
+        JSON,
+        nullable=False,
+        default=_default_run_auxiliary_model_binding,
+    )
     approval_checkpoints: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     auto_regression_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
     max_auto_regression_retries: Mapped[int] = mapped_column(Integer, nullable=False)

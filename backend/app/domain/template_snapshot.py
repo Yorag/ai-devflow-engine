@@ -11,6 +11,7 @@ from backend.app.domain.enums import ApprovalType, StageType, TemplateSource
 from backend.app.schemas.template import (
     FIXED_APPROVAL_CHECKPOINTS,
     FIXED_STAGE_SEQUENCE,
+    default_run_auxiliary_model_binding,
 )
 
 
@@ -34,6 +35,22 @@ class StageRoleSnapshot(BaseModel):
         return value
 
 
+class RunAuxiliaryModelBindingSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    provider_id: StrictStr = Field(min_length=1)
+    model_id: StrictStr = Field(min_length=1)
+    model_parameters: dict[str, object] = Field(default_factory=dict)
+
+
+def _default_run_auxiliary_model_binding_snapshot() -> (
+    RunAuxiliaryModelBindingSnapshot
+):
+    return RunAuxiliaryModelBindingSnapshot.model_validate(
+        default_run_auxiliary_model_binding().model_dump(mode="python")
+    )
+
+
 class TemplateSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -45,6 +62,9 @@ class TemplateSnapshot(BaseModel):
     source_template_updated_at: datetime
     fixed_stage_sequence: tuple[StageType, ...]
     stage_role_bindings: tuple[StageRoleSnapshot, ...]
+    run_auxiliary_model_binding: RunAuxiliaryModelBindingSnapshot = Field(
+        default_factory=_default_run_auxiliary_model_binding_snapshot
+    )
     approval_checkpoints: tuple[ApprovalType, ...]
     auto_regression_enabled: StrictBool
     max_auto_regression_retries: StrictInt = Field(ge=0)
@@ -207,6 +227,9 @@ class TemplateSnapshotBuilder:
                 StageType(stage) for stage in list(template.fixed_stage_sequence)
             ),
             stage_role_bindings=bindings,
+            run_auxiliary_model_binding=(
+                TemplateSnapshotBuilder._run_auxiliary_model_binding(template)
+            ),
             approval_checkpoints=tuple(
                 ApprovalType(checkpoint)
                 for checkpoint in list(template.approval_checkpoints)
@@ -234,9 +257,21 @@ class TemplateSnapshotBuilder:
             created_at=created_at,
         )
 
+    @staticmethod
+    def _run_auxiliary_model_binding(
+        template: Any,
+    ) -> RunAuxiliaryModelBindingSnapshot:
+        value = getattr(template, "run_auxiliary_model_binding", None)
+        if value is None:
+            return _default_run_auxiliary_model_binding_snapshot()
+        if not isinstance(value, dict):
+            raise ValueError("run_auxiliary_model_binding must be an object")
+        return RunAuxiliaryModelBindingSnapshot.model_validate(value)
+
 
 __all__ = [
     "TEMPLATE_SNAPSHOT_SCHEMA_VERSION",
+    "RunAuxiliaryModelBindingSnapshot",
     "StageRoleSnapshot",
     "TemplateSnapshot",
     "TemplateSnapshotBuilder",

@@ -39,6 +39,7 @@ from backend.app.domain.provider_call_policy_snapshot import (
     ProviderCallPolicySnapshotBuilderError,
 )
 from backend.app.domain.provider_snapshot import (
+    INTERNAL_MODEL_BINDING_TYPES,
     InternalModelBindingSelection,
     ModelBindingSnapshot,
     ModelBindingSnapshotBuilder,
@@ -401,7 +402,10 @@ class RunLifecycleService:
                 run_id=run_id,
                 created_at=started_at,
             )
-            internal_bindings = self._internal_bindings_from_settings(settings_read)
+            internal_bindings = self._internal_bindings_for_run(
+                settings_read,
+                template_snapshot,
+            )
             required_providers = self._load_required_providers(
                 template_snapshot=template_snapshot,
                 internal_bindings=internal_bindings,
@@ -2796,6 +2800,23 @@ class RunLifecycleService:
             provider_id: tuple(dict.fromkeys(model_ids))
             for provider_id, model_ids in by_provider.items()
         }
+
+    @staticmethod
+    def _internal_bindings_for_run(
+        settings_read,
+        template_snapshot: TemplateSnapshot,
+    ) -> tuple[InternalModelBindingSelection, ...]:
+        del settings_read
+        binding = template_snapshot.run_auxiliary_model_binding
+        return tuple(
+            InternalModelBindingSelection(
+                binding_type=binding_type,
+                provider_id=binding.provider_id,
+                model_id=binding.model_id,
+                model_parameters=dict(binding.model_parameters),
+            )
+            for binding_type in INTERNAL_MODEL_BINDING_TYPES
+        )
 
     @staticmethod
     def _internal_bindings_from_settings(settings_read) -> tuple[InternalModelBindingSelection, ...]:

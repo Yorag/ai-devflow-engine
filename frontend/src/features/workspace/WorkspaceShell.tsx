@@ -482,6 +482,7 @@ function createTemplateWriteRequest(
     name: draft.name.trim(),
     description: draft.description,
     stage_role_bindings: draft.stage_role_bindings,
+    run_auxiliary_model_binding: draft.run_auxiliary_model_binding,
     auto_regression_enabled: draft.auto_regression_enabled,
     max_auto_regression_retries: draft.max_auto_regression_retries,
     max_react_iterations_per_stage: draft.max_react_iterations_per_stage,

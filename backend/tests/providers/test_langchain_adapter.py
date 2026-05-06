@@ -374,6 +374,42 @@ def test_invoke_structured_returns_normalized_tool_call_requests_and_usage() -> 
     assert result.raw_response_ref.startswith("sha256:")
 
 
+def test_invoke_structured_adds_title_to_bare_json_schema() -> None:
+    from backend.app.providers.langchain_adapter import LangChainProviderAdapter
+
+    captured: dict[str, object] = {}
+    fake_provider = fake_provider_fixture()
+
+    def factory(_config, _timeout, _max_tokens):
+        model = _FakeStructuredModel({"summary": "done"})
+        captured["model"] = model
+        return model
+
+    adapter = LangChainProviderAdapter(
+        provider_config=fake_provider.config,
+        provider_call_policy_snapshot=provider_policy_snapshot(),
+        chat_model_factory=factory,
+    )
+
+    result = adapter.invoke_structured(
+        messages=(SystemMessage(content="system"), HumanMessage(content="user")),
+        response_schema={"type": "object", "additionalProperties": True},
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        tool_descriptions=(),
+        trace_context=trace_context(),
+    )
+
+    model = captured["model"]
+    assert isinstance(model, _FakeStructuredModel)
+    assert model.structured_schema == {
+        "title": "AgentDecision",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": True,
+    }
+    assert result.structured_output == {"summary": "done"}
+
+
 def test_invoke_structured_respects_smaller_requested_output_budget() -> None:
     from backend.app.providers.langchain_adapter import LangChainProviderAdapter
 

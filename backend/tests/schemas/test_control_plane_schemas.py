@@ -144,6 +144,7 @@ def test_pipeline_template_and_agent_role_schemas_keep_fixed_stage_contract() ->
     from backend.app.schemas.template import (
         AgentRoleConfig,
         PipelineTemplateRead,
+        RunAuxiliaryModelBinding,
         StageRoleBinding,
     )
 
@@ -176,6 +177,11 @@ def test_pipeline_template_and_agent_role_schemas_keep_fixed_stage_contract() ->
         base_template_id=None,
         fixed_stage_sequence=FIXED_STAGE_SEQUENCE,
         stage_role_bindings=[binding],
+        run_auxiliary_model_binding=RunAuxiliaryModelBinding(
+            provider_id="provider-deepseek",
+            model_id="deepseek-chat",
+            model_parameters={"temperature": 0},
+        ),
         approval_checkpoints=[
             common.ApprovalType.SOLUTION_DESIGN_APPROVAL,
             common.ApprovalType.CODE_REVIEW_APPROVAL,
@@ -204,6 +210,11 @@ def test_pipeline_template_and_agent_role_schemas_keep_fixed_stage_contract() ->
         "stage_work_instruction": "Analyze the requirement and produce structured acceptance criteria.",
         "system_prompt": "Analyze the requirement and produce structured acceptance criteria.",
         "provider_id": "provider-deepseek",
+    }
+    assert dumped["run_auxiliary_model_binding"] == {
+        "provider_id": "provider-deepseek",
+        "model_id": "deepseek-chat",
+        "model_parameters": {"temperature": 0},
     }
     assert dumped["approval_checkpoints"] == [
         "solution_design_approval",

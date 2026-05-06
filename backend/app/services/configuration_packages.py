@@ -35,6 +35,7 @@ from backend.app.schemas.configuration_package import (
     ConfigurationPackageImportResult,
     ConfigurationPackageModelRuntimeCapabilities,
     ConfigurationPackageProvider,
+    ConfigurationPackageRunAuxiliaryModelBinding,
     ConfigurationPackageScope,
     ConfigurationPackageTemplateConfig,
     ConfigurationPackageTemplateSlotConfig,
@@ -51,6 +52,7 @@ from backend.app.schemas.template import (
     FIXED_APPROVAL_CHECKPOINTS,
     FIXED_STAGE_SEQUENCE,
     PipelineTemplateWriteRequest,
+    default_run_auxiliary_model_binding,
 )
 from backend.app.services.delivery_channels import (
     BLOCKED_CREDENTIAL_REF,
@@ -72,6 +74,7 @@ from backend.app.services.providers import (
 )
 from backend.app.services.templates import (
     INVALID_TEMPLATE_MESSAGE,
+    RUN_AUXILIARY_UNSUPPORTED_MODEL_MESSAGE,
     UNKNOWN_PROVIDER_MESSAGE,
     TemplateService,
 )
@@ -368,12 +371,18 @@ class ConfigurationPackageService:
             for provider in package.providers
             if provider.is_enabled
         }
+        import_provider_model_ids = {
+            provider.provider_id: set(provider.supported_model_ids)
+            for provider in package.providers
+            if provider.is_enabled
+        }
         for index, template in enumerate(package.pipeline_templates):
             errors.extend(
                 self._validate_template(
                     template,
                     index=index,
                     import_provider_ids=import_provider_ids,
+                    import_provider_model_ids=import_provider_model_ids,
                 )
             )
         return errors
@@ -537,6 +546,7 @@ class ConfigurationPackageService:
         *,
         index: int,
         import_provider_ids: set[str],
+        import_provider_model_ids: dict[str, set[str]],
     ) -> list[ConfigurationPackageFieldError]:
         if template.template_source is TemplateSource.SYSTEM_TEMPLATE:
             return [
@@ -574,7 +584,11 @@ class ConfigurationPackageService:
                 )
             ]
 
-        provider_ids = {binding["provider_id"] for binding in bindings}
+        auxiliary_provider_id = body.run_auxiliary_model_binding.provider_id
+        provider_ids = {
+            *(binding["provider_id"] for binding in bindings),
+            auxiliary_provider_id,
+        }
         existing_provider_ids = {
             provider_id
             for (provider_id,) in self._session.query(ProviderModel.provider_id)
@@ -591,6 +605,33 @@ class ConfigurationPackageService:
                     UNKNOWN_PROVIDER_MESSAGE,
                 )
             ]
+        auxiliary_model_id = body.run_auxiliary_model_binding.model_id
+        if auxiliary_provider_id in import_provider_ids:
+            if auxiliary_model_id not in import_provider_model_ids.get(
+                auxiliary_provider_id,
+                set(),
+            ):
+                return [
+                    self._field_error(
+                        f"pipeline_templates[{index}].run_auxiliary_model_binding",
+                        RUN_AUXILIARY_UNSUPPORTED_MODEL_MESSAGE,
+                    )
+                ]
+        else:
+            auxiliary_provider = self._session.get(
+                ProviderModel,
+                auxiliary_provider_id,
+            )
+            if (
+                auxiliary_provider is not None
+                and auxiliary_model_id not in auxiliary_provider.supported_model_ids
+            ):
+                return [
+                    self._field_error(
+                        f"pipeline_templates[{index}].run_auxiliary_model_binding",
+                        RUN_AUXILIARY_UNSUPPORTED_MODEL_MESSAGE,
+                    )
+                ]
         return []
 
     def _apply_validated_package(
@@ -752,11 +793,17 @@ class ConfigurationPackageService:
             }
             for binding in bindings
         ]
+        auxiliary_binding = body.run_auxiliary_model_binding.model_dump(mode="python")
+        auxiliary_binding["provider_id"] = provider_id_map.get(
+            auxiliary_binding["provider_id"],
+            auxiliary_binding["provider_id"],
+        )
         payload = {
             "name": body.name,
             "description": body.description,
             "fixed_stage_sequence": [stage.value for stage in FIXED_STAGE_SEQUENCE],
             "stage_role_bindings": bindings,
+            "run_auxiliary_model_binding": auxiliary_binding,
             "approval_checkpoints": [
                 checkpoint.value for checkpoint in FIXED_APPROVAL_CHECKPOINTS
             ],
@@ -835,6 +882,12 @@ class ConfigurationPackageService:
                 )
                 for binding in template.stage_role_bindings
             ],
+            run_auxiliary_model_binding=(
+                ConfigurationPackageRunAuxiliaryModelBinding.model_validate(
+                    template.run_auxiliary_model_binding
+                    or default_run_auxiliary_model_binding().model_dump(mode="python")
+                )
+            ),
             auto_regression_enabled=template.auto_regression_enabled,
             max_auto_regression_retries=template.max_auto_regression_retries,
             max_react_iterations_per_stage=template.max_react_iterations_per_stage,
@@ -1078,6 +1131,9 @@ class ConfigurationPackageService:
                 binding.model_dump(mode="python")
                 for binding in template.stage_role_bindings
             ],
+            run_auxiliary_model_binding=(
+                template.run_auxiliary_model_binding.model_dump(mode="python")
+            ),
             approval_checkpoints=list(FIXED_APPROVAL_CHECKPOINTS),
             auto_regression_enabled=template.auto_regression_enabled,
             max_auto_regression_retries=template.max_auto_regression_retries,

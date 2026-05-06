@@ -283,6 +283,8 @@ def _create_user_template_with_provider(
     *,
     template_id: str,
     provider_id: str,
+    auxiliary_provider_id: str | None = None,
+    auxiliary_model_id: str | None = None,
 ) -> PipelineTemplateModel:
     source = session.get(PipelineTemplateModel, "template-feature")
     assert source is not None
@@ -297,6 +299,15 @@ def _create_user_template_with_provider(
             {**binding, "provider_id": provider_id}
             for binding in source.stage_role_bindings
         ],
+        run_auxiliary_model_binding=(
+            {
+                "provider_id": auxiliary_provider_id,
+                "model_id": auxiliary_model_id,
+                "model_parameters": {"temperature": 0},
+            }
+            if auxiliary_provider_id is not None and auxiliary_model_id is not None
+            else dict(source.run_auxiliary_model_binding)
+        ),
         approval_checkpoints=list(source.approval_checkpoints),
         auto_regression_enabled=source.auto_regression_enabled,
         max_auto_regression_retries=source.max_auto_regression_retries,
@@ -683,6 +694,107 @@ def test_session_service_start_run_from_new_requirement_respects_injected_creden
         )
 
     assert any(snapshot.provider_id == "provider-team" for snapshot in snapshots)
+
+
+def test_session_service_start_run_uses_template_auxiliary_model_binding(
+    tmp_path: Path,
+) -> None:
+    from backend.app.services.sessions import SessionService
+
+    settings = build_settings(tmp_path).model_copy(
+        update={
+            "credential_env_prefixes": (
+                "TEAM_PROVIDER_",
+                "OPENAI_",
+                "DEEPSEEK_",
+                "VOLCENGINE_",
+            )
+        }
+    )
+    manager = build_manager(settings)
+    audit = RecordingAuditService()
+    log_writer = RecordingLogWriter()
+
+    with manager.session(DatabaseRole.CONTROL) as control_session:
+        seed_control_plane(
+            control_session,
+            settings=settings,
+            audit=audit,
+            log_writer=log_writer,
+        )
+        for provider in control_session.query(ProviderModel).all():
+            provider.is_configured = False
+            provider.is_enabled = False
+            control_session.add(provider)
+        control_session.add(_build_team_provider())
+        team_template = _create_user_template_with_provider(
+            control_session,
+            template_id="template-team-auxiliary-model",
+            provider_id="provider-team",
+            auxiliary_provider_id="provider-team",
+            auxiliary_model_id="team-chat",
+        )
+        control_session.add(team_template)
+        control_session.commit()
+
+        draft = SessionService(
+            control_session,
+            audit_service=audit,
+            now=lambda: NOW,
+        ).create_session(
+            project_id="project-default",
+            trace_context=build_trace(),
+        )
+        draft.selected_template_id = team_template.template_id
+        draft.updated_at = NOW
+        control_session.add(draft)
+        control_session.commit()
+
+        runtime_session = manager.session(DatabaseRole.RUNTIME)
+        event_session = manager.session(DatabaseRole.EVENT)
+        graph_session = manager.session(DatabaseRole.GRAPH)
+        try:
+            result = SessionService(
+                control_session,
+                runtime_session=runtime_session,
+                event_session=event_session,
+                graph_session=graph_session,
+                audit_service=audit,
+                log_writer=log_writer,
+                environment_settings=settings,
+                now=lambda: NOW,
+            ).start_run_from_new_requirement(
+                session_id=draft.session_id,
+                content="Use the template auxiliary model binding.",
+                trace_context=build_trace(),
+            )
+        finally:
+            runtime_session.close()
+            event_session.close()
+            graph_session.close()
+
+    with manager.session(DatabaseRole.RUNTIME) as session:
+        internal_bindings = (
+            session.query(ModelBindingSnapshotModel)
+            .filter(
+                ModelBindingSnapshotModel.run_id == result.run.run_id,
+                ModelBindingSnapshotModel.binding_type.in_(
+                    [
+                        "context_compression",
+                        "structured_output_repair",
+                        "validation_pass",
+                    ]
+                ),
+            )
+            .order_by(ModelBindingSnapshotModel.binding_type.asc())
+            .all()
+        )
+        provider_ids = {binding.provider_id for binding in internal_bindings}
+        model_ids = {binding.model_id for binding in internal_bindings}
+
+    assert len(internal_bindings) == 3
+    assert provider_ids == {"provider-team"}
+    assert model_ids == {"team-chat"}
 
 
 def test_session_service_start_run_rejects_unavailable_internal_model_bindings(

@@ -31,6 +31,7 @@ def _pipeline_template_read(template: Any) -> PipelineTemplateRead:
             "base_template_id": template.base_template_id,
             "fixed_stage_sequence": template.fixed_stage_sequence,
             "stage_role_bindings": template.stage_role_bindings,
+            "run_auxiliary_model_binding": template.run_auxiliary_model_binding,
             "approval_checkpoints": template.approval_checkpoints,
             "auto_regression_enabled": template.auto_regression_enabled,
             "max_auto_regression_retries": template.max_auto_regression_retries,

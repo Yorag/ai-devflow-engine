@@ -1702,7 +1702,13 @@ a {
   box-shadow: 0 1px 4px oklch(38% 0.025 248 / 0.12);
 }
 
-.template-editor__global,
+.template-editor__global {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
 .template-editor-stage__fields {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

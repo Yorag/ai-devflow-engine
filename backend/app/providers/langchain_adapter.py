@@ -168,8 +168,9 @@ class LangChainProviderAdapter:
             return chat_model
         if not hasattr(chat_model, "with_structured_output"):
             return chat_model
+        normalized_schema = self._structured_output_schema(response_schema)
         return chat_model.with_structured_output(
-            response_schema,
+            normalized_schema,
             include_raw=True,
             strict=True,
         )
@@ -578,6 +579,21 @@ class LangChainProviderAdapter:
         if requested_max_output_tokens is None:
             return self.provider_config.max_output_tokens
         return min(self.provider_config.max_output_tokens, requested_max_output_tokens)
+
+    def _structured_output_schema(self, response_schema: JsonObject) -> JsonObject:
+        schema = dict(response_schema)
+        schema.setdefault("title", self._structured_output_schema_title())
+        schema.setdefault("properties", {})
+        return schema
+
+    def _structured_output_schema_title(self) -> str:
+        if self.provider_config.binding_type == "context_compression":
+            return "CompressedContextBlock"
+        if self.provider_config.binding_type == "structured_output_repair":
+            return "StructuredOutputRepair"
+        if self.provider_config.binding_type == "validation_pass":
+            return "ValidationPass"
+        return "AgentDecision"
 
     def _normalize_response(self, raw_response: Any) -> dict[str, Any]:
         if (

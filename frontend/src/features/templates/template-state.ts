@@ -4,6 +4,7 @@ import type {
   PipelineTemplateRead,
   PipelineTemplateWriteRequest,
   ProviderRead,
+  RunAuxiliaryModelBinding,
   StageRoleBinding,
 } from "../../api/types";
 
@@ -12,6 +13,7 @@ export type TemplateDraftState = Pick<
   | "name"
   | "description"
   | "stage_role_bindings"
+  | "run_auxiliary_model_binding"
   | "auto_regression_enabled"
   | "max_auto_regression_retries"
   | "max_react_iterations_per_stage"
@@ -24,6 +26,12 @@ export type TemplateStartGuard = {
   canStart: boolean;
   reason: string | null;
   actions: TemplateGuardAction[];
+};
+
+const DEFAULT_RUN_AUXILIARY_MODEL_BINDING: RunAuxiliaryModelBinding = {
+  provider_id: "provider-deepseek",
+  model_id: "deepseek-chat",
+  model_parameters: { temperature: 0 },
 };
 
 type TemplateDraftRecord = {
@@ -40,6 +48,9 @@ export function createTemplateDraft(
     name: template.name,
     description: template.description,
     stage_role_bindings: cloneStageRoleBindings(template.stage_role_bindings),
+    run_auxiliary_model_binding: cloneRunAuxiliaryModelBinding(
+      template.run_auxiliary_model_binding,
+    ),
     auto_regression_enabled: template.auto_regression_enabled,
     max_auto_regression_retries: template.max_auto_regression_retries,
     max_react_iterations_per_stage: Number.isFinite(
@@ -158,6 +169,17 @@ export function cloneStageRoleBindings(
   return bindings.map((binding) => normalizeStageRoleBinding(binding));
 }
 
+export function cloneRunAuxiliaryModelBinding(
+  binding: RunAuxiliaryModelBinding | null | undefined,
+): RunAuxiliaryModelBinding {
+  const source = binding ?? DEFAULT_RUN_AUXILIARY_MODEL_BINDING;
+  return {
+    provider_id: source.provider_id,
+    model_id: source.model_id,
+    model_parameters: { ...source.model_parameters },
+  };
+}
+
 export function availableTemplateProviders(providers: ProviderRead[]): ProviderRead[] {
   return providers.filter((provider) => provider.is_enabled);
 }
@@ -170,12 +192,18 @@ export function resolveTemplateProviderBindings(
     template.stage_role_bindings,
     providers,
   );
+  const resolvedAuxiliaryBinding = resolveRunAuxiliaryModelBindingProvider(
+    template.run_auxiliary_model_binding,
+    providers,
+  );
 
-  return resolvedBindings === template.stage_role_bindings
+  return resolvedBindings === template.stage_role_bindings &&
+    resolvedAuxiliaryBinding === template.run_auxiliary_model_binding
     ? template
     : {
         ...template,
         stage_role_bindings: resolvedBindings,
+        run_auxiliary_model_binding: resolvedAuxiliaryBinding,
       };
 }
 
@@ -187,12 +215,18 @@ export function resolveTemplateDraftProviders(
     draft.stage_role_bindings,
     providers,
   );
+  const resolvedAuxiliaryBinding = resolveRunAuxiliaryModelBindingProvider(
+    draft.run_auxiliary_model_binding,
+    providers,
+  );
 
-  return resolvedBindings === draft.stage_role_bindings
+  return resolvedBindings === draft.stage_role_bindings &&
+    resolvedAuxiliaryBinding === draft.run_auxiliary_model_binding
     ? draft
     : {
         ...draft,
         stage_role_bindings: resolvedBindings,
+        run_auxiliary_model_binding: resolvedAuxiliaryBinding,
       };
 }
 
@@ -208,12 +242,23 @@ export function unavailableTemplateProviderIds(
   const availableProviderIds = new Set(
     availableProviders.map((provider) => provider.provider_id),
   );
+  const unavailableIds = draft.stage_role_bindings
+    .map((binding) => binding.provider_id)
+    .filter((providerId) => !availableProviderIds.has(providerId));
+  const auxiliaryProvider = availableProviders.find(
+    (provider) =>
+      provider.provider_id === draft.run_auxiliary_model_binding.provider_id,
+  );
+  if (
+    !auxiliaryProvider ||
+    !providerModelIds(auxiliaryProvider).includes(
+      draft.run_auxiliary_model_binding.model_id,
+    )
+  ) {
+    unavailableIds.push(draft.run_auxiliary_model_binding.provider_id);
+  }
   return Array.from(
-    new Set(
-      draft.stage_role_bindings
-        .map((binding) => binding.provider_id)
-        .filter((providerId) => !availableProviderIds.has(providerId)),
-    ),
+    new Set(unavailableIds),
   );
 }
 
@@ -253,6 +298,46 @@ function resolveStageRoleBindingProviders(
   return changed ? resolvedBindings : bindings;
 }
 
+function resolveRunAuxiliaryModelBindingProvider(
+  binding: RunAuxiliaryModelBinding,
+  providers: ProviderRead[],
+): RunAuxiliaryModelBinding {
+  const availableProviders = availableTemplateProviders(providers);
+  const fallbackProvider = availableProviders.find(
+    (provider) => providerModelIds(provider).length > 0,
+  );
+
+  if (!fallbackProvider) {
+    return binding;
+  }
+
+  const currentProvider = availableProviders.find(
+    (provider) => provider.provider_id === binding.provider_id,
+  );
+  const currentModelIds = currentProvider ? providerModelIds(currentProvider) : [];
+
+  if (currentProvider && currentModelIds.includes(binding.model_id)) {
+    return binding;
+  }
+
+  const fallbackModelId =
+    providerModelIds(fallbackProvider)[0] ?? fallbackProvider.default_model_id;
+  return {
+    ...binding,
+    provider_id: fallbackProvider.provider_id,
+    model_id: fallbackModelId,
+  };
+}
+
+function providerModelIds(provider: ProviderRead): string[] {
+  const capabilityModelIds = provider.runtime_capabilities.map(
+    (capability) => capability.model_id,
+  );
+  return provider.supported_model_ids.filter((modelId) =>
+    capabilityModelIds.includes(modelId),
+  );
+}
+
 function createDraftRecord(
   template: PipelineTemplateRead | null,
   scopeId: string,
@@ -278,6 +363,11 @@ function serializeDraft(draft: TemplateDraftState): string {
       system_prompt: binding.system_prompt,
       provider_id: binding.provider_id,
     })),
+    run_auxiliary_model_binding: {
+      provider_id: draft.run_auxiliary_model_binding.provider_id,
+      model_id: draft.run_auxiliary_model_binding.model_id,
+      model_parameters: draft.run_auxiliary_model_binding.model_parameters,
+    },
     auto_regression_enabled: draft.auto_regression_enabled,
     max_auto_regression_retries: draft.max_auto_regression_retries,
     max_react_iterations_per_stage: draft.max_react_iterations_per_stage,

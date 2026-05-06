@@ -247,6 +247,12 @@ export type StageRoleBinding = {
   provider_id: string;
 };
 
+export type RunAuxiliaryModelBinding = {
+  provider_id: string;
+  model_id: string;
+  model_parameters: Record<string, unknown>;
+};
+
 export type PipelineTemplateRead = {
   template_id: string;
   name: string;
@@ -255,6 +261,7 @@ export type PipelineTemplateRead = {
   base_template_id: string | null;
   fixed_stage_sequence: StageType[];
   stage_role_bindings: StageRoleBinding[];
+  run_auxiliary_model_binding: RunAuxiliaryModelBinding;
   approval_checkpoints: ApprovalType[];
   auto_regression_enabled: boolean;
   max_auto_regression_retries: number;
@@ -269,6 +276,7 @@ export type PipelineTemplateWriteRequest = {
   name: string;
   description?: string | null;
   stage_role_bindings: StageRoleBinding[];
+  run_auxiliary_model_binding: RunAuxiliaryModelBinding;
   auto_regression_enabled: boolean;
   max_auto_regression_retries: number;
   max_react_iterations_per_stage: number;
@@ -371,6 +379,7 @@ export type ConfigurationPackageTemplateConfig = {
   name: string;
   template_source: TemplateSource;
   stage_role_bindings: StageRoleBinding[];
+  run_auxiliary_model_binding?: RunAuxiliaryModelBinding;
   auto_regression_enabled: boolean;
   max_auto_regression_retries: number;
   max_react_iterations_per_stage: number;

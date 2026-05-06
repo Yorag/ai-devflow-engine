@@ -155,6 +155,8 @@ def write_request(
     *,
     name: str = "Custom feature flow",
     provider_id: str = "provider-custom",
+    auxiliary_provider_id: str = "provider-custom",
+    auxiliary_model_id: str = "custom-chat",
     max_react_iterations_per_stage: int = 25,
     max_tool_calls_per_stage: int = 55,
     skip_high_risk_tool_confirmations: bool = True,
@@ -179,6 +181,11 @@ def write_request(
                 (FIXED_STAGE_SEQUENCE[5], "role-code-reviewer"),
             ]
         ],
+        run_auxiliary_model_binding={
+            "provider_id": auxiliary_provider_id,
+            "model_id": auxiliary_model_id,
+            "model_parameters": {"temperature": 0},
+        },
         approval_checkpoints=list(FIXED_APPROVAL_CHECKPOINTS),
         auto_regression_enabled=False,
         max_auto_regression_retries=3,
@@ -224,6 +231,11 @@ def test_save_as_user_template_from_system_template_creates_user_template_and_au
     assert saved.name == "Custom feature flow"
     assert saved.description == "Team-owned feature template"
     assert saved.fixed_stage_sequence == [stage.value for stage in FIXED_STAGE_SEQUENCE]
+    assert saved.run_auxiliary_model_binding == {
+        "provider_id": "provider-custom",
+        "model_id": "custom-chat",
+        "model_parameters": {"temperature": 0},
+    }
     assert saved.approval_checkpoints == [
         checkpoint.value for checkpoint in FIXED_APPROVAL_CHECKPOINTS
     ]
@@ -263,6 +275,10 @@ def test_save_as_user_template_from_system_template_creates_user_template_and_au
         "role-code-reviewer",
     ]
     assert record["metadata"]["provider_ids"] == ["provider-custom"]
+    assert record["metadata"]["run_auxiliary_model_binding"] == {
+        "provider_id": "provider-custom",
+        "model_id": "custom-chat",
+    }
     assert record["metadata"]["max_react_iterations_per_stage"] == 25
     assert record["metadata"]["max_tool_calls_per_stage"] == 55
     assert record["metadata"]["skip_high_risk_tool_confirmations"] is True
@@ -344,6 +360,8 @@ def test_patch_user_template_updates_allowed_fields_keeps_identity_and_audits(
             body=write_request(
                 name="Updated flow",
                 provider_id="provider-deepseek",
+                auxiliary_provider_id="provider-deepseek",
+                auxiliary_model_id="deepseek-chat",
                 max_react_iterations_per_stage=20,
                 max_tool_calls_per_stage=40,
                 skip_high_risk_tool_confirmations=False,
@@ -360,6 +378,11 @@ def test_patch_user_template_updates_allowed_fields_keeps_identity_and_audits(
     assert {binding["provider_id"] for binding in updated.stage_role_bindings} == {
         "provider-deepseek"
     }
+    assert updated.run_auxiliary_model_binding == {
+        "provider_id": "provider-deepseek",
+        "model_id": "deepseek-chat",
+        "model_parameters": {"temperature": 0},
+    }
     assert updated.max_react_iterations_per_stage == 20
     assert updated.max_tool_calls_per_stage == 40
     assert updated.skip_high_risk_tool_confirmations is False
@@ -369,6 +392,10 @@ def test_patch_user_template_updates_allowed_fields_keeps_identity_and_audits(
     assert records[0]["target_id"] == created.template_id
     assert records[0]["metadata"]["template_id"] == created.template_id
     assert records[0]["metadata"]["base_template_id"] == "template-feature"
+    assert records[0]["metadata"]["run_auxiliary_model_binding"] == {
+        "provider_id": "provider-deepseek",
+        "model_id": "deepseek-chat",
+    }
     assert records[0]["metadata"]["max_react_iterations_per_stage"] == 20
     assert records[0]["metadata"]["max_tool_calls_per_stage"] == 40
     assert records[0]["metadata"]["skip_high_risk_tool_confirmations"] is False
@@ -472,6 +499,18 @@ def test_missing_source_and_unknown_provider_are_rejected_and_audited(
                 body=write_request(provider_id="provider-missing"),
                 trace_context=build_trace(),
             )
+        with pytest.raises(TemplateServiceError) as missing_auxiliary_provider:
+            service.save_as_user_template(
+                source_template_id="template-feature",
+                body=write_request(auxiliary_provider_id="provider-missing"),
+                trace_context=build_trace(),
+            )
+        with pytest.raises(TemplateServiceError) as unsupported_auxiliary_model:
+            service.save_as_user_template(
+                source_template_id="template-feature",
+                body=write_request(auxiliary_model_id="custom-missing-model"),
+                trace_context=build_trace(),
+            )
 
         user_count = (
             session.query(PipelineTemplateModel)
@@ -486,6 +525,16 @@ def test_missing_source_and_unknown_provider_are_rejected_and_audited(
     assert missing_provider.value.status_code == 422
     assert missing_provider.value.message == (
         "Pipeline template references an unknown Provider."
+    )
+    assert missing_auxiliary_provider.value.error_code is ErrorCode.VALIDATION_ERROR
+    assert missing_auxiliary_provider.value.status_code == 422
+    assert missing_auxiliary_provider.value.message == (
+        "Pipeline template references an unknown Provider."
+    )
+    assert unsupported_auxiliary_model.value.error_code is ErrorCode.VALIDATION_ERROR
+    assert unsupported_auxiliary_model.value.status_code == 422
+    assert unsupported_auxiliary_model.value.message == (
+        "Pipeline template run auxiliary model is not supported by the selected Provider."
     )
     assert user_count == 0
     assert _action_records(audit, "template.save_as.rejected")

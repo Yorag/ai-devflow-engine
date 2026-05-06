@@ -239,7 +239,99 @@ describe("TemplateEditor", () => {
     expect(
       within(editor).queryByText("This template references unavailable providers."),
     ).toBeNull();
+    expect(within(editor).getByText("Unsaved")).toBeTruthy();
+    expect(
+      within(editor).getByText(
+        "Unsaved edits will not affect this session until you save as a user template.",
+      ),
+    ).toBeTruthy();
     expect(editor.textContent ?? "").not.toContain("provider-deepseek");
+  });
+
+  it("exposes one template-level run auxiliary model dropdown and saves the selected model", async () => {
+    const workspace = mockSessionWorkspaces["session-draft"];
+    const providers: ProviderRead[] = [
+      {
+        ...mockProviderList[2],
+        provider_id: "provider-mimo",
+        display_name: "MiMo",
+        default_model_id: "MiMo-V2.5",
+        supported_model_ids: ["MiMo-V2.5", "MiMo-V2.5-Pro"],
+        runtime_capabilities: [
+          {
+            ...mockProviderList[2].runtime_capabilities[0],
+            model_id: "MiMo-V2.5",
+          },
+          {
+            ...mockProviderList[2].runtime_capabilities[0],
+            model_id: "MiMo-V2.5-Pro",
+          },
+        ],
+      },
+    ];
+    const templateWithAuxiliaryModel = {
+      ...mockPipelineTemplates[1],
+      run_auxiliary_model_binding: {
+        provider_id: "provider-mimo",
+        model_id: "MiMo-V2.5",
+        model_parameters: { temperature: 0 },
+      },
+      stage_role_bindings: mockPipelineTemplates[1].stage_role_bindings.map(
+        (binding) => ({
+          ...binding,
+          provider_id: "provider-mimo",
+        }),
+      ),
+    };
+    let savedTemplate: PipelineTemplateRead | null = null;
+
+    renderWithAppProviders(
+      <TemplateEmptyState
+        session={workspace.session}
+        templates={[templateWithAuxiliaryModel]}
+        providers={providers}
+        selectedTemplateId={templateWithAuxiliaryModel.template_id}
+        onTemplateChange={() => undefined}
+        onTemplateSaveAs={(template) => {
+          savedTemplate = template;
+        }}
+      />,
+    );
+
+    const editor = screen.getByRole("region", { name: "Template editor" });
+    const auxiliaryModelSelect = within(editor).getByLabelText("运行辅助模型");
+    expect(auxiliaryModelSelect).toHaveProperty("value", "provider-mimo/MiMo-V2.5");
+    expect(
+      within(auxiliaryModelSelect).getByRole("option", {
+        name: "MiMo / MiMo-V2.5",
+      }),
+    ).toBeTruthy();
+    expect(
+      within(auxiliaryModelSelect).getByRole("option", {
+        name: "MiMo / MiMo-V2.5-Pro",
+      }),
+    ).toBeTruthy();
+
+    fireEvent.change(auxiliaryModelSelect, {
+      target: { value: "provider-mimo/MiMo-V2.5-Pro" },
+    });
+    fireEvent.click(within(editor).getByRole("button", { name: "Save template" }));
+
+    await waitFor(() => {
+      expect(
+        (savedTemplate as (PipelineTemplateRead & {
+          run_auxiliary_model_binding?: {
+            provider_id: string;
+            model_id: string;
+            model_parameters: Record<string, unknown>;
+          };
+        }) | null)?.run_auxiliary_model_binding,
+      ).toEqual({
+        provider_id: "provider-mimo",
+        model_id: "MiMo-V2.5-Pro",
+        model_parameters: { temperature: 0 },
+      });
+    });
   });
 
   it("edits only allowed runtime configuration fields for a system template", () => {

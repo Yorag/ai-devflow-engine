@@ -11,6 +11,7 @@ from pydantic import (
 )
 
 from backend.app.schemas import common
+from backend.app.schemas.template import default_run_auxiliary_model_binding
 
 
 class _StrictBaseModel(BaseModel):
@@ -69,12 +70,29 @@ class ConfigurationPackageTemplateSlotConfig(_StrictBaseModel):
     provider_id: str = Field(min_length=1)
 
 
+class ConfigurationPackageRunAuxiliaryModelBinding(_StrictBaseModel):
+    provider_id: str = Field(min_length=1)
+    model_id: str = Field(min_length=1)
+    model_parameters: dict[str, object] = Field(default_factory=dict)
+
+
+def _default_run_auxiliary_model_binding() -> (
+    ConfigurationPackageRunAuxiliaryModelBinding
+):
+    return ConfigurationPackageRunAuxiliaryModelBinding.model_validate(
+        default_run_auxiliary_model_binding().model_dump(mode="python")
+    )
+
+
 class ConfigurationPackageTemplateConfig(_StrictBaseModel):
     template_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     template_source: common.TemplateSource
     stage_role_bindings: list[ConfigurationPackageTemplateSlotConfig] = Field(
         min_length=1
+    )
+    run_auxiliary_model_binding: ConfigurationPackageRunAuxiliaryModelBinding = Field(
+        default_factory=_default_run_auxiliary_model_binding
     )
     auto_regression_enabled: bool
     max_auto_regression_retries: int = Field(ge=0)
@@ -135,6 +153,7 @@ __all__ = [
     "ConfigurationPackageModelRuntimeCapabilities",
     "ConfigurationPackageProvider",
     "ConfigurationPackageRead",
+    "ConfigurationPackageRunAuxiliaryModelBinding",
     "ConfigurationPackageScope",
     "ConfigurationPackageTemplateConfig",
     "ConfigurationPackageTemplateSlotConfig",

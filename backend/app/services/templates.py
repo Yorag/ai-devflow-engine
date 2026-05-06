@@ -36,6 +36,8 @@ from backend.app.schemas.template import (
     FIXED_APPROVAL_CHECKPOINTS,
     FIXED_STAGE_SEQUENCE,
     PipelineTemplateWriteRequest,
+    RunAuxiliaryModelBinding,
+    default_run_auxiliary_model_binding,
 )
 from backend.app.services.providers import ProviderService
 from backend.app.services.runtime_settings import (
@@ -53,6 +55,9 @@ API_ACTOR_ID = "api-user"
 TEMPLATE_NOT_FOUND_MESSAGE = "Pipeline template was not found."
 INVALID_TEMPLATE_MESSAGE = "Pipeline template contains invalid editable fields."
 UNKNOWN_PROVIDER_MESSAGE = "Pipeline template references an unknown Provider."
+RUN_AUXILIARY_UNSUPPORTED_MODEL_MESSAGE = (
+    "Pipeline template run auxiliary model is not supported by the selected Provider."
+)
 PATCH_SYSTEM_TEMPLATE_MESSAGE = "System templates cannot be overwritten."
 DELETE_SYSTEM_TEMPLATE_MESSAGE = "System templates cannot be deleted."
 DELETE_STARTED_SESSION_MESSAGE = (
@@ -168,6 +173,12 @@ class AgentRoleSeed:
     role_id: str
     role_name: str
     asset: PromptAssetRead
+
+
+@dataclass(frozen=True)
+class _ValidatedTemplateBindings:
+    stage_role_bindings: list[dict[str, str]]
+    run_auxiliary_model_binding: dict[str, Any]
 
 
 class TemplateServiceError(RuntimeError):
@@ -338,6 +349,7 @@ class TemplateService:
                     stage_work_instructions=stage_work_instructions,
                     provider_by_stage=seed["provider_by_stage"],
                 ),
+                run_auxiliary_model_binding=_default_run_auxiliary_model_binding_dict(),
                 approval_checkpoints=[
                     checkpoint.value for checkpoint in FIXED_APPROVAL_CHECKPOINTS
                 ],
@@ -401,6 +413,9 @@ class TemplateService:
             "approval_checkpoints": [
                 checkpoint.value for checkpoint in FIXED_APPROVAL_CHECKPOINTS
             ],
+            "run_auxiliary_model_binding": (
+                _default_run_auxiliary_model_binding_dict()
+            ),
             "auto_regression_enabled": seed["auto_regression_enabled"],
             "max_auto_regression_retries": seed["max_auto_regression_retries"],
             "max_react_iterations_per_stage": seed[
@@ -525,7 +540,8 @@ class TemplateService:
             template_source=TemplateSource.USER_TEMPLATE,
             base_template_id=source_template.template_id if source_template else None,
             fixed_stage_sequence=[stage.value for stage in body.fixed_stage_sequence],
-            stage_role_bindings=bindings,
+            stage_role_bindings=bindings.stage_role_bindings,
+            run_auxiliary_model_binding=bindings.run_auxiliary_model_binding,
             approval_checkpoints=[
                 checkpoint.value for checkpoint in body.approval_checkpoints
             ],
@@ -609,7 +625,8 @@ class TemplateService:
         template.name = body.name
         template.description = body.description
         template.fixed_stage_sequence = [stage.value for stage in body.fixed_stage_sequence]
-        template.stage_role_bindings = bindings
+        template.stage_role_bindings = bindings.stage_role_bindings
+        template.run_auxiliary_model_binding = bindings.run_auxiliary_model_binding
         template.approval_checkpoints = [
             checkpoint.value for checkpoint in body.approval_checkpoints
         ]
@@ -870,7 +887,7 @@ class TemplateService:
         body: PipelineTemplateWriteRequest,
         *,
         trace_context: TraceContext,
-    ) -> list[dict[str, str]]:
+    ) -> _ValidatedTemplateBindings:
         ProviderService(
             self._session,
             audit_service=self._audit_service,
@@ -878,21 +895,38 @@ class TemplateService:
         ).seed_builtin_providers(trace_context=trace_context)
         bindings = self.validate_editable_fields(body)
         bindings = self.validate_template_prompts_before_save(bindings)
-        provider_ids = {binding["provider_id"] for binding in bindings}
-        existing_provider_ids = {
-            provider_id
-            for (provider_id,) in self._session.query(ProviderModel.provider_id)
+        auxiliary_binding = _run_auxiliary_model_binding_dict(
+            body.run_auxiliary_model_binding
+        )
+        provider_ids = {
+            *(binding["provider_id"] for binding in bindings),
+            auxiliary_binding["provider_id"],
+        }
+        providers = {
+            provider.provider_id: provider
+            for provider in self._session.query(ProviderModel)
             .filter(ProviderModel.provider_id.in_(provider_ids))
             .filter(ProviderModel.is_configured.is_(True))
             .filter(ProviderModel.is_enabled.is_(True))
             .all()
         }
-        if provider_ids - existing_provider_ids:
+        if provider_ids - set(providers):
             raise TemplateServiceError(
                 ErrorCode.VALIDATION_ERROR,
                 UNKNOWN_PROVIDER_MESSAGE,
             )
-        return bindings
+        auxiliary_provider = providers[auxiliary_binding["provider_id"]]
+        if auxiliary_binding["model_id"] not in set(
+            auxiliary_provider.supported_model_ids
+        ):
+            raise TemplateServiceError(
+                ErrorCode.VALIDATION_ERROR,
+                RUN_AUXILIARY_UNSUPPORTED_MODEL_MESSAGE,
+            )
+        return _ValidatedTemplateBindings(
+            stage_role_bindings=bindings,
+            run_auxiliary_model_binding=auxiliary_binding,
+        )
 
     def _template_audit_metadata(
         self,
@@ -906,6 +940,7 @@ class TemplateService:
         provider_ids = _unique_ordered(
             binding["provider_id"] for binding in template.stage_role_bindings
         )
+        auxiliary_binding = _template_run_auxiliary_model_binding_dict(template)
         return {
             "template_id": template.template_id,
             "source_template_id": source_template_id,
@@ -914,6 +949,10 @@ class TemplateService:
             "stage_types": list(template.fixed_stage_sequence),
             "role_ids": role_ids,
             "provider_ids": provider_ids,
+            "run_auxiliary_model_binding": {
+                "provider_id": auxiliary_binding["provider_id"],
+                "model_id": auxiliary_binding["model_id"],
+            },
             "auto_regression_enabled": template.auto_regression_enabled,
             "max_auto_regression_retries": template.max_auto_regression_retries,
             "max_react_iterations_per_stage": (
@@ -1008,6 +1047,31 @@ def _stage_role_bindings(
             }
         )
     return bindings
+
+
+def _default_run_auxiliary_model_binding_dict() -> dict[str, Any]:
+    return _run_auxiliary_model_binding_dict(default_run_auxiliary_model_binding())
+
+
+def _run_auxiliary_model_binding_dict(
+    binding: RunAuxiliaryModelBinding,
+) -> dict[str, Any]:
+    return {
+        "provider_id": binding.provider_id,
+        "model_id": binding.model_id,
+        "model_parameters": dict(binding.model_parameters),
+    }
+
+
+def _template_run_auxiliary_model_binding_dict(
+    template: PipelineTemplateModel,
+) -> dict[str, Any]:
+    value = getattr(template, "run_auxiliary_model_binding", None)
+    if value is None:
+        return _default_run_auxiliary_model_binding_dict()
+    return _run_auxiliary_model_binding_dict(
+        RunAuxiliaryModelBinding.model_validate(value)
+    )
 
 
 def _system_template_needs_asset_refresh(

@@ -1357,6 +1357,7 @@ export const mockConfigurationPackageExport: ConfigurationPackageExport = {
       name: "新功能开发流程",
       template_source: "system_template",
       stage_role_bindings: createStageRoleBindings(),
+      run_auxiliary_model_binding: defaultRunAuxiliaryModelBinding(),
       auto_regression_enabled: true,
       max_auto_regression_retries: 1,
       max_react_iterations_per_stage: 30,
@@ -1441,6 +1442,7 @@ function createTemplate(
       "delivery_integration",
     ],
     stage_role_bindings: createStageRoleBindings(),
+    run_auxiliary_model_binding: defaultRunAuxiliaryModelBinding(),
     approval_checkpoints: [
       "solution_design_approval",
       "code_review_approval",
@@ -1455,6 +1457,14 @@ function createTemplate(
     created_at: timestamp,
     updated_at: timestamp,
   };
+}
+
+function defaultRunAuxiliaryModelBinding() {
+  return {
+    provider_id: "provider-deepseek",
+    model_id: "deepseek-chat",
+    model_parameters: { temperature: 0 },
+  } as PipelineTemplateRead["run_auxiliary_model_binding"];
 }
 
 function createStageRoleBindings() {

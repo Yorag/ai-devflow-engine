@@ -222,6 +222,11 @@ describe("resource clients", () => {
       {
         name: "Custom",
         stage_role_bindings: [],
+        run_auxiliary_model_binding: {
+          provider_id: "provider-deepseek",
+          model_id: "deepseek-chat",
+          model_parameters: { temperature: 0 },
+        },
         auto_regression_enabled: true,
         max_auto_regression_retries: 1,
         max_react_iterations_per_stage: 30,
@@ -235,6 +240,11 @@ describe("resource clients", () => {
       {
         name: "Custom",
         stage_role_bindings: [],
+        run_auxiliary_model_binding: {
+          provider_id: "provider-deepseek",
+          model_id: "deepseek-chat",
+          model_parameters: { temperature: 0 },
+        },
         auto_regression_enabled: true,
         max_auto_regression_retries: 1,
         max_react_iterations_per_stage: 30,

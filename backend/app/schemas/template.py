@@ -42,6 +42,20 @@ class StageRoleBinding(_StrictBaseModel):
     provider_id: str = Field(min_length=1)
 
 
+class RunAuxiliaryModelBinding(_StrictBaseModel):
+    provider_id: str = Field(min_length=1)
+    model_id: str = Field(min_length=1)
+    model_parameters: dict[str, object] = Field(default_factory=dict)
+
+
+def default_run_auxiliary_model_binding() -> RunAuxiliaryModelBinding:
+    return RunAuxiliaryModelBinding(
+        provider_id="provider-deepseek",
+        model_id="deepseek-chat",
+        model_parameters={"temperature": 0},
+    )
+
+
 class PipelineTemplateRead(_StrictBaseModel):
     template_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
@@ -50,6 +64,9 @@ class PipelineTemplateRead(_StrictBaseModel):
     base_template_id: str | None = None
     fixed_stage_sequence: list[common.StageType]
     stage_role_bindings: list[StageRoleBinding]
+    run_auxiliary_model_binding: RunAuxiliaryModelBinding = Field(
+        default_factory=default_run_auxiliary_model_binding
+    )
     approval_checkpoints: list[common.ApprovalType]
     auto_regression_enabled: bool
     max_auto_regression_retries: int = Field(ge=0)
@@ -91,6 +108,9 @@ class PipelineTemplateWriteRequest(_StrictBaseModel):
         default_factory=lambda: list(FIXED_STAGE_SEQUENCE)
     )
     stage_role_bindings: list[StageRoleBinding] = Field(min_length=1)
+    run_auxiliary_model_binding: RunAuxiliaryModelBinding = Field(
+        default_factory=default_run_auxiliary_model_binding
+    )
     approval_checkpoints: list[common.ApprovalType] = Field(
         default_factory=lambda: list(FIXED_APPROVAL_CHECKPOINTS)
     )
@@ -131,5 +151,7 @@ __all__ = [
     "FIXED_STAGE_SEQUENCE",
     "PipelineTemplateRead",
     "PipelineTemplateWriteRequest",
+    "RunAuxiliaryModelBinding",
     "StageRoleBinding",
+    "default_run_auxiliary_model_binding",
 ]
