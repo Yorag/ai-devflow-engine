@@ -85,15 +85,11 @@ describe("ConsolePage route baseline", () => {
     expect(
       screen.getByRole("heading", {
         level: 1,
-        name: "Requirement delivery flow engine",
+        name: "Make delivery work traceable.",
       }),
     ).toBeTruthy();
 
-    fireEvent.click(
-      screen.getByRole("link", {
-        name: "Open console",
-      }),
-    );
+    fireEvent.click(screen.getAllByRole("link", { name: /open console/i })[0]);
 
     expect(
       await screen.findByRole("heading", {
