@@ -538,14 +538,57 @@ def create_session_rerun(
     sessionId: str,
     body: SessionRerunRequest | None = None,
     service: RunLifecycleService = Depends(get_run_lifecycle_service),
+    runtime_dispatcher: RuntimeExecutionDispatcher = Depends(
+        runtime_dispatcher_from_app_state
+    ),
 ) -> RunCommandResponse:
     del body
+    trace_context = get_trace_context()
     try:
         result = service.create_rerun(
             session_id=sessionId,
             actor_id="session-user",
-            trace_context=get_trace_context(),
+            trace_context=trace_context,
         )
     except RunLifecycleServiceError as exc:
         _raise_run_api_error(exc)
+    if result.stage is None:
+        raise ApiError(
+            ErrorCode.INTERNAL_ERROR,
+            "Rerun startup did not create a current stage.",
+            500,
+        )
+    try:
+        runtime_dispatcher.dispatch_started_run(
+            RuntimeDispatchCommand(
+                session_id=result.session.session_id,
+                run_id=result.run.run_id,
+                stage_run_id=result.stage.stage_run_id,
+                stage_type=result.stage.stage_type,
+                graph_thread_id=result.run.graph_thread_ref,
+                trace_context=TraceContext.model_validate(
+                    {
+                        **trace_context.model_dump(),
+                        "trace_id": result.run.trace_id,
+                        "parent_span_id": trace_context.span_id,
+                        "span_id": f"runtime-dispatch-rerun-{result.run.run_id}",
+                        "created_at": datetime.now(UTC),
+                        "session_id": result.session.session_id,
+                        "run_id": result.run.run_id,
+                        "stage_run_id": result.stage.stage_run_id,
+                        "graph_thread_id": result.run.graph_thread_ref,
+                    }
+                ),
+            )
+        )
+    except Exception:
+        _LOGGER.exception(
+            "Runtime dispatch failed after rerun startup.",
+            extra={
+                "session_id": result.session.session_id,
+                "run_id": result.run.run_id,
+                "stage_run_id": result.stage.stage_run_id,
+            },
+        )
+        raise
     return _run_command_response(result.session, result.run)

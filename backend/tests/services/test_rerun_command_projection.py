@@ -12,21 +12,35 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.api.error_codes import ErrorCode
 from backend.app.db.base import ROLE_METADATA, DatabaseRole
-from backend.app.db.models.control import ProjectModel, SessionModel
+from backend.app.db.models.control import (
+    PipelineTemplateModel,
+    PlatformRuntimeSettingsModel,
+    ProjectModel,
+    ProviderModel,
+    SessionModel,
+)
 from backend.app.db.models.event import DomainEventModel
+from backend.app.db.models.graph import GraphDefinitionModel, GraphThreadModel
 from backend.app.db.models.runtime import (
+    ModelBindingSnapshotModel,
     PipelineRunModel,
     ProviderCallPolicySnapshotModel,
+    ProviderSnapshotModel,
     RuntimeLimitSnapshotModel,
+    StageArtifactModel,
     StageRunModel,
 )
 from backend.app.domain.enums import (
+    ApprovalType,
+    ProviderProtocolType,
+    ProviderSource,
     RunStatus,
     RunTriggerSource,
     SessionStatus,
     SseEventType,
     StageStatus,
     StageType,
+    TemplateSource,
 )
 from backend.app.domain.runtime_refs import (
     CheckpointRef,
@@ -37,6 +51,12 @@ from backend.app.domain.runtime_refs import (
 )
 from backend.app.domain.trace_context import TraceContext
 from backend.app.observability.log_writer import LogRecordInput
+from backend.app.schemas.runtime_settings import (
+    AgentRuntimeLimits,
+    ContextLimits,
+    LogPolicy,
+    ProviderCallPolicy,
+)
 from backend.app.schemas.feed import SystemStatusFeedEntry
 from backend.app.services.events import DomainEventType, EventStore
 from backend.app.services.runtime_orchestration import RuntimeOrchestrationService
@@ -211,10 +231,12 @@ def build_service(
     resolved_runtime_port = runtime_port or FakeRuntimePort()
     resolved_audit_service = audit_service or RecordingAuditService()
     resolved_log_writer = log_writer or RecordingRunLogWriter()
+    graph_session = manager.open_session(DatabaseRole.GRAPH)
     service = RunLifecycleService(
         control_session=control_session or manager.open_session(DatabaseRole.CONTROL),
         runtime_session=runtime_session or manager.open_session(DatabaseRole.RUNTIME),
         event_session=event_session or manager.open_session(DatabaseRole.EVENT),
+        graph_session=graph_session,
         runtime_orchestration=RuntimeOrchestrationService(
             runtime_port=resolved_runtime_port,
             checkpoint_port=FakeCheckpointPort(),
@@ -235,6 +257,26 @@ def seed_rerunnable_session(
     stage_status: StageStatus,
     current_run_id: str | None = "run-1",
 ) -> None:
+    provider_capabilities = [
+        {
+            "model_id": "test-chat",
+            "context_window_tokens": 128000,
+            "max_output_tokens": 8192,
+            "supports_tool_calling": True,
+            "supports_structured_output": True,
+            "supports_native_reasoning": False,
+        }
+    ]
+    stage_role_bindings = [
+        {
+            "stage_type": stage_type.value,
+            "role_id": f"{stage_type.value}-agent",
+            "stage_work_instruction": f"Do {stage_type.value}.",
+            "system_prompt": f"System prompt for {stage_type.value}.",
+            "provider_id": "provider-test",
+        }
+        for stage_type in StageType
+    ]
     with manager.session(DatabaseRole.CONTROL) as session:
         session.add(
             ProjectModel(
@@ -245,6 +287,83 @@ def seed_rerunnable_session(
                 is_default=True,
                 is_visible=True,
                 visibility_removed_at=None,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            ProviderModel(
+                provider_id="provider-test",
+                display_name="Test Provider",
+                provider_source=ProviderSource.CUSTOM,
+                protocol_type=ProviderProtocolType.OPENAI_COMPLETIONS_COMPATIBLE,
+                base_url="https://provider.test/v1",
+                api_key_ref="env:TEST_PROVIDER_API_KEY",
+                default_model_id="test-chat",
+                supported_model_ids=["test-chat"],
+                is_configured=True,
+                is_enabled=True,
+                runtime_capabilities=provider_capabilities,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            PipelineTemplateModel(
+                template_id="template-1",
+                name="Rerun Template",
+                description=None,
+                template_source=TemplateSource.USER_TEMPLATE,
+                base_template_id=None,
+                fixed_stage_sequence=[stage.value for stage in StageType],
+                stage_role_bindings=stage_role_bindings,
+                run_auxiliary_model_binding={
+                    "provider_id": "provider-test",
+                    "model_id": "test-chat",
+                    "model_parameters": {"temperature": 0},
+                },
+                approval_checkpoints=[
+                    ApprovalType.SOLUTION_DESIGN_APPROVAL.value,
+                    ApprovalType.CODE_REVIEW_APPROVAL.value,
+                ],
+                auto_regression_enabled=False,
+                max_auto_regression_retries=0,
+                max_react_iterations_per_stage=30,
+                max_tool_calls_per_stage=80,
+                skip_high_risk_tool_confirmations=False,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            PlatformRuntimeSettingsModel(
+                settings_id="platform-runtime-settings",
+                config_version="runtime-settings-v1",
+                schema_version="runtime-settings-schema-v1",
+                hard_limits_version="platform-hard-limits-v1",
+                agent_limits=AgentRuntimeLimits(
+                    max_auto_regression_retries=0,
+                ).model_dump(mode="python"),
+                provider_call_policy=ProviderCallPolicy().model_dump(mode="python"),
+                internal_model_bindings={
+                    binding_type: {
+                        "provider_id": "provider-test",
+                        "model_id": "test-chat",
+                        "model_parameters": {"temperature": 0},
+                        "source_config_version": "test",
+                    }
+                    for binding_type in (
+                        "context_compression",
+                        "structured_output_repair",
+                        "validation_pass",
+                    )
+                },
+                context_limits=ContextLimits().model_dump(mode="python"),
+                log_policy=LogPolicy().model_dump(mode="python"),
+                created_by_actor_id="test",
+                updated_by_actor_id="test",
+                last_audit_log_id=None,
+                last_trace_id="trace-old",
                 created_at=NOW,
                 updated_at=NOW,
             )
@@ -264,48 +383,68 @@ def seed_rerunnable_session(
                 updated_at=NOW,
             )
         )
+        session.commit()
     with manager.session(DatabaseRole.RUNTIME) as session:
+        provider_snapshot_id = "provider-snapshot-1"
         session.add_all(
             [
                 RuntimeLimitSnapshotModel(
                     snapshot_id="runtime-limits-1",
                     run_id="run-1",
-                    agent_limits={},
-                    context_limits={},
+                    agent_limits=AgentRuntimeLimits(
+                        max_auto_regression_retries=0,
+                    ).model_dump(mode="python"),
+                    context_limits=ContextLimits().model_dump(mode="python"),
                     source_config_version="test",
-                    hard_limits_version="test",
+                    hard_limits_version="platform-hard-limits-v1",
                     schema_version="runtime-limit-snapshot-v1",
                     created_at=NOW,
                 ),
                 ProviderCallPolicySnapshotModel(
                     snapshot_id="provider-policy-1",
                     run_id="run-1",
-                    provider_call_policy={},
+                    provider_call_policy={
+                        "request_timeout_seconds": 60,
+                        "network_error_max_retries": 3,
+                        "rate_limit_max_retries": 3,
+                        "backoff_base_seconds": 1.0,
+                        "backoff_max_seconds": 30.0,
+                        "circuit_breaker_failure_threshold": 5,
+                        "circuit_breaker_recovery_seconds": 60,
+                    },
                     source_config_version="test",
                     schema_version="provider-call-policy-snapshot-v1",
                     created_at=NOW,
                 ),
-                PipelineRunModel(
-                    run_id="run-1",
-                    session_id="session-1",
-                    project_id="project-1",
-                    attempt_index=1,
-                    status=run_status,
-                    trigger_source=RunTriggerSource.INITIAL_REQUIREMENT,
-                    template_snapshot_ref="template-snapshot-1",
-                    graph_definition_ref="graph-definition-1",
-                    graph_thread_ref="thread-1",
-                    workspace_ref="workspace-1",
-                    runtime_limit_snapshot_ref="runtime-limits-1",
-                    provider_call_policy_snapshot_ref="provider-policy-1",
-                    delivery_channel_snapshot_ref=None,
-                    current_stage_run_id="stage-run-1",
-                    trace_id="trace-old",
-                    started_at=NOW,
-                    ended_at=NOW,
-                    created_at=NOW,
-                    updated_at=NOW,
-                ),
+            ]
+        )
+        session.flush()
+        session.add(
+            PipelineRunModel(
+                run_id="run-1",
+                session_id="session-1",
+                project_id="project-1",
+                attempt_index=1,
+                status=run_status,
+                trigger_source=RunTriggerSource.INITIAL_REQUIREMENT,
+                template_snapshot_ref="template-snapshot-1",
+                graph_definition_ref="graph-definition-1",
+                graph_thread_ref="thread-1",
+                workspace_ref="workspace-1",
+                runtime_limit_snapshot_ref="runtime-limits-1",
+                provider_call_policy_snapshot_ref="provider-policy-1",
+                delivery_channel_snapshot_ref=None,
+                current_stage_run_id="stage-run-1",
+                trace_id="trace-old",
+                started_at=NOW,
+                ended_at=NOW,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.flush()
+        session.add_all(
+            [
                 StageRunModel(
                     stage_run_id="stage-run-1",
                     run_id="run-1",
@@ -322,8 +461,105 @@ def seed_rerunnable_session(
                     created_at=NOW,
                     updated_at=NOW,
                 ),
+                ProviderSnapshotModel(
+                    snapshot_id=provider_snapshot_id,
+                    run_id="run-1",
+                    provider_id="provider-test",
+                    display_name="Test Provider",
+                    provider_source=ProviderSource.CUSTOM,
+                    protocol_type=ProviderProtocolType.OPENAI_COMPLETIONS_COMPATIBLE,
+                    base_url="https://provider.test/v1",
+                    api_key_ref="env:TEST_PROVIDER_API_KEY",
+                    model_id="test-chat",
+                    capabilities=provider_capabilities[0],
+                    source_config_version="test",
+                    schema_version="provider-snapshot-v1",
+                    created_at=NOW,
+                ),
             ]
         )
+        session.flush()
+        session.add_all(
+            [
+                *[
+                    ModelBindingSnapshotModel(
+                        snapshot_id=f"model-binding-{stage_type.value}",
+                        run_id="run-1",
+                        binding_id=f"agent_role:{stage_type.value}:{stage_type.value}-agent",
+                        binding_type="agent_role",
+                        stage_type=stage_type,
+                        role_id=f"{stage_type.value}-agent",
+                        provider_snapshot_id=provider_snapshot_id,
+                        provider_id="provider-test",
+                        model_id="test-chat",
+                        capabilities=provider_capabilities[0],
+                        model_parameters={},
+                        source_config_version="test",
+                        schema_version="model-binding-snapshot-v1",
+                        created_at=NOW,
+                    )
+                    for stage_type in StageType
+                ],
+                *[
+                    ModelBindingSnapshotModel(
+                        snapshot_id=f"model-binding-{binding_type}",
+                        run_id="run-1",
+                        binding_id=binding_type,
+                        binding_type=binding_type,
+                        stage_type=None,
+                        role_id=None,
+                        provider_snapshot_id=provider_snapshot_id,
+                        provider_id="provider-test",
+                        model_id="test-chat",
+                        capabilities=provider_capabilities[0],
+                        model_parameters={"temperature": 0},
+                        source_config_version="test",
+                        schema_version="model-binding-snapshot-v1",
+                        created_at=NOW,
+                    )
+                    for binding_type in (
+                        "context_compression",
+                        "structured_output_repair",
+                        "validation_pass",
+                    )
+                ],
+            ]
+        )
+        session.commit()
+    with manager.session(DatabaseRole.GRAPH) as session:
+        session.add(
+            GraphDefinitionModel(
+                graph_definition_id="graph-definition-1",
+                run_id="run-1",
+                template_snapshot_ref="template-snapshot-1",
+                graph_version="function-one-mainline-v1",
+                stage_nodes=[
+                    {"node_key": stage_type.value, "stage_type": stage_type.value}
+                    for stage_type in StageType
+                ],
+                stage_contracts={stage_type.value: {} for stage_type in StageType},
+                interrupt_policy={},
+                retry_policy={},
+                delivery_routing_policy={},
+                schema_version="graph-definition-v1",
+                created_at=NOW,
+            )
+        )
+        session.add(
+            GraphThreadModel(
+                graph_thread_id="thread-1",
+                run_id="run-1",
+                graph_definition_id="graph-definition-1",
+                checkpoint_namespace="run-1-main",
+                current_node_key="code_generation",
+                current_interrupt_id=None,
+                status=run_status.value,
+                last_checkpoint_ref=None,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.commit()
 
 
 def seed_terminal_system_status(
@@ -373,21 +609,33 @@ def test_create_rerun_creates_new_run_updates_session_and_appends_run_created_an
     assert result.session.current_run_id == result.run.run_id
     assert result.session.status is SessionStatus.RUNNING
     assert result.session.latest_stage_type is StageType.REQUIREMENT_ANALYSIS
-    assert result.stage is None
+    assert result.stage is not None
+    assert result.stage.run_id == result.run.run_id
+    assert result.stage.stage_type is StageType.REQUIREMENT_ANALYSIS
+    assert result.stage.status is StageStatus.RUNNING
+    assert result.run.current_stage_run_id == result.stage.stage_run_id
     assert result.run.run_id != "run-1"
     assert result.run.attempt_index == 2
     assert result.run.status is RunStatus.RUNNING
     assert result.run.trigger_source is RunTriggerSource.RETRY
     assert result.run.graph_thread_ref != "thread-1"
     assert result.run.trace_id != "trace-old"
-    assert result.run.template_snapshot_ref == "template-snapshot-1"
-    assert result.run.graph_definition_ref == "graph-definition-1"
-    assert result.run.workspace_ref == "workspace-1"
-    assert result.run.runtime_limit_snapshot_ref == "runtime-limits-1"
-    assert result.run.provider_call_policy_snapshot_ref == "provider-policy-1"
+    assert result.run.template_snapshot_ref == f"template-snapshot-{result.run.run_id}"
+    assert result.run.graph_definition_ref == f"graph-definition-{result.run.run_id}"
+    assert result.run.workspace_ref != "workspace-1"
+    assert result.run.runtime_limit_snapshot_ref == (
+        f"runtime-limit-snapshot-{result.run.run_id}"
+    )
+    assert result.run.provider_call_policy_snapshot_ref == (
+        f"provider-call-policy-snapshot-{result.run.run_id}"
+    )
     assert runtime_port.calls[-1][0] == "assert_thread_terminal"
     assert audit.records[0]["action"] == "runtime.rerun"
-    assert [record.message for record in log_writer.records] == [
+    assert [
+        record.message
+        for record in log_writer.records
+        if record.message.startswith("Run rerun command")
+    ] == [
         "Run rerun command accepted.",
         "Run rerun command completed.",
     ]
@@ -401,7 +649,57 @@ def test_create_rerun_creates_new_run_updates_session_and_appends_run_created_an
         assert [row.run_id for row in runs] == ["run-1", result.run.run_id]
         assert runs[0].status is RunStatus.TERMINATED
         assert runs[1].status is RunStatus.RUNNING
-        assert runs[1].current_stage_run_id is None
+        assert runs[1].current_stage_run_id == result.stage.stage_run_id
+        stage = session.get(StageRunModel, result.stage.stage_run_id)
+        assert stage is not None
+        assert stage.run_id == result.run.run_id
+        assert stage.stage_type is StageType.REQUIREMENT_ANALYSIS
+        assert stage.status is StageStatus.RUNNING
+        assert (
+            session.query(RuntimeLimitSnapshotModel)
+            .filter(RuntimeLimitSnapshotModel.run_id == result.run.run_id)
+            .count()
+            == 1
+        )
+        assert (
+            session.query(ProviderCallPolicySnapshotModel)
+            .filter(ProviderCallPolicySnapshotModel.run_id == result.run.run_id)
+            .count()
+            == 1
+        )
+        assert (
+            session.query(ProviderSnapshotModel)
+            .filter(ProviderSnapshotModel.run_id == result.run.run_id)
+            .count()
+            == 1
+        )
+        assert (
+            session.query(ModelBindingSnapshotModel)
+            .filter(ModelBindingSnapshotModel.run_id == result.run.run_id)
+            .count()
+            == 9
+        )
+        template_artifact = (
+            session.query(StageArtifactModel)
+            .filter(
+                StageArtifactModel.run_id == result.run.run_id,
+                StageArtifactModel.artifact_type == "template_snapshot",
+            )
+            .one()
+        )
+        assert template_artifact.stage_run_id == result.stage.stage_run_id
+        assert template_artifact.payload_ref == result.run.template_snapshot_ref
+    with manager.session(DatabaseRole.GRAPH) as session:
+        graph_definition = session.get(GraphDefinitionModel, result.run.graph_definition_ref)
+        graph_thread = session.get(GraphThreadModel, result.run.graph_thread_ref)
+        assert graph_definition is not None
+        assert graph_definition.run_id == result.run.run_id
+        assert graph_definition.template_snapshot_ref == result.run.template_snapshot_ref
+        assert graph_thread is not None
+        assert graph_thread.run_id == result.run.run_id
+        assert graph_thread.graph_definition_id == result.run.graph_definition_ref
+        assert graph_thread.current_node_key == "requirement_analysis"
+        assert graph_thread.status == "running"
     with manager.session(DatabaseRole.EVENT) as session:
         created = (
             session.query(DomainEventModel)
@@ -421,6 +719,17 @@ def test_create_rerun_creates_new_run_updates_session_and_appends_run_created_an
         assert created.payload["run"]["trigger_source"] == "retry"
         assert created.payload["run"]["current_stage_type"] == "requirement_analysis"
         assert created.payload["run"]["is_active"] is True
+        stage_started = (
+            session.query(DomainEventModel)
+            .filter(DomainEventModel.event_type == SseEventType.STAGE_STARTED)
+            .order_by(DomainEventModel.sequence_index.desc())
+            .first()
+        )
+        assert stage_started is not None
+        assert (
+            stage_started.payload["stage_node"]["stage_run_id"]
+            == result.stage.stage_run_id
+        )
         assert changed is not None
         assert changed.payload["current_run_id"] == result.run.run_id
         assert changed.payload["status"] == "running"
@@ -653,7 +962,11 @@ def test_create_rerun_allows_terminal_current_run_tail_without_stage_row(
     assert result.run.trigger_source is RunTriggerSource.RETRY
     assert runtime_port.calls[-1][0] == "assert_thread_terminal"
     assert audit.records[0]["action"] == "runtime.rerun"
-    assert [record.message for record in log_writer.records] == [
+    assert [
+        record.message
+        for record in log_writer.records
+        if record.message.startswith("Run rerun command")
+    ] == [
         "Run rerun command accepted.",
         "Run rerun command completed.",
     ]
@@ -760,7 +1073,11 @@ def test_create_rerun_compensates_new_run_when_event_commit_fails(
     assert exc_info.value.status_code == 500
     assert audit.records[0]["action"] == "runtime.rerun"
     assert audit.records[-1]["action"] == "runtime.rerun.failed"
-    assert [record.message for record in log_writer.records] == [
+    assert [
+        record.message
+        for record in log_writer.records
+        if record.message.startswith("Run rerun command")
+    ] == [
         "Run rerun command accepted.",
         "Run rerun command failed.",
     ]
@@ -814,7 +1131,11 @@ def test_create_rerun_compensates_partial_state_when_control_commit_fails(
     assert exc_info.value.status_code == 500
     assert audit.records[0]["action"] == "runtime.rerun"
     assert audit.records[-1]["action"] == "runtime.rerun.failed"
-    assert [record.message for record in log_writer.records] == [
+    assert [
+        record.message
+        for record in log_writer.records
+        if record.message.startswith("Run rerun command")
+    ] == [
         "Run rerun command accepted.",
         "Run rerun command failed.",
     ]

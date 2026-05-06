@@ -7,14 +7,14 @@ from fastapi.testclient import TestClient
 
 from backend.app.db.base import DatabaseRole
 from backend.app.db.models.control import SessionModel
-from backend.app.db.models.runtime import PipelineRunModel
-from backend.app.domain.enums import RunStatus, SessionStatus, StageStatus
+from backend.app.db.models.graph import GraphBase, GraphThreadModel
+from backend.app.db.models.runtime import PipelineRunModel, StageRunModel
+from backend.app.domain.enums import RunStatus, SessionStatus, StageStatus, StageType
 from backend.app.domain.runtime_refs import GraphThreadStatus
 from backend.app.schemas.feed import SystemStatusFeedEntry
 from backend.app.services.events import DomainEventType, EventStore
 from backend.tests.api.test_pause_resume_api import (
     build_app,
-    seed_active_run_for_api,
 )
 from backend.tests.services.test_rerun_command_projection import (
     FakeCheckpointPort,
@@ -22,17 +22,33 @@ from backend.tests.services.test_rerun_command_projection import (
     NOW,
     RecordingAuditService,
     build_trace,
+    seed_rerunnable_session as seed_full_rerunnable_session,
 )
 
 
 def build_rerun_app(tmp_path: Path):
     app = build_app(tmp_path)
+    GraphBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.GRAPH))
     app.state.h45_runtime_port = FakeRuntimePort()
     app.state.h41_runtime_port = app.state.h45_runtime_port
     app.state.h45_checkpoint_port = FakeCheckpointPort()
     app.state.h41_checkpoint_port = app.state.h45_checkpoint_port
     app.state.h45_audit_service = RecordingAuditService()
     return app
+
+
+class CapturingRuntimeDispatcher:
+    def __init__(self, app) -> None:  # noqa: ANN001
+        self.app = app
+        self.commands = []
+        self.visibility_checks = []
+
+    def dispatch_started_run(self, command) -> None:  # noqa: ANN001
+        self.commands.append(command)
+        with self.app.state.database_manager.session(DatabaseRole.RUNTIME) as session:
+            run = session.get(PipelineRunModel, command.run_id)
+            stage = session.get(StageRunModel, command.stage_run_id)
+            self.visibility_checks.append((run is not None, stage is not None))
 
 
 def seed_rerunnable_run_for_api(
@@ -42,8 +58,8 @@ def seed_rerunnable_run_for_api(
     session_status: SessionStatus = SessionStatus.TERMINATED,
     stage_status: StageStatus = StageStatus.TERMINATED,
 ) -> None:
-    seed_active_run_for_api(
-        app,
+    seed_full_rerunnable_session(
+        app.state.database_manager,
         run_status=run_status,
         session_status=session_status,
         stage_status=stage_status,
@@ -110,6 +126,54 @@ def test_post_session_runs_creates_new_retry_run_and_returns_run_command_respons
     assert body["run"]["trigger_source"] == "retry"
     assert body["run"]["current_stage_type"] == "requirement_analysis"
     assert body["run"]["is_active"] is True
+
+
+def test_post_session_runs_dispatches_started_rerun_requirement_analysis_stage(
+    tmp_path: Path,
+) -> None:
+    app = build_rerun_app(tmp_path)
+    dispatcher = CapturingRuntimeDispatcher(app)
+    app.state.runtime_execution_dispatcher = dispatcher
+    seed_rerunnable_run_for_api(app)
+    seed_terminal_system_status_for_api(app)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/sessions/session-1/runs",
+            json={},
+            headers={
+                "X-Request-ID": "req-rerun-dispatch",
+                "X-Correlation-ID": "corr-rerun-dispatch",
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    new_run_id = body["run"]["run_id"]
+    assert len(dispatcher.commands) == 1
+    command = dispatcher.commands[0]
+    assert command.session_id == "session-1"
+    assert command.run_id == new_run_id
+    assert command.stage_type is StageType.REQUIREMENT_ANALYSIS
+    assert command.stage_run_id
+    assert command.graph_thread_id
+    assert command.trace_context.request_id == "req-rerun-dispatch"
+    assert command.trace_context.correlation_id == "corr-rerun-dispatch"
+    assert dispatcher.visibility_checks == [(True, True)]
+
+    with app.state.database_manager.session(DatabaseRole.RUNTIME) as session:
+        run = session.get(PipelineRunModel, new_run_id)
+        assert run is not None
+        assert run.current_stage_run_id == command.stage_run_id
+        assert run.graph_thread_ref == command.graph_thread_id
+        assert command.trace_context.trace_id == run.trace_id
+
+    with app.state.database_manager.session(DatabaseRole.GRAPH) as session:
+        thread = session.get(GraphThreadModel, command.graph_thread_id)
+        assert thread is not None
+        assert thread.run_id == new_run_id
+        assert thread.current_node_key == "requirement_analysis"
+        assert thread.status == "running"
 
 
 def test_post_session_runs_accepts_bodyless_request(tmp_path: Path) -> None:

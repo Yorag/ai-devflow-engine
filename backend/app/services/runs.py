@@ -13,11 +13,20 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from backend.app.api.error_codes import ErrorCode
+from backend.app.db.models.graph import GraphDefinitionModel, GraphThreadModel
 from backend.app.db.models.event import DomainEventModel
-from backend.app.db.models.control import ProviderModel, SessionModel
+from backend.app.db.models.control import (
+    PipelineTemplateModel,
+    ProviderModel,
+    SessionModel,
+)
 from backend.app.db.models.runtime import (
     ApprovalRequestModel,
+    ModelBindingSnapshotModel,
     PipelineRunModel,
+    ProviderCallPolicySnapshotModel,
+    ProviderSnapshotModel,
+    RuntimeLimitSnapshotModel,
     StageArtifactModel,
     StageRunModel,
     ToolConfirmationRequestModel,
@@ -97,6 +106,7 @@ from backend.app.services.publication_boundary import (
 from backend.app.services.runtime_orchestration import RuntimeOrchestrationService
 from backend.app.services.tool_confirmations import ToolConfirmationService
 from backend.app.services.runtime_settings import (
+    PlatformRuntimeSettingsRead,
     PlatformRuntimeSettingsService,
     RuntimeSettingsServiceError,
 )
@@ -1252,11 +1262,123 @@ class RunLifecycleService:
                 source_run=run,
                 started_at=started_at,
             )
+            graph_session = self._require_graph_session()
+            template_snapshot = self._build_rerun_template_snapshot(
+                session=session,
+                run_id=new_run.run_id,
+                created_at=started_at,
+                source_template_snapshot_ref=run.template_snapshot_ref,
+                trace_context=command_trace,
+            )
+            settings_read = self._settings_for_rerun(
+                run_id=new_run.run_id,
+                trace_context=command_trace,
+            )
+            runtime_limit_snapshot = RuntimeLimitSnapshotBuilder.build_for_run(
+                settings_read,
+                template_snapshot=template_snapshot,
+                run_id=new_run.run_id,
+                created_at=started_at,
+            )
+            provider_call_policy_snapshot = ProviderCallPolicySnapshotBuilder.build_for_run(
+                settings_read,
+                run_id=new_run.run_id,
+                created_at=started_at,
+            )
+            internal_bindings = self._internal_bindings_for_run(
+                settings_read,
+                template_snapshot,
+            )
+            required_providers = self._load_required_providers(
+                template_snapshot=template_snapshot,
+                internal_bindings=internal_bindings,
+            )
+            provider_snapshots = ProviderSnapshotBuilder.build_for_run(
+                required_providers,
+                run_id=new_run.run_id,
+                required_provider_ids=self._required_provider_ids(
+                    template_snapshot,
+                    internal_bindings,
+                ),
+                required_model_ids_by_provider=self._required_model_ids_by_provider(
+                    internal_bindings,
+                ),
+                created_at=started_at,
+                credential_env_prefixes=self._credential_env_prefixes,
+            )
+            model_binding_snapshots = ModelBindingSnapshotBuilder.build_for_run(
+                template_snapshot,
+                provider_snapshots=provider_snapshots,
+                internal_bindings=internal_bindings,
+                run_id=new_run.run_id,
+                created_at=started_at,
+            )
+            graph_definition = GraphCompiler(now=lambda: started_at).compile(
+                template_snapshot=template_snapshot,
+                runtime_limit_snapshot=runtime_limit_snapshot,
+            )
+            new_run.template_snapshot_ref = template_snapshot.snapshot_ref
+            new_run.graph_definition_ref = graph_definition.graph_definition_id
+            new_run.runtime_limit_snapshot_ref = runtime_limit_snapshot.snapshot_id
+            new_run.provider_call_policy_snapshot_ref = (
+                provider_call_policy_snapshot.snapshot_id
+            )
             session.current_run_id = new_run.run_id
             session.status = SessionStatus.RUNNING
             session.latest_stage_type = StageType.REQUIREMENT_ANALYSIS
             session.updated_at = started_at
+            RuntimeSnapshotRepository(self._runtime_session).save_runtime_limit_snapshot(
+                runtime_limit_snapshot
+            )
+            RuntimeSnapshotRepository(
+                self._runtime_session
+            ).save_provider_call_policy_snapshot(provider_call_policy_snapshot)
+            GraphRepository(graph_session).save_definition(graph_definition)
             self._runtime_session.add(new_run)
+            self.attach_provider_snapshots(
+                new_run,
+                provider_snapshots=provider_snapshots,
+                model_binding_snapshots=model_binding_snapshots,
+            )
+            GraphRepository(graph_session).save_thread(
+                thread_id=new_run.graph_thread_ref,
+                run_id=new_run.run_id,
+                graph_definition_id=graph_definition.graph_definition_id,
+                current_node_key="requirement_analysis",
+                created_at=started_at,
+            )
+            stage_trace = command_trace.child_span(
+                span_id=f"runtime-rerun-stage-start-{new_run.run_id}",
+                created_at=started_at,
+                run_id=new_run.run_id,
+                stage_run_id=new_run.current_stage_run_id,
+                graph_thread_id=new_run.graph_thread_ref,
+            )
+            stage = StageRunService(
+                runtime_session=self._runtime_session,
+                log_writer=self._log_writer,
+                redaction_policy=self._redaction_policy,
+                now=self._now,
+            ).start_stage(
+                run_id=new_run.run_id,
+                stage_run_id=new_run.current_stage_run_id,
+                stage_type=StageType.REQUIREMENT_ANALYSIS,
+                attempt_index=1,
+                graph_node_key="requirement_analysis",
+                stage_contract_ref=(
+                    f"{graph_definition.graph_definition_id}/stage-contracts/"
+                    "requirement_analysis"
+                ),
+                input_ref=None,
+                summary="Requirement Analysis started from a rerun command.",
+                trace_context=stage_trace,
+            )
+            self._persist_template_snapshot_artifact(
+                run=new_run,
+                stage=stage,
+                template_snapshot=template_snapshot,
+                created_at=started_at,
+            )
             self._require_control_session().add(session)
             self._append_latest_terminal_system_status_retry_action(
                 run=run,
@@ -1268,7 +1390,7 @@ class RunLifecycleService:
                 span_id=f"runtime-rerun-created-{new_run.run_id}",
                 created_at=started_at,
                 run_id=new_run.run_id,
-                stage_run_id=None,
+                stage_run_id=stage.stage_run_id,
                 graph_thread_id=new_run.graph_thread_ref,
             )
             self._require_events().append(
@@ -1288,6 +1410,20 @@ class RunLifecycleService:
                 session=session,
                 run=new_run,
                 trace_context=event_trace,
+                occurred_at=started_at,
+            )
+            stage_node = self._build_stage_started_projection(
+                run_id=new_run.run_id,
+                stage=stage,
+                occurred_at=started_at,
+            )
+            self._require_events().append(
+                DomainEventType.STAGE_STARTED,
+                payload={"stage_node": stage_node.model_dump(mode="json")},
+                trace_context=event_trace,
+                session_id=session.session_id,
+                run_id=new_run.run_id,
+                stage_run_id=stage.stage_run_id,
                 occurred_at=started_at,
             )
             self._commit_rerun_all(
@@ -1311,7 +1447,7 @@ class RunLifecycleService:
                 level=LogLevel.INFO,
                 duration_ms=self._duration_ms(started_at, started_at),
             )
-            return RunCommandResult(session=session, run=new_run, stage=None)
+            return RunCommandResult(session=session, run=new_run, stage=stage)
         except _RejectedRunLifecycleServiceError as exc:
             self._rollback_all()
             self._record_rejected_command(
@@ -1722,8 +1858,10 @@ class RunLifecycleService:
         source_run: PipelineRunModel,
         started_at: datetime,
     ) -> PipelineRunModel:
+        run_id = _bounded_id("run", uuid4().hex)
+        stage_run_id = _bounded_id("stage-run", uuid4().hex)
         return PipelineRunModel(
-            run_id=f"run-{uuid4().hex}",
+            run_id=run_id,
             session_id=session.session_id,
             project_id=source_run.project_id,
             attempt_index=source_run.attempt_index + 1,
@@ -1731,19 +1869,91 @@ class RunLifecycleService:
             trigger_source=RunTriggerSource.RETRY,
             template_snapshot_ref=source_run.template_snapshot_ref,
             graph_definition_ref=source_run.graph_definition_ref,
-            graph_thread_ref=f"thread-{uuid4().hex}",
-            workspace_ref=source_run.workspace_ref,
+            graph_thread_ref=_graph_thread_id(run_id),
+            workspace_ref=_workspace_ref(run_id),
             runtime_limit_snapshot_ref=source_run.runtime_limit_snapshot_ref,
             provider_call_policy_snapshot_ref=(
                 source_run.provider_call_policy_snapshot_ref
             ),
             delivery_channel_snapshot_ref=source_run.delivery_channel_snapshot_ref,
-            current_stage_run_id=None,
-            trace_id=f"trace-{uuid4().hex}",
+            current_stage_run_id=stage_run_id,
+            trace_id=_trace_id(),
             started_at=started_at,
             ended_at=None,
             created_at=started_at,
             updated_at=started_at,
+        )
+
+    def _build_rerun_template_snapshot(
+        self,
+        *,
+        session: SessionModel,
+        run_id: str,
+        created_at: datetime,
+        source_template_snapshot_ref: str,
+        trace_context: TraceContext,
+    ) -> TemplateSnapshot:
+        del source_template_snapshot_ref
+        template = self._require_control_session().get(
+            PipelineTemplateModel,
+            session.selected_template_id,
+        )
+        if template is None:
+            raise RunLifecycleServiceError(
+                "Pipeline template was not found for rerun.",
+                error_code=ErrorCode.VALIDATION_ERROR,
+                status_code=422,
+                detail_ref=session.session_id,
+            )
+        try:
+            snapshot = TemplateSnapshotBuilder.build_for_run(
+                template,
+                run_id=run_id,
+                created_at=created_at,
+            )
+            self._prompt_validation_service.validate_run_prompt_snapshots(
+                template_snapshot=snapshot,
+                trace_context=trace_context.child_span(
+                    span_id=f"runtime-rerun-template-{run_id}",
+                    created_at=created_at,
+                    run_id=run_id,
+                ),
+            )
+            return snapshot
+        except RunPromptValidationError as exc:
+            raise RunLifecycleServiceError(
+                exc.message,
+                error_code=exc.error_code,
+                status_code=422,
+                detail_ref=session.session_id,
+            ) from exc
+        except (ValidationError, ValueError) as exc:
+            raise RunLifecycleServiceError(
+                "Rerun template snapshot is invalid.",
+                error_code=ErrorCode.VALIDATION_ERROR,
+                status_code=422,
+                detail_ref=session.session_id,
+            ) from exc
+
+    def _settings_for_rerun(
+        self,
+        *,
+        run_id: str,
+        trace_context: TraceContext,
+    ) -> PlatformRuntimeSettingsRead:
+        control_session = self._require_control_session()
+        return PlatformRuntimeSettingsService(
+            control_session,
+            audit_service=self._audit_service,
+            log_writer=self._log_writer,
+            redaction_policy=self._redaction_policy,
+            now=self._now,
+        ).get_current_settings(
+            trace_context=trace_context.child_span(
+                span_id=f"runtime-rerun-settings-{run_id}",
+                created_at=self._now(),
+                run_id=run_id,
+            )
         )
 
     def _run_summary_projection(
@@ -2512,9 +2722,13 @@ class RunLifecycleService:
     ) -> None:
         runtime_committed = False
         control_committed = False
+        graph_committed = False
         try:
             self._runtime_session.commit()
             runtime_committed = True
+            if self._graph_session is not None:
+                self._graph_session.commit()
+                graph_committed = True
             self._require_control_session().commit()
             control_committed = True
             self._require_event_session().commit()
@@ -2525,6 +2739,7 @@ class RunLifecycleService:
                 session_snapshot=session_snapshot,
                 new_run_id=new_run_id,
                 runtime_committed=runtime_committed,
+                graph_committed=graph_committed,
                 control_committed=control_committed,
             )
             raise
@@ -2536,11 +2751,13 @@ class RunLifecycleService:
         session_snapshot: RerunSessionState,
         new_run_id: str,
         runtime_committed: bool,
+        graph_committed: bool,
         control_committed: bool,
     ) -> None:
         control_restored = not control_committed
         control_error: Exception | None = None
         runtime_error: Exception | None = None
+        graph_error: Exception | None = None
 
         if control_committed:
             try:
@@ -2562,19 +2779,53 @@ class RunLifecycleService:
         if runtime_committed and control_restored:
             try:
                 self._runtime_session.rollback()
-                run = self._runtime_session.get(PipelineRunModel, new_run_id)
-                if run is not None:
-                    self._runtime_session.delete(run)
-                    self._runtime_session.commit()
+                for model in (
+                    StageArtifactModel,
+                    StageRunModel,
+                    ModelBindingSnapshotModel,
+                    ProviderSnapshotModel,
+                    PipelineRunModel,
+                    RuntimeLimitSnapshotModel,
+                    ProviderCallPolicySnapshotModel,
+                ):
+                    rows = (
+                        self._runtime_session.query(model)
+                        .filter(model.run_id == new_run_id)
+                        .all()
+                    )
+                    for row in rows:
+                        self._runtime_session.delete(row)
+                self._runtime_session.commit()
             except Exception as exc:
                 runtime_error = exc
 
-        if control_error is not None or runtime_error is not None:
+        if graph_committed and control_restored:
+            try:
+                graph_session = self._require_graph_session()
+                graph_session.rollback()
+                thread = graph_session.get(GraphThreadModel, _graph_thread_id(new_run_id))
+                if thread is not None:
+                    graph_session.delete(thread)
+                definition = graph_session.get(
+                    GraphDefinitionModel,
+                    _bounded_id("graph-definition", new_run_id),
+                )
+                if definition is not None:
+                    graph_session.delete(definition)
+                graph_session.commit()
+            except Exception as exc:
+                graph_error = exc
+
+        if (
+            control_error is not None
+            or runtime_error is not None
+            or graph_error is not None
+        ):
             self._rollback_all()
-            detail = str(control_error or runtime_error)
+            detail = str(control_error or runtime_error or graph_error)
             raise RuntimeError(
                 f"rerun compensation failed after partial commit: {detail}"
-            ) from (control_error or runtime_error)
+            ) from (control_error or runtime_error or graph_error)
 
     def _rollback_all(self) -> None:
         self._runtime_session.rollback()
