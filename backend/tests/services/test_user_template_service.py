@@ -852,6 +852,64 @@ def test_delete_user_template_rejects_started_session_reference_without_changes(
     assert _action_records(audit, "template.delete.rejected")
 
 
+def test_delete_user_template_falls_back_hidden_started_session(
+    tmp_path: Path,
+) -> None:
+    from backend.app.services.templates import DEFAULT_TEMPLATE_ID, TemplateService
+
+    audit = RecordingAuditService()
+    manager = build_manager(tmp_path)
+
+    with manager.session(DatabaseRole.CONTROL) as session:
+        seed_project(session)
+        seed_templates_and_custom_provider(session, audit)
+        created = TemplateService(
+            session,
+            audit_service=audit,
+            now=lambda: NOW,
+        ).save_as_user_template(
+            source_template_id=None,
+            body=write_request(),
+            trace_context=build_trace(),
+        )
+        session.add(
+            SessionModel(
+                session_id="session-hidden-started",
+                project_id="project-default",
+                display_name="Hidden started",
+                status=SessionStatus.FAILED,
+                selected_template_id=created.template_id,
+                current_run_id="run-failed",
+                latest_stage_type=None,
+                is_visible=False,
+                visibility_removed_at=NOW,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.commit()
+
+        TemplateService(
+            session,
+            audit_service=audit,
+            now=lambda: LATER,
+        ).delete_user_template(
+            template_id=created.template_id,
+            trace_context=build_trace(),
+        )
+        saved_template = session.get(PipelineTemplateModel, created.template_id)
+        saved_session = session.get(SessionModel, "session-hidden-started")
+
+    assert saved_template is None
+    assert saved_session is not None
+    assert saved_session.selected_template_id == DEFAULT_TEMPLATE_ID
+    assert saved_session.is_visible is False
+    assert saved_session.visibility_removed_at is not None
+    assert saved_session.updated_at.replace(tzinfo=UTC) == LATER
+    record = _action_records(audit, "template.delete")[0]
+    assert record["metadata"]["fallback_session_ids"] == ["session-hidden-started"]
+
+
 def test_delete_user_template_rejects_non_draft_session_without_current_run(
     tmp_path: Path,
 ) -> None:

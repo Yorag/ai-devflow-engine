@@ -726,8 +726,11 @@ class TemplateService:
         blocked_sessions = [
             session
             for session in referencing_sessions
-            if session.status is not SessionStatus.DRAFT
-            or session.current_run_id is not None
+            if session.is_visible
+            and (
+                session.status is not SessionStatus.DRAFT
+                or session.current_run_id is not None
+            )
         ]
         if blocked_sessions:
             self._record_rejected(
