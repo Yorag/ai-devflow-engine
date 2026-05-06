@@ -27,6 +27,7 @@ type TemplateEmptyStateProps = {
     sourceTemplate: PipelineTemplateRead,
     draft: TemplateDraftState,
   ) => unknown | Promise<unknown>;
+  onTemplateUse?: (template: PipelineTemplateRead) => unknown | Promise<unknown>;
   onTemplateOverwrite?: (
     template: PipelineTemplateRead,
     sourceTemplate: PipelineTemplateRead,
@@ -43,6 +44,7 @@ export function TemplateEmptyState({
   onTemplateChange,
   isTemplateChangeBusy = false,
   onTemplateSaveAs,
+  onTemplateUse,
   onTemplateOverwrite,
   onTemplateDelete,
 }: TemplateEmptyStateProps): JSX.Element {
@@ -114,6 +116,22 @@ export function TemplateEmptyState({
         );
       }
       setDraft(createTemplateDraft(savedTemplate));
+    } catch (error) {
+      setTemplateSaveError(error);
+    } finally {
+      setTemplateSaveBusy(false);
+    }
+  }
+
+  async function handleUse() {
+    if (!selectedTemplate) {
+      return;
+    }
+
+    setTemplateSaveBusy(true);
+    setTemplateSaveError(null);
+    try {
+      await onTemplateUse?.(selectedTemplate);
     } catch (error) {
       setTemplateSaveError(error);
     } finally {
@@ -214,6 +232,7 @@ export function TemplateEmptyState({
           providers={providers}
           draft={draft}
           onDraftChange={setDraft}
+          onUse={handleUse}
           onSaveAs={handleSaveAs}
           onOverwrite={handleOverwrite}
           onDelete={handleDelete}

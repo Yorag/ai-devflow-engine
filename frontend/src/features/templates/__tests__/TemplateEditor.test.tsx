@@ -90,6 +90,41 @@ describe("template-state", () => {
   });
 });
 describe("TemplateEditor", () => {
+  it("uses a clean system template without creating a user template", () => {
+    const workspace = mockSessionWorkspaces["session-draft"];
+    const usedTemplateIds: string[] = [];
+    const savedAsTemplateIds: string[] = [];
+
+    renderWithAppProviders(
+      <TemplateEmptyState
+        session={workspace.session}
+        templates={mockPipelineTemplates}
+        providers={mockProviderList}
+        selectedTemplateId="template-feature"
+        onTemplateChange={() => undefined}
+        onTemplateUse={(template) => usedTemplateIds.push(template.template_id)}
+        onTemplateSaveAs={(template) => savedAsTemplateIds.push(template.template_id)}
+      />,
+    );
+
+    const editor = screen.getByRole("region", { name: "Template editor" });
+    expect(within(editor).getByText("Saved")).toBeTruthy();
+    expect(
+      within(editor).getByRole("button", { name: "Use template" }),
+    ).toBeTruthy();
+    expect(
+      within(editor).queryByRole("button", { name: "Save template" }),
+    ).toBeNull();
+    expect(
+      within(editor).queryByRole("button", { name: "Save as new template" }),
+    ).toBeNull();
+
+    fireEvent.click(within(editor).getByRole("button", { name: "Use template" }));
+
+    expect(usedTemplateIds).toEqual(["template-feature"]);
+    expect(savedAsTemplateIds).toEqual([]);
+  });
+
   it("renders fixed stage tabs and only edits the selected stage", () => {
     const workspace = mockSessionWorkspaces["session-draft"];
 
@@ -245,6 +280,12 @@ describe("TemplateEditor", () => {
         "Unsaved edits will not affect this session until you save as a user template.",
       ),
     ).toBeTruthy();
+    expect(
+      within(editor).getByRole("button", { name: "Use template" }),
+    ).toBeTruthy();
+    expect(
+      within(editor).getByRole("button", { name: "Save as new template" }),
+    ).toBeTruthy();
     expect(editor.textContent ?? "").not.toContain("provider-deepseek");
   });
 
@@ -315,7 +356,9 @@ describe("TemplateEditor", () => {
     fireEvent.change(auxiliaryModelSelect, {
       target: { value: "provider-mimo/MiMo-V2.5-Pro" },
     });
-    fireEvent.click(within(editor).getByRole("button", { name: "Save template" }));
+    fireEvent.click(
+      within(editor).getByRole("button", { name: "Save as new template" }),
+    );
 
     await waitFor(() => {
       expect(
@@ -391,14 +434,25 @@ describe("TemplateEditor", () => {
 
     expect(within(editor).getByText(/Unsaved edits will not affect/u)).toBeTruthy();
     expect(
-      within(editor).getByRole("button", { name: "Save template" }),
+      within(editor).getByRole("button", { name: "Save as new template" }),
     ).toBeTruthy();
+    expect(
+      Array.from(
+        editor.querySelectorAll(".template-editor__actions button"),
+        (button) => button.textContent ?? "",
+      ),
+    ).toEqual(["Discard changes", "Save as new template", "Use template"]);
+    expect(
+      within(editor).queryByRole("button", { name: "Save template" }),
+    ).toBeNull();
     expect(
       within(editor).queryByRole("button", { name: "Overwrite template" }),
     ).toBeNull();
     expect(within(editor).queryByRole("button", { name: "Delete template" })).toBeNull();
 
-    fireEvent.click(within(editor).getByRole("button", { name: "Save template" }));
+    fireEvent.click(
+      within(editor).getByRole("button", { name: "Save as new template" }),
+    );
 
     expect(savedAsTemplateIds).toEqual(["template-user-template-feature-1"]);
   });
@@ -426,7 +480,9 @@ describe("TemplateEditor", () => {
       target: { value: "2" },
     });
     fireEvent.click(within(editor).getByLabelText("Skip high-risk confirmations"));
-    fireEvent.click(within(editor).getByRole("button", { name: "Save template" }));
+    fireEvent.click(
+      within(editor).getByRole("button", { name: "Save as new template" }),
+    );
 
     await waitFor(() => {
       expect(savedTemplate).toMatchObject({
@@ -492,7 +548,7 @@ describe("TemplateEditor", () => {
     expect(savedTemplates).toEqual(["Checkout feature flow"]);
   });
 
-  it("Save template persists all edited stage bindings in one full template payload", async () => {
+  it("Save as new template persists all edited stage bindings in one full template payload", async () => {
     const workspace = mockSessionWorkspaces["session-draft"];
     let savedTemplate: PipelineTemplateRead | null = null;
 
@@ -525,7 +581,7 @@ describe("TemplateEditor", () => {
         target: { value: "Design only the approved checkout solution." },
       },
     );
-    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save as new template" }));
 
     await waitFor(() => {
       expect(savedTemplate?.stage_role_bindings).toEqual(
@@ -586,7 +642,7 @@ describe("TemplateEditor", () => {
         target: { value: "Clarify all checkout constraints before design." },
       },
     );
-    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save as new template" }));
 
     await waitFor(() => {
       const savedBinding = savedTemplate?.stage_role_bindings.find(
@@ -615,14 +671,22 @@ describe("TemplateEditor", () => {
     );
 
     const systemEditor = screen.getByRole("region", { name: "Template editor" });
+    fireEvent.change(
+      within(systemEditor).getByLabelText(
+        "Requirement Analysis stage work instruction",
+      ),
+      {
+        target: { value: "Clarify requirements before saving a reusable copy." },
+      },
+    );
     fireEvent.click(
-      within(systemEditor).getByRole("button", { name: "Save template" }),
+      within(systemEditor).getByRole("button", { name: "Save as new template" }),
     );
     await waitFor(() => {
       expect(systemSaveAsIds).toEqual(["template-user-template-feature-1"]);
     });
     fireEvent.click(
-      within(systemEditor).getByRole("button", { name: "Save template" }),
+      within(systemEditor).getByRole("button", { name: "Save as new template" }),
     );
 
     await waitFor(() => {
@@ -899,7 +963,13 @@ describe("TemplateEditor", () => {
     renderWithAppProviders(<RefreshHarness />);
 
     expect(screen.getAllByRole("radio", { name: /新功能开发流程/u })).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
+    fireEvent.change(
+      screen.getByLabelText("Requirement Analysis stage work instruction"),
+      {
+        target: { value: "Keep this local save-as template through refresh." },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save as new template" }));
     await waitFor(() => {
       expect(screen.getAllByRole("radio", { name: /新功能开发流程/u })).toHaveLength(2);
     });
@@ -923,7 +993,13 @@ describe("TemplateEditor", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
+    fireEvent.change(
+      screen.getByLabelText("Requirement Analysis stage work instruction"),
+      {
+        target: { value: "Create a local unpersisted template copy." },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save as new template" }));
 
     await waitFor(() => {
       const featureOptions = screen.getAllByRole("radio", {

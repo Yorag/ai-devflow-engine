@@ -22,6 +22,7 @@ type TemplateEditorProps = {
   providers: ProviderRead[];
   draft: TemplateDraftState;
   onDraftChange: (draft: TemplateDraftState) => void;
+  onUse: () => void;
   onSaveAs: () => void;
   onOverwrite: () => void;
   onDelete: () => void;
@@ -44,6 +45,7 @@ export function TemplateEditor({
   providers,
   draft,
   onDraftChange,
+  onUse,
   onSaveAs,
   onOverwrite,
   onDelete,
@@ -374,7 +376,7 @@ export function TemplateEditor({
             Discard changes
           </button>
         ) : null}
-        {template.template_source === "user_template" ? (
+        {template.template_source === "user_template" && dirty ? (
           <button
             className="workspace-button workspace-button--secondary"
             type="button"
@@ -384,17 +386,33 @@ export function TemplateEditor({
             {isSaving ? "Saving template" : "Save as new template"}
           </button>
         ) : null}
+        {template.template_source === "system_template" && dirty ? (
+          <button
+            className="workspace-button"
+            type="button"
+            onClick={onSaveAs}
+            disabled={!canSave}
+          >
+            {isSaving ? "Saving template" : "Save as new template"}
+          </button>
+        ) : null}
+        {template.template_source === "user_template" && dirty ? (
+          <button
+            className="workspace-button"
+            type="button"
+            onClick={onOverwrite}
+            disabled={!canSave}
+          >
+            {isSaving ? "Saving template" : "Save template"}
+          </button>
+        ) : null}
         <button
           className="workspace-button"
           type="button"
-          onClick={
-            template.template_source === "user_template"
-              ? onOverwrite
-              : onSaveAs
-          }
+          onClick={onUse}
           disabled={!canSave}
         >
-          {isSaving ? "Saving template" : "Save template"}
+          Use template
         </button>
         {template.template_source === "user_template" ? (
           <>

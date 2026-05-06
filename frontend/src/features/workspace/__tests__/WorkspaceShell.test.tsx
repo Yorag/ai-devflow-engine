@@ -766,8 +766,11 @@ describe("WorkspaceShell", () => {
 
     expect(within(editor).getByText(/Unsaved edits will not affect/u)).toBeTruthy();
     expect(
-      within(editor).getByRole("button", { name: "Save template" }),
+      within(editor).getByRole("button", { name: "Save as new template" }),
     ).toBeTruthy();
+    expect(
+      within(editor).queryByRole("button", { name: "Save template" }),
+    ).toBeNull();
     expect(document.body.textContent ?? "").not.toContain("DeliveryChannel");
     expect(document.body.textContent ?? "").not.toContain("deterministic test runtime");
   });
@@ -843,7 +846,9 @@ describe("WorkspaceShell", () => {
       target: { value: "2" },
     });
     fireEvent.click(within(editor).getByLabelText("Skip high-risk confirmations"));
-    fireEvent.click(within(editor).getByRole("button", { name: "Save template" }));
+    fireEvent.click(
+      within(editor).getByRole("button", { name: "Save as new template" }),
+    );
 
     await waitFor(() => {
       expect(sessionTemplateBody).toEqual({
@@ -879,6 +884,51 @@ describe("WorkspaceShell", () => {
     );
   });
 
+  it("uses the selected system template without creating a user template", async () => {
+    const baseFetcher = createMockApiFetcher();
+    let saveAsCalls = 0;
+    let sessionTemplateBody: unknown = null;
+    const request: ApiRequestOptions = {
+      fetcher: async (input, init) => {
+        const path = normalizeTestPath(input);
+        const method = init?.method ?? "GET";
+
+        if (
+          path.startsWith("/api/pipeline-templates/") &&
+          path.endsWith("/save-as") &&
+          method === "POST"
+        ) {
+          saveAsCalls += 1;
+        }
+
+        if (method === "PUT" && path === "/api/sessions/session-draft/template") {
+          sessionTemplateBody =
+            typeof init?.body === "string" ? JSON.parse(init.body) : null;
+          return jsonTestResponse({
+            ...mockSessionWorkspaces["session-draft"].session,
+            selected_template_id: "template-feature",
+          });
+        }
+
+        return baseFetcher(input, init);
+      },
+    };
+
+    renderWithAppProviders(<ConsolePage request={request} />);
+
+    const editor = await screen.findByRole("region", { name: "Template editor" });
+    fireEvent.click(within(editor).getByRole("button", { name: "Use template" }));
+
+    await waitFor(() => {
+      expect(sessionTemplateBody).toEqual({ template_id: "template-feature" });
+    });
+    expect(saveAsCalls).toBe(0);
+    await waitFor(() => {
+      expect(screen.queryByRole("region", { name: "Template editor" })).toBeNull();
+    });
+    expect(screen.getByLabelText("当前输入")).toHaveProperty("disabled", false);
+  });
+
   it("hides the template panel after saving and binding while Composer stays ready", async () => {
     renderWithAppProviders(
       <ConsolePage request={{ fetcher: createMockApiFetcher() }} />,
@@ -891,7 +941,9 @@ describe("WorkspaceShell", () => {
         target: { value: "Clarify saved requirements before implementation." },
       },
     );
-    fireEvent.click(within(editor).getByRole("button", { name: "Save template" }));
+    fireEvent.click(
+      within(editor).getByRole("button", { name: "Save as new template" }),
+    );
 
     await waitFor(() => {
       expect(screen.queryByRole("region", { name: "Template editor" })).toBeNull();

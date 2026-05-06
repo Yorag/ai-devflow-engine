@@ -265,6 +265,41 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
     }
   }
 
+  async function handleTemplateUse(
+    template: PipelineTemplateRead,
+  ): Promise<PipelineTemplateRead> {
+    if (!selectedSession) {
+      return template;
+    }
+
+    setWorkspaceActionBusy(true);
+    setTemplateChangeError(null);
+    try {
+      const updatedSession = await updateSessionTemplate(
+        selectedSession.session_id,
+        { template_id: template.template_id },
+        request ?? {},
+      );
+      setTemplateSelections((current) => ({
+        ...current,
+        [updatedSession.session_id]: updatedSession.selected_template_id,
+      }));
+      setConfiguredDraftSessionIds((current) =>
+        current.includes(updatedSession.session_id)
+          ? current
+          : [...current, updatedSession.session_id],
+      );
+      await sessionsQuery.refetch();
+      await sessionWorkspaceQuery.refetch();
+      return template;
+    } catch (error) {
+      setTemplateChangeError(error);
+      throw error;
+    } finally {
+      setWorkspaceActionBusy(false);
+    }
+  }
+
   async function handleTemplateOverwrite(
     _template: PipelineTemplateRead,
     sourceTemplate: PipelineTemplateRead,
@@ -383,6 +418,7 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
                     selectedTemplateId={selectedTemplateId}
                     onTemplateChange={handleTemplateChange}
                     isTemplateChangeBusy={isWorkspaceActionBusy}
+                    onTemplateUse={handleTemplateUse}
                     onTemplateSaveAs={handleTemplateSaveAs}
                     onTemplateOverwrite={handleTemplateOverwrite}
                     onTemplateDelete={handleTemplateDelete}
