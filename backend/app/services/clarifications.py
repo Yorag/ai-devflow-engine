@@ -23,7 +23,6 @@ from backend.app.domain.enums import (
 )
 from backend.app.domain.runtime_refs import (
     CheckpointPurpose,
-    CheckpointRef,
     GraphInterruptRef,
     GraphInterruptStatus,
     GraphInterruptType,
@@ -35,6 +34,7 @@ from backend.app.domain.trace_context import TraceContext
 from backend.app.schemas.feed import ControlItemFeedEntry, MessageFeedEntry
 from backend.app.schemas.observability import AuditActorType, AuditResult
 from backend.app.services.events import DomainEventType, EventStore
+from backend.app.services.graph_interrupt_refs import build_persisted_graph_interrupt_ref
 from backend.app.services.runs import RunLifecycleService, RunLifecycleServiceError
 from backend.app.services.runtime_orchestration import RuntimeOrchestrationService
 
@@ -83,11 +83,13 @@ class ClarificationService:
         event_session: Session,
         audit_service: Any,
         runtime_orchestration: RuntimeOrchestrationService,
+        graph_session: Session | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._control_session = control_session
         self._runtime_session = runtime_session
         self._event_session = event_session
+        self._graph_session = graph_session
         self._audit_service = audit_service
         self._runtime_orchestration = runtime_orchestration
         self._now = now or (lambda: datetime.now(UTC))
@@ -484,33 +486,19 @@ class ClarificationService:
         stage: StageRunModel,
         clarification: ClarificationRecordModel,
     ) -> GraphInterruptRef:
-        thread = GraphThreadRef(
-            thread_id=run.graph_thread_ref,
-            run_id=run.run_id,
-            status=GraphThreadStatus.WAITING_CLARIFICATION,
-            current_stage_run_id=stage.stage_run_id,
-            current_stage_type=stage.stage_type,
-        )
-        checkpoint = CheckpointRef(
-            checkpoint_id=f"checkpoint-{clarification.graph_interrupt_ref}",
-            thread_id=thread.thread_id,
-            run_id=run.run_id,
-            stage_run_id=stage.stage_run_id,
-            stage_type=stage.stage_type,
-            purpose=CheckpointPurpose.WAITING_CLARIFICATION,
-            payload_ref=clarification.payload_ref or clarification.clarification_id,
-        )
-        return GraphInterruptRef(
+        payload_ref = clarification.payload_ref or clarification.clarification_id
+        if self._graph_session is None:
+            raise RuntimeError("Clarification resume requires graph_session.")
+        return build_persisted_graph_interrupt_ref(
+            graph_session=self._graph_session,
+            run=run,
+            stage=stage,
             interrupt_id=clarification.graph_interrupt_ref,
-            thread=thread,
             interrupt_type=GraphInterruptType.CLARIFICATION_REQUEST,
-            status=GraphInterruptStatus.PENDING,
-            run_id=run.run_id,
-            stage_run_id=stage.stage_run_id,
-            stage_type=stage.stage_type,
-            payload_ref=clarification.payload_ref or clarification.clarification_id,
+            payload_ref=payload_ref,
+            checkpoint_purpose=CheckpointPurpose.WAITING_CLARIFICATION,
+            thread_status=GraphThreadStatus.WAITING_CLARIFICATION,
             clarification_id=clarification.clarification_id,
-            checkpoint_ref=checkpoint,
         )
 
     def _reject_reply(
@@ -609,11 +597,15 @@ class ClarificationService:
         self._runtime_session.commit()
         self._control_session.commit()
         self._event_session.commit()
+        if self._graph_session is not None:
+            self._graph_session.commit()
 
     def _rollback_sessions(self) -> None:
         self._runtime_session.rollback()
         self._control_session.rollback()
         self._event_session.rollback()
+        if self._graph_session is not None:
+            self._graph_session.rollback()
 
 
 __all__ = [

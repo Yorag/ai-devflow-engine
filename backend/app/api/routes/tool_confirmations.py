@@ -7,10 +7,9 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.errors import ApiError, ErrorResponse
 from backend.app.api.routes.sessions import (
-    InMemoryCheckpointPort,
-    InMemoryRuntimeCommandPort,
     get_control_session,
     get_event_session,
+    get_graph_session,
     get_runtime_session,
 )
 from backend.app.db.base import DatabaseRole
@@ -28,6 +27,7 @@ from backend.app.services.tool_confirmations import (
     ToolConfirmationService,
     ToolConfirmationServiceError,
 )
+from backend.app.services.graph_runtime import GraphCheckpointPort, GraphRuntimeCommandPort
 from backend.app.services.runtime_orchestration import RuntimeOrchestrationService
 
 
@@ -36,6 +36,7 @@ router = APIRouter(tags=["tool-confirmations"])
 
 def _tool_confirmation_runtime_orchestration_from_app_state(
     request: Request,
+    graph_session: Session,
 ) -> RuntimeOrchestrationService:
     runtime_port = getattr(request.app.state, "h44a_runtime_port", None)
     if runtime_port is None:
@@ -43,10 +44,10 @@ def _tool_confirmation_runtime_orchestration_from_app_state(
     if runtime_port is None:
         runtime_port = getattr(request.app.state, "h41_runtime_port", None)
     if runtime_port is None:
-        runtime_port = InMemoryRuntimeCommandPort()
+        runtime_port = GraphRuntimeCommandPort(graph_session)
     checkpoint_port = getattr(request.app.state, "h41_checkpoint_port", None)
     if checkpoint_port is None:
-        checkpoint_port = InMemoryCheckpointPort()
+        checkpoint_port = GraphCheckpointPort(graph_session)
     return RuntimeOrchestrationService(
         runtime_port=runtime_port,
         checkpoint_port=checkpoint_port,
@@ -58,6 +59,7 @@ def get_tool_confirmation_service(
     control_session: Session = Depends(get_control_session),
     runtime_session: Session = Depends(get_runtime_session),
     event_session: Session = Depends(get_event_session),
+    graph_session: Session = Depends(get_graph_session),
 ) -> Iterator[ToolConfirmationService]:
     manager: DatabaseManager = request.app.state.database_manager
     settings = request.app.state.environment_settings
@@ -82,8 +84,10 @@ def get_tool_confirmation_service(
             runtime_session=runtime_session,
             event_session=event_session,
             runtime_orchestration=_tool_confirmation_runtime_orchestration_from_app_state(
-                request
+                request,
+                graph_session,
             ),
+            graph_session=graph_session,
             audit_service=audit_service,
             log_writer=log_writer,
         )

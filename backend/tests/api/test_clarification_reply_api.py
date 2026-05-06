@@ -8,16 +8,23 @@ from backend.app.core.config import EnvironmentSettings
 from backend.app.db.base import DatabaseRole
 from backend.app.db.models.control import ControlBase, SessionModel
 from backend.app.db.models.event import DomainEventModel, EventBase
-from backend.app.db.models.graph import GraphBase
+from backend.app.db.models.graph import (
+    GraphBase,
+    GraphCheckpointModel,
+    GraphDefinitionModel,
+    GraphInterruptModel,
+    GraphThreadModel,
+)
 from backend.app.db.models.log import AuditLogEntryModel, LogBase
 from backend.app.db.models.runtime import (
     ClarificationRecordModel,
     PipelineRunModel,
     RuntimeBase,
 )
-from backend.app.domain.enums import RunStatus, SseEventType
+from backend.app.domain.enums import RunStatus, SseEventType, StageType
 from backend.app.main import create_app
 from backend.app.services.sessions import DEFAULT_SESSION_DISPLAY_NAME
+from backend.tests.services.test_clarification_flow import NOW
 
 
 def build_app(tmp_path: Path):
@@ -78,11 +85,77 @@ def seed_waiting_clarification_via_service(app) -> str:
             payload_ref="clarification-payload-1",
             trace_context=build_trace(),
         )
+        _seed_graph_interrupt_for_clarification(app, result.clarification_id)
         return result.clarification_id
     finally:
         control_session.close()
         runtime_session.close()
         event_session.close()
+
+
+def _seed_graph_interrupt_for_clarification(app, clarification_id: str) -> None:
+    manager = app.state.database_manager
+    checkpoint_ref = "graph-checkpoint://thread-1/checkpoint-clarification-1"
+    with manager.session(DatabaseRole.GRAPH) as session:
+        session.add(
+            GraphDefinitionModel(
+                graph_definition_id="graph-definition-1",
+                run_id="run-1",
+                template_snapshot_ref="template-snapshot-1",
+                graph_version="test-graph-v1",
+                stage_nodes=[],
+                stage_contracts={},
+                interrupt_policy={},
+                retry_policy={},
+                delivery_routing_policy={},
+                schema_version="graph-definition-v1",
+                created_at=NOW,
+            )
+        )
+        session.add(
+            GraphThreadModel(
+                graph_thread_id="thread-1",
+                run_id="run-1",
+                graph_definition_id="graph-definition-1",
+                checkpoint_namespace="thread-1",
+                current_node_key="requirement_analysis.main",
+                current_interrupt_id=f"interrupt-{clarification_id}",
+                status="interrupted",
+                last_checkpoint_ref=checkpoint_ref,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.flush()
+        session.add(
+            GraphCheckpointModel(
+                checkpoint_id="checkpoint-clarification-1",
+                graph_thread_id="thread-1",
+                checkpoint_ref=checkpoint_ref,
+                node_key="requirement_analysis.main",
+                state_ref=checkpoint_ref,
+                sequence_index=1,
+                created_at=NOW,
+            )
+        )
+        session.add(
+            GraphInterruptModel(
+                interrupt_id=f"interrupt-{clarification_id}",
+                graph_thread_id="thread-1",
+                interrupt_type="clarification_request",
+                source_stage_type=StageType.REQUIREMENT_ANALYSIS,
+                source_node_key="requirement_analysis.main",
+                payload_ref="clarification-payload-1",
+                runtime_object_ref=clarification_id,
+                runtime_object_type="clarification_record",
+                status="pending",
+                requested_at=NOW,
+                responded_at=None,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.commit()
 
 
 def test_post_session_message_accepts_clarification_reply_and_restores_running(

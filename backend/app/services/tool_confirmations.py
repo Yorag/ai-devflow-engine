@@ -26,7 +26,6 @@ from backend.app.domain.enums import (
 )
 from backend.app.domain.runtime_refs import (
     CheckpointPurpose,
-    CheckpointRef,
     GraphInterruptRef,
     GraphInterruptStatus,
     GraphInterruptType,
@@ -41,6 +40,7 @@ from backend.app.schemas.feed import ToolConfirmationFeedEntry
 from backend.app.schemas.observability import AuditActorType, AuditResult, LogCategory, LogLevel
 from backend.app.services.control_records import ControlRecordService
 from backend.app.services.events import DomainEventType, EventStore
+from backend.app.services.graph_interrupt_refs import build_persisted_graph_interrupt_ref
 from backend.app.services.runtime_orchestration import RuntimeOrchestrationService
 
 
@@ -106,6 +106,7 @@ class ToolConfirmationService:
         runtime_session: Session,
         event_session: Session,
         runtime_orchestration: RuntimeOrchestrationService,
+        graph_session: Session | None = None,
         audit_service: Any | None = None,
         log_writer: RunLogWriter,
         redaction_policy: RedactionPolicy | None = None,
@@ -115,6 +116,7 @@ class ToolConfirmationService:
         self._control_session = control_session
         self._runtime_session = runtime_session
         self._event_session = event_session
+        self._graph_session = graph_session
         self._runtime_orchestration = runtime_orchestration
         self._audit_service = audit_service or _NoopAuditService()
         self._log_writer = log_writer
@@ -799,33 +801,19 @@ class ToolConfirmationService:
         run: PipelineRunModel,
         stage: StageRunModel,
     ) -> GraphInterruptRef:
-        return GraphInterruptRef(
+        if self._graph_session is None:
+            raise RuntimeError("Tool confirmation resume requires graph_session.")
+        return build_persisted_graph_interrupt_ref(
+            graph_session=self._graph_session,
+            run=run,
+            stage=stage,
             interrupt_id=request.graph_interrupt_ref,
-            thread=GraphThreadRef(
-                thread_id=run.graph_thread_ref,
-                run_id=run.run_id,
-                status=GraphThreadStatus.WAITING_TOOL_CONFIRMATION,
-                current_stage_run_id=stage.stage_run_id,
-                current_stage_type=stage.stage_type,
-            ),
             interrupt_type=GraphInterruptType.TOOL_CONFIRMATION,
-            status=GraphInterruptStatus.PENDING,
-            run_id=run.run_id,
-            stage_run_id=stage.stage_run_id,
-            stage_type=stage.stage_type,
             payload_ref=request.tool_confirmation_id,
+            checkpoint_purpose=CheckpointPurpose.WAITING_TOOL_CONFIRMATION,
+            thread_status=GraphThreadStatus.WAITING_TOOL_CONFIRMATION,
             tool_confirmation_id=request.tool_confirmation_id,
             tool_action_ref=request.confirmation_object_ref,
-            checkpoint_ref=CheckpointRef(
-                checkpoint_id=f"checkpoint-{request.graph_interrupt_ref}",
-                thread_id=run.graph_thread_ref,
-                run_id=run.run_id,
-                stage_run_id=stage.stage_run_id,
-                stage_type=stage.stage_type,
-                purpose=CheckpointPurpose.WAITING_TOOL_CONFIRMATION,
-                workspace_snapshot_ref=None,
-                payload_ref=request.tool_confirmation_id,
-            ),
         )
 
     @staticmethod
@@ -1063,11 +1051,15 @@ class ToolConfirmationService:
         self._runtime_session.commit()
         self._control_session.commit()
         self._event_session.commit()
+        if self._graph_session is not None:
+            self._graph_session.commit()
 
     def _rollback_sessions(self) -> None:
         self._runtime_session.rollback()
         self._control_session.rollback()
         self._event_session.rollback()
+        if self._graph_session is not None:
+            self._graph_session.rollback()
 
 
 class _NoopAuditService:

@@ -1552,30 +1552,10 @@ class DeterministicRuntimeEngine:
         stage: StageRunModel,
         interrupt_ref: GraphInterruptRef | None = None,
     ) -> GraphInterruptRef:
-        if interrupt_ref is not None:
-            return interrupt_ref
-        thread = self._thread_ref(
-            run=run,
-            stage=stage,
-            status=GraphThreadStatus.WAITING_CLARIFICATION,
-        )
-        return GraphInterruptRef(
-            interrupt_id=clarification.graph_interrupt_ref,
-            thread=thread,
-            interrupt_type=GraphInterruptType.CLARIFICATION_REQUEST,
-            status=GraphInterruptStatus.PENDING,
-            run_id=run.run_id,
-            stage_run_id=stage.stage_run_id,
-            stage_type=stage.stage_type,
-            payload_ref=clarification.payload_ref or clarification.clarification_id,
-            clarification_id=clarification.clarification_id,
-            checkpoint_ref=self._checkpoint_stub(
-                run=run,
-                stage=stage,
-                purpose=CheckpointPurpose.WAITING_CLARIFICATION,
-                payload_ref=clarification.payload_ref or clarification.clarification_id,
-            ),
-        )
+        del clarification, run, stage
+        if interrupt_ref is None:
+            raise RuntimeError("Deterministic clarification interrupt was not persisted.")
+        return interrupt_ref
 
     def _approval_interrupt_ref(
         self,
@@ -1585,30 +1565,10 @@ class DeterministicRuntimeEngine:
         stage: StageRunModel,
         interrupt_ref: GraphInterruptRef | None = None,
     ) -> GraphInterruptRef:
-        if interrupt_ref is not None:
-            return interrupt_ref
-        thread = self._thread_ref(
-            run=run,
-            stage=stage,
-            status=GraphThreadStatus.WAITING_APPROVAL,
-        )
-        return GraphInterruptRef(
-            interrupt_id=approval.graph_interrupt_ref,
-            thread=thread,
-            interrupt_type=GraphInterruptType.APPROVAL,
-            status=GraphInterruptStatus.PENDING,
-            run_id=run.run_id,
-            stage_run_id=stage.stage_run_id,
-            stage_type=stage.stage_type,
-            payload_ref=approval.payload_ref,
-            approval_id=approval.approval_id,
-            checkpoint_ref=self._checkpoint_stub(
-                run=run,
-                stage=stage,
-                purpose=CheckpointPurpose.WAITING_APPROVAL,
-                payload_ref=approval.payload_ref,
-            ),
-        )
+        del approval, run, stage
+        if interrupt_ref is None:
+            raise RuntimeError("Deterministic approval interrupt was not persisted.")
+        return interrupt_ref
 
     def _tool_confirmation_interrupt_ref(
         self,
@@ -1618,31 +1578,12 @@ class DeterministicRuntimeEngine:
         stage: StageRunModel,
         interrupt_ref: GraphInterruptRef | None = None,
     ) -> GraphInterruptRef:
-        if interrupt_ref is not None:
-            return interrupt_ref
-        thread = self._thread_ref(
-            run=run,
-            stage=stage,
-            status=GraphThreadStatus.WAITING_TOOL_CONFIRMATION,
-        )
-        return GraphInterruptRef(
-            interrupt_id=request.graph_interrupt_ref,
-            thread=thread,
-            interrupt_type=GraphInterruptType.TOOL_CONFIRMATION,
-            status=GraphInterruptStatus.PENDING,
-            run_id=run.run_id,
-            stage_run_id=stage.stage_run_id,
-            stage_type=stage.stage_type,
-            payload_ref=request.tool_confirmation_id,
-            tool_confirmation_id=request.tool_confirmation_id,
-            tool_action_ref=request.confirmation_object_ref,
-            checkpoint_ref=self._checkpoint_stub(
-                run=run,
-                stage=stage,
-                purpose=CheckpointPurpose.WAITING_TOOL_CONFIRMATION,
-                payload_ref=request.tool_confirmation_id,
-            ),
-        )
+        del request, run, stage
+        if interrupt_ref is None:
+            raise RuntimeError(
+                "Deterministic tool confirmation interrupt was not persisted."
+            )
+        return interrupt_ref
 
     def _thread_ref(
         self,
@@ -1657,25 +1598,6 @@ class DeterministicRuntimeEngine:
             status=status,
             current_stage_run_id=stage.stage_run_id,
             current_stage_type=stage.stage_type,
-        )
-
-    @staticmethod
-    def _checkpoint_stub(
-        *,
-        run: PipelineRunModel,
-        stage: StageRunModel,
-        purpose: CheckpointPurpose,
-        payload_ref: str,
-    ) -> CheckpointRef:
-        return CheckpointRef(
-            checkpoint_id=f"checkpoint-{payload_ref}",
-            thread_id=run.graph_thread_ref,
-            run_id=run.run_id,
-            stage_run_id=stage.stage_run_id,
-            stage_type=stage.stage_type,
-            purpose=purpose,
-            workspace_snapshot_ref=None,
-            payload_ref=payload_ref,
         )
 
     def _interrupt_result(

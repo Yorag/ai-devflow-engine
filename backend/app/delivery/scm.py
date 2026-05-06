@@ -1571,7 +1571,7 @@ class CreateCodeReviewRequestTool:
 
     @property
     def description(self) -> str:
-        return "Create a mock remote PR or MR request for a delivery branch."
+        return "Create a remote PR or MR request for a delivery branch."
 
     @property
     def input_schema(self) -> Mapping[str, object]:

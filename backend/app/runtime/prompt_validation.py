@@ -265,7 +265,7 @@ class PromptValidationService:
         return False
 
     def _load_stage_contracts(self) -> dict[str, dict[str, Any]]:
-        template_snapshot = self._template_snapshot_stub()
+        template_snapshot = self._validation_template_snapshot()
         runtime_limit_snapshot = RuntimeLimitSnapshotBuilder.build_for_run(
             self._settings_read,
             template_snapshot=template_snapshot,
@@ -281,7 +281,7 @@ class PromptValidationService:
             for stage_type, contract in graph_definition.stage_contracts.items()
         }
 
-    def _template_snapshot_stub(self) -> TemplateSnapshot:
+    def _validation_template_snapshot(self) -> TemplateSnapshot:
         stages = build_fixed_stage_sequence()
         created_at = self._created_at()
         return TemplateSnapshot(

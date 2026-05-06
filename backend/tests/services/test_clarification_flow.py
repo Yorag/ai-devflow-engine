@@ -15,6 +15,13 @@ from backend.app.db.models.control import (
     SessionModel,
 )
 from backend.app.db.models.event import DomainEventModel, EventBase
+from backend.app.db.models.graph import (
+    GraphBase,
+    GraphCheckpointModel,
+    GraphDefinitionModel,
+    GraphInterruptModel,
+    GraphThreadModel,
+)
 from backend.app.db.models.runtime import (
     ApprovalRequestModel,
     ClarificationRecordModel,
@@ -260,6 +267,7 @@ def build_manager(tmp_path: Path) -> DatabaseManager:
     ControlBase.metadata.create_all(manager.engine(DatabaseRole.CONTROL))
     RuntimeBase.metadata.create_all(manager.engine(DatabaseRole.RUNTIME))
     EventBase.metadata.create_all(manager.engine(DatabaseRole.EVENT))
+    GraphBase.metadata.create_all(manager.engine(DatabaseRole.GRAPH))
     return manager
 
 
@@ -385,6 +393,7 @@ def build_service(
     *,
     fail_resume: bool = False,
     audit: RecordingAuditService | None = None,
+    include_graph_session: bool = False,
 ) -> tuple[Any, RecordingAuditService, FakeRuntimePort]:
     from backend.app.services.clarifications import ClarificationService
 
@@ -394,6 +403,9 @@ def build_service(
         control_session=manager.session(DatabaseRole.CONTROL),
         runtime_session=manager.session(DatabaseRole.RUNTIME),
         event_session=manager.session(DatabaseRole.EVENT),
+        graph_session=manager.session(DatabaseRole.GRAPH)
+        if include_graph_session
+        else None,
         audit_service=audit,
         runtime_orchestration=RuntimeOrchestrationService(
             runtime_port=runtime_port,
@@ -416,6 +428,75 @@ def request_clarification(manager: DatabaseManager) -> tuple[str, FakeRuntimePor
         trace_context=build_trace(),
     )
     return result.clarification_id, runtime_port
+
+
+def seed_graph_interrupt_for_clarification(
+    manager: DatabaseManager,
+    *,
+    clarification_id: str,
+) -> None:
+    with manager.session(DatabaseRole.GRAPH) as session:
+        session.add_all(
+            [
+                GraphDefinitionModel(
+                    graph_definition_id="graph-definition-1",
+                    run_id="run-1",
+                    template_snapshot_ref="template-snapshot-1",
+                    graph_version="test-graph-v1",
+                    stage_nodes=[],
+                    stage_contracts={},
+                    interrupt_policy={},
+                    retry_policy={},
+                    delivery_routing_policy={},
+                    schema_version="graph-definition-v1",
+                    created_at=NOW,
+                ),
+                GraphThreadModel(
+                    graph_thread_id="thread-1",
+                    run_id="run-1",
+                    graph_definition_id="graph-definition-1",
+                    checkpoint_namespace="thread-1",
+                    current_node_key="requirement_analysis.main",
+                    current_interrupt_id=f"interrupt-{clarification_id}",
+                    status="interrupted",
+                    last_checkpoint_ref=(
+                        "graph-checkpoint://thread-1/checkpoint-clarification-1"
+                    ),
+                    created_at=NOW,
+                    updated_at=NOW,
+                ),
+            ]
+        )
+        session.flush()
+        session.add(
+            GraphCheckpointModel(
+                checkpoint_id="checkpoint-clarification-1",
+                graph_thread_id="thread-1",
+                checkpoint_ref="graph-checkpoint://thread-1/checkpoint-clarification-1",
+                node_key="requirement_analysis.main",
+                state_ref="graph-checkpoint://thread-1/checkpoint-clarification-1",
+                sequence_index=1,
+                created_at=NOW,
+            )
+        )
+        session.add(
+            GraphInterruptModel(
+                interrupt_id=f"interrupt-{clarification_id}",
+                graph_thread_id="thread-1",
+                interrupt_type="clarification_request",
+                source_stage_type=StageType.REQUIREMENT_ANALYSIS,
+                source_node_key="requirement_analysis.main",
+                payload_ref="clarification-payload-1",
+                runtime_object_ref=clarification_id,
+                runtime_object_type="clarification_record",
+                status="pending",
+                requested_at=NOW,
+                responded_at=None,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.commit()
 
 
 def test_request_clarification_creates_wait_record_interrupt_event_and_no_approval(
@@ -549,7 +630,11 @@ def test_answer_clarification_restores_running_and_resumes_same_interrupt(
     manager = build_manager(tmp_path)
     seed_waiting_requirement_analysis(manager)
     clarification_id, _request_runtime_port = request_clarification(manager)
-    service, audit, runtime_port = build_service(manager)
+    seed_graph_interrupt_for_clarification(
+        manager,
+        clarification_id=clarification_id,
+    )
+    service, audit, runtime_port = build_service(manager, include_graph_session=True)
 
     result = service.answer_clarification(
         session_id="session-1",
@@ -580,6 +665,14 @@ def test_answer_clarification_restores_running_and_resumes_same_interrupt(
     assert runtime_port.calls[0][0] == "resume_interrupt"
     assert runtime_port.calls[0][1]["interrupt"].interrupt_id == (
         clarification.graph_interrupt_ref
+    )
+    assert (
+        runtime_port.calls[0][1]["interrupt"].checkpoint_ref.checkpoint_id
+        == "checkpoint-clarification-1"
+    )
+    assert (
+        runtime_port.calls[0][1]["interrupt"].checkpoint_ref.payload_ref
+        == "graph-checkpoint://thread-1/checkpoint-clarification-1"
     )
     assert runtime_port.calls[0][1]["resume_payload"].values == {
         "clarification_id": clarification_id,
@@ -668,7 +761,15 @@ def test_answer_clarification_rolls_back_when_runtime_resume_fails(
     manager = build_manager(tmp_path)
     seed_waiting_requirement_analysis(manager)
     clarification_id, _request_runtime_port = request_clarification(manager)
-    service, audit, _runtime_port = build_service(manager, fail_resume=True)
+    seed_graph_interrupt_for_clarification(
+        manager,
+        clarification_id=clarification_id,
+    )
+    service, audit, _runtime_port = build_service(
+        manager,
+        fail_resume=True,
+        include_graph_session=True,
+    )
 
     from backend.app.services.clarifications import ClarificationServiceError
 

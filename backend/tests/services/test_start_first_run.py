@@ -668,10 +668,10 @@ def test_session_service_start_run_from_new_requirement_respects_injected_creden
     assert any(snapshot.provider_id == "provider-team" for snapshot in snapshots)
 
 
-def test_session_service_start_run_uses_template_provider_for_internal_bindings(
+def test_session_service_start_run_rejects_unavailable_internal_model_bindings(
     tmp_path: Path,
 ) -> None:
-    from backend.app.services.sessions import SessionService
+    from backend.app.services.sessions import SessionService, SessionServiceError
 
     settings = build_settings(tmp_path)
     manager = build_manager(settings)
@@ -717,48 +717,39 @@ def test_session_service_start_run_uses_template_provider_for_internal_bindings(
         event_session = manager.session(DatabaseRole.EVENT)
         graph_session = manager.session(DatabaseRole.GRAPH)
         try:
-            result = SessionService(
-                control_session,
-                runtime_session=runtime_session,
-                event_session=event_session,
-                graph_session=graph_session,
-                audit_service=audit,
-                log_writer=log_writer,
-                environment_settings=settings,
-                now=lambda: NOW,
-            ).start_run_from_new_requirement(
-                session_id=draft.session_id,
-                content="Use the configured team provider only.",
-                trace_context=build_trace(),
-            )
+            with pytest.raises(SessionServiceError) as exc_info:
+                SessionService(
+                    control_session,
+                    runtime_session=runtime_session,
+                    event_session=event_session,
+                    graph_session=graph_session,
+                    audit_service=audit,
+                    log_writer=log_writer,
+                    environment_settings=settings,
+                    now=lambda: NOW,
+                ).start_run_from_new_requirement(
+                    session_id=draft.session_id,
+                    content="Use the configured team provider only.",
+                    trace_context=build_trace(),
+                )
         finally:
             runtime_session.close()
             event_session.close()
             graph_session.close()
 
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.error_code is ErrorCode.CONFIG_SNAPSHOT_UNAVAILABLE
+    assert "provider-deepseek" in str(exc_info.value)
     with manager.session(DatabaseRole.RUNTIME) as session:
-        provider_snapshots = (
-            session.query(ProviderSnapshotModel)
-            .filter(ProviderSnapshotModel.run_id == result.run.run_id)
-            .all()
-        )
-        model_bindings = (
-            session.query(ModelBindingSnapshotModel)
-            .filter(ModelBindingSnapshotModel.run_id == result.run.run_id)
-            .all()
-        )
-
-    assert {snapshot.provider_id for snapshot in provider_snapshots} == {
-        "provider-team"
-    }
-    assert {binding.provider_id for binding in model_bindings} == {"provider-team"}
-    assert {binding.model_id for binding in model_bindings} == {"team-chat"}
+        assert session.query(PipelineRunModel).count() == 0
+        assert session.query(ProviderSnapshotModel).count() == 0
+        assert session.query(ModelBindingSnapshotModel).count() == 0
 
 
-def test_session_service_start_run_replaces_stale_template_providers_with_configured_provider(
+def test_session_service_start_run_rejects_unavailable_template_provider(
     tmp_path: Path,
 ) -> None:
-    from backend.app.services.sessions import SessionService
+    from backend.app.services.sessions import SessionService, SessionServiceError
 
     settings = build_settings(tmp_path)
     manager = build_manager(settings)
@@ -794,42 +785,34 @@ def test_session_service_start_run_replaces_stale_template_providers_with_config
         event_session = manager.session(DatabaseRole.EVENT)
         graph_session = manager.session(DatabaseRole.GRAPH)
         try:
-            result = SessionService(
-                control_session,
-                runtime_session=runtime_session,
-                event_session=event_session,
-                graph_session=graph_session,
-                audit_service=audit,
-                log_writer=log_writer,
-                environment_settings=settings,
-                now=lambda: NOW,
-            ).start_run_from_new_requirement(
-                session_id=draft.session_id,
-                content="Use the only configured provider.",
-                trace_context=build_trace(),
-            )
+            with pytest.raises(SessionServiceError) as exc_info:
+                SessionService(
+                    control_session,
+                    runtime_session=runtime_session,
+                    event_session=event_session,
+                    graph_session=graph_session,
+                    audit_service=audit,
+                    log_writer=log_writer,
+                    environment_settings=settings,
+                    now=lambda: NOW,
+                ).start_run_from_new_requirement(
+                    session_id=draft.session_id,
+                    content="Use the only configured provider.",
+                    trace_context=build_trace(),
+                )
         finally:
             runtime_session.close()
             event_session.close()
             graph_session.close()
 
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.error_code is ErrorCode.CONFIG_SNAPSHOT_UNAVAILABLE
+    assert "provider-deepseek" in str(exc_info.value)
+    assert "provider-volcengine" in str(exc_info.value)
     with manager.session(DatabaseRole.RUNTIME) as session:
-        provider_snapshots = (
-            session.query(ProviderSnapshotModel)
-            .filter(ProviderSnapshotModel.run_id == result.run.run_id)
-            .all()
-        )
-        model_bindings = (
-            session.query(ModelBindingSnapshotModel)
-            .filter(ModelBindingSnapshotModel.run_id == result.run.run_id)
-            .all()
-        )
-
-    assert {snapshot.provider_id for snapshot in provider_snapshots} == {
-        "provider-team"
-    }
-    assert {binding.provider_id for binding in model_bindings} == {"provider-team"}
-    assert {binding.model_id for binding in model_bindings} == {"team-chat"}
+        assert session.query(PipelineRunModel).count() == 0
+        assert session.query(ProviderSnapshotModel).count() == 0
+        assert session.query(ModelBindingSnapshotModel).count() == 0
 
 
 def test_session_service_start_run_from_new_requirement_calls_prompt_validation_hook_once(

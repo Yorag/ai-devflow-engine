@@ -14,6 +14,12 @@ from backend.app.api.error_codes import ErrorCode
 from backend.app.db.base import DatabaseRole, ROLE_METADATA
 from backend.app.db.models.control import ProjectModel, SessionModel
 from backend.app.db.models.event import DomainEventModel
+from backend.app.db.models.graph import (
+    GraphCheckpointModel,
+    GraphDefinitionModel,
+    GraphInterruptModel,
+    GraphThreadModel,
+)
 from backend.app.db.models.runtime import (
     PipelineRunModel,
     ProviderCallPolicySnapshotModel,
@@ -244,12 +250,14 @@ def build_service(
     resolved_audit_service = audit_service or RecordingAuditService()
     resolved_log_writer = log_writer or RecordingRunLogWriter()
     runtime_session = manager.open_session(DatabaseRole.RUNTIME)
+    graph_session = manager.open_session(DatabaseRole.GRAPH)
     if runtime_session_wrapper is not None:
         runtime_session = runtime_session_wrapper(runtime_session)
     service = ToolConfirmationService(
         control_session=manager.open_session(DatabaseRole.CONTROL),
         runtime_session=runtime_session,
         event_session=manager.open_session(DatabaseRole.EVENT),
+        graph_session=graph_session,
         runtime_orchestration=RuntimeOrchestrationService(
             runtime_port=resolved_runtime_port,
             checkpoint_port=FakeCheckpointPort(),
@@ -433,6 +441,64 @@ def seed_pending_confirmation(
                 updated_at=NOW,
             )
         )
+    with manager.session(DatabaseRole.GRAPH) as session:
+        session.add(
+            GraphDefinitionModel(
+                graph_definition_id="graph-definition-1",
+                run_id="run-1",
+                template_snapshot_ref="template-snapshot-1",
+                graph_version="test-graph-v1",
+                stage_nodes=[],
+                stage_contracts={},
+                interrupt_policy={},
+                retry_policy={},
+                delivery_routing_policy={},
+                schema_version="graph-definition-v1",
+                created_at=NOW,
+            )
+        )
+        session.add(
+            GraphThreadModel(
+                graph_thread_id="thread-1",
+                run_id="run-1",
+                graph_definition_id="graph-definition-1",
+                checkpoint_namespace="thread-1",
+                current_node_key="code_generation.main",
+                current_interrupt_id="interrupt-tool-confirmation-1",
+                status="interrupted",
+                last_checkpoint_ref="graph-checkpoint://thread-1/checkpoint-tool-1",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            GraphCheckpointModel(
+                checkpoint_id="checkpoint-tool-1",
+                graph_thread_id="thread-1",
+                checkpoint_ref="graph-checkpoint://thread-1/checkpoint-tool-1",
+                node_key="code_generation.main",
+                state_ref="graph-checkpoint://thread-1/checkpoint-tool-1",
+                sequence_index=1,
+                created_at=NOW,
+            )
+        )
+        session.add(
+            GraphInterruptModel(
+                interrupt_id="interrupt-tool-confirmation-1",
+                graph_thread_id="thread-1",
+                interrupt_type="tool_confirmation",
+                source_stage_type=StageType.CODE_GENERATION,
+                source_node_key="code_generation.main",
+                payload_ref="tool-confirmation-1",
+                runtime_object_ref="tool-confirmation-1",
+                runtime_object_type="tool_confirmation_request",
+                status="pending",
+                requested_at=NOW,
+                responded_at=None,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
     return "tool-confirmation-1"
 
 
@@ -540,6 +606,12 @@ def test_allow_updates_request_result_projection_and_resumes_runtime(tmp_path: P
     assert result.tool_confirmation.decision is ToolConfirmationStatus.ALLOWED
     assert result.tool_confirmation.is_actionable is False
     assert runtime_port.calls[-1][0] == "resume_tool_confirmation"
+    interrupt = runtime_port.calls[-1][1]["interrupt"]
+    assert interrupt.checkpoint_ref.checkpoint_id == "checkpoint-tool-1"
+    assert (
+        interrupt.checkpoint_ref.payload_ref
+        == "graph-checkpoint://thread-1/checkpoint-tool-1"
+    )
     assert runtime_port.calls[-1][1]["resume_payload"].values == {
         "decision": "allowed",
         "tool_confirmation_id": confirmation_id,

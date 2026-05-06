@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from backend.app.core.config import EnvironmentSettings
 from backend.app.db.base import DatabaseRole
-from backend.app.db.models.control import ControlBase, PipelineTemplateModel
+from backend.app.db.models.control import ControlBase, PipelineTemplateModel, ProviderModel
 from backend.app.db.models.log import AuditLogEntryModel, LogBase
+from backend.app.domain.trace_context import TraceContext
 from backend.app.main import create_app
 from backend.app.schemas.observability import AuditResult
 from backend.app.schemas.template import FIXED_APPROVAL_CHECKPOINTS, FIXED_STAGE_SEQUENCE
+from backend.app.services.providers import ProviderService
 
 
 def build_template_api_app(tmp_path: Path):
@@ -24,7 +27,43 @@ def build_template_api_app(tmp_path: Path):
     app = create_app(settings=settings)
     ControlBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.CONTROL))
     LogBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.LOG))
+    configure_required_template_providers(app)
     return app
+
+
+class _NoopAuditService:
+    def record_command_result(self, **kwargs):
+        return object()
+
+
+def configure_required_template_providers(app) -> None:
+    with app.state.database_manager.session(DatabaseRole.CONTROL) as session:
+        ProviderService(
+            session,
+            audit_service=_NoopAuditService(),
+            now=lambda: datetime(2026, 5, 5, 9, 0, 0, tzinfo=UTC),
+        ).seed_builtin_providers(
+            trace_context=TraceContext(
+                request_id="template-test-provider-seed",
+                trace_id="template-test-provider-seed",
+                correlation_id="template-test-provider-seed",
+                span_id="template-test-provider-seed",
+                parent_span_id=None,
+                created_at=datetime(2026, 5, 5, 9, 0, 0, tzinfo=UTC),
+            )
+        )
+        for provider in (
+            session.query(ProviderModel)
+            .filter(
+                ProviderModel.provider_id.in_(
+                    ["provider-deepseek", "provider-volcengine"]
+                )
+            )
+            .all()
+        ):
+            provider.is_configured = True
+            provider.is_enabled = True
+        session.commit()
 
 
 def write_payload(name: str = "Custom feature flow") -> dict:

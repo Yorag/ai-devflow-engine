@@ -11,10 +11,6 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.error_codes import ErrorCode
 from backend.app.api.errors import ApiError
-from backend.app.api.routes.sessions import (
-    InMemoryCheckpointPort,
-    InMemoryRuntimeCommandPort,
-)
 from backend.app.core.config import EnvironmentSettings
 from backend.app.db.base import DatabaseRole
 from backend.app.db.models.runtime import (
@@ -48,6 +44,14 @@ from backend.app.runtime.base import (
 from backend.app.runtime.deterministic import (
     DeterministicRuntimeEngine,
     DeterministicToolConfirmationConfig,
+)
+from backend.app.services.graph_runtime import (
+    GraphCheckpointPort,
+    GraphRuntimeCommandPort,
+)
+from backend.app.testing.runtime_ports import (
+    InMemoryCheckpointPort,
+    InMemoryRuntimeCommandPort,
 )
 from backend.app.services.delivery import DeliveryRecordService, DeliveryService
 from backend.app.services.events import EventStore
@@ -90,23 +94,27 @@ class AdvanceRuntimeResponse(BaseModel):
 class _OpenSessions:
     control: Session
     runtime: Session
+    graph: Session
     event: Session
     log: Session
 
     def commit(self) -> None:
         self.runtime.commit()
+        self.graph.commit()
         self.event.commit()
         self.control.commit()
         self.log.commit()
 
     def rollback(self) -> None:
         self.runtime.rollback()
+        self.graph.rollback()
         self.event.rollback()
         self.control.rollback()
         self.log.rollback()
 
     def close(self) -> None:
         self.runtime.close()
+        self.graph.close()
         self.event.close()
         self.control.close()
         self.log.close()
@@ -163,8 +171,8 @@ class DeterministicRuntimeAdvancementHarness:
             self._configure_engine(engine)
             result = engine.run_next(
                 context=self._build_context(run_id, sessions.runtime),
-                runtime_port=self._runtime_port(),
-                checkpoint_port=self._checkpoint_port(),
+                runtime_port=self._runtime_port(sessions),
+                checkpoint_port=self._checkpoint_port(sessions),
             )
             response = self._to_response(result, sessions.runtime)
             sessions.commit()
@@ -190,6 +198,7 @@ class DeterministicRuntimeAdvancementHarness:
         return _OpenSessions(
             control=manager.session(DatabaseRole.CONTROL),
             runtime=manager.session(DatabaseRole.RUNTIME),
+            graph=manager.session(DatabaseRole.GRAPH),
             event=manager.session(DatabaseRole.EVENT),
             log=manager.session(DatabaseRole.LOG),
         )
@@ -344,20 +353,20 @@ class DeterministicRuntimeAdvancementHarness:
             ),
         )
 
-    def _runtime_port(self) -> Any:
+    def _runtime_port(self, sessions: _OpenSessions) -> Any:
         runtime_port = getattr(self._app.state, "h45_runtime_port", None)
         if runtime_port is None:
             runtime_port = getattr(self._app.state, "h41_runtime_port", None)
         if runtime_port is None:
-            runtime_port = InMemoryRuntimeCommandPort()
+            runtime_port = GraphRuntimeCommandPort(sessions.graph, now=self._now)
         return runtime_port
 
-    def _checkpoint_port(self) -> Any:
+    def _checkpoint_port(self, sessions: _OpenSessions) -> Any:
         checkpoint_port = getattr(self._app.state, "h45_checkpoint_port", None)
         if checkpoint_port is None:
             checkpoint_port = getattr(self._app.state, "h41_checkpoint_port", None)
         if checkpoint_port is None:
-            checkpoint_port = InMemoryCheckpointPort()
+            checkpoint_port = GraphCheckpointPort(sessions.graph, now=self._now)
         return checkpoint_port
 
     def _to_response(

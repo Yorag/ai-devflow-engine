@@ -8,6 +8,13 @@ from backend.app.core.config import EnvironmentSettings
 from backend.app.db.base import DatabaseRole
 from backend.app.db.models.control import ControlBase, PipelineTemplateModel, ProjectModel, SessionModel
 from backend.app.db.models.event import EventBase
+from backend.app.db.models.graph import (
+    GraphBase,
+    GraphCheckpointModel,
+    GraphDefinitionModel,
+    GraphInterruptModel,
+    GraphThreadModel,
+)
 from backend.app.db.models.log import LogBase
 from backend.app.db.models.runtime import (
     PipelineRunModel,
@@ -46,6 +53,7 @@ def build_app(tmp_path: Path):
     )
     ControlBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.CONTROL))
     RuntimeBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.RUNTIME))
+    GraphBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.GRAPH))
     EventBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.EVENT))
     LogBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.LOG))
     app.state.h41_runtime_port = FakeRuntimePort()
@@ -247,7 +255,73 @@ def seed_tool_confirmation(app, **kwargs) -> str:
         session.commit()
     finally:
         session.close()
+    _seed_graph_interrupt_for_tool_confirmation(app)
     return "tool-confirmation-1"
+
+
+def _seed_graph_interrupt_for_tool_confirmation(app) -> None:
+    manager = app.state.database_manager
+    checkpoint_ref = "graph-checkpoint://thread-1/checkpoint-tool-1"
+    with manager.session(DatabaseRole.GRAPH) as session:
+        session.add(
+            GraphDefinitionModel(
+                graph_definition_id="graph-definition-1",
+                run_id="run-1",
+                template_snapshot_ref="template-snapshot-1",
+                graph_version="test-graph-v1",
+                stage_nodes=[],
+                stage_contracts={},
+                interrupt_policy={},
+                retry_policy={},
+                delivery_routing_policy={},
+                schema_version="graph-definition-v1",
+                created_at=NOW,
+            )
+        )
+        session.add(
+            GraphThreadModel(
+                graph_thread_id="thread-1",
+                run_id="run-1",
+                graph_definition_id="graph-definition-1",
+                checkpoint_namespace="thread-1",
+                current_node_key="code_generation.main",
+                current_interrupt_id="interrupt-tool-confirmation-1",
+                status="interrupted",
+                last_checkpoint_ref=checkpoint_ref,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.flush()
+        session.add(
+            GraphCheckpointModel(
+                checkpoint_id="checkpoint-tool-1",
+                graph_thread_id="thread-1",
+                checkpoint_ref=checkpoint_ref,
+                node_key="code_generation.main",
+                state_ref=checkpoint_ref,
+                sequence_index=1,
+                created_at=NOW,
+            )
+        )
+        session.add(
+            GraphInterruptModel(
+                interrupt_id="interrupt-tool-confirmation-1",
+                graph_thread_id="thread-1",
+                interrupt_type="tool_confirmation",
+                source_stage_type=StageType.CODE_GENERATION,
+                source_node_key="code_generation.main",
+                payload_ref="tool-confirmation-1",
+                runtime_object_ref="tool-confirmation-1",
+                runtime_object_type="tool_confirmation_request",
+                status="pending",
+                requested_at=NOW,
+                responded_at=None,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.commit()
 
 
 def test_post_tool_confirmation_allow_returns_tool_confirmation_projection(

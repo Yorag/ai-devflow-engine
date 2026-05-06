@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from langgraph.checkpoint.memory import InMemorySaver
 
 from backend.app.domain.enums import StageStatus, StageType
 from backend.app.domain.graph_definition import GraphDefinition
@@ -256,6 +257,7 @@ def build_engine(
     engine = LangGraphRuntimeEngine(
         graph_definition=build_definition(),
         stage_runner=resolved_runner,
+        checkpointer=InMemorySaver(),
         log_writer=log_writer,
         now=_clock(),
     )
@@ -302,6 +304,17 @@ def test_langgraph_runtime_advances_one_business_stage_per_run_next_call() -> No
         for call in runner.invocations
     )
     assert runtime_port.calls == []
+
+
+def test_langgraph_runtime_requires_explicit_checkpointer() -> None:
+    from backend.app.runtime.langgraph_engine import LangGraphRuntimeEngine
+
+    with pytest.raises(ValueError, match="explicit checkpointer"):
+        LangGraphRuntimeEngine(
+            graph_definition=build_definition(),
+            stage_runner=FakeStageRunner(),
+            now=_clock(),
+        )
 
 
 def test_langgraph_runtime_uses_graph_thread_id_for_checkpointer_and_syncs_checkpoint_refs() -> None:

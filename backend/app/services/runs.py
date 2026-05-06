@@ -386,7 +386,6 @@ class RunLifecycleService:
                 )
             except (ValidationError, ValueError) as exc:
                 raise RunPromptValidationError(str(exc)) from exc
-            template_snapshot = self._effective_template_snapshot(template_snapshot)
             self._prompt_validation_service.validate_run_prompt_snapshots(
                 template_snapshot=template_snapshot,
                 trace_context=run_trace,
@@ -402,10 +401,7 @@ class RunLifecycleService:
                 run_id=run_id,
                 created_at=started_at,
             )
-            internal_bindings = self._effective_internal_bindings(
-                template_snapshot,
-                settings_read,
-            )
+            internal_bindings = self._internal_bindings_from_settings(settings_read)
             required_providers = self._load_required_providers(
                 template_snapshot=template_snapshot,
                 internal_bindings=internal_bindings,
@@ -2772,132 +2768,6 @@ class RunLifecycleService:
             provider_id: tuple(dict.fromkeys(model_ids))
             for provider_id, model_ids in by_provider.items()
         }
-
-    def _effective_internal_bindings(
-        self,
-        template_snapshot: TemplateSnapshot,
-        settings_read,
-    ) -> tuple[InternalModelBindingSelection, ...]:
-        configured_bindings = self._internal_bindings_from_settings(settings_read)
-        fallback_provider = self._first_available_template_provider(template_snapshot)
-        effective: list[InternalModelBindingSelection] = []
-
-        for binding in configured_bindings:
-            if self._internal_binding_provider_is_available(binding):
-                effective.append(binding)
-                continue
-
-            if fallback_provider is None:
-                effective.append(binding)
-                continue
-
-            effective.append(
-                InternalModelBindingSelection(
-                    binding_type=binding.binding_type,
-                    provider_id=fallback_provider.provider_id,
-                    model_id=fallback_provider.default_model_id,
-                    model_parameters=dict(binding.model_parameters),
-                )
-            )
-
-        return tuple(effective)
-
-    def _effective_template_snapshot(
-        self,
-        template_snapshot: TemplateSnapshot,
-    ) -> TemplateSnapshot:
-        available_provider_ids = {
-            binding.provider_id
-            for binding in template_snapshot.stage_role_bindings
-            if self._stage_binding_provider_is_available(binding.provider_id)
-        }
-        fallback_provider = (
-            self._first_available_template_provider(
-                template_snapshot,
-                available_provider_ids=available_provider_ids,
-            )
-            or self._first_available_configured_provider()
-        )
-        if fallback_provider is None:
-            return template_snapshot
-
-        changed = False
-        bindings = []
-        for binding in template_snapshot.stage_role_bindings:
-            if self._stage_binding_provider_is_available(binding.provider_id):
-                bindings.append(binding)
-                continue
-
-            changed = True
-            bindings.append(
-                binding.model_copy(update={"provider_id": fallback_provider.provider_id})
-            )
-
-        if not changed:
-            return template_snapshot
-
-        return template_snapshot.model_copy(
-            update={"stage_role_bindings": tuple(bindings)}
-        )
-
-    def _stage_binding_provider_is_available(self, provider_id: str) -> bool:
-        provider = self._require_control_session().get(ProviderModel, provider_id)
-        return self._provider_default_model_is_available(provider)
-
-    def _internal_binding_provider_is_available(
-        self,
-        binding: InternalModelBindingSelection,
-    ) -> bool:
-        provider = self._require_control_session().get(ProviderModel, binding.provider_id)
-        return bool(
-            provider is not None
-            and provider.is_configured
-            and provider.is_enabled
-            and binding.model_id in provider.supported_model_ids
-        )
-
-    def _first_available_template_provider(
-        self,
-        template_snapshot: TemplateSnapshot,
-        *,
-        available_provider_ids: set[str] | None = None,
-    ) -> ProviderModel | None:
-        control_session = self._require_control_session()
-        for provider_id in dict.fromkeys(
-            binding.provider_id for binding in template_snapshot.stage_role_bindings
-        ):
-            if (
-                available_provider_ids is not None
-                and provider_id not in available_provider_ids
-            ):
-                continue
-            provider = control_session.get(ProviderModel, provider_id)
-            if self._provider_default_model_is_available(provider):
-                return provider
-        return None
-
-    def _first_available_configured_provider(self) -> ProviderModel | None:
-        providers = (
-            self._require_control_session()
-            .query(ProviderModel)
-            .filter(ProviderModel.is_configured.is_(True))
-            .filter(ProviderModel.is_enabled.is_(True))
-            .order_by(ProviderModel.created_at.asc(), ProviderModel.provider_id.asc())
-            .all()
-        )
-        for provider in providers:
-            if self._provider_default_model_is_available(provider):
-                return provider
-        return None
-
-    @staticmethod
-    def _provider_default_model_is_available(provider: ProviderModel | None) -> bool:
-        return bool(
-            provider is not None
-            and provider.is_configured
-            and provider.is_enabled
-            and provider.default_model_id in provider.supported_model_ids
-        )
 
     @staticmethod
     def _internal_bindings_from_settings(settings_read) -> tuple[InternalModelBindingSelection, ...]:

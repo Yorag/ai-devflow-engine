@@ -5,13 +5,13 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from backend.app.api.routes.sessions import (
+from backend.app.testing import (
     InMemoryCheckpointPort,
     InMemoryRuntimeCommandPort,
 )
 from backend.app.core.config import EnvironmentSettings
 from backend.app.db.base import DatabaseRole
-from backend.app.db.models.control import ControlBase
+from backend.app.db.models.control import ControlBase, ProviderModel
 from backend.app.db.models.event import EventBase
 from backend.app.db.models.graph import GraphBase
 from backend.app.db.models.log import LogBase
@@ -48,9 +48,32 @@ def _create_schema(app: Any) -> None:
     LogBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.LOG))
 
 
+def _configure_required_providers(app: Any) -> None:
+    with app.state.database_manager.session(DatabaseRole.CONTROL) as session:
+        providers = (
+            session.query(ProviderModel)
+            .filter(
+                ProviderModel.provider_id.in_(
+                    ["provider-deepseek", "provider-volcengine"]
+                )
+            )
+            .all()
+        )
+        assert {provider.provider_id for provider in providers} == {
+            "provider-deepseek",
+            "provider-volcengine",
+        }
+        for provider in providers:
+            provider.is_configured = True
+            provider.is_enabled = True
+            session.add(provider)
+        session.commit()
+
+
 def _start_run(client: TestClient) -> tuple[str, str]:
     created = client.post("/api/projects/project-default/sessions")
     assert created.status_code == 201
+    _configure_required_providers(client.app)
     session_id = created.json()["session_id"]
     response = client.post(
         f"/api/sessions/{session_id}/messages",

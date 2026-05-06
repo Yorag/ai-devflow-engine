@@ -31,6 +31,7 @@ from backend.app.domain.enums import (
     SseEventType,
 )
 from backend.app.domain.runtime_refs import (
+    CheckpointPurpose,
     GraphInterruptRef,
     GraphInterruptStatus,
     GraphInterruptType,
@@ -51,6 +52,7 @@ from backend.app.schemas.observability import LogCategory, LogLevel
 from backend.app.services.control_records import ControlRecordService
 from backend.app.services.delivery_snapshots import DeliverySnapshotServiceError
 from backend.app.services.events import DomainEventType, EventStore
+from backend.app.services.graph_interrupt_refs import build_persisted_graph_interrupt_ref
 from backend.app.services.runtime_orchestration import RuntimeOrchestrationService
 
 
@@ -115,6 +117,7 @@ class ApprovalService:
         runtime_session: Session,
         event_session: Session,
         runtime_orchestration: RuntimeOrchestrationService,
+        graph_session: Session | None = None,
         audit_service: Any | None = None,
         delivery_snapshot_service: Any | None = None,
         log_writer: RunLogWriter,
@@ -125,6 +128,7 @@ class ApprovalService:
         self._control_session = control_session
         self._runtime_session = runtime_session
         self._event_session = event_session
+        self._graph_session = graph_session
         self._runtime_orchestration = runtime_orchestration
         self._audit_service = audit_service or _NoopAuditService()
         self._delivery_snapshot_service = (
@@ -1091,43 +1095,18 @@ class ApprovalService:
         run: PipelineRunModel,
         stage: StageRunModel,
     ) -> GraphInterruptRef:
-        return GraphInterruptRef(
+        if self._graph_session is None:
+            raise RuntimeError("Approval resume requires graph_session.")
+        return build_persisted_graph_interrupt_ref(
+            graph_session=self._graph_session,
+            run=run,
+            stage=stage,
             interrupt_id=approval.graph_interrupt_ref,
-            thread=GraphThreadRef(
-                thread_id=run.graph_thread_ref,
-                run_id=run.run_id,
-                status=GraphThreadStatus.WAITING_APPROVAL,
-                current_stage_run_id=stage.stage_run_id,
-                current_stage_type=stage.stage_type,
-            ),
             interrupt_type=GraphInterruptType.APPROVAL,
-            status=GraphInterruptStatus.PENDING,
-            run_id=run.run_id,
-            stage_run_id=stage.stage_run_id,
-            stage_type=stage.stage_type,
             payload_ref=approval.payload_ref,
+            checkpoint_purpose=CheckpointPurpose.WAITING_APPROVAL,
+            thread_status=GraphThreadStatus.WAITING_APPROVAL,
             approval_id=approval.approval_id,
-            checkpoint_ref=self._checkpoint_stub(run=run, stage=stage, approval=approval),
-        )
-
-    def _checkpoint_stub(
-        self,
-        *,
-        run: PipelineRunModel,
-        stage: StageRunModel,
-        approval: ApprovalRequestModel,
-    ):
-        from backend.app.domain.runtime_refs import CheckpointPurpose, CheckpointRef
-
-        return CheckpointRef(
-            checkpoint_id=f"checkpoint-{approval.graph_interrupt_ref}",
-            thread_id=run.graph_thread_ref,
-            run_id=run.run_id,
-            stage_run_id=stage.stage_run_id,
-            stage_type=stage.stage_type,
-            purpose=CheckpointPurpose.WAITING_APPROVAL,
-            workspace_snapshot_ref=None,
-            payload_ref=approval.payload_ref,
         )
 
     def _record_rejected_submission(
@@ -1350,11 +1329,15 @@ class ApprovalService:
         self._runtime_session.commit()
         self._control_session.commit()
         self._event_session.commit()
+        if self._graph_session is not None:
+            self._graph_session.commit()
 
     def _rollback_sessions(self) -> None:
         self._runtime_session.rollback()
         self._control_session.rollback()
         self._event_session.rollback()
+        if self._graph_session is not None:
+            self._graph_session.rollback()
 
 
 class _NoopAuditService:

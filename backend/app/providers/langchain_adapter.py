@@ -137,7 +137,7 @@ class LangChainProviderAdapter:
         return ChatOpenAI(
             model=provider_config.model_id,
             openai_api_base=provider_config.base_url,
-            openai_api_key=provider_config.api_key_ref or "fixture-api-key",
+            openai_api_key=provider_config.api_key_ref,
             request_timeout=request_timeout,
             max_tokens=max_tokens,
             model_kwargs=dict(provider_config.model_parameters),
@@ -546,6 +546,17 @@ class LangChainProviderAdapter:
         require_available: bool,
     ) -> ProviderConfig:
         api_key_ref = self.provider_config.api_key_ref
+        if require_available and (
+            not isinstance(api_key_ref, str) or api_key_ref.strip() == ""
+        ):
+            raise LangChainProviderAdapterError(
+                "provider_credential_unavailable",
+                "Provider credential is unavailable.",
+                provider_snapshot_id=self.provider_config.provider_snapshot_id,
+                model_binding_snapshot_id=(
+                    self.provider_config.model_binding_snapshot_id
+                ),
+            )
         if not isinstance(api_key_ref, str) or not api_key_ref.startswith("env:"):
             return self.provider_config
         env_name = api_key_ref.removeprefix("env:")

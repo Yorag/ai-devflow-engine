@@ -10,6 +10,7 @@ from backend.app.api.routes.sessions import (
     _runtime_orchestration_from_app_state,
     get_control_session,
     get_event_session,
+    get_graph_session,
     get_runtime_session,
 )
 from backend.app.db.base import DatabaseRole
@@ -41,6 +42,7 @@ def get_approval_service(
     control_session: Session = Depends(get_control_session),
     runtime_session: Session = Depends(get_runtime_session),
     event_session: Session = Depends(get_event_session),
+    graph_session: Session = Depends(get_graph_session),
 ) -> Iterator[ApprovalService]:
     manager: DatabaseManager = request.app.state.database_manager
     settings = request.app.state.environment_settings
@@ -75,7 +77,11 @@ def get_approval_service(
             control_session=control_session,
             runtime_session=runtime_session,
             event_session=event_session,
-            runtime_orchestration=_runtime_orchestration_from_app_state(request),
+            runtime_orchestration=_runtime_orchestration_from_app_state(
+                request,
+                graph_session,
+            ),
+            graph_session=graph_session,
             audit_service=audit_service,
             delivery_snapshot_service=delivery_snapshot_service,
             log_writer=JsonlLogWriter(

@@ -14,6 +14,12 @@ from backend.app.api.error_codes import ErrorCode
 from backend.app.db.base import DatabaseRole, ROLE_METADATA
 from backend.app.db.models.control import DeliveryChannelModel, ProjectModel, SessionModel
 from backend.app.db.models.event import DomainEventModel
+from backend.app.db.models.graph import (
+    GraphCheckpointModel,
+    GraphDefinitionModel,
+    GraphInterruptModel,
+    GraphThreadModel,
+)
 from backend.app.db.models.runtime import (
     ApprovalDecisionModel,
     ApprovalRequestModel,
@@ -264,6 +270,7 @@ def build_service(
     control_session = manager.open_session(DatabaseRole.CONTROL)
     runtime_session = manager.open_session(DatabaseRole.RUNTIME)
     event_session = manager.open_session(DatabaseRole.EVENT)
+    graph_session = manager.open_session(DatabaseRole.GRAPH)
     resolved_runtime_port = runtime_port or FakeRuntimePort()
     resolved_audit_service = audit_service or RecordingAuditService()
     resolved_log_writer = log_writer or RecordingRunLogWriter()
@@ -274,6 +281,7 @@ def build_service(
         control_session=control_session,
         runtime_session=runtime_session,
         event_session=event_session,
+        graph_session=graph_session,
         runtime_orchestration=RuntimeOrchestrationService(
             runtime_port=resolved_runtime_port,
             checkpoint_port=FakeCheckpointPort(),
@@ -431,6 +439,68 @@ def seed_waiting_approval(
                 ),
             ]
         )
+    with manager.session(DatabaseRole.GRAPH) as session:
+        session.add(
+            GraphDefinitionModel(
+                graph_definition_id="graph-definition-1",
+                run_id="run-1",
+                template_snapshot_ref="template-snapshot-1",
+                graph_version="test-graph-v1",
+                stage_nodes=[],
+                stage_contracts={},
+                interrupt_policy={},
+                retry_policy={},
+                delivery_routing_policy={},
+                schema_version="graph-definition-v1",
+                created_at=NOW,
+            )
+        )
+        session.add(
+            GraphThreadModel(
+                graph_thread_id="thread-1",
+                run_id="run-1",
+                graph_definition_id="graph-definition-1",
+                checkpoint_namespace="thread-1",
+                current_node_key=f"{stage_type.value}.main",
+                current_interrupt_id="interrupt-approval-1",
+                status="interrupted",
+                last_checkpoint_ref="graph-checkpoint://thread-1/checkpoint-approval-1",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            GraphCheckpointModel(
+                checkpoint_id="checkpoint-approval-1",
+                graph_thread_id="thread-1",
+                checkpoint_ref="graph-checkpoint://thread-1/checkpoint-approval-1",
+                node_key=f"{stage_type.value}.main",
+                state_ref="graph-checkpoint://thread-1/checkpoint-approval-1",
+                sequence_index=1,
+                created_at=NOW,
+            )
+        )
+        session.add(
+            GraphInterruptModel(
+                interrupt_id="interrupt-approval-1",
+                graph_thread_id="thread-1",
+                interrupt_type=(
+                    "solution_design_approval"
+                    if stage_type is StageType.SOLUTION_DESIGN
+                    else "code_review_approval"
+                ),
+                source_stage_type=stage_type,
+                source_node_key=f"{stage_type.value}.main",
+                payload_ref="approval-payload-1",
+                runtime_object_ref=approval_id,
+                runtime_object_type="approval_request",
+                status="pending",
+                requested_at=NOW,
+                responded_at=None,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
     return approval_id
 
 
@@ -493,6 +563,12 @@ def test_approve_solution_design_creates_decision_approval_result_and_resumes_ru
     assert result.approval_result.next_stage_type is StageType.CODE_GENERATION
     assert result.control_item is None
     assert runtime_port.calls[-1][0] == "resume_interrupt"
+    interrupt = runtime_port.calls[-1][1]["interrupt"]
+    assert interrupt.checkpoint_ref.checkpoint_id == "checkpoint-approval-1"
+    assert (
+        interrupt.checkpoint_ref.payload_ref
+        == "graph-checkpoint://thread-1/checkpoint-approval-1"
+    )
     assert runtime_port.calls[-1][1]["resume_payload"].values == {
         "decision": "approved",
         "reason": None,
@@ -638,12 +714,14 @@ def test_approve_code_review_prepares_snapshot_before_decision_event_and_runtime
         assert_before_events_and_resume=True,
     )
     control_session = manager.open_session(DatabaseRole.CONTROL)
+    graph_session = manager.open_session(DatabaseRole.GRAPH)
     audit = RecordingAuditService()
     log_writer = RecordingRunLogWriter()
     service = ApprovalService(
         control_session=control_session,
         runtime_session=runtime_session,
         event_session=event_session,
+        graph_session=graph_session,
         runtime_orchestration=RuntimeOrchestrationService(
             runtime_port=runtime_port,
             checkpoint_port=FakeCheckpointPort(),
@@ -805,12 +883,14 @@ def test_approve_rolls_back_decision_snapshot_and_events_when_runtime_resume_fai
     event_session = manager.open_session(DatabaseRole.EVENT)
     snapshot_service = RecordingDeliverySnapshotService(runtime_session)
     control_session = manager.open_session(DatabaseRole.CONTROL)
+    graph_session = manager.open_session(DatabaseRole.GRAPH)
     audit = RecordingAuditService()
     log_writer = RecordingRunLogWriter()
     service = ApprovalService(
         control_session=control_session,
         runtime_session=runtime_session,
         event_session=event_session,
+        graph_session=graph_session,
         runtime_orchestration=RuntimeOrchestrationService(
             runtime_port=runtime_port,
             checkpoint_port=FakeCheckpointPort(),

@@ -14,6 +14,13 @@ from backend.app.db.models.control import (
     SessionModel,
 )
 from backend.app.db.models.event import EventBase
+from backend.app.db.models.graph import (
+    GraphBase,
+    GraphCheckpointModel,
+    GraphDefinitionModel,
+    GraphInterruptModel,
+    GraphThreadModel,
+)
 from backend.app.db.models.log import LogBase
 from backend.app.db.models.runtime import (
     DeliveryChannelSnapshotModel,
@@ -59,6 +66,7 @@ def build_app(tmp_path: Path):
     )
     ControlBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.CONTROL))
     RuntimeBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.RUNTIME))
+    GraphBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.GRAPH))
     EventBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.EVENT))
     LogBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.LOG))
     app.state.h41_runtime_port = FakeRuntimePort()
@@ -276,7 +284,82 @@ def seed_approval(app, **kwargs):
         session.commit()
     finally:
         session.close()
+    _seed_graph_interrupt_for_approval(app, stage_type=stage_type, approval_id="approval-1")
     return "approval-1"
+
+
+def _seed_graph_interrupt_for_approval(
+    app,
+    *,
+    stage_type: StageType,
+    approval_id: str,
+) -> None:
+    manager = app.state.database_manager
+    checkpoint_ref = "graph-checkpoint://thread-1/checkpoint-approval-1"
+    with manager.session(DatabaseRole.GRAPH) as session:
+        session.add(
+            GraphDefinitionModel(
+                graph_definition_id="graph-definition-1",
+                run_id="run-1",
+                template_snapshot_ref="template-snapshot-1",
+                graph_version="test-graph-v1",
+                stage_nodes=[],
+                stage_contracts={},
+                interrupt_policy={},
+                retry_policy={},
+                delivery_routing_policy={},
+                schema_version="graph-definition-v1",
+                created_at=NOW,
+            )
+        )
+        session.add(
+            GraphThreadModel(
+                graph_thread_id="thread-1",
+                run_id="run-1",
+                graph_definition_id="graph-definition-1",
+                checkpoint_namespace="thread-1",
+                current_node_key=f"{stage_type.value}.main",
+                current_interrupt_id="interrupt-approval-1",
+                status="interrupted",
+                last_checkpoint_ref=checkpoint_ref,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.flush()
+        session.add(
+            GraphCheckpointModel(
+                checkpoint_id="checkpoint-approval-1",
+                graph_thread_id="thread-1",
+                checkpoint_ref=checkpoint_ref,
+                node_key=f"{stage_type.value}.main",
+                state_ref=checkpoint_ref,
+                sequence_index=1,
+                created_at=NOW,
+            )
+        )
+        session.add(
+            GraphInterruptModel(
+                interrupt_id="interrupt-approval-1",
+                graph_thread_id="thread-1",
+                interrupt_type=(
+                    "solution_design_approval"
+                    if stage_type is StageType.SOLUTION_DESIGN
+                    else "code_review_approval"
+                ),
+                source_stage_type=stage_type,
+                source_node_key=f"{stage_type.value}.main",
+                payload_ref="approval-payload-1",
+                runtime_object_ref=approval_id,
+                runtime_object_type="approval_request",
+                status="pending",
+                requested_at=NOW,
+                responded_at=None,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.commit()
 
 
 class RejectingSnapshotService:

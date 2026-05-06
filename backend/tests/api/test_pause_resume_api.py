@@ -13,6 +13,12 @@ from backend.app.db.models.control import (
     SessionModel,
 )
 from backend.app.db.models.event import EventBase
+from backend.app.db.models.graph import (
+    GraphBase,
+    GraphCheckpointModel,
+    GraphDefinitionModel,
+    GraphThreadModel,
+)
 from backend.app.db.models.log import LogBase
 from backend.app.db.models.runtime import (
     ApprovalRequestModel,
@@ -65,6 +71,65 @@ def build_app(tmp_path: Path):
     app.state.h41_checkpoint_port = app.state.h45_checkpoint_port
     app.state.h45_audit_service = RecordingAuditService()
     return app
+
+
+def build_app_without_injected_runtime_ports(tmp_path: Path):
+    app = create_app(
+        EnvironmentSettings(
+            platform_runtime_root=tmp_path / "runtime",
+            default_project_root=tmp_path / "project-root",
+        )
+    )
+    ControlBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.CONTROL))
+    RuntimeBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.RUNTIME))
+    GraphBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.GRAPH))
+    EventBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.EVENT))
+    LogBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.LOG))
+    app.state.h45_audit_service = RecordingAuditService()
+    return app
+
+
+def seed_graph_thread_for_api(app) -> None:
+    session = app.state.database_manager.session(DatabaseRole.GRAPH)
+    try:
+        session.add(
+            GraphDefinitionModel(
+                graph_definition_id="graph-definition-1",
+                run_id="run-1",
+                template_snapshot_ref="template-snapshot-1",
+                graph_version="graph-v1",
+                stage_nodes=[
+                    {
+                        "node_key": "code_generation.main",
+                        "stage_type": StageType.CODE_GENERATION.value,
+                    }
+                ],
+                stage_contracts={StageType.CODE_GENERATION.value: {"allowed_tools": []}},
+                interrupt_policy={},
+                retry_policy={},
+                delivery_routing_policy={},
+                schema_version="graph-definition-v1",
+                created_at=NOW,
+            )
+        )
+        session.flush()
+        session.add(
+            GraphThreadModel(
+                graph_thread_id="thread-1",
+                run_id="run-1",
+                graph_definition_id="graph-definition-1",
+                checkpoint_namespace="run-1-main",
+                current_node_key="code_generation.main",
+                current_interrupt_id=None,
+                status="running",
+                last_checkpoint_ref=None,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
 
 
 def seed_active_run_for_api(
@@ -350,6 +415,33 @@ def test_post_run_pause_returns_paused_session_and_run(tmp_path: Path) -> None:
     assert body["run"]["status"] == "paused"
     assert body["run"]["run_id"] == "run-1"
     assert body["run"]["current_stage_type"] == "code_generation"
+
+
+def test_post_run_pause_uses_persistent_graph_runtime_ports_by_default(
+    tmp_path: Path,
+) -> None:
+    app = build_app_without_injected_runtime_ports(tmp_path)
+    seed_active_run_for_api(
+        app,
+        run_status=RunStatus.RUNNING,
+        session_status=SessionStatus.RUNNING,
+        stage_status=StageStatus.RUNNING,
+    )
+    seed_graph_thread_for_api(app)
+
+    with TestClient(app) as client:
+        response = client.post("/api/runs/run-1/pause", json={})
+
+    assert response.status_code == 200
+    with app.state.database_manager.session(DatabaseRole.GRAPH) as session:
+        thread = session.get(GraphThreadModel, "thread-1")
+        assert thread is not None
+        assert thread.status == "paused"
+        assert thread.last_checkpoint_ref is not None
+        checkpoints = session.query(GraphCheckpointModel).all()
+        assert len(checkpoints) == 1
+        assert checkpoints[0].graph_thread_id == "thread-1"
+        assert checkpoints[0].checkpoint_ref == thread.last_checkpoint_ref
 
 
 def test_post_run_pause_accepts_bodyless_request(tmp_path: Path) -> None:

@@ -266,7 +266,7 @@ def build_engine(
     return LangGraphRuntimeEngine(
         graph_definition=build_definition(),
         stage_runner=runner,
-        checkpointer=checkpointer,
+        checkpointer=checkpointer or InMemorySaver(),
         log_writer=log_writer,
         now=_clock(),
     )

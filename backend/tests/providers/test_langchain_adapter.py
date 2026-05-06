@@ -258,6 +258,26 @@ def test_create_chat_model_rejects_missing_api_key_env_value(
     assert error.value.error_code == "provider_credential_unavailable"
 
 
+def test_create_chat_model_rejects_missing_api_key_without_fixture_fallback() -> None:
+    from backend.app.providers.langchain_adapter import (
+        LangChainProviderAdapter,
+        LangChainProviderAdapterError,
+    )
+
+    fake_provider = fake_provider_fixture(
+        provider_snapshot=provider_snapshot_fixture(api_key_ref=None)
+    )
+    adapter = LangChainProviderAdapter(
+        provider_config=fake_provider.config,
+        provider_call_policy_snapshot=provider_policy_snapshot(),
+    )
+
+    with pytest.raises(LangChainProviderAdapterError) as error:
+        adapter.create_chat_model()
+
+    assert error.value.error_code == "provider_credential_unavailable"
+
+
 def test_bind_tools_rejects_models_without_tool_calling_capability(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

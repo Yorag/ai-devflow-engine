@@ -10,13 +10,9 @@ from typing import Any
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from backend.app.api.routes.sessions import (
-    InMemoryCheckpointPort,
-    InMemoryRuntimeCommandPort,
-)
 from backend.app.core.config import EnvironmentSettings
 from backend.app.db.base import DatabaseRole
-from backend.app.db.models.control import ControlBase
+from backend.app.db.models.control import ControlBase, ProviderModel
 from backend.app.db.models.event import EventBase
 from backend.app.db.models.graph import GraphBase
 from backend.app.db.models.log import LogBase
@@ -43,7 +39,6 @@ from backend.app.domain.enums import (
     ToolRiskCategory,
 )
 from backend.app.domain.runtime_refs import (
-    CheckpointRef,
     GraphThreadRef,
     GraphThreadStatus,
 )
@@ -64,6 +59,7 @@ from backend.app.schemas import common
 from backend.app.schemas.feed import ExecutionNodeProjection, ProviderCallStageItem
 from backend.app.services.delivery import DeliveryRecordService, DeliveryService
 from backend.app.services.events import DomainEventType, EventStore
+from backend.app.services.graph_runtime import GraphCheckpointPort, GraphRuntimeCommandPort
 
 
 NOW = datetime(2026, 5, 5, 9, 0, 0, tzinfo=UTC)
@@ -103,42 +99,6 @@ class RecordingRunLogWriter:
         return SimpleNamespace(log_id=f"log-{len(self.records)}")
 
 
-class CapturingCheckpointPort(InMemoryCheckpointPort):
-    def __init__(self) -> None:
-        self.calls: list[dict[str, Any]] = []
-
-    def save_checkpoint(self, **kwargs: Any) -> CheckpointRef:
-        self.calls.append(kwargs)
-        thread = kwargs["thread"]
-        return CheckpointRef(
-            checkpoint_id=f"checkpoint-{len(self.calls)}",
-            thread_id=thread.thread_id,
-            run_id=thread.run_id,
-            stage_run_id=kwargs.get("stage_run_id"),
-            stage_type=kwargs.get("stage_type"),
-            purpose=kwargs["purpose"],
-            workspace_snapshot_ref=kwargs.get("workspace_snapshot_ref"),
-            payload_ref=kwargs.get("payload_ref"),
-        )
-
-
-class CapturingRuntimePort(InMemoryRuntimeCommandPort):
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, dict[str, Any]]] = []
-
-    def create_interrupt(self, **kwargs: Any):
-        self.calls.append(("create_interrupt", kwargs))
-        return super().create_interrupt(**kwargs)
-
-    def resume_interrupt(self, **kwargs: Any):
-        self.calls.append(("resume_interrupt", kwargs))
-        return super().resume_interrupt(**kwargs)
-
-    def resume_tool_confirmation(self, **kwargs: Any):
-        self.calls.append(("resume_tool_confirmation", kwargs))
-        return super().resume_tool_confirmation(**kwargs)
-
-
 @dataclass
 class FullFlowFixture:
     app: Any
@@ -147,8 +107,6 @@ class FullFlowFixture:
     session_id: str
     run_id: str
     first_stage_run_id: str
-    runtime_port: CapturingRuntimePort
-    checkpoint_port: CapturingCheckpointPort
     audit: RecordingAuditService
     log_writer: RecordingRunLogWriter
 
@@ -157,8 +115,6 @@ def seedFullFlowFixture(
     tmp_path: Path,
 ) -> tuple[
     Any,
-    CapturingRuntimePort,
-    CapturingCheckpointPort,
     RecordingAuditService,
     RecordingRunLogWriter,
 ]:
@@ -179,32 +135,45 @@ def seedFullFlowFixture(
     GraphBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.GRAPH))
     EventBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.EVENT))
     LogBase.metadata.create_all(app.state.database_manager.engine(DatabaseRole.LOG))
-    runtime_port = CapturingRuntimePort()
-    checkpoint_port = CapturingCheckpointPort()
     audit = RecordingAuditService()
     log_writer = RecordingRunLogWriter()
-    app.state.h45_runtime_port = runtime_port
-    app.state.h41_runtime_port = runtime_port
-    app.state.h44_runtime_port = runtime_port
-    app.state.h44a_runtime_port = runtime_port
-    app.state.h45_checkpoint_port = checkpoint_port
-    app.state.h41_checkpoint_port = checkpoint_port
     app.state.h44_audit_service = audit
     app.state.h44_tool_confirmation_audit_service = audit
     app.state.h44a_audit_service = audit
     app.state.h43_audit_service = audit
-    return app, runtime_port, checkpoint_port, audit, log_writer
+    return app, audit, log_writer
+
+
+def configureRequiredProviders(app: Any) -> None:
+    with app.state.database_manager.session(DatabaseRole.CONTROL) as session:
+        providers = (
+            session.query(ProviderModel)
+            .filter(
+                ProviderModel.provider_id.in_(
+                    ["provider-deepseek", "provider-volcengine"]
+                )
+            )
+            .all()
+        )
+        assert {provider.provider_id for provider in providers} == {
+            "provider-deepseek",
+            "provider-volcengine",
+        }
+        for provider in providers:
+            provider.is_configured = True
+            provider.is_enabled = True
+            session.add(provider)
+        session.commit()
 
 
 def startDeterministicRunFixture(tmp_path: Path) -> FullFlowFixture:
-    app, runtime_port, checkpoint_port, audit, log_writer = seedFullFlowFixture(
-        tmp_path
-    )
+    app, audit, log_writer = seedFullFlowFixture(tmp_path)
     client_context = TestClient(app)
     client = client_context.__enter__()
     try:
         created = client.post("/api/projects/project-default/sessions")
         assert created.status_code == 201
+        configureRequiredProviders(app)
         session_id = created.json()["session_id"]
         response = client.post(
             f"/api/sessions/{session_id}/messages",
@@ -229,8 +198,6 @@ def startDeterministicRunFixture(tmp_path: Path) -> FullFlowFixture:
             session_id=session_id,
             run_id=body["session"]["current_run_id"],
             first_stage_run_id=body["message_item"]["stage_run_id"],
-            runtime_port=runtime_port,
-            checkpoint_port=checkpoint_port,
             audit=audit,
             log_writer=log_writer,
         )
@@ -394,6 +361,7 @@ def _advance_until_interrupt_or_stage_result(
     configure: Callable[[DeterministicRuntimeEngine], None] | None = None,
 ) -> RuntimeInterrupt | RuntimeStepResult:
     runtime_session = fixture.app.state.database_manager.session(DatabaseRole.RUNTIME)
+    graph_session = fixture.app.state.database_manager.session(DatabaseRole.GRAPH)
     event_session = fixture.app.state.database_manager.session(DatabaseRole.EVENT)
     engine, control_session = _build_engine(
         fixture.app,
@@ -405,23 +373,27 @@ def _advance_until_interrupt_or_stage_result(
     try:
         if configure is not None:
             configure(engine)
+        graph_clock = _clock()
         result = engine.run_next(
             context=_build_context(fixture.app, fixture.run_id),
-            runtime_port=fixture.runtime_port,
-            checkpoint_port=fixture.checkpoint_port,
+            runtime_port=GraphRuntimeCommandPort(graph_session, now=graph_clock),
+            checkpoint_port=GraphCheckpointPort(graph_session, now=graph_clock),
         )
         runtime_session.commit()
+        graph_session.commit()
         event_session.commit()
         control_session.commit()
         assert isinstance(result, (RuntimeInterrupt, RuntimeStepResult))
         return result
     except Exception:
         runtime_session.rollback()
+        graph_session.rollback()
         event_session.rollback()
         control_session.rollback()
         raise
     finally:
         runtime_session.close()
+        graph_session.close()
         event_session.close()
         control_session.close()
 

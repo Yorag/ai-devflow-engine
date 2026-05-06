@@ -5,7 +5,6 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
-from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
 from backend.app.domain.graph_definition import GraphDefinition
@@ -58,9 +57,11 @@ class LangGraphRuntimeEngine:
         log_writer: RunLogWriter | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
+        if checkpointer is None:
+            raise ValueError("LangGraphRuntimeEngine requires an explicit checkpointer")
         self._graph_definition = graph_definition
         self._stage_runner = stage_runner
-        self._checkpointer = checkpointer or InMemorySaver()
+        self._checkpointer = checkpointer
         self._log_writer = log_writer
         self._now = now or (lambda: datetime.now(UTC))
         self._first_node_key = str(graph_definition.stage_nodes[0]["node_key"])
