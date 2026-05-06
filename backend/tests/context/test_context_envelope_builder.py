@@ -442,6 +442,7 @@ def _builder(
     *,
     artifact_store: FakeArtifactStore | None = None,
     source_resolver: FakeSourceResolver | None = None,
+    context_size_guard: object | None = None,
 ) -> object:
     from backend.app.context.builder import ContextEnvelopeBuilder
 
@@ -450,6 +451,7 @@ def _builder(
         tool_registry=FakeToolRegistry(),
         artifact_store=artifact_store or FakeArtifactStore(),
         source_resolver=source_resolver or FakeSourceResolver(),
+        context_size_guard=context_size_guard,
         now=lambda: NOW,
     )
 
@@ -470,6 +472,17 @@ def test_stage_execution_builds_envelope_manifest_messages_and_persists_context_
     )
     assert result.envelope.stage_contract[0].trust_level is (
         ContextTrustLevel.STAGE_CONTRACT_TRUSTED
+    )
+    stage_fragment_block = result.envelope.stage_contract[1]
+    assert stage_fragment_block.block_id == "prompt-section:stage_prompt_fragment"
+    assert stage_fragment_block.trust_level is ContextTrustLevel.STAGE_CONTRACT_TRUSTED
+    assert stage_fragment_block.summary.startswith("# Code Generation Stage Prompt")
+    assert stage_fragment_block.estimated_chars == len(stage_fragment_block.summary)
+    assert stage_fragment_block.prompt_section_refs[0].section_id == (
+        "stage_prompt_fragment"
+    )
+    assert stage_fragment_block.prompt_section_refs[0].prompt_ref.prompt_id == (
+        "stage_prompt_fragment.code_generation"
     )
     assert result.envelope.agent_role_prompt[0].trust_level is (
         ContextTrustLevel.AGENT_ROLE_CONFIG
@@ -495,6 +508,63 @@ def test_stage_execution_builds_envelope_manifest_messages_and_persists_context_
         mode="json"
     )
     assert artifact_store.calls[0]["trace_context"] == result.envelope.trace_context
+    assert any(
+        record.block_id == "prompt-section:stage_prompt_fragment"
+        and record.section is ContextEnvelopeSection.STAGE_CONTRACT
+        and record.prompt_section_refs[0].prompt_ref.prompt_id
+        == "stage_prompt_fragment.code_generation"
+        for record in result.manifest.records
+    )
+
+
+def test_stage_prompt_fragment_is_counted_as_pinned_context() -> None:
+    from backend.app.context.size_guard import (
+        ContextOverflowError,
+        ContextSizeGuard,
+        ContextTokenEstimator,
+    )
+
+    class StageFragmentOnlyEstimator(ContextTokenEstimator):
+        def estimate_block(self, block: ContextBlock) -> int:
+            if block.block_id == "prompt-section:stage_prompt_fragment":
+                return 80
+            return 0
+
+        def estimate_text(self, text: str) -> int:
+            del text
+            return 0
+
+    request = _build_request(
+        provider_snapshot=_provider_snapshot().model_copy(
+            update={
+                "capabilities": _capabilities().model_copy(
+                    update={"context_window_tokens": 100}
+                )
+            }
+        ),
+        model_binding_snapshot=_model_binding_snapshot().model_copy(
+            update={
+                "capabilities": _capabilities().model_copy(
+                    update={"context_window_tokens": 100}
+                )
+            }
+        ),
+        runtime_limit_snapshot=_runtime_limits().model_copy(
+            update={
+                "context_limits": ContextLimits(compression_threshold_ratio=0.75)
+            }
+        ),
+    )
+
+    with pytest.raises(ContextOverflowError) as exc_info:
+        _builder(
+            context_size_guard=ContextSizeGuard(
+                token_estimator=StageFragmentOnlyEstimator()
+            )
+        ).build_for_stage_call(request)
+
+    assert exc_info.value.reason == "pinned_context_overflow"
+    assert exc_info.value.total_estimated_tokens == 80
 
 
 def test_structured_output_repair_requires_parse_error_and_uses_repair_prompt_path() -> None:
