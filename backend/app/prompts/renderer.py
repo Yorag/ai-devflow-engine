@@ -12,6 +12,7 @@ from backend.app.domain.enums import StageType
 from backend.app.prompts.definitions import (
     COMPRESSION_PROMPT_ID,
     RUNTIME_INSTRUCTIONS_PROMPT_ID,
+    STAGE_PROMPT_FRAGMENT_PROMPT_IDS_BY_STAGE,
     STRUCTURED_OUTPUT_REPAIR_PROMPT_ID,
     TOOL_USAGE_TEMPLATE_PROMPT_ID,
 )
@@ -176,6 +177,22 @@ class PromptRenderer:
             authority_level=PromptAuthorityLevel.STAGE_CONTRACT_RENDERED,
         )
 
+    def render_stage_prompt_fragment(
+        self,
+        request: PromptRenderRequest,
+    ) -> PromptRenderedSection:
+        prompt_id = STAGE_PROMPT_FRAGMENT_PROMPT_IDS_BY_STAGE[request.stage_type]
+        asset = self._get_asset(prompt_id)
+        return self._asset_section(
+            request=request,
+            section_id="stage_prompt_fragment",
+            title=asset.sections[0].title,
+            body="\n\n".join(section.body for section in asset.sections),
+            prompt_ref=self._prompt_ref(asset),
+            authority_level=PromptAuthorityLevel.STAGE_CONTRACT_RENDERED,
+            cache_scope=asset.cache_scope,
+        )
+
     def render_tool_usage(
         self,
         request: PromptRenderRequest,
@@ -320,6 +337,7 @@ class PromptRenderer:
 
         runtime = self.render_runtime_instructions(request)
         stage_contract = self.render_stage_contract(request)
+        stage_prompt_fragment = self.render_stage_prompt_fragment(request)
         agent_role = self._agent_role_section(request)
         task_objective = self._dynamic_section(
             request=request,
@@ -347,13 +365,14 @@ class PromptRenderer:
         sections = [
             runtime,
             stage_contract,
+            stage_prompt_fragment,
             agent_role,
             task_objective,
             specified_action,
             response_schema,
         ]
         if tool_usage is not None:
-            sections.insert(5, tool_usage)
+            sections.insert(6, tool_usage)
         system_sections = [
             section
             for section in sections
@@ -361,6 +380,7 @@ class PromptRenderer:
             in {
                 "runtime_instructions",
                 "stage_contract",
+                "stage_prompt_fragment",
                 "available_tools",
                 "response_schema",
             }

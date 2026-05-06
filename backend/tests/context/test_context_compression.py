@@ -597,6 +597,18 @@ def _builder_renderer() -> PromptRenderer:
                     body="# Context Compression\nPreserve decisions and refs.",
                 ),
                 _asset(
+                    prompt_id="stage_prompt_fragment.code_generation",
+                    prompt_type=PromptType.STAGE_PROMPT_FRAGMENT,
+                    authority_level=PromptAuthorityLevel.STAGE_CONTRACT_RENDERED,
+                    model_call_type=ModelCallType.STAGE_EXECUTION,
+                    cache_scope=PromptCacheScope.RUN_STATIC,
+                    source_ref="backend://prompts/stages/code_generation.md",
+                    body=(
+                        "# Code Generation Stage Prompt\n"
+                        "Use the current stage_contract and response_schema."
+                    ),
+                ),
+                _asset(
                     prompt_id="tool_usage_template",
                     prompt_type=PromptType.TOOL_USAGE_TEMPLATE,
                     authority_level=PromptAuthorityLevel.TOOL_DESCRIPTION_RENDERED,

@@ -115,6 +115,91 @@ def seed_required_assets(root: Path) -> None:
                 body=f"# {heading}\n\nRole seed body.",
             ),
         )
+    stage_assets = {
+        "stages/requirement_analysis.md": "stage_prompt_fragment.requirement_analysis",
+        "stages/solution_design.md": "stage_prompt_fragment.solution_design",
+        "stages/code_generation.md": "stage_prompt_fragment.code_generation",
+        "stages/test_generation_execution.md": (
+            "stage_prompt_fragment.test_generation_execution"
+        ),
+        "stages/code_review.md": "stage_prompt_fragment.code_review",
+        "stages/delivery_integration.md": (
+            "stage_prompt_fragment.delivery_integration"
+        ),
+    }
+    for relative_path, prompt_id in stage_assets.items():
+        write_asset(
+            root,
+            relative_path,
+            valid_asset(
+                prompt_id=prompt_id,
+                prompt_version="2026-05-06.1",
+                prompt_type="stage_prompt_fragment",
+                authority_level="stage_contract_rendered",
+                model_call_type="stage_execution",
+                cache_scope="run_static",
+                source_ref=f"backend://prompts/{relative_path}",
+                body=(
+                    "# Stage Prompt Fragment\n\n"
+                    "Use allowed_tools from the current stage_contract and "
+                    "return the response_schema artifact."
+                ),
+            ),
+        )
+
+
+def test_builtin_stage_prompt_fragments_are_required_and_stage_scoped() -> None:
+    from backend.app.domain.enums import StageType
+    from backend.app.prompts.registry import PromptRegistry
+    from backend.app.schemas.prompts import (
+        ModelCallType,
+        PromptAuthorityLevel,
+        PromptCacheScope,
+        PromptType,
+    )
+
+    registry = PromptRegistry.load_builtin_assets()
+
+    expected = {
+        "stage_prompt_fragment.requirement_analysis": (
+            StageType.REQUIREMENT_ANALYSIS
+        ),
+        "stage_prompt_fragment.solution_design": StageType.SOLUTION_DESIGN,
+        "stage_prompt_fragment.code_generation": StageType.CODE_GENERATION,
+        "stage_prompt_fragment.test_generation_execution": (
+            StageType.TEST_GENERATION_EXECUTION
+        ),
+        "stage_prompt_fragment.code_review": StageType.CODE_REVIEW,
+        "stage_prompt_fragment.delivery_integration": (
+            StageType.DELIVERY_INTEGRATION
+        ),
+    }
+    for prompt_id, stage_type in expected.items():
+        asset = registry.get(prompt_id)
+        assert asset.prompt_type is PromptType.STAGE_PROMPT_FRAGMENT
+        assert asset.authority_level is PromptAuthorityLevel.STAGE_CONTRACT_RENDERED
+        assert asset.model_call_type is ModelCallType.STAGE_EXECUTION
+        assert asset.cache_scope is PromptCacheScope.RUN_STATIC
+        assert asset.applies_to_stage_types == [stage_type]
+        assert asset.sections[0].body.startswith("# ")
+        assert "prompt_id:" not in asset.sections[0].body
+        assert "allowed_tools" in asset.sections[0].body
+        assert "response_schema" in asset.sections[0].body
+
+
+def test_runtime_instructions_define_real_development_boundaries() -> None:
+    from backend.app.prompts.registry import PromptRegistry
+
+    asset = PromptRegistry.load_builtin_assets().get("runtime_instructions")
+    body = asset.sections[0].body
+
+    assert asset.prompt_version == "2026-05-06.1"
+    assert "Authority Order" in body
+    assert "stage-contract-rendered controls, including response_schema" in body
+    assert "Untrusted Context" in body
+    assert "Tool And Side Effect Policy" in body
+    assert "No Raw Chain-of-Thought" in body
+    assert "response_schema" in body
 
 
 def test_load_builtin_assets_rejects_missing_front_matter(tmp_path: Path) -> None:

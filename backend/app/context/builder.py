@@ -192,6 +192,10 @@ class ContextEnvelopeBuilder:
                 prompt_render_result=prompt_render,
                 section=ContextEnvelopeSection.STAGE_CONTRACT,
                 trust_level=ContextTrustLevel.STAGE_CONTRACT_TRUSTED,
+                section_ids=(
+                    ContextEnvelopeSection.STAGE_CONTRACT.value,
+                    "stage_prompt_fragment",
+                ),
             ),
             agent_role_prompt=self._agent_role_blocks(
                 request=request,
@@ -682,7 +686,9 @@ class ContextEnvelopeBuilder:
         prompt_render_result: PromptRenderResult,
         section: ContextEnvelopeSection,
         trust_level: ContextTrustLevel,
+        section_ids: tuple[str, ...] | None = None,
     ) -> tuple[ContextBlock, ...]:
+        rendered_section_ids = section_ids or (section.value,)
         return tuple(
             self._prompt_section_block(
                 rendered_section=rendered_section,
@@ -690,7 +696,7 @@ class ContextEnvelopeBuilder:
                 trust_level=trust_level,
             )
             for rendered_section in prompt_render_result.sections
-            if rendered_section.section_id == section.value
+            if rendered_section.section_id in rendered_section_ids
         )
 
     def _runtime_instruction_blocks(

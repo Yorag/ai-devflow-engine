@@ -68,6 +68,32 @@ def _tool_asset() -> PromptAssetRead:
     )
 
 
+def _stage_prompt_fragment_asset() -> PromptAssetRead:
+    body = (
+        "# Solution Design Stage Prompt\n\n"
+        "Use the current stage_contract and response_schema."
+    )
+    return PromptAssetRead(
+        prompt_id="stage_prompt_fragment.solution_design",
+        prompt_version="2026-05-06.1",
+        prompt_type=PromptType.STAGE_PROMPT_FRAGMENT,
+        authority_level=PromptAuthorityLevel.STAGE_CONTRACT_RENDERED,
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        cache_scope=PromptCacheScope.RUN_STATIC,
+        source_ref="backend://prompts/stages/solution_design.md",
+        content_hash=PromptAssetRead.calculate_content_hash(body),
+        sections=[
+            PromptSectionRead(
+                section_id="stage_prompt_fragment.solution_design",
+                title="Solution Design Stage Prompt",
+                body=body,
+                cache_scope=PromptCacheScope.RUN_STATIC,
+            )
+        ],
+        applies_to_stage_types=[StageType.SOLUTION_DESIGN],
+    )
+
+
 def _tool() -> ToolBindableDescription:
     return ToolBindableDescription(
         name="read_file",
@@ -169,9 +195,15 @@ def test_renderer_metadata_round_trips_into_context_manifest_system_prompt_overr
         tool_schema_version="tool-schema-v1",
         created_at=NOW,
     )
-    rendered = PromptRenderer(PromptRegistry([_runtime_asset(), _tool_asset()])).render_messages(
-        request
-    )
+    rendered = PromptRenderer(
+        PromptRegistry(
+            [
+                _runtime_asset(),
+                _stage_prompt_fragment_asset(),
+                _tool_asset(),
+            ]
+        )
+    ).render_messages(request)
     envelope = ContextEnvelope(
         session_id="session-1",
         run_id="run-1",
@@ -205,8 +237,11 @@ def test_renderer_metadata_round_trips_into_context_manifest_system_prompt_overr
     assert dumped["system_prompt_ref"] == rendered.system_prompt_ref
     assert dumped["system_prompt_ref"] == "template-snapshot://run-1/agent-role/system-prompt"
     assert dumped["prompt_refs"][0]["prompt_id"] == "runtime_instructions"
+    assert dumped["prompt_refs"][1]["prompt_id"] == "stage_prompt_fragment.solution_design"
+    assert dumped["prompt_refs"][2]["prompt_id"] == "tool_usage_template"
     assert dumped["prompt_asset_sources"] == [
         "backend://prompts/runtime/runtime_instructions.md",
+        "backend://prompts/stages/solution_design.md",
         "backend://prompts/tools/tool_usage_common.md",
     ]
     assert dumped["rendered_output_ref"] == rendered.rendered_output_ref
