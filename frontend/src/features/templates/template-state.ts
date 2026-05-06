@@ -149,48 +149,16 @@ export function resolveTemplateProviderBindings(
   template: PipelineTemplateRead,
   providers: ProviderRead[],
 ): PipelineTemplateRead {
-  const resolvedDraft = resolveTemplateDraftProviders(
-    createTemplateDraft(template),
-    providers,
-  );
-
-  if (serializeDraft(resolvedDraft) === serializeDraft(createTemplateDraft(template))) {
-    return template;
-  }
-
-  return {
-    ...template,
-    stage_role_bindings: resolvedDraft.stage_role_bindings,
-  };
+  void providers;
+  return template;
 }
 
 export function resolveTemplateDraftProviders(
   draft: TemplateDraftState,
   providers: ProviderRead[],
 ): TemplateDraftState {
-  const providerOptions = availableTemplateProviders(providers);
-  const availableProviderIds = new Set(
-    providerOptions.map((provider) => provider.provider_id),
-  );
-  const fallbackProviderId =
-    draft.stage_role_bindings.find((binding) =>
-      availableProviderIds.has(binding.provider_id),
-    )?.provider_id ?? providerOptions[0]?.provider_id;
-
-  if (!fallbackProviderId) {
-    return draft;
-  }
-
-  let changed = false;
-  const stage_role_bindings = draft.stage_role_bindings.map((binding) => {
-    if (availableProviderIds.has(binding.provider_id)) {
-      return binding;
-    }
-    changed = true;
-    return { ...binding, provider_id: fallbackProviderId };
-  });
-
-  return changed ? { ...draft, stage_role_bindings } : draft;
+  void providers;
+  return draft;
 }
 
 export function unavailableTemplateProviderIds(

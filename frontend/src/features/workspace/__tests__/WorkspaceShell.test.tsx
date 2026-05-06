@@ -1300,7 +1300,7 @@ describe("WorkspaceShell", () => {
     );
   });
 
-  it("keeps first requirement input enabled when a configured provider replaces stale template bindings", async () => {
+  it("blocks first requirement input when configured providers do not include the selected template binding", async () => {
     const baseFetcher = createMockApiFetcher();
     const mimoProvider: ProviderRead = {
       ...mockProviderList[2],
@@ -1333,21 +1333,27 @@ describe("WorkspaceShell", () => {
     const editor = await screen.findByRole("region", { name: "Template editor" });
     const providerSelect = within(editor).getByLabelText("requirement_analysis provider");
     await waitFor(() => {
-      expect(providerSelect).toHaveProperty("value", "provider-mimo");
+      expect(providerSelect).toHaveProperty("value", "provider-deepseek");
     });
     expect(
-      screen.queryByText(/This template references unavailable providers/u),
-    ).toBeNull();
+      within(providerSelect).getByRole("option", { name: "MiMo" }),
+    ).toBeTruthy();
+    expect(
+      within(providerSelect).getByRole("option", {
+        name: "Unavailable provider: provider-deepseek",
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.getAllByText(
+        "This template references unavailable providers: provider-deepseek.",
+      ),
+    ).toHaveLength(2);
 
     const input = screen.getByLabelText("当前输入");
-    fireEvent.change(input, {
-      target: { value: "Start with the configured provider." },
-    });
-
-    expect(input).toHaveProperty("disabled", false);
+    expect(input).toHaveProperty("disabled", true);
     expect(screen.getByRole("button", { name: "发送" })).toHaveProperty(
       "disabled",
-      false,
+      true,
     );
   });
 

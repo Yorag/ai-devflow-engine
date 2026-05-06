@@ -75,7 +75,7 @@ describe("template-state", () => {
 });
 
 describe("TemplateEditor", () => {
-  it("uses the configured provider when a system template references an unavailable provider", async () => {
+  it("blocks start and preserves bindings when a template references an unavailable provider", async () => {
     const workspace = mockSessionWorkspaces["session-draft"];
     const providers: ProviderRead[] = [
       {
@@ -107,17 +107,19 @@ describe("TemplateEditor", () => {
     const providerSelect = within(editor).getByLabelText("requirement_analysis provider");
 
     await waitFor(() => {
-      expect(providerSelect).toHaveProperty("value", "provider-mimo");
+      expect(providerSelect).toHaveProperty("value", "provider-deepseek");
     });
     expect(
       within(providerSelect).getByRole("option", { name: "MiMo" }),
     ).toBeTruthy();
     expect(
-      within(providerSelect).queryByRole("option", { name: "Unavailable provider" }),
-    ).toBeNull();
+      within(providerSelect).getByRole("option", {
+        name: "Unavailable provider: provider-deepseek",
+      }),
+    ).toBeTruthy();
     expect(
-      within(editor).queryByText(/This template references unavailable providers/u),
-    ).toBeNull();
+      within(editor).getByText(/This template references unavailable providers/u),
+    ).toBeTruthy();
   });
 
   it("edits only allowed runtime configuration fields for a system template", () => {

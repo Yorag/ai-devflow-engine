@@ -142,6 +142,13 @@ export function TemplateEditor({
                     })
                   }
                 >
+                  {!providerOptions.some(
+                    (provider) => provider.provider_id === binding.provider_id,
+                  ) ? (
+                    <option value={binding.provider_id} disabled>
+                      Unavailable provider: {binding.provider_id}
+                    </option>
+                  ) : null}
                   {providerOptions.length === 0 ? (
                     <option value="" disabled>
                       No provider configured
@@ -227,7 +234,7 @@ function providerSelectValue(
   if (providerOptions.some((provider) => provider.provider_id === providerId)) {
     return providerId;
   }
-  return providerOptions[0]?.provider_id ?? "";
+  return providerId || "";
 }
 
 function getRetryValidationError(value: number): string | null {
