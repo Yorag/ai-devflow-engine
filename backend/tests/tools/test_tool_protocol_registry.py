@@ -225,6 +225,17 @@ def test_bindable_description_uses_langchain_compatible_schema() -> None:
         "description": "Read one text file from the current run workspace.",
         "parameters": READ_FILE_SCHEMA,
     }
+    assert (
+        "Prefer this tool over bash"
+        not in description.to_langchain_tool_schema()["description"]
+    )
+    assert "prompt" not in description.to_langchain_tool_schema()
+    assert "result_schema" not in description.to_langchain_tool_schema()
+    assert set(description.to_langchain_tool_schema()) == {
+        "name",
+        "description",
+        "parameters",
+    }
 
     with pytest.raises(ValidationError):
         ToolBindableDescription(

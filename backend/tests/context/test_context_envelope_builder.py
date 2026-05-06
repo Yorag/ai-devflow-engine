@@ -189,6 +189,7 @@ def _renderer() -> PromptRenderer:
                     model_call_type=ModelCallType.STRUCTURED_OUTPUT_REPAIR,
                     source_ref="backend://prompts/repairs/structured_output_repair.md",
                     body="# Structured Output Repair\nRepair only invalid JSON.",
+                    cache_scope=PromptCacheScope.DYNAMIC_UNCACHED,
                 ),
                 _asset(
                     prompt_id="stage_prompt_fragment.code_generation",
@@ -209,6 +210,23 @@ def _renderer() -> PromptRenderer:
                     model_call_type=ModelCallType.TOOL_CALL_PREPARATION,
                     source_ref="backend://prompts/tools/tool_usage_common.md",
                     body="# Tool Usage\nUse only listed tools.",
+                    cache_scope=PromptCacheScope.RUN_STATIC,
+                ),
+                _asset(
+                    prompt_id="tool_prompt_fragment.grep",
+                    prompt_type=PromptType.TOOL_PROMPT_FRAGMENT,
+                    authority_level=PromptAuthorityLevel.TOOL_DESCRIPTION_RENDERED,
+                    model_call_type=ModelCallType.TOOL_CALL_PREPARATION,
+                    source_ref="backend://prompts/tools/grep.md",
+                    body="# grep Tool\nUse grep for workspace text search.",
+                ),
+                _asset(
+                    prompt_id="tool_prompt_fragment.read_file",
+                    prompt_type=PromptType.TOOL_PROMPT_FRAGMENT,
+                    authority_level=PromptAuthorityLevel.TOOL_DESCRIPTION_RENDERED,
+                    model_call_type=ModelCallType.TOOL_CALL_PREPARATION,
+                    source_ref="backend://prompts/tools/read_file.md",
+                    body="# read_file Tool\nUse read_file for workspace text reads.",
                 ),
             ]
         )

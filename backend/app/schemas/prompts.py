@@ -20,6 +20,7 @@ class _PromptContractEnum(StrEnum):
 class PromptType(_PromptContractEnum):
     RUNTIME_INSTRUCTIONS = "runtime_instructions"
     STAGE_PROMPT_FRAGMENT = "stage_prompt_fragment"
+    TOOL_PROMPT_FRAGMENT = "tool_prompt_fragment"
     STRUCTURED_OUTPUT_REPAIR = "structured_output_repair"
     COMPRESSION_PROMPT = "compression_prompt"
     AGENT_ROLE_SEED = "agent_role_seed"
@@ -148,6 +149,18 @@ class PromptAssetRead(_StrictBaseModel):
                 f"{expected_model_call_type.value} model_call_type"
             )
 
+        expected_cache_scope = _EXPECTED_CACHE_SCOPE_BY_PROMPT_TYPE.get(
+            self.prompt_type
+        )
+        if (
+            expected_cache_scope is not None
+            and self.cache_scope != expected_cache_scope
+        ):
+            raise ValueError(
+                f"{self.prompt_type.value} must use "
+                f"{expected_cache_scope.value} cache_scope"
+            )
+
         return self
 
 
@@ -158,6 +171,7 @@ _EXPECTED_AUTHORITY_BY_PROMPT_TYPE: dict[PromptType, PromptAuthorityLevel] = {
     PromptType.COMPRESSION_PROMPT: PromptAuthorityLevel.SYSTEM_TRUSTED,
     PromptType.AGENT_ROLE_SEED: PromptAuthorityLevel.AGENT_ROLE_PROMPT,
     PromptType.TOOL_USAGE_TEMPLATE: PromptAuthorityLevel.TOOL_DESCRIPTION_RENDERED,
+    PromptType.TOOL_PROMPT_FRAGMENT: PromptAuthorityLevel.TOOL_DESCRIPTION_RENDERED,
 }
 
 _EXPECTED_MODEL_CALL_BY_PROMPT_TYPE: dict[PromptType, ModelCallType] = {
@@ -167,6 +181,17 @@ _EXPECTED_MODEL_CALL_BY_PROMPT_TYPE: dict[PromptType, ModelCallType] = {
     PromptType.COMPRESSION_PROMPT: ModelCallType.CONTEXT_COMPRESSION,
     PromptType.AGENT_ROLE_SEED: ModelCallType.STAGE_EXECUTION,
     PromptType.TOOL_USAGE_TEMPLATE: ModelCallType.TOOL_CALL_PREPARATION,
+    PromptType.TOOL_PROMPT_FRAGMENT: ModelCallType.TOOL_CALL_PREPARATION,
+}
+
+_EXPECTED_CACHE_SCOPE_BY_PROMPT_TYPE: dict[PromptType, PromptCacheScope] = {
+    PromptType.RUNTIME_INSTRUCTIONS: PromptCacheScope.GLOBAL_STATIC,
+    PromptType.STAGE_PROMPT_FRAGMENT: PromptCacheScope.RUN_STATIC,
+    PromptType.STRUCTURED_OUTPUT_REPAIR: PromptCacheScope.DYNAMIC_UNCACHED,
+    PromptType.COMPRESSION_PROMPT: PromptCacheScope.RUN_STATIC,
+    PromptType.AGENT_ROLE_SEED: PromptCacheScope.GLOBAL_STATIC,
+    PromptType.TOOL_USAGE_TEMPLATE: PromptCacheScope.RUN_STATIC,
+    PromptType.TOOL_PROMPT_FRAGMENT: PromptCacheScope.GLOBAL_STATIC,
 }
 
 

@@ -146,6 +146,41 @@ def seed_required_assets(root: Path) -> None:
                 ),
             ),
         )
+    seed_tool_prompt_assets(root)
+
+
+def seed_tool_prompt_assets(root: Path) -> None:
+    tool_names = [
+        "bash",
+        "create_code_review_request",
+        "create_commit",
+        "edit_file",
+        "glob",
+        "grep",
+        "prepare_branch",
+        "push_branch",
+        "read_delivery_snapshot",
+        "read_file",
+        "write_file",
+    ]
+    for tool_name in tool_names:
+        write_asset(
+            root,
+            f"tools/{tool_name}.md",
+            valid_asset(
+                prompt_id=f"tool_prompt_fragment.{tool_name}",
+                prompt_version="2026-05-06.1",
+                prompt_type="tool_prompt_fragment",
+                authority_level="tool_description_rendered",
+                model_call_type="tool_call_preparation",
+                cache_scope="global_static",
+                source_ref=f"backend://prompts/tools/{tool_name}.md",
+                body=(
+                    f"# {tool_name} Tool Prompt\n\n"
+                    f"Use {tool_name} according to the tool-specific contract."
+                ),
+            ),
+        )
 
 
 def test_builtin_stage_prompt_fragments_are_required_and_stage_scoped() -> None:
@@ -187,13 +222,116 @@ def test_builtin_stage_prompt_fragments_are_required_and_stage_scoped() -> None:
         assert "response_schema" in asset.sections[0].body
 
 
+def test_tool_prompt_fragments_are_required_and_globally_static(tmp_path: Path) -> None:
+    from backend.app.domain.enums import StageType
+    from backend.app.prompts.registry import PromptRegistry
+    from backend.app.schemas.prompts import (
+        ModelCallType,
+        PromptAuthorityLevel,
+        PromptCacheScope,
+        PromptType,
+    )
+
+    seed_required_assets(tmp_path)
+    seed_tool_prompt_assets(tmp_path)
+
+    registry = PromptRegistry.load_builtin_assets(asset_root=tmp_path)
+
+    expected_tool_prompt_ids = [
+        "tool_prompt_fragment.bash",
+        "tool_prompt_fragment.create_code_review_request",
+        "tool_prompt_fragment.create_commit",
+        "tool_prompt_fragment.edit_file",
+        "tool_prompt_fragment.glob",
+        "tool_prompt_fragment.grep",
+        "tool_prompt_fragment.prepare_branch",
+        "tool_prompt_fragment.push_branch",
+        "tool_prompt_fragment.read_delivery_snapshot",
+        "tool_prompt_fragment.read_file",
+        "tool_prompt_fragment.write_file",
+    ]
+    assets = registry.list_by_type(PromptType.TOOL_PROMPT_FRAGMENT)
+
+    assert [asset.prompt_id for asset in assets] == expected_tool_prompt_ids
+    for prompt_id in expected_tool_prompt_ids:
+        asset = registry.get(prompt_id)
+        assert asset.prompt_type is PromptType.TOOL_PROMPT_FRAGMENT
+        assert asset.authority_level is PromptAuthorityLevel.TOOL_DESCRIPTION_RENDERED
+        assert asset.model_call_type is ModelCallType.TOOL_CALL_PREPARATION
+        assert asset.cache_scope is PromptCacheScope.GLOBAL_STATIC
+    assert registry.get("tool_prompt_fragment.read_file").applies_to_stage_types == [
+        StageType.SOLUTION_DESIGN,
+        StageType.CODE_GENERATION,
+        StageType.TEST_GENERATION_EXECUTION,
+        StageType.CODE_REVIEW,
+    ]
+    assert registry.get("tool_prompt_fragment.bash").applies_to_stage_types == [
+        StageType.TEST_GENERATION_EXECUTION
+    ]
+    assert registry.get(
+        "tool_prompt_fragment.create_commit"
+    ).applies_to_stage_types == [StageType.DELIVERY_INTEGRATION]
+
+
+def test_builtin_tool_prompt_fragments_include_industrial_usage_guidance() -> None:
+    from backend.app.prompts.registry import PromptRegistry
+    from backend.app.schemas.prompts import PromptType
+
+    registry = PromptRegistry.load_builtin_assets()
+    assets = registry.list_by_type(PromptType.TOOL_PROMPT_FRAGMENT)
+    by_id = {asset.prompt_id: asset.sections[0].body for asset in assets}
+
+    assert "Prefer this tool over bash" in by_id["tool_prompt_fragment.read_file"]
+    assert "ripgrep" in by_id["tool_prompt_fragment.grep"]
+    assert (
+        "Do not use bash to read, search, create, or edit files"
+        in by_id["tool_prompt_fragment.bash"]
+    )
+    assert "approval" in by_id[
+        "tool_prompt_fragment.create_code_review_request"
+    ].lower()
+    for tool_body in by_id.values():
+        for heading in [
+            "## Purpose",
+            "## Use When",
+            "## Do Not Use When",
+            "## Input Rules",
+            "## Output Handling",
+            "## Safety And Side Effects",
+            "## Failure Handling",
+        ]:
+            assert heading in tool_body
+
+
+def test_tool_usage_template_remains_common_policy_not_tool_fragment() -> None:
+    from backend.app.prompts.registry import PromptRegistry
+    from backend.app.schemas.prompts import PromptCacheScope, PromptType
+
+    asset = PromptRegistry.load_builtin_assets().get("tool_usage_template")
+
+    assert asset.prompt_type is PromptType.TOOL_USAGE_TEMPLATE
+    assert asset.cache_scope is PromptCacheScope.RUN_STATIC
+    assert "Prefer the most specific dedicated tool" in asset.sections[0].body
+
+
+def test_load_builtin_assets_rejects_missing_tool_prompt_fragment(tmp_path: Path) -> None:
+    from backend.app.prompts.registry import PromptAssetMetadataError, PromptRegistry
+
+    seed_required_assets(tmp_path)
+    seed_tool_prompt_assets(tmp_path)
+    (tmp_path / "tools" / "grep.md").unlink()
+
+    with pytest.raises(PromptAssetMetadataError, match="tool_prompt_fragment.grep"):
+        PromptRegistry.load_builtin_assets(asset_root=tmp_path)
+
+
 def test_runtime_instructions_define_real_development_boundaries() -> None:
     from backend.app.prompts.registry import PromptRegistry
 
     asset = PromptRegistry.load_builtin_assets().get("runtime_instructions")
     body = asset.sections[0].body
 
-    assert asset.prompt_version == "2026-05-06.1"
+    assert asset.prompt_version == "2026-05-06.2"
     assert "Authority Order" in body
     assert "stage-contract-rendered controls, including response_schema" in body
     assert "Untrusted Context" in body

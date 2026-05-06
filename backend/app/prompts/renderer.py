@@ -14,6 +14,7 @@ from backend.app.prompts.definitions import (
     RUNTIME_INSTRUCTIONS_PROMPT_ID,
     STAGE_PROMPT_FRAGMENT_PROMPT_IDS_BY_STAGE,
     STRUCTURED_OUTPUT_REPAIR_PROMPT_ID,
+    TOOL_PROMPT_FRAGMENT_PROMPT_IDS_BY_TOOL,
     TOOL_USAGE_TEMPLATE_PROMPT_ID,
 )
 from backend.app.prompts.registry import PromptAssetNotFoundError, PromptRegistry
@@ -97,6 +98,7 @@ class PromptRenderedSection(_StrictBaseModel):
     rendered_content_ref: str = Field(min_length=1)
     rendered_content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     prompt_ref: PromptVersionRef | None = None
+    depends_on_prompt_refs: list[PromptVersionRef] = Field(default_factory=list)
 
 
 class PromptRenderRequest(_StrictBaseModel):
@@ -201,6 +203,45 @@ class PromptRenderer:
             return None
         self._validate_tool_contract(request)
         asset = self._get_asset(TOOL_USAGE_TEMPLATE_PROMPT_ID)
+        sorted_tools = sorted(request.available_tools, key=lambda tool: tool.name)
+        duplicate_tool_names = sorted(
+            {
+                tool.name
+                for index, tool in enumerate(sorted_tools)
+                if any(previous.name == tool.name for previous in sorted_tools[:index])
+            }
+        )
+        if duplicate_tool_names:
+            raise PromptRenderException(
+                PromptRenderError(
+                    code="duplicate_available_tool",
+                    message=(
+                        "available_tools contains duplicate tool names: "
+                        f"{', '.join(duplicate_tool_names)}"
+                    ),
+                    stage_type=request.stage_type,
+                )
+            )
+        tool_prompt_bodies: list[str] = []
+        tool_prompt_refs: list[PromptVersionRef] = []
+        for tool in sorted_tools:
+            prompt_id = TOOL_PROMPT_FRAGMENT_PROMPT_IDS_BY_TOOL.get(tool.name)
+            if prompt_id is None:
+                raise PromptRenderException(
+                    PromptRenderError(
+                        code="tool_prompt_fragment_missing",
+                        message=(
+                            "No rich prompt fragment is registered for available "
+                            f"tool: {tool.name}"
+                        ),
+                        stage_type=request.stage_type,
+                    )
+                )
+            tool_asset = self._get_asset(prompt_id)
+            tool_prompt_bodies.append(
+                "\n\n".join(section.body for section in tool_asset.sections)
+            )
+            tool_prompt_refs.append(self._prompt_ref(tool_asset))
         tools_payload = [
             {
                 "name": tool.name,
@@ -213,15 +254,16 @@ class PromptRenderer:
                 ],
                 "schema_version": tool.schema_version,
             }
-            for tool in sorted(request.available_tools, key=lambda tool: tool.name)
+            for tool in sorted_tools
         ]
-        body = "\n\n".join(
-            [
-                "\n\n".join(section.body for section in asset.sections),
-                "Available tools are limited to the stage contract allowed_tools list.",
-                _stable_json(tools_payload),
-            ]
-        )
+        body_parts = [
+            "\n\n".join(section.body for section in asset.sections),
+            "Available tools are limited to the stage contract allowed_tools list.",
+        ]
+        if tool_prompt_bodies:
+            body_parts.extend(["## Tool Guidance", *tool_prompt_bodies])
+        body_parts.extend(["## Tool Schemas", _stable_json(tools_payload)])
+        body = "\n\n".join(body_parts)
         return self._asset_section(
             request=request,
             section_id="available_tools",
@@ -230,6 +272,7 @@ class PromptRenderer:
             prompt_ref=self._prompt_ref(asset),
             authority_level=PromptAuthorityLevel.TOOL_DESCRIPTION_RENDERED,
             cache_scope=asset.cache_scope,
+            depends_on_prompt_refs=tool_prompt_refs,
         )
 
     def render_structured_output_repair(
@@ -440,9 +483,11 @@ class PromptRenderer:
             f"artifact://prompt-renders/{request.run_id}/"
             f"{request.stage_run_id}/{model_call_type.value}"
         )
-        prompt_refs = [
-            section.prompt_ref for section in sections if section.prompt_ref is not None
-        ]
+        prompt_refs: list[PromptVersionRef] = []
+        for section in sections:
+            if section.prompt_ref is not None:
+                prompt_refs.append(section.prompt_ref)
+            prompt_refs.extend(section.depends_on_prompt_refs)
         metadata = PromptRenderMetadata(
             render_id=(
                 f"prompt-render:{request.run_id}:"
@@ -510,6 +555,7 @@ class PromptRenderer:
         prompt_ref: PromptVersionRef,
         authority_level: PromptAuthorityLevel,
         cache_scope: PromptCacheScope,
+        depends_on_prompt_refs: list[PromptVersionRef] | None = None,
     ) -> PromptRenderedSection:
         return PromptRenderedSection(
             section_id=section_id,
@@ -520,6 +566,7 @@ class PromptRenderer:
             rendered_content_ref=self._content_ref(request, section_id),
             rendered_content_hash=_hash_text(body),
             prompt_ref=prompt_ref,
+            depends_on_prompt_refs=depends_on_prompt_refs or [],
         )
 
     def _dynamic_section(
