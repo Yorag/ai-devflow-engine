@@ -407,6 +407,7 @@ def test_invoke_structured_adds_title_to_bare_json_schema() -> None:
         "properties": {},
         "additionalProperties": True,
     }
+    assert model.structured_kwargs["strict"] is False
     assert result.structured_output == {"summary": "done"}
 
 

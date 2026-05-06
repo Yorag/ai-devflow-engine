@@ -169,10 +169,11 @@ class LangChainProviderAdapter:
         if not hasattr(chat_model, "with_structured_output"):
             return chat_model
         normalized_schema = self._structured_output_schema(response_schema)
+        strict = normalized_schema.get("additionalProperties") is not True
         return chat_model.with_structured_output(
             normalized_schema,
             include_raw=True,
-            strict=True,
+            strict=strict,
         )
 
     def invoke_structured(

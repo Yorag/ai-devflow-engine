@@ -989,6 +989,7 @@ def test_default_engine_factory_starts_next_stage_before_projecting_run_next(
                         "model_binding_snapshot"
                     ].stage_type,
                     "task_objective": kwargs["task_objective"],
+                    "response_schema": kwargs["response_schema"],
                     "output_schema_ref": kwargs["output_schema_ref"],
                 }
             )
@@ -1050,6 +1051,17 @@ def test_default_engine_factory_starts_next_stage_before_projecting_run_next(
     assert captured_stage_configs[1]["output_schema_ref"] == (
         "schema://stage-agent/solution_design"
     )
+    requirement_schema = captured_stage_configs[0]["response_schema"]
+    assert requirement_schema["type"] == "object"
+    assert "decision_type" in requirement_schema["required"]
+    assert requirement_schema["properties"]["decision_type"]["enum"] == [
+        "request_tool_confirmation",
+        "submit_stage_artifact",
+        "request_clarification",
+        "repair_structured_output",
+        "retry_with_revised_plan",
+        "fail_stage",
+    ]
 
 
 def test_dispatch_started_run_default_dispatcher_drives_until_final_stage_completed(

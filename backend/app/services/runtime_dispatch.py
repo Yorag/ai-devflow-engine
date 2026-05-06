@@ -67,7 +67,10 @@ from backend.app.providers.langchain_adapter import LangChainProviderAdapter
 from backend.app.providers.provider_registry import ProviderRegistry
 from backend.app.prompts.registry import PromptRegistry
 from backend.app.prompts.renderer import PromptRenderer
-from backend.app.runtime.agent_decision import AgentDecisionParser
+from backend.app.runtime.agent_decision import (
+    AgentDecisionParser,
+    agent_decision_response_schema,
+)
 from backend.app.runtime.base import (
     RuntimeEngine,
     RuntimeEngineResult,
@@ -2083,7 +2086,7 @@ class _RuntimeDispatchStageRunner:
                 stage_type,
             ),
             specified_action="Produce the structured stage artifact for the current stage.",
-            response_schema={"type": "object", "additionalProperties": True},
+            response_schema=agent_decision_response_schema(),
             output_schema_ref=f"schema://stage-agent/{stage_type.value}",
             requested_max_output_tokens=provider_config.max_output_tokens,
             stage_artifacts=self._stage_artifacts,

@@ -133,6 +133,28 @@ class AgentDecisionType(StrEnum):
     FAIL_STAGE = "fail_stage"
 
 
+def agent_decision_response_schema() -> JsonObject:
+    return {
+        "title": "AgentDecision",
+        "type": "object",
+        "properties": {
+            "decision_type": {
+                "type": "string",
+                "enum": [
+                    AgentDecisionType.REQUEST_TOOL_CONFIRMATION.value,
+                    AgentDecisionType.SUBMIT_STAGE_ARTIFACT.value,
+                    AgentDecisionType.REQUEST_CLARIFICATION.value,
+                    AgentDecisionType.REPAIR_STRUCTURED_OUTPUT.value,
+                    AgentDecisionType.RETRY_WITH_REVISED_PLAN.value,
+                    AgentDecisionType.FAIL_STAGE.value,
+                ],
+            },
+        },
+        "required": ["decision_type"],
+        "additionalProperties": True,
+    }
+
+
 class AgentDecisionErrorCode(StrEnum):
     PROVIDER_CALL_FAILED = "provider_call_failed"
     INVALID_TOOL_CALL = "invalid_tool_call"
