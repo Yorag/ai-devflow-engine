@@ -13,6 +13,25 @@ STRUCTURED_OUTPUT_REPAIR_PROMPT_ID = "structured_output_repair"
 COMPRESSION_PROMPT_ID = "compression_prompt"
 TOOL_USAGE_TEMPLATE_PROMPT_ID = "tool_usage_template"
 
+STAGE_PROMPT_FRAGMENT_PROMPT_IDS_BY_STAGE = {
+    common.StageType.REQUIREMENT_ANALYSIS: (
+        "stage_prompt_fragment.requirement_analysis"
+    ),
+    common.StageType.SOLUTION_DESIGN: "stage_prompt_fragment.solution_design",
+    common.StageType.CODE_GENERATION: "stage_prompt_fragment.code_generation",
+    common.StageType.TEST_GENERATION_EXECUTION: (
+        "stage_prompt_fragment.test_generation_execution"
+    ),
+    common.StageType.CODE_REVIEW: "stage_prompt_fragment.code_review",
+    common.StageType.DELIVERY_INTEGRATION: (
+        "stage_prompt_fragment.delivery_integration"
+    ),
+}
+
+STAGE_PROMPT_FRAGMENT_PROMPT_IDS = frozenset(
+    STAGE_PROMPT_FRAGMENT_PROMPT_IDS_BY_STAGE.values()
+)
+
 AGENT_ROLE_SEED_PROMPT_IDS = frozenset(
     {
         "agent_role_seed.requirement_analyst",
@@ -29,6 +48,7 @@ REQUIRED_BUILTIN_PROMPT_IDS = frozenset(
         STRUCTURED_OUTPUT_REPAIR_PROMPT_ID,
         COMPRESSION_PROMPT_ID,
         TOOL_USAGE_TEMPLATE_PROMPT_ID,
+        *STAGE_PROMPT_FRAGMENT_PROMPT_IDS,
         *AGENT_ROLE_SEED_PROMPT_IDS,
     }
 )
@@ -50,6 +70,11 @@ ROLE_STAGE_TYPES: dict[str, tuple[common.StageType, ...]] = {
         common.StageType.CODE_REVIEW,
         common.StageType.DELIVERY_INTEGRATION,
     ),
+}
+
+STAGE_PROMPT_FRAGMENT_STAGE_TYPES: dict[str, tuple[common.StageType, ...]] = {
+    prompt_id: (stage_type,)
+    for stage_type, prompt_id in STAGE_PROMPT_FRAGMENT_PROMPT_IDS_BY_STAGE.items()
 }
 
 ALL_STAGE_TYPES = (
@@ -82,10 +107,54 @@ BUILTIN_PROMPT_DEFINITIONS = (
         relative_path="tools/tool_usage_common.md",
         applies_to_stage_types=ALL_STAGE_TYPES,
     ),
+    BuiltinPromptDefinition(
+        prompt_id=STAGE_PROMPT_FRAGMENT_PROMPT_IDS_BY_STAGE[
+            common.StageType.REQUIREMENT_ANALYSIS
+        ],
+        relative_path="stages/requirement_analysis.md",
+        applies_to_stage_types=(common.StageType.REQUIREMENT_ANALYSIS,),
+    ),
+    BuiltinPromptDefinition(
+        prompt_id=STAGE_PROMPT_FRAGMENT_PROMPT_IDS_BY_STAGE[
+            common.StageType.SOLUTION_DESIGN
+        ],
+        relative_path="stages/solution_design.md",
+        applies_to_stage_types=(common.StageType.SOLUTION_DESIGN,),
+    ),
+    BuiltinPromptDefinition(
+        prompt_id=STAGE_PROMPT_FRAGMENT_PROMPT_IDS_BY_STAGE[
+            common.StageType.CODE_GENERATION
+        ],
+        relative_path="stages/code_generation.md",
+        applies_to_stage_types=(common.StageType.CODE_GENERATION,),
+    ),
+    BuiltinPromptDefinition(
+        prompt_id=STAGE_PROMPT_FRAGMENT_PROMPT_IDS_BY_STAGE[
+            common.StageType.TEST_GENERATION_EXECUTION
+        ],
+        relative_path="stages/test_generation_execution.md",
+        applies_to_stage_types=(common.StageType.TEST_GENERATION_EXECUTION,),
+    ),
+    BuiltinPromptDefinition(
+        prompt_id=STAGE_PROMPT_FRAGMENT_PROMPT_IDS_BY_STAGE[
+            common.StageType.CODE_REVIEW
+        ],
+        relative_path="stages/code_review.md",
+        applies_to_stage_types=(common.StageType.CODE_REVIEW,),
+    ),
+    BuiltinPromptDefinition(
+        prompt_id=STAGE_PROMPT_FRAGMENT_PROMPT_IDS_BY_STAGE[
+            common.StageType.DELIVERY_INTEGRATION
+        ],
+        relative_path="stages/delivery_integration.md",
+        applies_to_stage_types=(common.StageType.DELIVERY_INTEGRATION,),
+    ),
 )
 
 
 def applies_to_stage_types_for_prompt_id(prompt_id: str) -> tuple[common.StageType, ...]:
+    if prompt_id in STAGE_PROMPT_FRAGMENT_STAGE_TYPES:
+        return STAGE_PROMPT_FRAGMENT_STAGE_TYPES[prompt_id]
     if prompt_id in ROLE_STAGE_TYPES:
         return ROLE_STAGE_TYPES[prompt_id]
     return ALL_STAGE_TYPES

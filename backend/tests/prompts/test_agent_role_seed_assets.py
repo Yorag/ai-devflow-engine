@@ -42,7 +42,7 @@ def test_agent_role_seed_assets_parse_front_matter_and_hash_body() -> None:
         asset = load_agent_role_seed_asset(path)
 
         assert asset.prompt_id == prompt_id
-        assert asset.prompt_version == "2026-05-02.1"
+        assert asset.prompt_version == "2026-05-06.1"
         assert asset.prompt_type is PromptType.AGENT_ROLE_SEED
         assert asset.authority_level is PromptAuthorityLevel.AGENT_ROLE_PROMPT
         assert asset.model_call_type is ModelCallType.STAGE_EXECUTION
@@ -55,6 +55,16 @@ def test_agent_role_seed_assets_parse_front_matter_and_hash_body() -> None:
             markdown
         ).strip()
         assert asset.sections[0].body
+        body = asset.sections[0].body
+        assert "## Mission" in body
+        assert "## Workflow" in body
+        assert "## Quality Gates" in body
+        assert "## Failure And Escalation" in body
+        assert "runtime_instructions" in body
+        assert "stage_contract" in body
+        assert "response_schema" in body
+        assert "prompt_id:" not in body
+        assert "prompt_version:" not in body
         assert "---" not in asset.sections[0].body
         assert asset.applies_to_stage_types
 

@@ -80,6 +80,18 @@ def _registry() -> PromptRegistry:
                 source_ref="backend://prompts/tools/tool_usage_common.md",
                 body="# Tool Usage\n\nUse only listed tools.",
             ),
+            _asset(
+                prompt_id="stage_prompt_fragment.solution_design",
+                prompt_type=PromptType.STAGE_PROMPT_FRAGMENT,
+                authority_level=PromptAuthorityLevel.STAGE_CONTRACT_RENDERED,
+                model_call_type=ModelCallType.STAGE_EXECUTION,
+                source_ref="backend://prompts/stages/solution_design.md",
+                body=(
+                    "# Solution Design Stage Prompt\n\n"
+                    "Use the current stage_contract and response_schema."
+                ),
+                cache_scope=PromptCacheScope.RUN_STATIC,
+            ),
         ]
     )
 
@@ -158,6 +170,8 @@ def test_render_stage_execution_messages_with_metadata_without_prompt_metadata_i
     message_text = "\n\n".join(message.content for message in result.messages)
     assert [message.role for message in result.messages] == ["system", "user"]
     assert "# Runtime Instructions" in result.messages[0].content
+    assert "Solution Design Stage Prompt" in result.messages[0].content
+    assert "Use the current stage_contract" in result.messages[0].content
     assert "read_file description." in result.messages[0].content
     assert '"solution"' in result.messages[0].content
     assert "You may choose a concise tone" in result.messages[1].content
@@ -174,6 +188,7 @@ def test_render_stage_execution_messages_with_metadata_without_prompt_metadata_i
     assert result.section_order == [
         "runtime_instructions",
         "stage_contract",
+        "stage_prompt_fragment",
         "agent_role_prompt",
         "task_objective",
         "specified_action",
@@ -182,6 +197,7 @@ def test_render_stage_execution_messages_with_metadata_without_prompt_metadata_i
     ]
     assert [ref.prompt_id for ref in result.metadata.prompt_refs] == [
         "runtime_instructions",
+        "stage_prompt_fragment.solution_design",
         "tool_usage_template",
     ]
     agent_section = next(
@@ -226,6 +242,23 @@ def test_missing_prompt_asset_returns_structured_renderer_error() -> None:
 
     assert exc_info.value.error.code == "prompt_asset_missing"
     assert exc_info.value.error.prompt_id == "runtime_instructions"
+
+
+def test_missing_stage_prompt_fragment_returns_structured_renderer_error() -> None:
+    from backend.app.prompts.renderer import PromptRenderException, PromptRenderer
+
+    registry = PromptRegistry(
+        [
+            asset
+            for asset in _registry().list_by_type(PromptType.RUNTIME_INSTRUCTIONS)
+        ]
+    )
+
+    with pytest.raises(PromptRenderException) as exc_info:
+        PromptRenderer(registry).render_messages(_request())
+
+    assert exc_info.value.error.code == "prompt_asset_missing"
+    assert exc_info.value.error.prompt_id == "stage_prompt_fragment.solution_design"
 
 
 def test_tool_descriptions_must_not_exceed_stage_contract_allowed_tools() -> None:
