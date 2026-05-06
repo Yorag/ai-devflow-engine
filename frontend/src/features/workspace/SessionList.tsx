@@ -26,18 +26,6 @@ const activeSessionStatuses: SessionStatus[] = [
   "waiting_tool_confirmation",
 ];
 
-const statusLabels: Record<SessionStatus, string> = {
-  draft: "Draft",
-  running: "Running",
-  paused: "Paused",
-  waiting_clarification: "Waiting clarification",
-  waiting_approval: "Waiting approval",
-  waiting_tool_confirmation: "Waiting tool confirmation",
-  completed: "Completed",
-  failed: "Failed",
-  terminated: "Terminated",
-};
-
 const stageLabels: Record<StageType, string> = {
   requirement_analysis: "Requirement Analysis",
   solution_design: "Solution Design",
@@ -239,6 +227,7 @@ export function SessionList({
                         className="session-list-item__open"
                         type="button"
                         onClick={() => onSessionChange(session.session_id)}
+                        onDoubleClick={() => startRename(session)}
                         aria-current={isCurrent ? "page" : undefined}
                         aria-label={`Open ${displayName}`}
                       >
@@ -256,14 +245,6 @@ export function SessionList({
                         {isDeleting ? "Deleting" : "Delete"}
                       </button>
                     </div>
-                    <button
-                      className="session-list-item__rename-trigger"
-                      type="button"
-                      onClick={() => startRename(session)}
-                      aria-label={`Rename ${displayName}`}
-                    >
-                      Rename
-                    </button>
                   </>
                 )}
                 {isEditing && renameError ? (
@@ -276,9 +257,10 @@ export function SessionList({
                     {deleteError.message}
                   </p>
                 ) : null}
-                <p>{formatStatus(session.status)}</p>
-                <p>Updated {formatTimestamp(session.updated_at)}</p>
-                <p>Current stage {formatStage(session.latest_stage_type)}</p>
+                <div className="session-list-item__meta-row">
+                  <span>{formatTimestamp(session.updated_at)}</span>
+                  <span>{formatStage(session.latest_stage_type)}</span>
+                </div>
               </div>
             </article>
           );
@@ -307,10 +289,6 @@ function isActiveSession(status: SessionStatus): boolean {
   return activeSessionStatuses.includes(status);
 }
 
-function formatStatus(status: SessionStatus): string {
-  return statusLabels[status];
-}
-
 function formatStage(stageType: StageType | null): string {
   return stageType ? stageLabels[stageType] : "Not started";
 }
@@ -321,9 +299,7 @@ function formatTimestamp(value: string): string {
     return value;
   }
 
-  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(
-    date.getUTCDate(),
-  )} ${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}`;
+  return `${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}`;
 }
 
 function pad2(value: number): string {

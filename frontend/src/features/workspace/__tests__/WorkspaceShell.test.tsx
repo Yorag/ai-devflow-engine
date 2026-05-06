@@ -176,10 +176,9 @@ describe("WorkspaceShell", () => {
       screen.getByRole("button", { name: "Default project cannot be removed" }),
     ).toHaveProperty("disabled", true);
     expect(screen.getByText("Add workspace shell")).toBeTruthy();
-    expect(screen.getByText("Waiting approval")).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: "Rename Add workspace shell" }),
-    ).toBeTruthy();
+      screen.queryByRole("button", { name: "Rename Add workspace shell" }),
+    ).toBeNull();
     expect(
       screen.getByRole("button", {
         name: "Delete Add workspace shell blocked by active run",
@@ -227,8 +226,14 @@ describe("WorkspaceShell", () => {
       name: `Delete ${longName} blocked by active run`,
     })).toHaveProperty("disabled", true);
 
-    fireEvent.click(
-      within(item).getByRole("button", { name: `Rename ${longName}` }),
+    expect(
+      within(item).queryByRole("button", { name: `Rename ${longName}` }),
+    ).toBeNull();
+
+    fireEvent.doubleClick(
+      within(titleRow as HTMLElement).getByRole("button", {
+        name: `Open ${longName}`,
+      }),
     );
 
     expect(
@@ -307,12 +312,16 @@ describe("WorkspaceShell", () => {
       .closest("article");
     expect(runningSessionItem).toBeTruthy();
     expect(
-      within(runningSessionItem as HTMLElement).getByText("Updated 2026-05-01 09:25"),
+      within(runningSessionItem as HTMLElement).queryByText(/Updated/u),
+    ).toBeNull();
+    expect(
+      within(runningSessionItem as HTMLElement).queryByText(/Current stage/u),
+    ).toBeNull();
+    expect(
+      within(runningSessionItem as HTMLElement).getByText("09:25"),
     ).toBeTruthy();
     expect(
-      within(runningSessionItem as HTMLElement).getByText(
-        "Current stage Solution Design",
-      ),
+      within(runningSessionItem as HTMLElement).getByText("Solution Design"),
     ).toBeTruthy();
 
     fireEvent.click(

@@ -261,7 +261,6 @@ a {
 
 .workspace-button,
 .session-list-item__delete,
-.session-list-item__rename-trigger,
 .session-list-item__rename-actions button {
   width: 100%;
   min-width: 0;
@@ -287,7 +286,6 @@ a {
 
 .workspace-button--secondary,
 .session-list-item__delete,
-.session-list-item__rename-trigger,
 .session-list-item__rename-actions button {
   border-color: var(--border);
   background: var(--surface);
@@ -296,7 +294,6 @@ a {
 
 .workspace-button--secondary:hover:not(:disabled),
 .session-list-item__delete:hover:not(:disabled),
-.session-list-item__rename-trigger:hover:not(:disabled),
 .session-list-item__rename-actions button:hover:not(:disabled) {
   background: var(--surface-muted);
 }
@@ -386,17 +383,17 @@ a {
 
 .session-list__items {
   display: grid;
-  gap: 8px;
+  gap: 5px;
 }
 
 .session-list-item {
   display: grid;
-  gap: 8px;
+  gap: 4px;
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
-  padding: 11px;
+  padding: 7px 9px;
 }
 
 .session-list-item--active {
@@ -406,14 +403,14 @@ a {
 
 .session-list-item__body {
   display: grid;
-  gap: 5px;
+  gap: 3px;
   min-width: 0;
 }
 
 .session-list-item__title-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
+  align-items: center;
   gap: 8px;
   min-width: 0;
 }
@@ -445,9 +442,9 @@ a {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.86rem;
+  font-size: 0.82rem;
   font-weight: 750;
-  line-height: 1.3;
+  line-height: 1.25;
 }
 
 .session-list-item__title {
@@ -465,32 +462,34 @@ a {
 
 .session-list-item__delete {
   width: auto;
-  max-width: 82px;
-  min-height: 28px;
-  padding: 0 9px;
-  font-size: 0.74rem;
-}
-
-.session-list-item__rename-trigger {
-  justify-self: start;
-  width: auto;
   min-height: 24px;
-  border-color: transparent;
-  background: transparent;
-  color: var(--text-muted);
-  padding: 0;
-  font-size: 0.74rem;
+  padding: 0 8px;
+  font-size: 0.7rem;
   font-weight: 650;
 }
 
-.session-list-item__rename-trigger:hover:not(:disabled) {
-  background: transparent;
-  color: var(--accent);
+.session-list-item__meta-row {
+  display: grid;
+  grid-template-columns: minmax(48px, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: oklch(58% 0.018 248);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.session-list-item__meta-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .session-list-item__rename-form {
   display: grid;
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
   margin: 0;
 }
