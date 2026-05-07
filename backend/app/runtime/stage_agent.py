@@ -42,6 +42,7 @@ from backend.app.tools.registry import ToolRegistry
 
 
 JsonObject = dict[str, Any]
+StageProgressCallback = Callable[["StageExecutionRequest", str, str], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +135,7 @@ class StageAgentRuntime:
         run_log_recorder: object | None = None,
         risk_policy: object | None = None,
         confirmation_port: object | None = None,
+        progress_callback: StageProgressCallback | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._context_builder = context_builder
@@ -168,6 +170,7 @@ class StageAgentRuntime:
         self._run_log_recorder = run_log_recorder
         self._risk_policy = risk_policy
         self._confirmation_port = confirmation_port
+        self._progress_callback = progress_callback
         self._now = now or (lambda: datetime.now(UTC))
         self._process_records: dict[str, object] = {}
         self._process_refs: list[str] = []
@@ -1064,6 +1067,8 @@ class StageAgentRuntime:
         )
         process_ref = f"stage-artifact://{request.stage_artifact_id}#process/{process_key}"
         self._process_refs.append(process_ref)
+        if self._progress_callback is not None:
+            self._progress_callback(request, process_key, process_ref)
         return process_ref
 
     def _process_record_count(self, process_key: str) -> int:

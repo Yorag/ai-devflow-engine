@@ -83,8 +83,9 @@ from backend.app.runtime.langgraph_engine import LangGraphRuntimeEngine
 from backend.app.runtime.persistent_checkpointer import SQLiteLangGraphCheckpointSaver
 from backend.app.runtime.stage_agent import StageAgentRuntime
 from backend.app.runtime.stage_runner_port import StageNodeInvocation, StageNodeResult
-from backend.app.schemas.feed import ExecutionNodeProjection
-from backend.app.schemas.observability import AuditActorType, AuditResult, LogCategory, LogLevel
+from backend.app.schemas import common
+from backend.app.schemas.feed import ExecutionNodeProjection, StageItemProjection
+from backend.app.schemas.observability import AuditActorType, LogCategory, LogLevel
 from backend.app.schemas.runtime_settings import (
     ModelBindingSnapshotRead,
     ProviderCallPolicySnapshotRead,
@@ -528,8 +529,17 @@ class RuntimeExecutionService:
             started_at=stage.started_at,
             ended_at=stage.ended_at,
             summary=reason,
-            items=[],
-            metrics={},
+            items=self._stage_progress_items(
+                runtime_session,
+                run=run,
+                stage=stage,
+                occurred_at=occurred_at,
+                artifact_refs=[],
+            ),
+            metrics=self._stage_metrics(
+                runtime_session,
+                artifact_refs=[],
+            ),
         )
         events.append(
             DomainEventType.STAGE_UPDATED,
@@ -677,7 +687,13 @@ class RuntimeExecutionService:
             started_at=stage.started_at,
             ended_at=stage.ended_at,
             summary=stage.summary or _stage_result_summary(stage, result.status),
-            items=[],
+            items=self._stage_progress_items(
+                runtime_session,
+                run=run,
+                stage=stage,
+                occurred_at=occurred_at,
+                artifact_refs=result.artifact_refs,
+            ),
             metrics=self._stage_metrics(
                 runtime_session,
                 artifact_refs=result.artifact_refs,
@@ -972,8 +988,17 @@ class RuntimeExecutionService:
             started_at=stage.started_at,
             ended_at=stage.ended_at,
             summary=stage.summary or _stage_result_summary(stage, status),
-            items=[],
-            metrics={},
+            items=self._stage_progress_items(
+                runtime_session,
+                run=run,
+                stage=stage,
+                occurred_at=occurred_at,
+                artifact_refs=[],
+            ),
+            metrics=self._stage_metrics(
+                runtime_session,
+                artifact_refs=[],
+            ),
         )
         EventStore(event_session, now=self._now).append(
             DomainEventType.STAGE_UPDATED,
@@ -1724,6 +1749,137 @@ class RuntimeExecutionService:
         return metrics
 
     @staticmethod
+    def _stage_progress_items(
+        runtime_session: Session,
+        *,
+        run: PipelineRunModel,
+        stage: StageRunModel,
+        occurred_at: datetime,
+        artifact_refs: Sequence[str],
+    ) -> list[StageItemProjection]:
+        artifact = RuntimeExecutionService._latest_stage_artifact(
+            runtime_session,
+            run_id=run.run_id,
+            stage_run_id=stage.stage_run_id,
+            artifact_refs=artifact_refs,
+        )
+        if artifact is None or not isinstance(artifact.process, dict):
+            return []
+
+        process = dict(artifact.process)
+        items: list[StageItemProjection] = []
+        for index, record in enumerate(_mapping_records(process.get("model_call_trace")), 1):
+            usage = record.get("usage") if isinstance(record.get("usage"), dict) else {}
+            items.append(
+                StageItemProjection(
+                    item_id=_bounded_id(
+                        "item",
+                        stage.stage_run_id,
+                        "model",
+                        str(index),
+                    ),
+                    type=common.StageItemType.MODEL_CALL,
+                    occurred_at=occurred_at,
+                    title="Model call",
+                    summary=_model_call_summary(record),
+                    content=_json_content(_public_record(record)),
+                    artifact_refs=_stage_ref_list(
+                        record.get("artifact_refs"),
+                        fallback=[_first_existing_text(record, ("model_call_ref",))],
+                    ),
+                    metrics={key: value for key, value in usage.items() if value is not None},
+                )
+            )
+
+        for index, record in enumerate(_mapping_records(process.get("decision_trace")), 1):
+            items.append(
+                StageItemProjection(
+                    item_id=_bounded_id(
+                        "item",
+                        stage.stage_run_id,
+                        "reasoning",
+                        str(index),
+                    ),
+                    type=common.StageItemType.REASONING,
+                    occurred_at=occurred_at,
+                    title="Reasoning",
+                    summary=_decision_summary(record),
+                    content=None,
+                    artifact_refs=_stage_ref_list(
+                        record.get("artifact_refs"),
+                        fallback=[_first_existing_text(record, ("trace_ref",))],
+                    ),
+                    metrics=_compact_metrics(record, ("status", "decision_type")),
+                )
+            )
+
+        for index, record in enumerate(_mapping_records(process.get("tool_trace")), 1):
+            items.append(
+                StageItemProjection(
+                    item_id=_bounded_id(
+                        "item",
+                        stage.stage_run_id,
+                        "tool",
+                        str(index),
+                    ),
+                    type=common.StageItemType.TOOL_CALL,
+                    occurred_at=occurred_at,
+                    title=_tool_title(record),
+                    summary=_tool_summary(record),
+                    content=_json_content(_public_record(record)),
+                    artifact_refs=_stage_ref_list(record.get("artifact_refs")),
+                    metrics=_compact_metrics(record, ("status", "call_id", "tool_name")),
+                )
+            )
+
+        for index, record in enumerate(
+            (
+                *_mapping_records(process.get("change_set")),
+                *_mapping_records(process.get("change_sets")),
+            ),
+            1,
+        ):
+            refs = _stage_ref_list(record.get("diff_refs"))
+            items.append(
+                StageItemProjection(
+                    item_id=_bounded_id(
+                        "item",
+                        stage.stage_run_id,
+                        "diff",
+                        str(index),
+                    ),
+                    type=common.StageItemType.DIFF_PREVIEW,
+                    occurred_at=occurred_at,
+                    title="Diff preview",
+                    summary=_change_set_summary(record),
+                    content=_change_set_content(record),
+                    artifact_refs=refs,
+                    metrics=_compact_metrics(record, ("change_set_id",)),
+                )
+            )
+
+        output_records = _mapping_records(process.get("output_snapshot"))
+        if output_records:
+            output = output_records[-1]
+            items.append(
+                StageItemProjection(
+                    item_id=_bounded_id("item", stage.stage_run_id, "result"),
+                    type=common.StageItemType.RESULT,
+                    occurred_at=occurred_at,
+                    title="Result",
+                    summary=_result_summary(output, stage.stage_type),
+                    content=_json_content(_public_record(output)),
+                    artifact_refs=[
+                        artifact.artifact_id,
+                        *_stage_ref_list(process.get("output_refs")),
+                    ],
+                    metrics=dict(artifact.metrics) if isinstance(artifact.metrics, dict) else {},
+                )
+            )
+
+        return items
+
+    @staticmethod
     def _thread_ref(
         graph_session: Session,
         *,
@@ -2094,8 +2250,63 @@ class _RuntimeDispatchStageRunner:
             change_sets=self._change_sets,
             clarifications=self._clarifications,
             approval_decisions=self._approval_decisions,
+            progress_callback=self._publish_stage_progress,
             now=self._now,
         )
+
+    def _publish_stage_progress(
+        self,
+        request: Any,
+        process_key: str,
+        process_ref: str,
+    ) -> None:
+        del process_key, process_ref
+        stage = self._runtime_session.get(
+            StageRunModel,
+            request.invocation.stage_run_id,
+        )
+        run = self._runtime_session.get(PipelineRunModel, request.invocation.run_id)
+        if stage is None or run is None:
+            return
+        occurred_at = self._now()
+        stage_node = ExecutionNodeProjection(
+            entry_id=_bounded_id(
+                "entry",
+                stage.stage_run_id,
+                "progress",
+                str(int(occurred_at.timestamp() * 1_000_000)),
+            ),
+            run_id=run.run_id,
+            occurred_at=occurred_at,
+            stage_run_id=stage.stage_run_id,
+            stage_type=stage.stage_type,
+            status=stage.status,
+            attempt_index=stage.attempt_index,
+            started_at=stage.started_at,
+            ended_at=stage.ended_at,
+            summary=stage.summary or f"{stage.stage_type.value} in progress.",
+            items=self._service._stage_progress_items(
+                self._runtime_session,
+                run=run,
+                stage=stage,
+                occurred_at=occurred_at,
+                artifact_refs=[request.stage_artifact_id],
+            ),
+            metrics=self._service._stage_metrics(
+                self._runtime_session,
+                artifact_refs=[request.stage_artifact_id],
+            ),
+        )
+        EventStore(self._event_session, now=self._now).append(
+            DomainEventType.STAGE_UPDATED,
+            payload={"stage_node": stage_node.model_dump(mode="json")},
+            trace_context=request.invocation.trace_context,
+            session_id=request.invocation.runtime_context.session_id,
+            run_id=run.run_id,
+            stage_run_id=stage.stage_run_id,
+            occurred_at=occurred_at,
+        )
+        self._event_session.commit()
 
 
 def runtime_dispatcher_from_app_state(request: Request) -> RuntimeExecutionDispatcher:
@@ -2211,6 +2422,128 @@ def _mapping_records(value: object) -> tuple[dict[str, Any], ...]:
     if isinstance(value, list | tuple):
         return tuple(dict(item) for item in value if isinstance(item, dict))
     return ()
+
+
+def _model_call_summary(record: dict[str, Any]) -> str:
+    provider = _optional_text(record.get("provider_id")) or "provider"
+    model = _optional_text(record.get("model_id")) or "model"
+    call_type = _optional_text(record.get("model_call_type")) or "stage call"
+    usage = record.get("usage") if isinstance(record.get("usage"), dict) else {}
+    total_tokens = usage.get("total_tokens")
+    suffix = f", {total_tokens} tokens" if total_tokens is not None else ""
+    return f"{provider} {model} handled {call_type}{suffix}."
+
+
+def _decision_summary(record: dict[str, Any]) -> str:
+    message = _optional_text(record.get("safe_message"))
+    decision_type = _optional_text(record.get("decision_type")) or _optional_text(
+        record.get("decision")
+    )
+    status = _optional_text(record.get("status"))
+    parts = [part for part in (message, decision_type, status) if part]
+    if not parts:
+        return "Model decision summary is available."
+    return " | ".join(parts)
+
+
+def _tool_title(record: dict[str, Any]) -> str:
+    tool_name = _optional_text(record.get("tool_name")) or "runtime tool"
+    return f"Tool call: {tool_name}"
+
+
+def _tool_summary(record: dict[str, Any]) -> str:
+    status = _optional_text(record.get("status")) or "completed"
+    safe_details = record.get("safe_details")
+    if isinstance(safe_details, dict):
+        detail = _optional_text(safe_details.get("summary")) or _optional_text(
+            safe_details.get("message")
+        )
+        if detail:
+            return f"{status}: {detail}"
+    return f"Tool call {status}."
+
+
+def _change_set_summary(record: dict[str, Any]) -> str:
+    summary = _optional_text(record.get("summary"))
+    if summary:
+        return summary
+    files = _stage_ref_list(record.get("changed_files"))
+    if files:
+        return f"{len(files)} file change(s) projected."
+    return "Workspace diff preview is available."
+
+
+def _change_set_content(record: dict[str, Any]) -> str:
+    lines: list[str] = []
+    change_set_id = _optional_text(record.get("change_set_id"))
+    if change_set_id:
+        lines.append(f"Change set: {change_set_id}")
+    files = _stage_ref_list(record.get("changed_files"))
+    if files:
+        lines.append("Changed files:")
+        lines.extend(f"- {file_path}" for file_path in files)
+    diff_refs = _stage_ref_list(record.get("diff_refs"))
+    if diff_refs:
+        lines.append("Diff refs:")
+        lines.extend(f"- {diff_ref}" for diff_ref in diff_refs)
+    return "\n".join(lines) or _json_content(_public_record(record)) or "Diff preview."
+
+
+def _result_summary(record: dict[str, Any], stage_type: StageType) -> str:
+    for key in ("summary", "risk_summary", "failure_summary", "artifact_type"):
+        value = _optional_text(record.get(key))
+        if value:
+            return value
+    return f"{stage_type.value} produced a stage result."
+
+
+def _public_record(record: dict[str, Any]) -> dict[str, Any]:
+    blocked_fragments = ("raw", "prompt", "response", "payload")
+    public: dict[str, Any] = {}
+    for key, value in record.items():
+        lowered = key.lower()
+        if any(fragment in lowered for fragment in blocked_fragments):
+            continue
+        public[key] = value
+    return public
+
+
+def _json_content(value: dict[str, Any]) -> str | None:
+    if not value:
+        return None
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2)
+
+
+def _compact_metrics(
+    record: dict[str, Any],
+    keys: Sequence[str],
+) -> dict[str, Any]:
+    return {key: record[key] for key in keys if record.get(key) is not None}
+
+
+def _stage_ref_list(
+    value: object,
+    *,
+    fallback: Sequence[str | None] = (),
+) -> list[str]:
+    if isinstance(value, str):
+        values: list[object] = [value]
+    elif isinstance(value, list | tuple | set):
+        values = list(value)
+    else:
+        values = list(fallback)
+    return [item for item in values if isinstance(item, str) and item.strip()]
+
+
+def _first_existing_text(
+    mapping: dict[str, Any],
+    keys: Sequence[str],
+) -> str | None:
+    for key in keys:
+        value = _optional_text(mapping.get(key))
+        if value is not None:
+            return value
+    return None
 
 
 def _first_text(

@@ -3,13 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from backend.app.db.base import DatabaseRole
 from backend.app.db.models.control import SessionModel
 from backend.app.db.models.event import DomainEventModel
 from backend.app.db.models.graph import (
-    GraphCheckpointModel,
     GraphInterruptModel,
     GraphThreadModel,
 )
@@ -94,10 +94,12 @@ class CapturingRuntimeEngine:
         *,
         fail_start_with: Exception | None = None,
         step_status: StageStatus = StageStatus.RUNNING,
+        artifact_refs: list[str] | None = None,
         start_result: Any | None = None,
     ) -> None:
         self.fail_start_with = fail_start_with
         self.step_status = step_status
+        self.artifact_refs = artifact_refs or []
         self.start_result = start_result
         self.start_calls: list[EngineCall] = []
         self.run_next_calls: list[EngineCall] = []
@@ -115,7 +117,11 @@ class CapturingRuntimeEngine:
             raise self.fail_start_with
         if self.start_result is not None:
             return self.start_result
-        return _step_result(context, status=self.step_status)
+        return _step_result(
+            context,
+            status=self.step_status,
+            artifact_refs=self.artifact_refs,
+        )
 
     def run_next(self, *, context, runtime_port, checkpoint_port):  # noqa: ANN001
         self.run_next_calls.append(
@@ -125,7 +131,11 @@ class CapturingRuntimeEngine:
                 checkpoint_port=checkpoint_port,
             )
         )
-        return _step_result(context, status=self.step_status)
+        return _step_result(
+            context,
+            status=self.step_status,
+            artifact_refs=self.artifact_refs,
+        )
 
     def resume(  # noqa: ANN001
         self,
@@ -145,7 +155,11 @@ class CapturingRuntimeEngine:
                 resume_payload=resume_payload,
             )
         )
-        return _step_result(context, status=self.step_status)
+        return _step_result(
+            context,
+            status=self.step_status,
+            artifact_refs=self.artifact_refs,
+        )
 
 
 class FailingAfterGraphResumeEngine:
@@ -450,6 +464,174 @@ def test_completed_step_result_marks_stage_completed_and_projects_update(
             stage_updated.payload["stage_node"]["stage_run_id"]
             == fixture.result.stage.stage_run_id
         )
+
+
+def test_completed_step_result_projects_stage_process_records_as_feed_items(
+    tmp_path: Path,
+) -> None:
+    fixture = _start_first_run(tmp_path)
+    with fixture.manager.session(DatabaseRole.RUNTIME) as session:
+        session.add(
+            StageArtifactModel(
+                artifact_id="artifact-stage-progress",
+                run_id=fixture.result.run.run_id,
+                stage_run_id=fixture.result.stage.stage_run_id,
+                artifact_type="requirement_intake_stage_agent_stage",
+                payload_ref="stage-artifact://artifact-stage-progress/output",
+                process={
+                    "model_call_trace": {
+                        "model_call_ref": "model-call-1",
+                        "provider_id": "openai",
+                        "model_id": "gpt-5.2",
+                        "model_call_type": "stage_execution",
+                        "usage": {
+                            "input_tokens": 120,
+                            "output_tokens": 42,
+                            "total_tokens": 162,
+                        },
+                        "input_summary": {"content_hash": "sha256:input"},
+                        "output_summary": {"content_hash": "sha256:output"},
+                    },
+                    "decision_trace": {
+                        "trace_ref": "decision-trace-1",
+                        "decision_type": "submit_stage_artifact",
+                        "status": "accepted",
+                        "safe_message": "Selected the structured artifact path.",
+                    },
+                    "tool_trace": {
+                        "tool_name": "read_workspace",
+                        "call_id": "tool-call-1",
+                        "status": "succeeded",
+                        "artifact_refs": ["tool-artifact-1"],
+                        "safe_details": {"summary": "Read workspace state."},
+                    },
+                    "change_set": {
+                        "change_set_id": "changeset-1",
+                        "summary": "Updated workspace feed projection.",
+                        "changed_files": ["frontend/src/features/feed/StageNode.tsx"],
+                        "diff_refs": ["diff://changeset-1/feed"],
+                    },
+                    "output_snapshot": {
+                        "artifact_type": "requirement_summary",
+                        "risk_summary": "Ready for the next stage.",
+                    },
+                    "output_refs": ["evidence://requirement-summary"],
+                },
+                metrics={},
+                created_at=NOW,
+            )
+        )
+        session.commit()
+    fake_engine = CapturingRuntimeEngine(
+        step_status=StageStatus.COMPLETED,
+        artifact_refs=["artifact-stage-progress"],
+    )
+    service = RuntimeExecutionService(
+        database_manager=fixture.manager,
+        environment_settings=fixture.settings,
+        engine_factory=lambda _factory_input: fake_engine,
+    )
+
+    service.dispatch_started_run(fixture.command)
+
+    with fixture.manager.session(DatabaseRole.EVENT) as session:
+        stage_updated = (
+            session.query(DomainEventModel)
+            .filter(
+                DomainEventModel.run_id == fixture.result.run.run_id,
+                DomainEventModel.event_type == "stage_updated",
+            )
+            .one()
+        )
+        items = stage_updated.payload["stage_node"]["items"]
+        item_types = [item["type"] for item in items]
+        assert item_types == [
+            "model_call",
+            "reasoning",
+            "tool_call",
+            "diff_preview",
+            "result",
+        ]
+        assert items[0]["title"] == "Model call"
+        assert items[0]["metrics"]["total_tokens"] == 162
+        assert items[1]["content"] is None
+        assert "Selected the structured artifact path." in items[1]["summary"]
+        assert items[2]["artifact_refs"] == ["tool-artifact-1"]
+        assert "frontend/src/features/feed/StageNode.tsx" in items[3]["content"]
+        assert "artifact-stage-progress" in items[4]["artifact_refs"]
+        assert "evidence://requirement-summary" in items[4]["artifact_refs"]
+
+
+def test_stage_progress_callback_publishes_realtime_stage_update(
+    tmp_path: Path,
+) -> None:
+    fixture = _start_first_run(tmp_path)
+    service = RuntimeExecutionService(
+        database_manager=fixture.manager,
+        environment_settings=fixture.settings,
+    )
+    factory_input = _factory_input_for_fixture(service, fixture)
+    try:
+        engine = service._default_engine_factory(factory_input)  # noqa: SLF001
+        with fixture.manager.session(DatabaseRole.RUNTIME) as session:
+            session.add(
+                StageArtifactModel(
+                    artifact_id="artifact-realtime-progress",
+                    run_id=fixture.result.run.run_id,
+                    stage_run_id=fixture.result.stage.stage_run_id,
+                    artifact_type="requirement_intake_stage_agent_stage",
+                    payload_ref="stage-artifact://artifact-realtime-progress/input",
+                    process={
+                        "model_call_trace": {
+                            "model_call_ref": "model-call-realtime",
+                            "provider_id": "openai",
+                            "model_id": "gpt-5.2",
+                            "usage": {"total_tokens": 12},
+                        }
+                    },
+                    metrics={},
+                    created_at=NOW,
+                )
+            )
+            session.commit()
+
+        request = SimpleNamespace(
+            invocation=SimpleNamespace(
+                run_id=fixture.result.run.run_id,
+                stage_run_id=fixture.result.stage.stage_run_id,
+                trace_context=fixture.command.trace_context,
+                runtime_context=SimpleNamespace(
+                    session_id=fixture.result.session.session_id
+                ),
+            ),
+            stage_artifact_id="artifact-realtime-progress",
+        )
+
+        engine._stage_runner._publish_stage_progress(  # noqa: SLF001
+            request,
+            "model_call_trace",
+            "stage-artifact://artifact-realtime-progress#process/model_call_trace",
+        )
+    finally:
+        factory_input.control_session.close()
+        factory_input.runtime_session.close()
+        factory_input.graph_session.close()
+        factory_input.event_session.close()
+        factory_input.log_session.close()
+
+    with fixture.manager.session(DatabaseRole.EVENT) as session:
+        event = (
+            session.query(DomainEventModel)
+            .filter(
+                DomainEventModel.run_id == fixture.result.run.run_id,
+                DomainEventModel.event_type == "stage_updated",
+            )
+            .order_by(DomainEventModel.sequence_index.desc())
+            .first()
+        )
+        assert event is not None
+        assert event.payload["stage_node"]["items"][0]["type"] == "model_call"
+        assert event.payload["stage_node"]["items"][0]["metrics"]["total_tokens"] == 12
 
 
 def test_runtime_interrupt_marks_run_stage_and_session_waiting(
@@ -1566,6 +1748,7 @@ def _step_result(
     context,
     *,
     status: StageStatus = StageStatus.RUNNING,
+    artifact_refs: list[str] | None = None,
 ) -> RuntimeStepResult:  # noqa: ANN001
     assert context.thread.current_stage_run_id is not None
     assert context.thread.current_stage_type is not None
@@ -1575,7 +1758,7 @@ def _step_result(
         stage_type=context.thread.current_stage_type,
         status=status,
         trace_context=context.trace_context,
-        artifact_refs=[],
+        artifact_refs=artifact_refs or [],
         domain_event_refs=[],
         log_summary_refs=[],
         audit_refs=[],

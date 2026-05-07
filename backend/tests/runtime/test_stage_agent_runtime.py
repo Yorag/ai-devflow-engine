@@ -221,6 +221,7 @@ def build_runtime(
     change_sets: Sequence[Any] = (),
     clarifications: Sequence[Any] = (),
     approval_decisions: Sequence[Any] = (),
+    progress_callback: Any | None = None,
 ) -> Any:
     from backend.app.runtime.stage_agent import StageAgentRuntime
 
@@ -257,6 +258,7 @@ def build_runtime(
         change_sets=change_sets,
         clarifications=clarifications,
         approval_decisions=approval_decisions,
+        progress_callback=progress_callback,
         now=lambda: NOW,
     )
     runtime.context_builder = context_builder
