@@ -1,18 +1,15 @@
-import type { ExecutionNodeProjection, StageType } from "../../api/types";
+import type { ExecutionNodeProjection } from "../../api/types";
+import {
+  formatBoolean,
+  formatMetricLabel,
+  formatStatusLabel,
+  stageLabels,
+} from "./display-labels";
 import { StageNodeItems } from "./StageNodeItems";
 
 export type StageNodeProps = {
   entry: ExecutionNodeProjection;
   onOpenInspectorTarget?: (entry: ExecutionNodeProjection) => void;
-};
-
-const stageLabels: Record<StageType, string> = {
-  requirement_analysis: "Requirement Analysis",
-  solution_design: "Solution Design",
-  code_generation: "Code Generation",
-  test_generation_execution: "Test Generation & Execution",
-  code_review: "Code Review",
-  delivery_integration: "Delivery Integration",
 };
 
 const metricPriority = [
@@ -34,23 +31,23 @@ export function StageNode({
   return (
     <article
       className={`feed-entry feed-entry--stage-node stage-node stage-node--${entry.status}`}
-      aria-label="Stage feed entry"
+      aria-label="阶段节点"
     >
       <header className="stage-node__header">
         <div className="stage-node__identity">
-          <span className="stage-node__eyebrow">Stage</span>
+          <span className="stage-node__eyebrow">阶段</span>
           <h2>{stageLabels[entry.stage_type]}</h2>
         </div>
         <div className="stage-node__header-actions">
-          <span className="stage-node__status">{formatLabel(entry.status)}</span>
+          <span className="stage-node__status">{formatStatusLabel(entry.status)}</span>
           {onOpenInspectorTarget ? (
             <button
               type="button"
               className="inspector-trigger"
               onClick={() => onOpenInspectorTarget(entry)}
-              aria-label={`Open ${stageLabels[entry.stage_type]} details`}
+              aria-label={`查看${stageLabels[entry.stage_type]}详情`}
             >
-              Details
+              查看详情
             </button>
           ) : null}
         </div>
@@ -59,14 +56,14 @@ export function StageNode({
       <p className="stage-node__summary">{entry.summary}</p>
 
       <div className="stage-node__meta-grid" aria-label="Stage metadata">
-        <StageDatum label="Attempt" value={String(entry.attempt_index)} />
-        <StageDatum label="Started" value={formatTimestamp(entry.started_at)} />
+        <StageDatum label="尝试次数" value={String(entry.attempt_index)} />
+        <StageDatum label="开始时间" value={formatTimestamp(entry.started_at)} />
         {entry.ended_at ? (
-          <StageDatum label="Ended" value={formatTimestamp(entry.ended_at)} />
+          <StageDatum label="结束时间" value={formatTimestamp(entry.ended_at)} />
         ) : null}
         <StageDatum
-          label="Items"
-          value={`${entry.items.length} ${entry.items.length === 1 ? "item" : "items"}`}
+          label="内部活动"
+          value={`${entry.items.length} 项`}
         />
         {metrics.map(([key, value]) => (
           <StageDatum
@@ -118,10 +115,6 @@ function selectStageMetrics(metrics: Record<string, unknown>): Array<[string, un
   return selected;
 }
 
-function formatMetricLabel(value: string): string {
-  return value === "duration_ms" ? "Duration" : formatLabel(value);
-}
-
 function formatMetricValue(key: string, value: unknown): string {
   if (typeof value === "number") {
     if (key.endsWith("_ms")) {
@@ -130,7 +123,7 @@ function formatMetricValue(key: string, value: unknown): string {
     return new Intl.NumberFormat("en-US").format(value);
   }
   if (typeof value === "boolean") {
-    return value ? "Yes" : "No";
+    return formatBoolean(value);
   }
   return String(value);
 }
@@ -146,13 +139,6 @@ function formatDurationMs(value: number): string {
     return `${Number((value / 1000).toFixed(1))}s`;
   }
   return `${value}ms`;
-}
-
-function formatLabel(value: string): string {
-  return value
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
 }
 
 function formatTimestamp(value: string): string {

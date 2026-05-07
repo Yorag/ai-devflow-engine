@@ -25,10 +25,10 @@ describe("buildDeliveryResultViewModel", () => {
     expect(model.title).toBe("Demo delivery");
     expect(model.summary).toBe("Demo delivery completed without Git writes.");
     expect(model.metadata).toEqual([
-      { label: "Mode", value: "demo_delivery" },
-      { label: "Display branch", value: "demo/run-completed" },
-      { label: "Tests", value: "Deterministic test path completed." },
-      { label: "Reference", value: "demo-delivery-result:run-completed" },
+      { label: "模式", value: "demo_delivery" },
+      { label: "展示分支", value: "demo/run-completed" },
+      { label: "测试", value: "Deterministic test path completed." },
+      { label: "引用", value: "demo-delivery-result:run-completed" },
     ]);
     expect("highlights" in model).toBe(false);
   });
@@ -43,15 +43,15 @@ describe("buildDeliveryResultViewModel", () => {
 
     expect(model.modeLabel).toBe("Demo Delivery");
     expect(model.metadata).toContainEqual({
-      label: "Display branch",
+      label: "展示分支",
       value: "feat/leaked",
     });
     expect(model.metadata).not.toContainEqual({
-      label: "Commit",
+      label: "提交",
       value: "abc1234",
     });
     expect(model.metadata).not.toContainEqual({
-      label: "Code review",
+      label: "代码评审",
       value: "example.test/pr/17",
       href: "https://example.test/pr/17",
     });
@@ -71,27 +71,27 @@ describe("DeliveryResultBlock", () => {
     const article = screen.getByRole("article", {
       name: "Delivery result feed entry",
     });
-    expect(within(article).getByText("Delivery result")).toBeTruthy();
+    expect(within(article).getByText("交付结果")).toBeTruthy();
     expect(within(article).getByText("Demo delivery")).toBeTruthy();
     expect(
       within(article).getByText("Demo delivery completed without Git writes."),
     ).toBeTruthy();
-    expect(within(article).getByText("Mode")).toBeTruthy();
+    expect(within(article).getByText("模式")).toBeTruthy();
     expect(within(article).getByText("demo_delivery")).toBeTruthy();
-    expect(within(article).getByText("Display branch")).toBeTruthy();
+    expect(within(article).getByText("展示分支")).toBeTruthy();
     expect(within(article).getByText("demo/run-completed")).toBeTruthy();
-    expect(within(article).getByText("Tests")).toBeTruthy();
+    expect(within(article).getByText("测试")).toBeTruthy();
     expect(
       within(article).getByText("Deterministic test path completed."),
     ).toBeTruthy();
-    expect(within(article).getByText("Reference")).toBeTruthy();
+    expect(within(article).getByText("引用")).toBeTruthy();
     expect(
       within(article).getByText("demo-delivery-result:run-completed"),
     ).toBeTruthy();
-    expect(article.textContent).not.toMatch(/\bCommit\b/i);
-    expect(article.textContent).not.toMatch(/\bCode review\b/i);
+    expect(article.textContent).not.toMatch(/提交/);
+    expect(article.textContent).not.toMatch(/代码评审/);
     expect(
-      within(article).getByRole("button", { name: "Open demo_delivery details" }),
+      within(article).getByRole("button", { name: "查看demo_delivery详情" }),
     ).toBeTruthy();
   });
 
@@ -111,11 +111,11 @@ describe("DeliveryResultBlock", () => {
     const article = screen.getByRole("article", {
       name: "Delivery result feed entry",
     });
-    expect(article.textContent).toContain("Display branch");
+    expect(article.textContent).toContain("展示分支");
     expect(article.textContent).toContain("feat/leaked");
-    expect(article.textContent).not.toMatch(/Commit:\s*abc1234/i);
+    expect(article.textContent).not.toMatch(/提交:\s*abc1234/i);
     expect(article.textContent).not.toMatch(
-      /Code review:\s*https:\/\/example\.test\/pr\/17/i,
+      /代码评审:\s*https:\/\/example\.test\/pr\/17/i,
     );
     expect(
       within(article)

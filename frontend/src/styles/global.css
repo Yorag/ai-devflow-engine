@@ -933,6 +933,19 @@ a {
   font-weight: 750;
 }
 
+.feed-entry__header--with-actions {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.feed-entry__header-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .feed-entry__header time {
   font-weight: 650;
 }
@@ -1371,10 +1384,14 @@ a {
 
 .stage-node-items {
   display: grid;
-  gap: 8px;
+  gap: 0;
   margin: 0;
   padding: 0;
   list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: oklch(99% 0.004 248);
+  overflow: hidden;
 }
 
 .stage-node__empty {
@@ -1385,28 +1402,31 @@ a {
 
 .stage-node-item {
   display: grid;
-  gap: 7px;
-  border: 1px solid oklch(86% 0.014 248);
-  border-radius: 8px;
-  background: oklch(99% 0.004 248);
-  padding: 10px;
+  gap: 6px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  padding: 11px 12px;
   overflow-wrap: anywhere;
 }
 
+.stage-node-item:last-child {
+  border-bottom: 0;
+}
+
 .stage-node-item--dialogue {
-  background: oklch(98.2% 0.012 252);
+  background: oklch(98.5% 0.01 252);
 }
 
 .stage-node-item--decision,
 .stage-node-item--result {
-  background: oklch(97.8% 0.014 150);
+  background: oklch(98.3% 0.01 150);
 }
 
 .stage-node-item--provider-retrying,
 .stage-node-item--provider-circuit_open,
 .stage-node-item--provider-failed {
-  background: oklch(97.4% 0.016 52);
-  border-color: oklch(84% 0.04 52);
+  background: oklch(98% 0.012 52);
 }
 
 .stage-node-item__header {
@@ -1417,11 +1437,11 @@ a {
 }
 
 .stage-node-item__header span {
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: oklch(98.4% 0.005 248);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--text-muted);
-  padding: 2px 7px;
+  padding: 0;
   font-size: 0.66rem;
   font-weight: 800;
 }
@@ -1435,6 +1455,7 @@ a {
 }
 
 .stage-node-item__header time {
+  margin-left: auto;
   color: var(--text-muted);
   font-size: 0.68rem;
   font-weight: 700;
@@ -1505,22 +1526,28 @@ a {
 }
 
 .stage-node-item__details {
-  display: grid;
-  gap: 6px;
+  display: block;
 }
 
 .stage-node-item__details summary {
   width: fit-content;
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
   cursor: pointer;
   color: oklch(35% 0.11 252);
   font-size: 0.76rem;
   font-weight: 800;
 }
 
+.stage-node-item__details summary:hover {
+  color: oklch(29% 0.13 252);
+}
+
 .stage-node-item__details pre {
+  margin-top: 6px;
   max-width: 100%;
   overflow: auto;
-  margin: 0;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: oklch(96.8% 0.006 248);

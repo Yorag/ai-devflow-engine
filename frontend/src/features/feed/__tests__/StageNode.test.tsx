@@ -124,36 +124,39 @@ const requirementAnalysisStage: ExecutionNodeProjection = {
 };
 
 describe("StageNode", () => {
-  it("renders a stage frame with summary, status, attempt, item count, and high-signal metrics", () => {
+  it("renders a localized stage frame with summary, status, attempt, item count, and high-signal metrics", () => {
     render(<StageNode entry={requirementAnalysisStage} />);
 
-    const article = screen.getByRole("article", { name: "Stage feed entry" });
+    const article = screen.getByRole("article", { name: "阶段节点" });
     expect(
-      within(article).getByRole("heading", { name: "Requirement Analysis" }),
+      within(article).getByRole("heading", { name: "需求分析" }),
     ).toBeTruthy();
-    expect(within(article).getByText("Waiting Clarification")).toBeTruthy();
-    expect(within(article).getByText("Attempt")).toBeTruthy();
-    const attemptDatum = within(article).getByText("Attempt").closest(".stage-node__datum");
+    expect(within(article).getByText("等待澄清")).toBeTruthy();
+    expect(within(article).getByText("阶段")).toBeTruthy();
+    expect(within(article).getByText("尝试次数")).toBeTruthy();
+    const attemptDatum = within(article).getByText("尝试次数").closest(".stage-node__datum");
     expect(attemptDatum?.textContent).toContain("2");
-    expect(within(article).getByText("8 items")).toBeTruthy();
+    expect(within(article).getByText("8 项")).toBeTruthy();
     expect(
       within(article).getByText(
         "Clarifying the provider retry behavior before design starts.",
       ),
     ).toBeTruthy();
-    expect(within(article).getAllByText("Duration").length).toBeGreaterThan(0);
+    expect(within(article).getAllByText("耗时").length).toBeGreaterThan(0);
     expect(within(article).getByText("2m 5s")).toBeTruthy();
-    expect(within(article).getByText("Clarification Rounds")).toBeTruthy();
+    expect(within(article).getByText("澄清轮次")).toBeTruthy();
     expect(within(article).getByText("1,420")).toBeTruthy();
   });
 
-  it("renders Requirement Analysis clarification as continuous stage-internal dialogue", () => {
+  it("renders Requirement Analysis clarification as localized continuous dialogue rows", () => {
     render(<StageNode entry={requirementAnalysisStage} />);
 
     const dialogueItems = screen.getAllByRole("listitem", {
-      name: /Dialogue stage item/,
+      name: /澄清对话/,
     });
     expect(dialogueItems).toHaveLength(2);
+    expect(within(dialogueItems[0]).getByText("助手提问")).toBeTruthy();
+    expect(within(dialogueItems[1]).getByText("用户回复")).toBeTruthy();
     expect(
       within(dialogueItems[0]).getByText(
         "Should the started run keep the original provider binding after a retry?",
@@ -169,18 +172,18 @@ describe("StageNode", () => {
   it("renders all required stage-internal item types with distinct content", () => {
     render(<StageNodeItems items={requirementAnalysisStage.items} />);
 
-    expect(screen.getByRole("listitem", { name: "Reasoning stage item" })).toBeTruthy();
+    expect(screen.getByRole("listitem", { name: "推理记录" })).toBeTruthy();
     expect(screen.getByText("The active run snapshot is immutable.")).toBeTruthy();
-    expect(screen.getByRole("listitem", { name: "Decision stage item" })).toBeTruthy();
+    expect(screen.getByRole("listitem", { name: "决策" })).toBeTruthy();
     expect(screen.getByText("Freeze the provider binding per run.")).toBeTruthy();
-    const toolItem = screen.getByRole("listitem", { name: "Tool Call stage item" });
+    const toolItem = screen.getByRole("listitem", { name: "工具调用" });
     expect(toolItem).toBeTruthy();
     expect(within(toolItem).getAllByText("read_file frontend/src/api/types.ts")).toHaveLength(2);
-    expect(screen.getByRole("listitem", { name: "Diff Preview stage item" })).toBeTruthy();
+    expect(screen.getByRole("listitem", { name: "变更预览" })).toBeTruthy();
     expect(
       screen.getByText("frontend/src/features/feed/StageNode.tsx", { exact: false }),
     ).toBeTruthy();
-    expect(screen.getByRole("listitem", { name: "Result stage item" })).toBeTruthy();
+    expect(screen.getByRole("listitem", { name: "阶段结果" })).toBeTruthy();
     expect(screen.getByText("The stage can continue into Solution Design.")).toBeTruthy();
   });
 
@@ -235,11 +238,11 @@ describe("StageNode", () => {
     );
 
     const closedCompactLabels = [
-      "Reasoning stage item",
-      "Context stage item",
-      "Model Call stage item",
-      "Tool Call stage item",
-      "Tool Confirmation stage item",
+      "推理记录",
+      "上下文",
+      "模型调用",
+      "工具调用",
+      "工具确认",
     ];
 
     for (const label of closedCompactLabels) {
@@ -250,7 +253,7 @@ describe("StageNode", () => {
       expect(within(item).getByText(/remains visible/)).toBeTruthy();
     }
 
-    const diffItem = screen.getByRole("listitem", { name: "Diff Preview stage item" });
+    const diffItem = screen.getByRole("listitem", { name: "变更预览" });
     expect(diffItem.querySelector("details")).toBeNull();
   });
 
@@ -258,14 +261,14 @@ describe("StageNode", () => {
     render(<StageNodeItems items={requirementAnalysisStage.items} />);
 
     const providerItem = screen.getByRole("listitem", {
-      name: "Provider Call stage item",
+      name: "模型服务调用",
     });
     expect(within(providerItem).getByText("provider-deepseek / deepseek-chat")).toBeTruthy();
-    expect(within(providerItem).getByText("Retrying")).toBeTruthy();
+    expect(within(providerItem).getByText("重试中")).toBeTruthy();
     expect(within(providerItem).getByText("3.4s")).toBeTruthy();
     expect(within(providerItem).getByText("1 / 3")).toBeTruthy();
-    expect(within(providerItem).getByText("Wait 2s")).toBeTruthy();
-    expect(within(providerItem).getByText("Closed")).toBeTruthy();
+    expect(within(providerItem).getByText("等待 2s")).toBeTruthy();
+    expect(within(providerItem).getByText("关闭")).toBeTruthy();
     expect(within(providerItem).getByText("rate_limit")).toBeTruthy();
     expect(within(providerItem).getByText("provider-trace-1")).toBeTruthy();
   });
@@ -273,9 +276,9 @@ describe("StageNode", () => {
   it("uses StageNode for stage_node entries without changing other top-level feed semantics", () => {
     render(<FeedEntryRenderer entry={requirementAnalysisStage} />);
 
-    expect(screen.getByRole("article", { name: "Stage feed entry" })).toBeTruthy();
-    expect(screen.getByText("Requirement Analysis")).toBeTruthy();
-    expect(screen.getByRole("listitem", { name: "Provider Call stage item" })).toBeTruthy();
+    expect(screen.getByRole("article", { name: "阶段节点" })).toBeTruthy();
+    expect(screen.getByText("需求分析")).toBeTruthy();
+    expect(screen.getByRole("listitem", { name: "模型服务调用" })).toBeTruthy();
 
     cleanup();
     render(<FeedEntryRenderer entry={mockFeedEntriesByType.tool_confirmation} />);
@@ -284,7 +287,7 @@ describe("StageNode", () => {
       screen.getByRole("article", { name: "Tool confirmation feed entry" }),
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: "允许本次执行" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "批准" })).toBeNull();
   });
 
   it("exposes the direct stage item render helper", () => {
@@ -299,19 +302,19 @@ describe("StageNode", () => {
       ),
     );
 
-    expect(screen.getByRole("listitem", { name: "Result stage item" })).toBeTruthy();
+    expect(screen.getByRole("listitem", { name: "阶段结果" })).toBeTruthy();
     expect(screen.getByText("Rendered without the list wrapper.")).toBeTruthy();
   });
 
   it("renders specialized tool-call and diff-preview content instead of the generic compact block", () => {
     render(<StageNode entry={mockCodeGenerationStageNode} />);
 
-    const toolItem = screen.getByRole("listitem", { name: "Tool Call stage item" });
-    expect(within(toolItem).getByText("Target")).toBeTruthy();
-    expect(within(toolItem).getByText("Succeeded")).toBeTruthy();
+    const toolItem = screen.getByRole("listitem", { name: "工具调用" });
+    expect(within(toolItem).getByText("目标")).toBeTruthy();
+    expect(within(toolItem).getByText("成功")).toBeTruthy();
     expect(within(toolItem).getByText("stdout 4 lines, stderr 0 lines")).toBeTruthy();
 
-    const diffItem = screen.getByRole("listitem", { name: "Diff Preview stage item" });
+    const diffItem = screen.getByRole("listitem", { name: "变更预览" });
     expect(
       within(diffItem).getByText("frontend/src/features/feed/ToolCallItem.tsx"),
     ).toBeTruthy();
@@ -322,7 +325,7 @@ describe("StageNode", () => {
     render(<StageNode entry={mockTestGenerationExecutionStageNode} />);
 
     const summary = screen.getByRole("region", { name: "Test result summary" });
-    expect(within(summary).getByText("Generated Tests")).toBeTruthy();
+    expect(within(summary).getByText("生成测试")).toBeTruthy();
     expect(within(summary).getByText("1")).toBeTruthy();
     expect(within(summary).getByText("7")).toBeTruthy();
     expect(

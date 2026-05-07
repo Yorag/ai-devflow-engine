@@ -3,7 +3,6 @@ import type {
   ControlItemFeedEntry,
   MessageFeedEntry,
   SessionStatus,
-  StageType,
   SystemStatusFeedEntry,
   TopLevelFeedEntry,
 } from "../../api/types";
@@ -11,6 +10,12 @@ import type { ApiRequestOptions } from "../../api/client";
 import { ApprovalBlock } from "../approvals/ApprovalBlock";
 import { DeliveryResultBlock } from "../delivery/DeliveryResultBlock";
 import { RerunAction } from "../runs/RerunAction";
+import {
+  formatApprovalType,
+  formatAuthor,
+  formatStatusLabel,
+  stageLabels,
+} from "./display-labels";
 import { StageNode } from "./StageNode";
 import { ToolConfirmationBlock } from "./ToolConfirmationBlock";
 
@@ -23,15 +28,6 @@ export type FeedEntryRendererProps = {
   request?: ApiRequestOptions;
   onOpenInspectorTarget?: (entry: TopLevelFeedEntry) => void;
   onOpenSettings?: () => void;
-};
-
-const stageLabels: Record<StageType, string> = {
-  requirement_analysis: "Requirement Analysis",
-  solution_design: "Solution Design",
-  code_generation: "Code Generation",
-  test_generation_execution: "Test Generation & Execution",
-  code_review: "Code Review",
-  delivery_integration: "Delivery Integration",
 };
 
 export type FeedEntryRendererOptions = {
@@ -159,16 +155,16 @@ function ControlItemEntry({
       aria-label="Control item feed entry"
     >
       <EntryHeader
-        label={formatLabel(entry.control_type)}
+        label={formatStatusLabel(entry.control_type)}
         timestamp={entry.occurred_at}
       />
       <h2>{entry.title}</h2>
       <p className="feed-entry__body">{entry.summary}</p>
       <div className="feed-entry__meta-grid" aria-label="Control metadata">
-        <Metadata label="Source" value={stageLabels[entry.source_stage_type]} />
+        <Metadata label="来源阶段" value={stageLabels[entry.source_stage_type]} />
         {entry.target_stage_type &&
         entry.target_stage_type !== entry.source_stage_type ? (
-          <Metadata label="Target" value={stageLabels[entry.target_stage_type]} />
+          <Metadata label="目标阶段" value={stageLabels[entry.target_stage_type]} />
         ) : null}
       </div>
       {onOpenInspectorTarget ? (
@@ -197,10 +193,10 @@ function ApprovalResultEntry({
         label={formatApprovalType(entry.approval_type)}
         timestamp={entry.created_at}
       />
-      <h2>{formatLabel(entry.decision)}</h2>
+      <h2>{formatStatusLabel(entry.decision)}</h2>
       {entry.reason ? <p className="feed-entry__body">{entry.reason}</p> : null}
       <div className="feed-entry__meta-grid" aria-label="Approval result metadata">
-        <Metadata label="Next stage" value={stageLabels[entry.next_stage_type]} />
+        <Metadata label="下一阶段" value={stageLabels[entry.next_stage_type]} />
       </div>
     </article>
   );
@@ -225,9 +221,9 @@ function SystemStatusEntry({
       aria-label="System status feed entry"
     >
       <EntryHeader
-        label="System status"
+        label="系统状态"
         timestamp={entry.occurred_at}
-        badge={formatLabel(entry.status)}
+        badge={formatStatusLabel(entry.status)}
       />
       <h2>{entry.title}</h2>
       <p className="feed-entry__body">{entry.reason}</p>
@@ -269,22 +265,6 @@ function Metadata({ label, value }: { label: string; value: string }): JSX.Eleme
   );
 }
 
-function ChipList({
-  label,
-  values,
-}: {
-  label: string;
-  values: string[];
-}): JSX.Element {
-  return (
-    <div className="feed-entry__chip-group" aria-label={label}>
-      {values.map((value) => (
-        <span key={value}>{value}</span>
-      ))}
-    </div>
-  );
-}
-
 function InspectorTrigger({
   label,
   className,
@@ -299,28 +279,11 @@ function InspectorTrigger({
       type="button"
       className={["inspector-trigger", className].filter(Boolean).join(" ")}
       onClick={onClick}
-      aria-label={`Open ${label} details`}
+      aria-label={`查看${label}详情`}
     >
-      Details
+      查看详情
     </button>
   );
-}
-
-function formatAuthor(author: MessageFeedEntry["author"]): string {
-  return author === "user" ? "User" : formatLabel(author);
-}
-
-function formatApprovalType(value: ApprovalResultFeedEntry["approval_type"]): string {
-  return value === "solution_design_approval"
-    ? "Solution design approval"
-    : "Code review approval";
-}
-
-function formatLabel(value: string): string {
-  return value
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
 }
 
 function formatTimestamp(value: string): string {

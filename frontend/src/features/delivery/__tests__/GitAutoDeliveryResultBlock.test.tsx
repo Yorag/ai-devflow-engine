@@ -52,21 +52,21 @@ describe("formatDeliveryHighlights", () => {
   it("returns git-auto-delivery result points from the current feed contract", () => {
     expect(formatDeliveryHighlights(gitDeliveryEntry)).toEqual([
       {
-        label: "Branch",
+        label: "分支",
         value:
           "feature/extremely-long-runtime-delivery-result-branch-name-that-wraps",
       },
       {
-        label: "Commit",
+        label: "提交",
         value: "8f14e45fceea167a5a36dedd4bea2543a17f8b9a",
       },
       {
-        label: "Code review",
+        label: "代码评审",
         value: "github.com/acme/devflow-engine/pull/42",
         href: "https://github.com/acme/devflow-engine/pull/42",
       },
-      { label: "Tests", value: "Frontend 214/214 tests passed." },
-      { label: "Reference", value: "delivery-result-ref-git-42" },
+      { label: "测试", value: "Frontend 214/214 tests passed." },
+      { label: "引用", value: "delivery-result-ref-git-42" },
     ]);
   });
 
@@ -79,12 +79,12 @@ describe("formatDeliveryHighlights", () => {
       }),
     ).toEqual([
       {
-        label: "Branch",
+        label: "分支",
         value:
           "feature/extremely-long-runtime-delivery-result-branch-name-that-wraps",
       },
-      { label: "Tests", value: "Frontend 214/214 tests passed." },
-      { label: "Reference", value: "delivery-result-ref-git-42" },
+      { label: "测试", value: "Frontend 214/214 tests passed." },
+      { label: "引用", value: "delivery-result-ref-git-42" },
     ]);
   });
 });
@@ -97,16 +97,16 @@ describe("buildDeliveryResultViewModel for git_auto_delivery", () => {
     expect(model.title).toBe("Git auto delivery");
     expect(model.summary).toBe("Delivery completed.");
     expect(model.metadata).toEqual([
-      { label: "Mode", value: "git_auto_delivery" },
-      { label: "Branch", value: "feature/run-delivery" },
-      { label: "Commit", value: "abc123def456" },
+      { label: "模式", value: "git_auto_delivery" },
+      { label: "分支", value: "feature/run-delivery" },
+      { label: "提交", value: "abc123def456" },
       {
-        label: "Code review",
+        label: "代码评审",
         value: "github.example/pulls/1",
         href: "https://github.example/pulls/1",
       },
-      { label: "Tests", value: "Resolved upstream test summary." },
-      { label: "Reference", value: "git-delivery-result:run-delivery" },
+      { label: "测试", value: "Resolved upstream test summary." },
+      { label: "引用", value: "git-delivery-result:run-delivery" },
     ]);
   });
 
@@ -119,23 +119,23 @@ describe("buildDeliveryResultViewModel for git_auto_delivery", () => {
       "Git auto delivery pushed the reviewed changes and opened a pull request.",
     );
     expect(model.metadata).toEqual([
-      { label: "Mode", value: "git_auto_delivery" },
+      { label: "模式", value: "git_auto_delivery" },
       {
-        label: "Branch",
+        label: "分支",
         value:
           "feature/extremely-long-runtime-delivery-result-branch-name-that-wraps",
       },
       {
-        label: "Commit",
+        label: "提交",
         value: "8f14e45fceea167a5a36dedd4bea2543a17f8b9a",
       },
       {
-        label: "Code review",
+        label: "代码评审",
         value: "github.com/acme/devflow-engine/pull/42",
         href: "https://github.com/acme/devflow-engine/pull/42",
       },
-      { label: "Tests", value: "Frontend 214/214 tests passed." },
-      { label: "Reference", value: "delivery-result-ref-git-42" },
+      { label: "测试", value: "Frontend 214/214 tests passed." },
+      { label: "引用", value: "delivery-result-ref-git-42" },
     ]);
     expect("highlights" in model).toBe(false);
   });
@@ -160,19 +160,19 @@ describe("DeliveryResultBlock for git_auto_delivery", () => {
         "Git auto delivery pushed the reviewed changes and opened a pull request.",
       ),
     ).toBeTruthy();
-    expect(within(article).getByText("Branch")).toBeTruthy();
+    expect(within(article).getByText("分支")).toBeTruthy();
     expect(
       within(article).getByText(
         "feature/extremely-long-runtime-delivery-result-branch-name-that-wraps",
       ),
     ).toBeTruthy();
-    expect(within(article).getByText("Commit")).toBeTruthy();
+    expect(within(article).getByText("提交")).toBeTruthy();
     expect(
       within(article).getByText("8f14e45fceea167a5a36dedd4bea2543a17f8b9a"),
     ).toBeTruthy();
 
     const reviewLink = within(article).getByRole("link", {
-      name: "Code review github.com/acme/devflow-engine/pull/42",
+      name: "代码评审 github.com/acme/devflow-engine/pull/42",
     });
     expect(reviewLink.getAttribute("href")).toBe(
       "https://github.com/acme/devflow-engine/pull/42",
@@ -180,15 +180,15 @@ describe("DeliveryResultBlock for git_auto_delivery", () => {
     expect(reviewLink.getAttribute("target")).toBe("_blank");
     expect(reviewLink.getAttribute("rel")).toBe("noopener noreferrer");
 
-    expect(within(article).getByText("Tests")).toBeTruthy();
+    expect(within(article).getByText("测试")).toBeTruthy();
     expect(
       within(article).getByText("Frontend 214/214 tests passed."),
     ).toBeTruthy();
-    expect(within(article).getByText("Reference")).toBeTruthy();
+    expect(within(article).getByText("引用")).toBeTruthy();
     expect(within(article).getByText("delivery-result-ref-git-42")).toBeTruthy();
     expect(
       within(article).getByRole("button", {
-        name: "Open git_auto_delivery details",
+        name: "查看git_auto_delivery详情",
       }),
     ).toBeTruthy();
   });
@@ -203,9 +203,9 @@ describe("DeliveryResultBlock for git_auto_delivery", () => {
     const article = screen.getByRole("article", {
       name: "Delivery result feed entry",
     });
-    expect(article.textContent).toContain("Branch");
-    expect(article.textContent).not.toMatch(/\bCommit\b/);
-    expect(article.textContent).not.toMatch(/\bCode review\b/);
+    expect(article.textContent).toContain("分支");
+    expect(article.textContent).not.toMatch(/提交/);
+    expect(article.textContent).not.toMatch(/代码评审/);
     expect(within(article).queryByRole("link")).toBeNull();
   });
 });

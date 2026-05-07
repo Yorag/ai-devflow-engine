@@ -36,10 +36,10 @@ describe("ToolCallItem", () => {
 
     render(<ToolCallItem item={item} />);
 
-    const article = screen.getByRole("listitem", { name: "Tool Call stage item" });
+    const article = screen.getByRole("listitem", { name: "工具调用" });
     expect(within(article).getByText("bash pytest frontend")).toBeTruthy();
     expect(within(article).getByText("frontend/src/features/feed")).toBeTruthy();
-    expect(within(article).getByText("Succeeded")).toBeTruthy();
+    expect(within(article).getByText("成功")).toBeTruthy();
     expect(within(article).getByText("2.4s")).toBeTruthy();
     const details = article.querySelector("details");
     expect(details).toBeTruthy();
@@ -61,9 +61,10 @@ describe("ToolCallItem", () => {
 
     render(<ToolCallItem item={item} />);
 
-    const article = screen.getByRole("listitem", { name: "Tool Call stage item" });
+    const article = screen.getByRole("listitem", { name: "工具调用" });
     expect(within(article).getByText("Read redacted tool trace")).toBeTruthy();
-    expect(within(article).getByText("Not recorded")).toBeTruthy();
+    expect(within(article).getAllByText("未记录")).toHaveLength(2);
+    expect(within(article).getByText("未知")).toBeTruthy();
   });
 });
 
@@ -73,7 +74,7 @@ describe("DiffPreview", () => {
 
     render(<DiffPreview item={item} />);
 
-    const article = screen.getByRole("listitem", { name: "Diff Preview stage item" });
+    const article = screen.getByRole("listitem", { name: "变更预览" });
     expect(
       within(article).getByText("frontend/src/features/feed/StageNodeItems.tsx"),
     ).toBeTruthy();
@@ -101,12 +102,12 @@ describe("DiffPreview", () => {
 
     render(<DiffPreview item={item} />);
 
-    const article = screen.getByRole("listitem", { name: "Diff Preview stage item" });
+    const article = screen.getByRole("listitem", { name: "变更预览" });
     expect(
       within(article).getByText("frontend/src/features/feed/DiffPreview.tsx"),
     ).toBeTruthy();
     expect(within(article).getByText("@@ fallbackHunk")).toBeTruthy();
-    expect(within(article).queryByText("More diff context")).toBeNull();
+    expect(within(article).queryByText("查看更多变更上下文")).toBeNull();
   });
 });
 
@@ -120,12 +121,12 @@ describe("TestResultSummary", () => {
     );
 
     const article = screen.getByRole("region", { name: "Test result summary" });
-    expect(within(article).getByText("Generated Tests")).toBeTruthy();
-    expect(within(article).getByText("Executed Tests")).toBeTruthy();
-    expect(within(article).getByText("Passed Tests")).toBeTruthy();
-    expect(within(article).getByText("Failed Tests")).toBeTruthy();
-    expect(within(article).getByText("Skipped Tests")).toBeTruthy();
-    expect(within(article).getByText("Test Gaps")).toBeTruthy();
+    expect(within(article).getByText("生成测试")).toBeTruthy();
+    expect(within(article).getByText("执行测试")).toBeTruthy();
+    expect(within(article).getByText("通过测试")).toBeTruthy();
+    expect(within(article).getByText("失败测试")).toBeTruthy();
+    expect(within(article).getByText("跳过测试")).toBeTruthy();
+    expect(within(article).getByText("测试缺口")).toBeTruthy();
     expect(
       within(article).getByText(
         "Pytest finished with one failure and one uncovered branch.",
@@ -149,9 +150,9 @@ describe("TestResultSummary", () => {
     render(<TestResultSummary metrics={{ passed_test_count: 3 }} resultItem={null} />);
 
     const article = screen.getByRole("region", { name: "Test result summary" });
-    expect(within(article).getByText("Passed Tests")).toBeTruthy();
+    expect(within(article).getByText("通过测试")).toBeTruthy();
     expect(within(article).getByText("3")).toBeTruthy();
-    expect(within(article).queryByText("Generated Tests")).toBeNull();
+    expect(within(article).queryByText("生成测试")).toBeNull();
     expect(within(article).queryByText("0")).toBeNull();
   });
 
@@ -172,12 +173,12 @@ describe("real backend code and test generation payload contract", () => {
       />,
     );
 
-    const toolItem = screen.getByRole("listitem", { name: "Tool Call stage item" });
+    const toolItem = screen.getByRole("listitem", { name: "工具调用" });
     expect(within(toolItem).getByText("edit_file apply implementation patch")).toBeTruthy();
     expect(within(toolItem).getByText("backend/app/schemas/feed.py")).toBeTruthy();
-    expect(within(toolItem).getByText("Succeeded")).toBeTruthy();
+    expect(within(toolItem).getByText("成功")).toBeTruthy();
 
-    const diffItem = screen.getByRole("listitem", { name: "Diff Preview stage item" });
+    const diffItem = screen.getByRole("listitem", { name: "变更预览" });
     expect(within(diffItem).getByText("backend/app/schemas/feed.py")).toBeTruthy();
     expect(within(diffItem).getByText("@@ StageItemProjection")).toBeTruthy();
   });
@@ -192,10 +193,10 @@ describe("real backend code and test generation payload contract", () => {
     );
 
     const summary = screen.getByRole("region", { name: "Test result summary" });
-    expect(within(summary).getByText("Generated Tests")).toBeTruthy();
-    expect(within(summary).getByText("Executed Tests")).toBeTruthy();
-    expect(within(summary).getByText("Failed Tests")).toBeTruthy();
+    expect(within(summary).getByText("生成测试")).toBeTruthy();
+    expect(within(summary).getByText("执行测试")).toBeTruthy();
+    expect(within(summary).getByText("失败测试")).toBeTruthy();
     expect(within(summary).getByText("Contract payload passed schema validation.")).toBeTruthy();
-    expect(within(summary).queryByText("Skipped Tests")).toBeNull();
+    expect(within(summary).queryByText("跳过测试")).toBeNull();
   });
 });

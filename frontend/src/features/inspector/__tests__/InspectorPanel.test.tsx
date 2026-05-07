@@ -178,15 +178,15 @@ describe("Feed Inspector opening", () => {
     expect(screen.queryByRole("complementary", { name: "Inspector" })).toBeNull();
     expect(screen.queryByText("Inspector closed")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Solution Design details" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看方案设计详情" }));
     expect(screen.getByRole("heading", { name: "Stage details" })).toBeTruthy();
     expect(await screen.findByText("stage-solution-design-running")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Clarification needed details" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看Clarification needed详情" }));
     expect(screen.getByRole("heading", { name: "Control item details" })).toBeTruthy();
     expect(await screen.findByText("control-clarification")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Allow dependency install details" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看Allow dependency install详情" }));
     expect(screen.getByRole("heading", { name: "Tool confirmation details" })).toBeTruthy();
     expect(await screen.findByText("tool-confirmation-1")).toBeTruthy();
     const toolEntry = screen.getByRole("article", {
@@ -202,7 +202,7 @@ describe("Feed Inspector opening", () => {
       within(inspector).queryByRole("button", { name: "拒绝本次执行" }),
     ).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Open demo_delivery details" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看demo_delivery详情" }));
     expect(screen.getByRole("heading", { name: "Delivery result details" })).toBeTruthy();
     const deliveryRecordLabel = await within(inspector).findByText("Delivery Record Id");
     expect(deliveryRecordLabel.parentElement?.textContent).toContain(
@@ -239,7 +239,7 @@ describe("Feed Inspector opening", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Solution Design details" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看方案设计详情" }));
     expect(screen.getByRole("heading", { name: "Stage details" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Close inspector" }));
@@ -259,7 +259,7 @@ describe("Feed Inspector opening", () => {
       </>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Solution Design details" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看方案设计详情" }));
     expect(screen.getByRole("heading", { name: "Stage details" })).toBeTruthy();
 
     screen.getByRole("button", { name: "Outside action" }).focus();
@@ -276,7 +276,7 @@ describe("Feed Inspector opening", () => {
       await screen.findByRole("button", { name: "Open Add workspace shell" }),
     );
     fireEvent.click(
-      await screen.findByRole("button", { name: "Open Solution Design details" }),
+      await screen.findByRole("button", { name: "查看方案设计详情" }),
     );
 
     expect(await screen.findByRole("heading", { name: "Stage details" })).toBeTruthy();
@@ -292,7 +292,7 @@ describe("Feed Inspector opening", () => {
       await screen.findByRole("button", { name: "Open Add workspace shell" }),
     );
     fireEvent.click(
-      await screen.findByRole("button", { name: "Open Solution Design details" }),
+      await screen.findByRole("button", { name: "查看方案设计详情" }),
     );
 
     expect(await screen.findByRole("heading", { name: "Stage details" })).toBeTruthy();
@@ -315,7 +315,7 @@ describe("Feed Inspector opening", () => {
       await screen.findByRole("button", { name: "Open Add workspace shell" }),
     );
     fireEvent.click(
-      await screen.findByRole("button", { name: "Open Solution Design details" }),
+      await screen.findByRole("button", { name: "查看方案设计详情" }),
     );
 
     expect(await screen.findByRole("heading", { name: "Stage details" })).toBeTruthy();
@@ -362,9 +362,9 @@ describe("Inspector trigger preservation", () => {
   it("keeps feed-only rendering working when no Inspector handler is passed", () => {
     render(<FeedEntryRenderer entry={mockFeedEntriesByType.stage_node} />);
 
-    expect(screen.getByRole("article", { name: "Stage feed entry" })).toBeTruthy();
+    expect(screen.getByRole("article", { name: "阶段节点" })).toBeTruthy();
     expect(
-      screen.queryByRole("button", { name: "Open Solution Design details" }),
+      screen.queryByRole("button", { name: "查看方案设计详情" }),
     ).toBeNull();
   });
 
@@ -375,7 +375,7 @@ describe("Inspector trigger preservation", () => {
     );
 
     expect(
-      screen.getByRole("button", { name: "Open Solution Design details" }),
+      screen.getByRole("button", { name: "查看方案设计详情" }),
     ).toBeTruthy();
   });
 
@@ -392,13 +392,13 @@ describe("Inspector trigger preservation", () => {
     );
 
     expect(
-      screen.getByRole("button", { name: "Open Clarification needed details" }),
+      screen.getByRole("button", { name: "查看Clarification needed详情" }),
     ).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: "Open Allow dependency install details" }),
+      screen.getByRole("button", { name: "查看Allow dependency install详情" }),
     ).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: "Open demo_delivery details" }),
+      screen.getByRole("button", { name: "查看demo_delivery详情" }),
     ).toBeTruthy();
   });
 
@@ -410,7 +410,7 @@ describe("Inspector trigger preservation", () => {
     );
 
     const detailsButton = screen.getByRole("button", {
-      name: "Open Allow dependency install details",
+      name: "查看Allow dependency install详情",
     });
     expect(detailsButton.getAttribute("class")).toContain("inspector-trigger");
     expect(detailsButton.getAttribute("class")).toContain("inspector-trigger--quiet");

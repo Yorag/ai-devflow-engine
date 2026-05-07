@@ -104,7 +104,7 @@ describe("ApprovalBlock", () => {
     const { queryClient } = renderApprovalBlock(buildApprovalEntry());
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
 
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "批准" }));
 
     await waitFor(() => {
       expect(approveApproval).toHaveBeenCalledWith(
@@ -138,17 +138,17 @@ describe("ApprovalBlock", () => {
 
     renderApprovalBlock(buildApprovalEntry());
 
-    fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+    fireEvent.click(screen.getByRole("button", { name: "退回" }));
 
-    const form = screen.getByRole("form", { name: "Reject approval with reason" });
+    const form = screen.getByRole("form", { name: "填写退回原因" });
     expect(
-      within(form).getByRole("button", { name: "Submit reject reason" }),
+      within(form).getByRole("button", { name: "提交退回原因" }),
     ).toHaveProperty("disabled", true);
-    fireEvent.change(within(form).getByLabelText("Reject reason"), {
+    fireEvent.change(within(form).getByLabelText("退回原因"), {
       target: { value: "The rollback explanation is still incomplete." },
     });
     fireEvent.click(
-      within(form).getByRole("button", { name: "Submit reject reason" }),
+      within(form).getByRole("button", { name: "提交退回原因" }),
     );
 
     await waitFor(() => {
@@ -171,11 +171,11 @@ describe("ApprovalBlock", () => {
       { onOpenSettings },
     );
 
-    expect(screen.getByRole("button", { name: "Approve" })).toHaveProperty(
+    expect(screen.getByRole("button", { name: "批准" })).toHaveProperty(
       "disabled",
       true,
     );
-    expect(screen.getByRole("button", { name: "Reject" })).toHaveProperty(
+    expect(screen.getByRole("button", { name: "退回" })).toHaveProperty(
       "disabled",
       false,
     );
@@ -191,11 +191,11 @@ describe("ApprovalBlock", () => {
       }),
     );
 
-    expect(screen.getByRole("button", { name: "Approve" })).toHaveProperty(
+    expect(screen.getByRole("button", { name: "批准" })).toHaveProperty(
       "disabled",
       true,
     );
-    expect(screen.getByRole("button", { name: "Reject" })).toHaveProperty(
+    expect(screen.getByRole("button", { name: "退回" })).toHaveProperty(
       "disabled",
       true,
     );
@@ -207,9 +207,9 @@ describe("ApprovalBlock", () => {
       </QueryClientProvider>,
     );
 
-    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
-    expect(screen.getByText("Pending")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "批准" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "退回" })).toBeNull();
+    expect(screen.getByText("待审批")).toBeTruthy();
   });
 
   it("keeps a current pending approval visible but non-submittable after the bound run has terminated", () => {
@@ -217,25 +217,25 @@ describe("ApprovalBlock", () => {
       currentSessionStatus: "terminated",
     });
 
-    expect(screen.getByRole("button", { name: "Approve" })).toHaveProperty(
+    expect(screen.getByRole("button", { name: "批准" })).toHaveProperty(
       "disabled",
       true,
     );
-    expect(screen.getByRole("button", { name: "Reject" })).toHaveProperty(
+    expect(screen.getByRole("button", { name: "退回" })).toHaveProperty(
       "disabled",
       true,
     );
     expect(
-      screen.getByText("Current run has terminated. Retry starts a new run."),
+      screen.getByText("当前运行已结束。重试会创建新的运行。"),
     ).toBeTruthy();
   });
 
   it("closes an already-open reject form when the current bound run becomes terminal", () => {
     const { rerender } = renderApprovalBlock(buildApprovalEntry());
 
-    fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+    fireEvent.click(screen.getByRole("button", { name: "退回" }));
     expect(
-      screen.getByRole("form", { name: "Reject approval with reason" }),
+      screen.getByRole("form", { name: "填写退回原因" }),
     ).toBeTruthy();
 
     rerender(
@@ -251,10 +251,10 @@ describe("ApprovalBlock", () => {
     );
 
     expect(
-      screen.queryByRole("form", { name: "Reject approval with reason" }),
+      screen.queryByRole("form", { name: "填写退回原因" }),
     ).toBeNull();
     expect(
-      screen.queryByRole("button", { name: "Submit reject reason" }),
+      screen.queryByRole("button", { name: "提交退回原因" }),
     ).toBeNull();
   });
 });

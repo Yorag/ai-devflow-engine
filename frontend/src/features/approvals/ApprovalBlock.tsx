@@ -6,6 +6,7 @@ import type { ApiRequestOptions } from "../../api/client";
 import { apiQueryKeys } from "../../api/hooks";
 import type { ApprovalRequestFeedEntry, SessionStatus } from "../../api/types";
 import { ErrorState } from "../errors/ErrorState";
+import { formatApprovalType, formatStatusLabel } from "../feed/display-labels";
 import { DeliveryReadinessNotice } from "./DeliveryReadinessNotice";
 import { RejectReasonForm } from "./RejectReasonForm";
 
@@ -54,7 +55,7 @@ export function ApprovalBlock({
   const disabledReason =
     entry.disabled_reason ??
     (actionState.isCurrentRunTerminal
-      ? "Current run has terminated. Retry starts a new run."
+      ? "当前运行已结束。重试会创建新的运行。"
       : null);
 
   async function invalidateWorkspaceQueries() {
@@ -112,7 +113,7 @@ export function ApprovalBlock({
       <header className="feed-entry__header">
         <span>{formatApprovalType(entry.approval_type)}</span>
         <time dateTime={entry.requested_at}>{formatTimestamp(entry.requested_at)}</time>
-        <strong>{formatLabel(entry.status)}</strong>
+        <strong>{formatStatusLabel(entry.status)}</strong>
       </header>
       <h2>{entry.title}</h2>
       <p className="feed-entry__body">{entry.approval_object_excerpt}</p>
@@ -145,14 +146,14 @@ export function ApprovalBlock({
             disabled={!actionState.canApprove || isBusy}
             onClick={handleApprove}
           >
-            {isBusy ? "Submitting approval" : "Approve"}
+            {isBusy ? "正在提交批准" : "批准"}
           </button>
           <button
             type="button"
             disabled={!actionState.canReject || isBusy}
             onClick={() => setRejectOpen((current) => !current)}
           >
-            Reject
+            退回
           </button>
         </div>
       ) : null}
@@ -229,19 +230,6 @@ function errorHasCode(error: unknown, code: string): boolean {
     return false;
   }
   return (error as { code?: unknown }).code === code;
-}
-
-function formatApprovalType(value: ApprovalRequestFeedEntry["approval_type"]): string {
-  return value === "solution_design_approval"
-    ? "Solution design approval"
-    : "Code review approval";
-}
-
-function formatLabel(value: string): string {
-  return value
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
 }
 
 function formatTimestamp(value: string): string {
