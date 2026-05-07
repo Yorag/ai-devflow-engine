@@ -142,7 +142,14 @@ def test_stage_agent_repair_decision_records_repair_trace_and_uses_repair_prompt
 def test_stage_agent_does_not_bind_tools_during_structured_output_repair() -> None:
     runtime = build_runtime(
         provider_results=[
-            model_result(structured_output={"decision_type": "not-a-decision"}),
+            model_result(
+                structured_output={
+                    "decision_type": "repair_structured_output",
+                    "parse_error": "missing field",
+                    "repair_instruction": "return valid artifact",
+                    "invalid_output_ref": "sha256:bad",
+                }
+            ),
             model_result(structured_output=fail_stage_payload()),
         ],
     )
@@ -202,29 +209,19 @@ def test_stage_agent_retry_with_revised_plan_continues_to_next_iteration() -> No
     assert len(runtime.context_builder.requests) == 2
 
 
-def test_stage_agent_parser_error_enters_structured_repair_iteration() -> None:
+def test_stage_agent_parser_error_fails_without_structured_repair_iteration() -> None:
     runtime = build_runtime(
         provider_results=[
             model_result(structured_output={"decision_type": "not-a-decision"}),
-            model_result(
-                structured_output={
-                    "decision_type": "submit_stage_artifact",
-                    "artifact_type": "CodeGenerationArtifact",
-                    "artifact_payload": code_generation_payload(),
-                    "evidence_refs": ["stage-process://stage-run-1/model-call/2"],
-                }
-            ),
         ]
     )
 
     result = runtime.run_stage(invocation())
 
-    assert result.status is StageStatus.COMPLETED
-    assert "structured_output_repair_trace" in runtime.artifact_store.append_keys()
-    assert runtime.context_builder.requests[1].model_call_type is (
-        ModelCallType.STRUCTURED_OUTPUT_REPAIR
-    )
-    assert runtime.context_builder.requests[1].parse_error == (
+    assert result.status is StageStatus.FAILED
+    assert "structured_output_repair_trace" not in runtime.artifact_store.append_keys()
+    assert len(runtime.context_builder.requests) == 1
+    assert runtime.artifact_store.process["stage_agent_failed"]["reason"] == (
         "invalid_structured_output"
     )
 

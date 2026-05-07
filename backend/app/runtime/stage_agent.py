@@ -29,6 +29,7 @@ from backend.app.runtime.agent_decision import (
     AgentDecisionParserError,
     AgentDecisionType,
     agent_decision_response_schema,
+    stage_response_schema,
 )
 from backend.app.runtime.stage_runner_port import StageNodeInvocation, StageNodeResult
 from backend.app.schemas.prompts import ModelCallType
@@ -383,6 +384,14 @@ class StageAgentRuntime:
             if evidence_result.result is not None or evidence_result.request is not request:
                 return (evidence_result.result, None, evidence_result.request)
             decision = evidence_result.decision
+            semantic_failure = self._semantic_failure_for_stage_artifact(
+                request,
+                decision,
+                iteration_index=iteration_index,
+                **cursor_kwargs,
+            )
+            if semantic_failure is not None:
+                return (semantic_failure, None, request)
             recovery_ref = self.persist_recovery_checkpoint(
                 request,
                 self._recovery_cursor(
@@ -720,55 +729,6 @@ class StageAgentRuntime:
         last_model_call_ref: str | None,
         completed_tool_call_ids: tuple[str, ...],
     ) -> _StageArtifactEvidenceResult:
-        parse_error = (
-            f"{policy.artifact_type}.{policy.payload_field} must cite at least one "
-            f"successful {policy.ref_prefix} side-effect ref from "
-            f"{', '.join(policy.tool_names)}."
-        )
-        repair_count = self._process_record_count("structured_output_repair_trace")
-        if (
-            repair_count
-            < request.runtime_limit_snapshot.agent_limits.max_structured_output_repair_attempts
-        ):
-            self._append_process_record(
-                request,
-                "structured_output_repair_trace",
-                {
-                    "parse_error_summary": _bounded_string(parse_error),
-                    "parse_error_code": "stage_artifact_missing_tool_evidence",
-                    "invalid_output_ref": last_model_call_ref,
-                    "repair_instruction_summary": (
-                        f"Execute the required tool action and submit "
-                        f"{policy.artifact_type} with {policy.payload_field} "
-                        "citing the successful tool side-effect refs."
-                    ),
-                    "decision_trace_ref": last_decision_trace_ref,
-                    "iteration_index": iteration_index,
-                    "artifact_type": policy.artifact_type,
-                    "missing_field": policy.payload_field,
-                },
-            )
-            self.persist_recovery_checkpoint(
-                request,
-                self._recovery_cursor(
-                    request,
-                    iteration_index=iteration_index,
-                    last_decision_trace_ref=last_decision_trace_ref,
-                    last_model_call_ref=last_model_call_ref,
-                    completed_tool_call_ids=completed_tool_call_ids,
-                ),
-            )
-            return _StageArtifactEvidenceResult(
-                decision=decision,
-                request=replace(
-                    request,
-                    model_call_type=ModelCallType.STRUCTURED_OUTPUT_REPAIR,
-                    parse_error=parse_error,
-                    response_schema=self._structured_output_repair_response_schema(
-                        request
-                    ),
-                ),
-            )
         return _StageArtifactEvidenceResult(
             decision=decision,
             request=request,
@@ -930,10 +890,11 @@ class StageAgentRuntime:
         iteration_index: int,
         last_model_call_ref: str,
     ) -> tuple[None, None, StageExecutionRequest] | None:
-        if exc.error.error_code in {
-            AgentDecisionErrorCode.PROVIDER_CALL_FAILED,
-            AgentDecisionErrorCode.CLARIFICATION_NOT_ALLOWED,
-        }:
+        intended_decision_type = _repairable_decision_type_from_parser_error(
+            request,
+            exc,
+        )
+        if intended_decision_type is None:
             return None
         repair_count = self._process_record_count("structured_output_repair_trace")
         if (
@@ -949,10 +910,12 @@ class StageAgentRuntime:
                 "parse_error_code": exc.error.error_code.value,
                 "invalid_output_ref": exc.error.decision_trace.model_call_ref,
                 "repair_instruction_summary": (
-                    "Return a valid AgentDecision matching the current response schema."
+                    "Repair only the structured format while preserving "
+                    f"{intended_decision_type.value}."
                 ),
                 "decision_trace_ref": exc.error.decision_trace.trace_ref,
                 "iteration_index": iteration_index,
+                "intended_decision_type": intended_decision_type.value,
             },
         )
         self.persist_recovery_checkpoint(
@@ -971,19 +934,27 @@ class StageAgentRuntime:
                 request,
                 model_call_type=ModelCallType.STRUCTURED_OUTPUT_REPAIR,
                 parse_error=exc.error.error_code.value,
-                response_schema=self._structured_output_repair_response_schema(request),
+                response_schema=self._structured_output_repair_response_schema(
+                    request,
+                    intended_decision_type=intended_decision_type,
+                ),
             ),
         )
 
     def _structured_output_repair_response_schema(
         self,
         request: StageExecutionRequest,
+        *,
+        intended_decision_type: AgentDecisionType | None = None,
     ) -> dict[str, object]:
-        allowed = [
-            decision_type
-            for decision_type in _base_response_schema_decision_types(request)
-            if decision_type is not AgentDecisionType.REPAIR_STRUCTURED_OUTPUT
-        ]
+        if intended_decision_type is None:
+            allowed = [
+                decision_type
+                for decision_type in _base_response_schema_decision_types(request)
+                if decision_type is not AgentDecisionType.REPAIR_STRUCTURED_OUTPUT
+            ]
+        else:
+            allowed = [intended_decision_type]
         return agent_decision_response_schema(
             artifact_type=_stage_artifact_type(request),
             allowed_decision_types=tuple(allowed),
@@ -993,7 +964,7 @@ class StageAgentRuntime:
         self,
         request: StageExecutionRequest,
     ) -> dict[str, object]:
-        return agent_decision_response_schema(
+        return stage_response_schema(
             artifact_type=_stage_artifact_type(request),
             allowed_decision_types=_base_response_schema_decision_types(request),
         )
@@ -1256,6 +1227,12 @@ class StageAgentRuntime:
                 route_key="waiting_tool_confirmation",
             )
         if decision.fail_stage is not None:
+            semantic_failure = self._semantic_failure_for_control_decision(
+                request,
+                decision,
+            )
+            if semantic_failure is not None:
+                return semantic_failure
             return self._failed_result(
                 request,
                 reason=decision.fail_stage.failure_reason,
@@ -1266,6 +1243,44 @@ class StageAgentRuntime:
                 },
             )
         return self._failed_result(request, reason="unsupported_agent_decision")
+
+    def _semantic_failure_for_stage_artifact(
+        self,
+        request: StageExecutionRequest,
+        decision: AgentDecision,
+        *,
+        iteration_index: int,
+        last_decision_trace_ref: str | None,
+        last_model_call_ref: str | None,
+    ) -> StageNodeResult | None:
+        stage_artifact = decision.stage_artifact
+        if stage_artifact is None:
+            return None
+        violation = _stage_artifact_semantic_violation(request, stage_artifact)
+        if violation is None:
+            return None
+        return self._failed_result(
+            request,
+            reason="stage_semantic_gate_failed",
+            iteration_index=iteration_index,
+            last_decision_trace_ref=last_decision_trace_ref,
+            last_model_call_ref=last_model_call_ref,
+            safe_details=violation,
+        )
+
+    def _semantic_failure_for_control_decision(
+        self,
+        request: StageExecutionRequest,
+        decision: AgentDecision,
+    ) -> StageNodeResult | None:
+        violation = _control_decision_semantic_violation(request, decision)
+        if violation is None:
+            return None
+        return self._failed_result(
+            request,
+            reason="stage_semantic_gate_failed",
+            safe_details=violation,
+        )
 
     def _failed_result(
         self,
@@ -1601,7 +1616,6 @@ def _base_response_schema_decision_types(
     decision_types: tuple[AgentDecisionType, ...] = (
         AgentDecisionType.REQUEST_TOOL_CONFIRMATION,
         AgentDecisionType.SUBMIT_STAGE_ARTIFACT,
-        AgentDecisionType.REPAIR_STRUCTURED_OUTPUT,
         AgentDecisionType.RETRY_WITH_REVISED_PLAN,
         AgentDecisionType.FAIL_STAGE,
     )
@@ -1613,7 +1627,6 @@ def _base_response_schema_decision_types(
             AgentDecisionType.REQUEST_TOOL_CONFIRMATION,
             AgentDecisionType.SUBMIT_STAGE_ARTIFACT,
             AgentDecisionType.REQUEST_CLARIFICATION,
-            AgentDecisionType.REPAIR_STRUCTURED_OUTPUT,
             AgentDecisionType.RETRY_WITH_REVISED_PLAN,
             AgentDecisionType.FAIL_STAGE,
         )
@@ -1642,6 +1655,283 @@ def _successful_side_effect_refs(
 
 def _dedupe_strings(values: Sequence[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(values))
+
+
+def _stage_artifact_semantic_violation(
+    request: StageExecutionRequest,
+    stage_artifact: object,
+) -> dict[str, object] | None:
+    artifact_type = getattr(stage_artifact, "artifact_type", None)
+    payload = getattr(stage_artifact, "artifact_payload", None)
+    if not isinstance(artifact_type, str) or not isinstance(payload, Mapping):
+        return None
+    if (
+        request.invocation.stage_type is StageType.SOLUTION_DESIGN
+        and artifact_type == "SolutionDesignArtifact"
+    ):
+        return _solution_design_semantic_violation(request, payload)
+    if (
+        request.invocation.stage_type is StageType.CODE_GENERATION
+        and artifact_type == "CodeGenerationArtifact"
+    ):
+        return _code_generation_artifact_semantic_violation(request, payload)
+    return None
+
+
+def _repairable_decision_type_from_parser_error(
+    request: StageExecutionRequest,
+    exc: AgentDecisionParserError,
+) -> AgentDecisionType | None:
+    del request
+    if exc.error.error_code is not AgentDecisionErrorCode.INVALID_STRUCTURED_OUTPUT:
+        return None
+    decision_type = exc.error.decision_trace.decision_type
+    if decision_type in {
+        AgentDecisionType.SUBMIT_STAGE_ARTIFACT,
+        AgentDecisionType.REQUEST_TOOL_CONFIRMATION,
+        AgentDecisionType.REQUEST_CLARIFICATION,
+        AgentDecisionType.RETRY_WITH_REVISED_PLAN,
+        AgentDecisionType.FAIL_STAGE,
+    }:
+        return decision_type
+    return None
+
+
+def _solution_design_semantic_violation(
+    request: StageExecutionRequest,
+    payload: Mapping[str, object],
+) -> dict[str, object] | None:
+    if not _non_empty_string_refs(payload.get("requirement_refs")):
+        return {
+            "semantic_rule": "solution_design_requirement_refs_required",
+            "artifact_type": "SolutionDesignArtifact",
+        }
+    if not _implementation_plan_has_actionable_steps(payload.get("implementation_plan")):
+        return {
+            "semantic_rule": "solution_design_implementation_plan_required",
+            "artifact_type": "SolutionDesignArtifact",
+        }
+    if not _objective_targets_homepage_copy(request.task_objective):
+        return None
+
+    plan_text = _flatten_text(
+        (
+            payload.get("technical_plan"),
+            payload.get("implementation_plan"),
+            payload.get("impacted_files"),
+            payload.get("test_strategy"),
+            payload.get("validation_report"),
+        )
+    )
+    if _text_mentions_homepage_target(plan_text):
+        return None
+    return {
+        "semantic_rule": "solution_design_unrelated_to_homepage_requirement",
+        "artifact_type": "SolutionDesignArtifact",
+        "required_target": "homepage",
+    }
+
+
+def _code_generation_artifact_semantic_violation(
+    request: StageExecutionRequest,
+    payload: Mapping[str, object],
+) -> dict[str, object] | None:
+    expected_files = _solution_design_target_files(request.stage_artifacts)
+    changed_files = _string_tuple(payload.get("changed_files"))
+    if not expected_files or not changed_files:
+        return None
+    expected = {_normalize_path_for_semantics(path) for path in expected_files}
+    unexpected = [
+        path
+        for path in changed_files
+        if _normalize_path_for_semantics(path) not in expected
+    ]
+    if not unexpected:
+        return None
+    return {
+        "semantic_rule": "code_generation_changed_files_outside_solution_boundary",
+        "artifact_type": "CodeGenerationArtifact",
+        "unexpected_files": unexpected,
+        "expected_files": sorted(expected_files),
+    }
+
+
+def _control_decision_semantic_violation(
+    request: StageExecutionRequest,
+    decision: AgentDecision,
+) -> dict[str, object] | None:
+    if (
+        request.invocation.stage_type is not StageType.CODE_GENERATION
+        or decision.fail_stage is None
+    ):
+        return None
+    if not _text_claims_missing_file(decision.fail_stage.failure_reason):
+        return None
+    target_files = _solution_design_target_files(request.stage_artifacts)
+    if not target_files and not _objective_targets_homepage_copy(request.task_objective):
+        return None
+    if _has_missing_file_tool_evidence(decision.fail_stage.evidence_refs):
+        return None
+    return {
+        "semantic_rule": "code_generation_missing_file_failure_without_evidence",
+        "artifact_type": "CodeGenerationArtifact",
+        "known_target_files": sorted(target_files),
+    }
+
+
+def _solution_design_target_files(stage_artifacts: Sequence[object]) -> set[str]:
+    files: set[str] = set()
+    for payload in _solution_design_payloads(stage_artifacts):
+        files.update(_string_tuple(payload.get("impacted_files")))
+        implementation_plan = payload.get("implementation_plan")
+        if isinstance(implementation_plan, Mapping):
+            tasks = implementation_plan.get("tasks")
+            if isinstance(tasks, Sequence) and not isinstance(tasks, str):
+                for task in tasks:
+                    if isinstance(task, Mapping):
+                        files.update(_string_tuple(task.get("target_files")))
+        elif isinstance(implementation_plan, Sequence) and not isinstance(
+            implementation_plan,
+            str,
+        ):
+            for item in implementation_plan:
+                files.update(_path_like_strings(item))
+        else:
+            files.update(_path_like_strings(implementation_plan))
+    return {
+        path
+        for path in files
+        if "/" in path or "\\" in path or path.lower().endswith((".py", ".tsx", ".ts"))
+    }
+
+
+def _solution_design_payloads(
+    stage_artifacts: Sequence[object],
+) -> tuple[Mapping[str, object], ...]:
+    payloads: list[Mapping[str, object]] = []
+    for artifact in stage_artifacts:
+        direct_payload = getattr(artifact, "payload", None)
+        if isinstance(direct_payload, Mapping) and (
+            getattr(artifact, "artifact_type", None) == "SolutionDesignArtifact"
+            or "implementation_plan" in direct_payload
+        ):
+            payloads.append(direct_payload)
+        process = getattr(artifact, "process", None)
+        if not isinstance(process, Mapping):
+            continue
+        output_snapshot = process.get("output_snapshot")
+        if isinstance(output_snapshot, Mapping):
+            artifact_type = output_snapshot.get("artifact_type")
+            artifact_payload = output_snapshot.get("artifact_payload")
+            if (
+                artifact_type == "SolutionDesignArtifact"
+                and isinstance(artifact_payload, Mapping)
+            ):
+                payloads.append(artifact_payload)
+        legacy_payload = process.get("solution_design_artifact")
+        if isinstance(legacy_payload, Mapping):
+            payloads.append(legacy_payload)
+    return tuple(payloads)
+
+
+def _implementation_plan_has_actionable_steps(value: object) -> bool:
+    if isinstance(value, Mapping):
+        tasks = value.get("tasks")
+        return isinstance(tasks, Sequence) and not isinstance(tasks, str) and bool(tasks)
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, Sequence):
+        return any(isinstance(item, object) and _flatten_text(item) for item in value)
+    return False
+
+
+def _objective_targets_homepage_copy(task_objective: str) -> bool:
+    text = task_objective.lower()
+    return any(
+        token in text
+        for token in (
+            "homepage",
+            "home page",
+            "homepage.tsx",
+            "官网",
+            "主页面",
+            "make delivery work",
+        )
+    )
+
+
+def _text_mentions_homepage_target(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        token in lowered
+        for token in (
+            "homepage",
+            "home page",
+            "homepage.tsx",
+            "frontend/src/pages",
+            "官网",
+            "主页面",
+            "make delivery work",
+        )
+    )
+
+
+def _text_claims_missing_file(value: str) -> bool:
+    lowered = value.lower()
+    return any(token in lowered for token in ("missing", "not found", "unavailable")) and any(
+        token in lowered for token in ("file", "path", "target", "文件")
+    )
+
+
+def _has_missing_file_tool_evidence(evidence_refs: Sequence[str]) -> bool:
+    return any(
+        "read_file" in ref
+        or "tool-result://" in ref
+        or "tool_trace" in ref
+        or "file_read" in ref
+        for ref in evidence_refs
+    )
+
+
+def _non_empty_string_refs(value: object) -> tuple[str, ...]:
+    return tuple(item for item in _string_tuple(value) if item.strip())
+
+
+def _string_tuple(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return (stripped,) if stripped else ()
+    if isinstance(value, Sequence):
+        return tuple(item.strip() for item in value if isinstance(item, str) and item.strip())
+    return ()
+
+
+def _path_like_strings(value: object) -> tuple[str, ...]:
+    text = _flatten_text(value)
+    if not text:
+        return ()
+    candidates = []
+    for raw in text.replace(",", " ").split():
+        token = raw.strip("`'\".()[]{}")
+        if "/" in token or "\\" in token or token.lower().endswith((".py", ".tsx", ".ts")):
+            candidates.append(token)
+    return tuple(candidates)
+
+
+def _normalize_path_for_semantics(value: str) -> str:
+    return value.replace("\\", "/").strip().lower()
+
+
+def _flatten_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, Mapping):
+        return " ".join(_flatten_text(item) for item in value.values())
+    if isinstance(value, Sequence) and not isinstance(value, bytes | bytearray):
+        return " ".join(_flatten_text(item) for item in value)
+    return str(value)
 
 
 def _safe_trace_summary(model_result: ModelCallResult) -> dict[str, object]:

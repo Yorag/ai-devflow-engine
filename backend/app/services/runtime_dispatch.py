@@ -73,7 +73,7 @@ from backend.app.api.error_codes import ErrorCode
 from backend.app.runtime.agent_decision import (
     AgentDecisionType,
     AgentDecisionParser,
-    agent_decision_response_schema,
+    stage_response_schema,
 )
 from backend.app.runtime.base import (
     RuntimeEngine,
@@ -2573,7 +2573,6 @@ class _RuntimeDispatchStageRunner:
         decision_types: tuple[AgentDecisionType, ...] = (
             AgentDecisionType.REQUEST_TOOL_CONFIRMATION,
             AgentDecisionType.SUBMIT_STAGE_ARTIFACT,
-            AgentDecisionType.REPAIR_STRUCTURED_OUTPUT,
             AgentDecisionType.RETRY_WITH_REVISED_PLAN,
             AgentDecisionType.FAIL_STAGE,
         )
@@ -2585,11 +2584,10 @@ class _RuntimeDispatchStageRunner:
                 AgentDecisionType.REQUEST_TOOL_CONFIRMATION,
                 AgentDecisionType.SUBMIT_STAGE_ARTIFACT,
                 AgentDecisionType.REQUEST_CLARIFICATION,
-                AgentDecisionType.REPAIR_STRUCTURED_OUTPUT,
                 AgentDecisionType.RETRY_WITH_REVISED_PLAN,
                 AgentDecisionType.FAIL_STAGE,
             )
-        return agent_decision_response_schema(
+        return stage_response_schema(
             artifact_type=artifact_type,
             allowed_decision_types=decision_types,
         )

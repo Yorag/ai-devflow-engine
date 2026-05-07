@@ -1320,12 +1320,11 @@ def test_default_engine_factory_starts_next_stage_before_projecting_run_next(
     )
     requirement_schema = captured_stage_configs[0]["response_schema"]
     assert requirement_schema["type"] == "object"
-    assert "decision_type" in requirement_schema["required"]
+    assert "decision_type" not in requirement_schema["required"]
     assert requirement_schema["properties"]["decision_type"]["enum"] == [
         "request_tool_confirmation",
         "submit_stage_artifact",
         "request_clarification",
-        "repair_structured_output",
         "retry_with_revised_plan",
         "fail_stage",
     ]
@@ -1333,12 +1332,21 @@ def test_default_engine_factory_starts_next_stage_before_projecting_run_next(
     assert "request_clarification" not in (
         solution_schema["properties"]["decision_type"]["enum"]
     )
-    solution_submit_schema = next(
+    solution_wrapped_submit_schema = next(
         candidate
         for candidate in solution_schema["oneOf"]
-        if candidate["properties"]["decision_type"]["const"] == "submit_stage_artifact"
+        if candidate["properties"].get("decision_type", {}).get("const")
+        == "submit_stage_artifact"
     )
-    assert solution_submit_schema["properties"]["artifact_type"]["const"] == (
+    solution_bare_submit_schema = next(
+        candidate
+        for candidate in solution_schema["oneOf"]
+        if "technical_plan" in candidate["properties"]
+    )
+    assert solution_wrapped_submit_schema["properties"]["artifact_type"]["const"] == (
+        "SolutionDesignArtifact"
+    )
+    assert solution_bare_submit_schema["properties"]["artifact_type"]["const"] == (
         "SolutionDesignArtifact"
     )
 

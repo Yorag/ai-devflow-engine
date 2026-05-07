@@ -1146,10 +1146,102 @@ def test_stage_agent_accepts_text_structured_candidate_when_native_structured_ou
     )
 
 
+def test_stage_agent_normalizes_bare_stage_artifact_without_repair_call() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(
+                structured_output={
+                    "changeset_ref": "changeset://run-1/code-generation/1",
+                    "changed_files": ["frontend/src/pages/HomePage.tsx"],
+                    "diff_refs": ["diff://run-1/code-generation/1"],
+                    "file_edit_trace_refs": [
+                        (
+                            "file_edit_trace:run-1:call-edit-1:"
+                            "frontend/src/pages/HomePage.tsx"
+                        )
+                    ],
+                    "implementation_notes": "Updated homepage heading text.",
+                    "requirement_refs": ["message://run-1/user/1"],
+                    "solution_refs": ["stage-artifact://solution-design/output"],
+                }
+            )
+        ],
+        allowed_tools=[],
+        available_tools=(),
+    )
+
+    result = runtime.run_stage(invocation())
+
+    assert result.status is StageStatus.COMPLETED
+    assert len(runtime.provider_adapter.calls) == 1
+    assert "structured_output_repair_trace" not in runtime.artifact_store.process
+
+
+def test_parser_error_without_repairable_intent_fails_instead_of_asking_repair_to_decide() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(structured_output={"decision_type": "not-a-decision"})
+        ],
+    )
+
+    result = runtime.run_stage(invocation())
+
+    assert result.status is StageStatus.FAILED
+    assert len(runtime.provider_adapter.calls) == 1
+    assert "structured_output_repair_trace" not in runtime.artifact_store.process
+    assert runtime.artifact_store.process["stage_agent_failed"]["reason"] == (
+        "invalid_structured_output"
+    )
+
+
+def test_parser_error_with_submit_intent_repairs_only_same_decision_type() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "CodeGenerationArtifact",
+                    "artifact_payload": code_generation_payload(),
+                    "evidence_refs": "stage-process://stage-run-1/model-call/1",
+                }
+            ),
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "CodeGenerationArtifact",
+                    "artifact_payload": code_generation_payload(),
+                    "evidence_refs": ["stage-process://stage-run-1/model-call/repair"],
+                }
+            ),
+        ],
+        allowed_tools=[],
+        available_tools=(),
+    )
+
+    result = runtime.run_stage(invocation())
+
+    assert result.status is StageStatus.COMPLETED
+    repair_request = runtime.context_builder.requests[1]
+    assert repair_request.model_call_type is ModelCallType.STRUCTURED_OUTPUT_REPAIR
+    assert repair_request.response_schema["properties"]["decision_type"]["enum"] == [
+        "submit_stage_artifact"
+    ]
+    assert "fail_stage" not in repair_request.response_schema["properties"][
+        "decision_type"
+    ]["enum"]
+
+
 def test_structured_output_repair_schema_excludes_recursive_repair_decision() -> None:
     runtime = build_runtime(
         provider_results=[
-            model_result(structured_output={"decision_type": "not-a-decision"}),
+            model_result(
+                structured_output={
+                    "decision_type": "repair_structured_output",
+                    "parse_error": "missing field",
+                    "repair_instruction": "return valid artifact",
+                    "invalid_output_ref": "sha256:bad",
+                }
+            ),
             model_result(
                 structured_output={
                     "decision_type": "submit_stage_artifact",
@@ -1174,7 +1266,14 @@ def test_structured_output_repair_schema_excludes_recursive_repair_decision() ->
 def test_retry_from_structured_output_repair_returns_to_stage_execution_with_tools() -> None:
     runtime = build_runtime(
         provider_results=[
-            model_result(structured_output={"decision_type": "not-a-decision"}),
+            model_result(
+                structured_output={
+                    "decision_type": "repair_structured_output",
+                    "parse_error": "missing evidence",
+                    "repair_instruction": "retry with a narrower read",
+                    "invalid_output_ref": "sha256:bad",
+                }
+            ),
             model_result(
                 structured_output={
                     "decision_type": "retry_with_revised_plan",
@@ -1207,6 +1306,96 @@ def test_retry_from_structured_output_repair_returns_to_stage_execution_with_too
     )
     assert runtime.provider_adapter.calls[1]["tool_descriptions"] == ()
     assert runtime.provider_adapter.calls[2]["tool_descriptions"] != ()
+
+
+def test_solution_design_rejects_unrelated_generic_plan_before_code_generation() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "SolutionDesignArtifact",
+                    "artifact_payload": {
+                        "technical_plan": (
+                            "Extend the data processing pipeline with a validation "
+                            "stage."
+                        ),
+                        "implementation_plan": ["Create src/pipeline/validator.py"],
+                        "impacted_files": [
+                            "src/pipeline/orchestrator.py",
+                            "src/pipeline/validator.py",
+                        ],
+                        "api_design": "No API changes.",
+                        "data_flow_design": "Add validator data flow.",
+                        "risks": ["Pipeline validation may reject records."],
+                        "test_strategy": ["Add tests/test_validator.py"],
+                        "validation_report": "Generic data validation plan.",
+                        "requirement_refs": ["REQ-PIPE-101"],
+                        "evidence_refs": [
+                            "stage-process://stage-run-1/model-call/1"
+                        ],
+                    },
+                    "evidence_refs": ["stage-process://stage-run-1/model-call/1"],
+                }
+            )
+        ],
+        allowed_tools=[],
+        available_tools=(),
+        stage_type=StageType.SOLUTION_DESIGN,
+        structured_artifact_required="SolutionDesignArtifact",
+        task_objective=(
+            "项目的官网主页面帮我把Make delivery work traceable."
+            "改成Make delivery work"
+        ),
+    )
+
+    result = runtime.run_stage(invocation(stage_type=StageType.SOLUTION_DESIGN))
+
+    assert result.status is StageStatus.FAILED
+    assert runtime.artifact_store.complete_calls == []
+    assert runtime.artifact_store.process["stage_agent_failed"]["reason"] == (
+        "stage_semantic_gate_failed"
+    )
+
+
+def test_code_generation_rejects_missing_file_failure_when_design_identifies_target() -> None:
+    design_artifact = SimpleNamespace(
+        artifact_type="SolutionDesignArtifact",
+        payload={
+            "impacted_files": ["frontend/src/pages/HomePage.tsx"],
+            "implementation_plan": [
+                "Edit frontend/src/pages/HomePage.tsx heading text."
+            ],
+        },
+        artifact_id="artifact-solution-design",
+    )
+    runtime = build_runtime(
+        provider_results=[
+            model_result(
+                structured_output={
+                    "decision_type": "fail_stage",
+                    "failure_reason": "Missing target website file.",
+                    "evidence_refs": ["stage-process://stage-run-1/model-call/1"],
+                    "incomplete_items": ["implementation"],
+                    "user_visible_summary": (
+                        "Cannot continue because the website file is missing."
+                    ),
+                }
+            )
+        ],
+        stage_artifacts=[design_artifact],
+        task_objective=(
+            "项目的官网主页面帮我把Make delivery work traceable."
+            "改成Make delivery work"
+        ),
+    )
+
+    result = runtime.run_stage(invocation())
+
+    assert result.status is StageStatus.FAILED
+    assert runtime.artifact_store.process["stage_agent_failed"]["reason"] == (
+        "stage_semantic_gate_failed"
+    )
 
 
 def test_stage_agent_creates_stage_input_before_process_records() -> None:
@@ -1337,14 +1526,6 @@ def test_code_generation_requires_successful_edit_evidence() -> None:
                     "evidence_refs": ["stage-process://stage-run-1/model-call/1"],
                 }
             ),
-            model_result(
-                structured_output={
-                    "decision_type": "submit_stage_artifact",
-                    "artifact_type": "CodeGenerationArtifact",
-                    "artifact_payload": code_generation_payload(),
-                    "evidence_refs": ["stage-process://stage-run-1/model-call/2"],
-                }
-            ),
         ],
         allowed_tools=["edit_file"],
         available_tools=(edit_file_description(),),
@@ -1354,7 +1535,7 @@ def test_code_generation_requires_successful_edit_evidence() -> None:
 
     assert result.status is StageStatus.FAILED
     assert runtime.artifact_store.complete_calls == []
-    assert "structured_output_repair_trace" in runtime.artifact_store.append_keys()
+    assert "structured_output_repair_trace" not in runtime.artifact_store.append_keys()
     failure = runtime.artifact_store.process["stage_agent_failed"]
     assert failure["reason"] == "stage_artifact_missing_tool_evidence"
     assert failure["safe_details"]["missing_field"] == "file_edit_trace_refs"
@@ -1403,14 +1584,6 @@ def test_execution_requires_successful_command_evidence() -> None:
                     "evidence_refs": ["stage-process://stage-run-1/model-call/1"],
                 }
             ),
-            model_result(
-                structured_output={
-                    "decision_type": "submit_stage_artifact",
-                    "artifact_type": "TestGenerationExecutionArtifact",
-                    "artifact_payload": execution_artifact_payload(),
-                    "evidence_refs": ["stage-process://stage-run-1/model-call/2"],
-                }
-            ),
         ],
         allowed_tools=["bash"],
         available_tools=(bash_description(),),
@@ -1422,7 +1595,7 @@ def test_execution_requires_successful_command_evidence() -> None:
 
     assert result.status is StageStatus.FAILED
     assert runtime.artifact_store.complete_calls == []
-    assert "structured_output_repair_trace" in runtime.artifact_store.append_keys()
+    assert "structured_output_repair_trace" not in runtime.artifact_store.append_keys()
     failure = runtime.artifact_store.process["stage_agent_failed"]
     assert failure["reason"] == "stage_artifact_missing_tool_evidence"
     assert failure["safe_details"]["missing_field"] == "command_trace_refs"
