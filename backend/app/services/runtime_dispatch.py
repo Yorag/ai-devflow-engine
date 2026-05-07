@@ -56,6 +56,7 @@ from backend.app.domain.runtime_refs import (
 from backend.app.domain.template_snapshot import TemplateSnapshot, TemplateSnapshotBuilder
 from backend.app.domain.trace_context import TraceContext
 from backend.app.observability.audit import AuditService
+from backend.app.observability.langsmith_tracing import LangSmithRuntimeTracer
 from backend.app.observability.log_index import LogIndexRepository
 from backend.app.observability.log_writer import (
     JsonlLogWriter,
@@ -2560,6 +2561,7 @@ class _RuntimeDispatchStageRunner:
             risk_policy=self._risk_policy,
             confirmation_port=self._confirmation_port,
             progress_callback=self._publish_stage_progress,
+            runtime_tracer=LangSmithRuntimeTracer(),
             now=self._now,
         )
 

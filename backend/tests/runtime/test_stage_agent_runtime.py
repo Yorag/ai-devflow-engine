@@ -208,6 +208,45 @@ class FakeArtifactStore:
         return [str(call["process_key"]) for call in self.append_calls]
 
 
+class FakeRuntimeTracer:
+    def __init__(self) -> None:
+        self.events: list[dict[str, Any]] = []
+
+    def trace_stage(self, **kwargs: Any) -> Any:
+        return self._span("stage", kwargs)
+
+    def trace_iteration(self, **kwargs: Any) -> Any:
+        return self._span("iteration", kwargs)
+
+    def trace_tool_call(self, **kwargs: Any) -> Any:
+        return self._span("tool_call", kwargs)
+
+    def record_model_decision(self, **kwargs: Any) -> None:
+        self.events.append({"event": "model_decision", **kwargs})
+
+    def record_tool_result(self, **kwargs: Any) -> None:
+        self.events.append({"event": "tool_result", **kwargs})
+
+    def record_stage_result(self, **kwargs: Any) -> None:
+        self.events.append({"event": "stage_result", **kwargs})
+
+    def record_stage_failure(self, **kwargs: Any) -> None:
+        self.events.append({"event": "stage_failure", **kwargs})
+
+    def _span(self, event: str, payload: dict[str, Any]) -> Any:
+        tracer = self
+
+        class _Span:
+            def __enter__(self) -> None:
+                tracer.events.append({"event": f"{event}_start", **payload})
+
+            def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+                del exc_type, exc, tb
+                tracer.events.append({"event": f"{event}_end", **payload})
+
+        return _Span()
+
+
 def build_runtime(
     *,
     provider_results: Sequence[ModelCallResult],
@@ -224,6 +263,7 @@ def build_runtime(
     clarifications: Sequence[Any] = (),
     approval_decisions: Sequence[Any] = (),
     progress_callback: Any | None = None,
+    runtime_tracer: Any | None = None,
     task_objective: str = "Implement the assigned runtime slice.",
 ) -> Any:
     from backend.app.runtime.stage_agent import StageAgentRuntime
@@ -266,6 +306,7 @@ def build_runtime(
         clarifications=clarifications,
         approval_decisions=approval_decisions,
         progress_callback=progress_callback,
+        runtime_tracer=runtime_tracer,
         now=lambda: NOW,
     )
     runtime.context_builder = context_builder
@@ -865,6 +906,50 @@ def test_stage_agent_executes_tool_decision_through_tool_registry_and_continues(
         "read_file",
     )
     assert "tool_trace" in runtime.artifact_store.append_keys()
+
+
+def test_stage_agent_traces_tool_loop_with_readable_runtime_events() -> None:
+    tracer = FakeRuntimeTracer()
+    runtime = build_runtime(
+        provider_results=[
+            model_result(tool_call_requests=(read_file_call("call-1"),)),
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "CodeGenerationArtifact",
+                    "artifact_payload": code_generation_payload(),
+                    "evidence_refs": ["tool-result://call-1"],
+                }
+            ),
+        ],
+        tool_results=[succeeded_tool_result("call-1")],
+        runtime_tracer=tracer,
+    )
+
+    result = runtime.run_stage(invocation())
+
+    assert result.status is StageStatus.COMPLETED
+    assert [event["event"] for event in tracer.events] == [
+        "stage_start",
+        "iteration_start",
+        "model_decision",
+        "tool_call_start",
+        "tool_result",
+        "tool_call_end",
+        "iteration_end",
+        "iteration_start",
+        "model_decision",
+        "stage_result",
+        "iteration_end",
+        "stage_end",
+    ]
+    assert tracer.events[0]["stage_type"] == "code_generation"
+    assert tracer.events[1]["iteration_index"] == 1
+    assert tracer.events[2]["decision_type"] == "request_tool_call"
+    assert tracer.events[3]["tool_name"] == "read_file"
+    assert tracer.events[4]["status"] == "succeeded"
+    assert tracer.events[8]["decision_type"] == "submit_stage_artifact"
+    assert tracer.events[9]["artifact_type"] == "CodeGenerationArtifact"
 
 
 def test_stage_agent_passes_template_tool_confirmation_skip_policy_to_tool_context() -> None:

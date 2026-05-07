@@ -14,6 +14,10 @@ from backend.app.domain.enums import StageStatus, StageType, ToolRiskLevel
 from backend.app.domain.graph_definition import GraphDefinition
 from backend.app.domain.provider_snapshot import ProviderSnapshot
 from backend.app.domain.template_snapshot import TemplateSnapshot
+from backend.app.observability.langsmith_tracing import (
+    NoopRuntimeTracer,
+    RuntimeTracer,
+)
 from backend.app.providers.langchain_adapter import (
     LangChainProviderAdapter,
     ModelCallResult,
@@ -154,6 +158,7 @@ class StageAgentRuntime:
         risk_policy: object | None = None,
         confirmation_port: object | None = None,
         progress_callback: StageProgressCallback | None = None,
+        runtime_tracer: RuntimeTracer | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._context_builder = context_builder
@@ -190,6 +195,7 @@ class StageAgentRuntime:
         self._risk_policy = risk_policy
         self._confirmation_port = confirmation_port
         self._progress_callback = progress_callback
+        self._runtime_tracer = runtime_tracer or NoopRuntimeTracer()
         self._now = now or (lambda: datetime.now(UTC))
         self._process_records: dict[str, object] = {}
         self._process_refs: list[str] = []
@@ -198,22 +204,41 @@ class StageAgentRuntime:
         self._process_records = {}
         self._process_refs = []
         request = self._request_from_invocation(invocation)
-        self._ensure_stage_input(request)
-        self._append_process_record(
-            request,
-            "stage_agent_started",
-            {
-                "run_id": request.invocation.run_id,
-                "stage_run_id": request.invocation.stage_run_id,
-                "stage_type": request.invocation.stage_type.value,
-                "stage_contract_ref": request.invocation.stage_contract_ref,
-                "graph_node_key": request.invocation.graph_node_key,
-                "started_at": self._now().isoformat(),
-            },
-        )
-        return self._run_loop(request)
+        with self._runtime_tracer.trace_stage(
+            run_id=request.invocation.run_id,
+            stage_run_id=request.invocation.stage_run_id,
+            stage_type=request.invocation.stage_type.value,
+            graph_node_key=request.invocation.graph_node_key,
+        ):
+            self._ensure_stage_input(request)
+            self._append_process_record(
+                request,
+                "stage_agent_started",
+                {
+                    "run_id": request.invocation.run_id,
+                    "stage_run_id": request.invocation.stage_run_id,
+                    "stage_type": request.invocation.stage_type.value,
+                    "stage_contract_ref": request.invocation.stage_contract_ref,
+                    "graph_node_key": request.invocation.graph_node_key,
+                    "started_at": self._now().isoformat(),
+                },
+            )
+            return self._run_loop(request)
 
     def run_iteration(
+        self,
+        request: StageExecutionRequest,
+        iteration_index: int,
+        tool_results: tuple[ToolResult, ...],
+    ) -> tuple[StageNodeResult | None, ToolResult | None, StageExecutionRequest]:
+        with self._runtime_tracer.trace_iteration(
+            iteration_index=iteration_index,
+            model_call_type=request.model_call_type.value,
+            tool_result_count=len(tool_results),
+        ):
+            return self._run_iteration(request, iteration_index, tool_results)
+
+    def _run_iteration(
         self,
         request: StageExecutionRequest,
         iteration_index: int,
@@ -271,6 +296,17 @@ class StageAgentRuntime:
                 "decision_trace",
                 exc.error.model_dump(mode="json"),
             )
+            self._runtime_tracer.record_model_decision(
+                decision_type=(
+                    exc.error.decision_trace.decision_type.value
+                    if exc.error.decision_trace.decision_type is not None
+                    else None
+                ),
+                status=exc.error.decision_trace.status,
+                trace_ref=exc.error.decision_trace.trace_ref,
+                model_call_ref=exc.error.decision_trace.model_call_ref,
+                reason=exc.error.safe_message,
+            )
             repair_result = self._repair_from_parser_error(
                 request,
                 exc,
@@ -295,6 +331,13 @@ class StageAgentRuntime:
             request,
             "decision_trace",
             decision.decision_trace.model_dump(mode="json"),
+        )
+        self._runtime_tracer.record_model_decision(
+            decision_type=decision.decision_type.value,
+            status=decision.decision_trace.status,
+            trace_ref=decision.decision_trace.trace_ref,
+            model_call_ref=decision.decision_trace.model_call_ref,
+            reason=decision.decision_trace.reason,
         )
 
         cursor_kwargs = {
@@ -562,26 +605,45 @@ class StageAgentRuntime:
         *,
         stage_contract: dict[str, object],
     ) -> ToolResult:
-        return self._tool_registry.execute(
-            tool_request,
-            ToolExecutionContext(
-                stage_type=request.invocation.stage_type,
-                stage_contracts={request.invocation.stage_type.value: stage_contract},
-                trace_context=request.invocation.trace_context,
-                runtime_tool_timeout_seconds=self._runtime_tool_timeout_seconds,
-                platform_tool_timeout_hard_limit_seconds=(
-                    self._platform_tool_timeout_hard_limit_seconds
+        with self._runtime_tracer.trace_tool_call(
+            tool_name=tool_request.tool_name,
+            call_id=tool_request.call_id,
+            input_payload=tool_request.input_payload,
+        ):
+            tool_result = self._tool_registry.execute(
+                tool_request,
+                ToolExecutionContext(
+                    stage_type=request.invocation.stage_type,
+                    stage_contracts={request.invocation.stage_type.value: stage_contract},
+                    trace_context=request.invocation.trace_context,
+                    runtime_tool_timeout_seconds=self._runtime_tool_timeout_seconds,
+                    platform_tool_timeout_hard_limit_seconds=(
+                        self._platform_tool_timeout_hard_limit_seconds
+                    ),
+                    workspace_boundary=self._workspace_boundary,
+                    audit_recorder=self._audit_recorder,
+                    run_log_recorder=self._run_log_recorder,
+                    risk_policy=self._risk_policy,
+                    confirmation_port=self._confirmation_port,
+                    skip_high_risk_tool_confirmations=(
+                        self._skip_high_risk_tool_confirmations(stage_contract)
+                    ),
                 ),
-                workspace_boundary=self._workspace_boundary,
-                audit_recorder=self._audit_recorder,
-                run_log_recorder=self._run_log_recorder,
-                risk_policy=self._risk_policy,
-                confirmation_port=self._confirmation_port,
-                skip_high_risk_tool_confirmations=(
-                    self._skip_high_risk_tool_confirmations(stage_contract)
+            )
+            self._runtime_tracer.record_tool_result(
+                tool_name=tool_result.tool_name,
+                call_id=tool_result.call_id,
+                status=tool_result.status.value,
+                artifact_refs=tuple(tool_result.artifact_refs),
+                side_effect_refs=tuple(tool_result.side_effect_refs),
+                error_code=(
+                    tool_result.error.error_code.value
+                    if tool_result.error is not None
+                    else None
                 ),
-            ),
-        )
+                safe_details=_tool_error_safe_details(tool_result),
+            )
+            return tool_result
 
     def _normalize_or_repair_stage_artifact_evidence(
         self,
@@ -753,6 +815,12 @@ class StageAgentRuntime:
             },
             output_refs=list(decision.stage_artifact.evidence_refs),
             trace_context=request.invocation.trace_context,
+        )
+        self._runtime_tracer.record_stage_result(
+            status=StageStatus.COMPLETED.value,
+            artifact_type=decision.stage_artifact.artifact_type,
+            artifact_refs=(request.stage_artifact_id,),
+            evidence_refs=tuple(decision.stage_artifact.evidence_refs),
         )
         return self._node_result(
             request,
@@ -1231,6 +1299,10 @@ class StageAgentRuntime:
                 "safe_details": dict(safe_details or {}),
                 "failed_at": self._now().isoformat(),
             },
+        )
+        self._runtime_tracer.record_stage_failure(
+            reason=reason,
+            safe_details=dict(safe_details or {}),
         )
         return self._node_result(
             request,
