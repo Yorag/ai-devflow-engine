@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import logging
 import posixpath
+import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from fnmatch import fnmatch
 from pathlib import Path, PureWindowsPath
-from shutil import rmtree
+from shutil import copy2, rmtree
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -78,6 +80,7 @@ class WorkspaceManager:
             if workspace.root.exists():
                 self._remove_managed_workspace_path(workspace.root)
             workspace.root.mkdir(parents=True, exist_ok=False)
+            self._copy_project_snapshot(workspace)
         except OSError as exc:
             error = WorkspaceManagerError("Run workspace could not be created.")
             self._write_failure_log(
@@ -239,6 +242,126 @@ class WorkspaceManager:
         ):
             return (logs_dir.relative_to(default_project_root).as_posix(),)
         return ()
+
+    def _copy_project_snapshot(self, workspace: RunWorkspace) -> None:
+        project_root = self._settings.default_project_root.expanduser().resolve(
+            strict=False
+        )
+        if not project_root.is_dir():
+            return
+        tracked_paths = self._git_tracked_paths(project_root)
+        relative_paths = (
+            tracked_paths if tracked_paths is not None else self._recursive_project_paths(project_root)
+        )
+        for relative_path in relative_paths:
+            if self._should_exclude_snapshot_path(relative_path, project_root=project_root):
+                continue
+            source = (project_root / relative_path).resolve(strict=False)
+            if not source.is_file() or source.is_symlink():
+                continue
+            if not source.is_relative_to(project_root):
+                continue
+            destination = workspace.root / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            copy2(source, destination)
+
+    def _git_tracked_paths(self, project_root: Path) -> tuple[Path, ...] | None:
+        if not (project_root / ".git").exists():
+            return None
+        try:
+            completed = subprocess.run(
+                ["git", "ls-files", "-z"],
+                cwd=project_root,
+                check=True,
+                capture_output=True,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            return None
+        paths: list[Path] = []
+        for raw_item in completed.stdout.split(b"\0"):
+            if not raw_item:
+                continue
+            try:
+                text = raw_item.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            relative = self._safe_snapshot_relative_path(text)
+            if relative is not None:
+                paths.append(relative)
+        return tuple(paths)
+
+    def _recursive_project_paths(self, project_root: Path) -> tuple[Path, ...]:
+        paths: list[Path] = []
+        for source in project_root.rglob("*"):
+            if not source.is_file() or source.is_symlink():
+                continue
+            try:
+                relative = source.relative_to(project_root)
+            except ValueError:
+                continue
+            if self._should_exclude_snapshot_path(relative, project_root=project_root):
+                continue
+            paths.append(relative)
+        return tuple(paths)
+
+    def _safe_snapshot_relative_path(self, value: str) -> Path | None:
+        if "\0" in value or self._is_absolute_or_drive_qualified(value):
+            return None
+        normalized = posixpath.normpath(value.replace("\\", "/"))
+        if normalized in {"", "."} or normalized.startswith("../") or normalized == "..":
+            return None
+        return Path(*normalized.split("/"))
+
+    def _should_exclude_snapshot_path(
+        self,
+        relative_path: Path,
+        *,
+        project_root: Path,
+    ) -> bool:
+        normalized = relative_path.as_posix()
+        parts = tuple(relative_path.parts)
+        if not normalized or normalized == ".":
+            return True
+        workspace_relative = self._workspace_root_relative_to_project(project_root)
+        if workspace_relative is not None and (
+            normalized == workspace_relative
+            or normalized.startswith(f"{workspace_relative}/")
+        ):
+            return True
+        excluded_dirs = {
+            ".git",
+            ".runtime",
+            ".venv",
+            "venv",
+            "node_modules",
+            "dist",
+            "build",
+            "coverage",
+            "__pycache__",
+        }
+        if any(part in excluded_dirs for part in parts):
+            return True
+        if any(part in {"secrets", ".ssh"} for part in parts):
+            return True
+        filename = relative_path.name
+        credential_patterns = (
+            ".env",
+            ".env.*",
+            ".npmrc",
+            ".pypirc",
+            ".netrc",
+            "*.pem",
+            "*.key",
+            "id_rsa",
+            "id_ed25519",
+        )
+        return any(fnmatch(filename, pattern) for pattern in credential_patterns)
+
+    def _workspace_root_relative_to_project(self, project_root: Path) -> str | None:
+        workspace_root = self._workspace_root.resolve(strict=False)
+        if workspace_root == project_root or workspace_root.is_relative_to(project_root):
+            return workspace_root.relative_to(project_root).as_posix()
+        return None
 
     def _remove_managed_workspace_path(self, path: Path) -> None:
         self._assert_managed_workspace_path(path)

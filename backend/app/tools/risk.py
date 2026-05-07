@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 import posixpath
 import re
 from typing import TYPE_CHECKING, Any, Protocol
@@ -9,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.app.domain.enums import ToolRiskCategory, ToolRiskLevel
+from backend.app.workspace.verification_policy import classify_verification_command
 
 if TYPE_CHECKING:
     from backend.app.domain.trace_context import TraceContext
@@ -152,6 +154,7 @@ class ToolRiskClassifier:
         *,
         tool: ToolProtocol,
         request: ToolExecutionRequest,
+        workspace_root: Path | None = None,
     ) -> ToolRiskAssessment:
         input_digest = _input_digest(request.input_payload)
         confirmation_object_ref = (
@@ -184,6 +187,38 @@ class ToolRiskClassifier:
             targets=targets,
             tool_name=tool.name,
         )
+        if tool.name == "bash" and command is not None:
+            verification_decision = classify_verification_command(
+                command,
+                workspace_root=workspace_root
+                or _workspace_root_from_payload(request.input_payload),
+            )
+            if verification_decision.allowed and verification_decision.read_only:
+                return _assessment(
+                    risk_level=ToolRiskLevel.READ_ONLY,
+                    risk_categories=[],
+                    reason=verification_decision.reason,
+                    command_preview=command,
+                    target_summary=target_summary,
+                    input_digest=input_digest,
+                    confirmation_object_ref=confirmation_object_ref,
+                )
+            return _assessment(
+                risk_level=ToolRiskLevel.HIGH_RISK,
+                risk_categories=high_risk_categories
+                or [ToolRiskCategory.UNKNOWN_COMMAND],
+                reason="Bash command is not an allowlisted verification command.",
+                command_preview=command,
+                target_summary=target_summary,
+                input_digest=input_digest,
+                confirmation_object_ref=confirmation_object_ref,
+                expected_side_effects=_side_effects_for(
+                    high_risk_categories or [ToolRiskCategory.UNKNOWN_COMMAND]
+                ),
+                alternative_path_summary=_alternative_path_summary_for(
+                    high_risk_categories or [ToolRiskCategory.UNKNOWN_COMMAND]
+                ),
+            )
         if high_risk_categories:
             return _assessment(
                 risk_level=ToolRiskLevel.HIGH_RISK,
@@ -295,6 +330,13 @@ def _request_targets(payload: dict[str, Any]) -> tuple[str, ...]:
         if isinstance(value, list):
             targets.extend(item.strip() for item in value if isinstance(item, str) and item.strip())
     return tuple(targets)
+
+
+def _workspace_root_from_payload(payload: dict[str, Any]) -> Path | None:
+    value = payload.get("workspace_root")
+    if isinstance(value, str) and value.strip():
+        return Path(value)
+    return None
 
 
 def _target_summary(

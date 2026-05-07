@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -467,7 +468,11 @@ class ToolExecutionGate:
                     audit_ref=audit_ref,
                 )
 
-        assessment = self._risk_classifier.classify(tool=tool, request=request)
+        assessment = self._risk_classifier.classify(
+            tool=tool,
+            request=request,
+            workspace_root=self._workspace_root(context),
+        )
         risk_result = self._validate_risk_confirmation(
             request=request,
             context=context,
@@ -530,6 +535,14 @@ class ToolExecutionGate:
             assessment=assessment,
             audit_ref=audit_ref,
         )
+
+    def _workspace_root(self, context: ToolExecutionContext) -> Path | None:
+        boundary = context.workspace_boundary
+        workspace = getattr(boundary, "workspace", None)
+        root = getattr(workspace, "root", None)
+        if isinstance(root, Path):
+            return root
+        return None
 
     def _grant_matches(
         self,

@@ -3,9 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 import hashlib
-import json
 from pathlib import Path
-import posixpath
 import re
 import shlex
 import subprocess
@@ -29,6 +27,7 @@ from backend.app.tools.protocol import (
     ToolSideEffectLevel,
 )
 from backend.app.workspace.manager import RunWorkspace, WorkspaceManager
+from backend.app.workspace.verification_policy import classify_verification_command
 
 
 _BASH_INPUT_SCHEMA: dict[str, Any] = {
@@ -64,8 +63,6 @@ _BASH_RESULT_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 _OUTPUT_PREVIEW_LIMIT = 4096
-_SHELL_META_TOKENS = {"&&", "||", "|", ";", ">", ">>", "<", "`"}
-_SHELL_META_SUBSTRINGS = (";", "|", "&", ">", "<", "`", "$(", "${")
 _EXCLUDED_PATH_PREFIXES = (
     ".runtime/logs",
     "node_modules",
@@ -76,15 +73,6 @@ _EXCLUDED_PATH_PREFIXES = (
     "coverage",
     "__pycache__",
 )
-_VERSION_PROBES = {
-    ("python", "--version"),
-    ("uv", "--version"),
-    ("node", "--version"),
-    ("npm", "--version"),
-    ("git", "--version"),
-    ("rg", "--version"),
-}
-_RESTRICTED_RUNTIME_PREFIXES = (".runtime",)
 _BASH_SENSITIVE_TEXT_PATTERNS = (
     re.compile(r"Authorization:", re.IGNORECASE),
     re.compile(r"Cookie:", re.IGNORECASE),
@@ -125,65 +113,11 @@ class BashCommandAllowlist:
     workspace_root: Path
 
     def allows(self, argv: Sequence[str]) -> bool:
-        if not argv:
-            return False
-        if tuple(argv[:2]) in _VERSION_PROBES and len(argv) == 2:
-            return True
-        command = " ".join(argv)
-        if command in self._readme_commands():
-            return True
-        return self._allows_pytest(argv) or self._allows_frontend_script(argv)
-
-    def _allows_pytest(self, argv: Sequence[str]) -> bool:
-        if not self._has_pytest_config():
-            return False
-        return len(argv) >= 3 and list(argv[:3]) == ["uv", "run", "pytest"]
-
-    def _allows_frontend_script(self, argv: Sequence[str]) -> bool:
-        scripts = self._frontend_scripts()
-        if not scripts:
-            return False
-        if len(argv) >= 5 and list(argv[:3]) == ["npm", "--prefix", "frontend"]:
-            if argv[3] == "run" and argv[4] in scripts:
-                return True
-            if argv[3] in scripts:
-                return True
-        return False
-
-    def _has_pytest_config(self) -> bool:
-        pyproject = self.workspace_root / "pyproject.toml"
-        if not pyproject.is_file():
-            return False
-        try:
-            content = pyproject.read_text(encoding="utf-8")
-        except OSError:
-            return False
-        return "pytest" in content
-
-    def _frontend_scripts(self) -> set[str]:
-        package_json = self.workspace_root / "frontend" / "package.json"
-        if not package_json.is_file():
-            return set()
-        try:
-            data = json.loads(package_json.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return set()
-        scripts = data.get("scripts")
-        if not isinstance(scripts, dict):
-            return set()
-        return {name for name in scripts if isinstance(name, str)}
-
-    def _readme_commands(self) -> set[str]:
-        commands: set[str] = set()
-        for filename in ("README.md", "README.zh.md"):
-            path = self.workspace_root / filename
-            if not path.is_file():
-                continue
-            try:
-                commands.update(_fenced_command_lines(path.read_text(encoding="utf-8")))
-            except OSError:
-                continue
-        return commands
+        command = shlex.join(list(argv))
+        return classify_verification_command(
+            command,
+            workspace_root=self.workspace_root,
+        ).allowed
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,8 +211,9 @@ def run_bash_command(
     runner: Callable[..., object] | None = None,
     tool_input: ToolInput,
 ) -> ToolResult:
-    argv = _parse_command(command)
-    if _contains_blocked_path_argument(argv) or not BashCommandAllowlist(workspace.root).allows(argv):
+    decision = classify_verification_command(command, workspace_root=workspace.root)
+    argv = list(decision.argv)
+    if not decision.allowed:
         result = _tool_error_result(
             tool_input,
             error_code=ErrorCode.BASH_COMMAND_NOT_ALLOWED,
@@ -423,89 +358,6 @@ def run_bash_command(
         trace_context=tool_input.trace_context,
         coordination_key=tool_input.coordination_key,
     )
-
-
-def _parse_command(command: str) -> list[str]:
-    try:
-        argv = shlex.split(command, posix=True)
-    except ValueError:
-        return []
-    if not argv:
-        return []
-    if any(_token_has_shell_meta(token) for token in argv):
-        return []
-    return argv
-
-
-def _contains_blocked_path_argument(argv: Sequence[str]) -> bool:
-    for token in argv[1:]:
-        if token.startswith("-"):
-            _, separator, value = token.partition("=")
-            if separator and _is_blocked_argument_path(value):
-                return True
-            continue
-        if _is_blocked_argument_path(token):
-            return True
-    return False
-
-
-def _token_has_shell_meta(token: str) -> bool:
-    return token in _SHELL_META_TOKENS or any(fragment in token for fragment in _SHELL_META_SUBSTRINGS)
-
-
-def _is_blocked_argument_path(token: str) -> bool:
-    for candidate in _path_value_candidates(token):
-        if _is_single_blocked_path(candidate):
-            return True
-    return False
-
-
-def _is_single_blocked_path(token: str) -> bool:
-    if not _looks_like_path_argument(token):
-        return False
-    normalized = _normalize_argument_path(token)
-    return (
-        normalized == ".."
-        or normalized.startswith("../")
-        or normalized.startswith("/")
-        or (len(normalized) >= 3 and normalized[1] == ":" and normalized[2] == "/")
-        or normalized == ".runtime"
-        or normalized.startswith(".runtime/")
-    )
-
-
-def _path_value_candidates(token: str) -> tuple[str, ...]:
-    candidate = token.strip()
-    if not candidate:
-        return ()
-    if "=" not in candidate:
-        return (candidate,)
-    parts = [part.strip() for part in candidate.split("=") if part.strip()]
-    if len(parts) <= 1:
-        return (candidate,)
-    return tuple(parts[1:]) + (candidate,)
-
-
-def _looks_like_path_argument(token: str) -> bool:
-    candidate = token.strip()
-    if not candidate:
-        return False
-    lowered = candidate.replace("\\", "/").lower()
-    return (
-        lowered == ".."
-        or lowered.startswith("../")
-        or lowered.startswith("/")
-        or lowered.startswith(".")
-        or "/" in lowered
-        or (len(lowered) >= 3 and lowered[1] == ":" and lowered[2] == "/")
-    )
-
-
-def _normalize_argument_path(token: str) -> str:
-    normalized = posixpath.normpath(token.strip().replace("\\", "/"))
-    if normalized == ".":
-        return ""
-    return normalized.lower()
 
 
 def _run_command(
@@ -738,20 +590,6 @@ def _tool_error_result(
         trace_context=tool_input.trace_context,
         coordination_key=tool_input.coordination_key,
     )
-
-
-def _fenced_command_lines(content: str) -> set[str]:
-    commands: set[str] = set()
-    in_fence = False
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if line.startswith("```"):
-            in_fence = not in_fence
-            continue
-        if not in_fence or not line or line.startswith("#"):
-            continue
-        commands.add(line)
-    return commands
 
 
 __all__ = [

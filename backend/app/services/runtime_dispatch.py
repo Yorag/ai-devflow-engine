@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from backend.app.core.config import EnvironmentSettings
 from backend.app.db.base import DatabaseRole
 from backend.app.db.models.control import PipelineTemplateModel, SessionModel
+from backend.app.db.models.event import DomainEventModel
 from backend.app.db.models.graph import (
     GraphCheckpointModel,
     GraphDefinitionModel,
@@ -67,7 +68,9 @@ from backend.app.providers.langchain_adapter import LangChainProviderAdapter
 from backend.app.providers.provider_registry import ProviderRegistry
 from backend.app.prompts.registry import PromptRegistry
 from backend.app.prompts.renderer import PromptRenderer
+from backend.app.api.error_codes import ErrorCode
 from backend.app.runtime.agent_decision import (
+    AgentDecisionType,
     AgentDecisionParser,
     agent_decision_response_schema,
 )
@@ -85,7 +88,13 @@ from backend.app.runtime.stage_agent import StageAgentRuntime
 from backend.app.runtime.stage_runner_port import StageNodeInvocation, StageNodeResult
 from backend.app.schemas import common
 from backend.app.schemas.feed import ExecutionNodeProjection, StageItemProjection
-from backend.app.schemas.observability import AuditActorType, LogCategory, LogLevel
+from backend.app.schemas.observability import (
+    AuditActorType,
+    AuditResult,
+    LogCategory,
+    LogLevel,
+    RedactionStatus,
+)
 from backend.app.schemas.runtime_settings import (
     ModelBindingSnapshotRead,
     ProviderCallPolicySnapshotRead,
@@ -101,7 +110,21 @@ from backend.app.services.runs import TerminalStatusProjector
 from backend.app.services.runtime_orchestration import RuntimeOrchestrationService
 from backend.app.services.stages import StageRunService
 from backend.app.services.tool_confirmations import ToolConfirmationService
+from backend.app.tools.protocol import ToolAuditRef
 from backend.app.tools.registry import ToolRegistry
+from backend.app.workspace.bash import BashTool
+from backend.app.workspace.manager import (
+    RunWorkspace,
+    WorkspaceManager,
+    WorkspaceManagerError,
+)
+from backend.app.workspace.tools import (
+    FileEditTool,
+    FileReadTool,
+    FileWriteTool,
+    GlobTool,
+    GrepTool,
+)
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -151,6 +174,146 @@ class RuntimeEngineFactoryInput:
 
 
 RuntimeEngineFactory = Callable[[RuntimeEngineFactoryInput], RuntimeEngine]
+
+
+@dataclass(frozen=True, slots=True)
+class _RuntimeWorkspaceBoundary:
+    manager: WorkspaceManager
+    workspace: RunWorkspace
+
+    def assert_inside_workspace(
+        self,
+        target: str,
+        *,
+        trace_context: TraceContext,
+    ) -> None:
+        self.manager.assert_inside_workspace(
+            target,
+            workspace=self.workspace,
+            trace_context=trace_context,
+        )
+
+
+class _RuntimeToolAuditRecorder:
+    def __init__(self, audit_service: AuditService) -> None:
+        self._audit_service = audit_service
+
+    def record_tool_intent(
+        self,
+        *,
+        request: Any,
+        tool_name: str,
+        trace_context: TraceContext,
+    ) -> ToolAuditRef:
+        result = self._audit_service.record_command_result(
+            actor_type=AuditActorType.AGENT,
+            actor_id="stage_agent",
+            action=f"tool.{tool_name}.intent",
+            target_type="tool_action",
+            target_id=f"{tool_name}:{request.call_id}",
+            result=AuditResult.ACCEPTED,
+            reason="Tool intent accepted for runtime execution.",
+            metadata={
+                "tool_name": tool_name,
+                "call_id": request.call_id,
+                "coordination_key": request.coordination_key,
+            },
+            trace_context=trace_context,
+        )
+        return _tool_audit_ref(result, trace_context=trace_context)
+
+    def record_tool_rejection(
+        self,
+        *,
+        request: Any,
+        error_code: ErrorCode,
+        trace_context: TraceContext,
+    ) -> ToolAuditRef:
+        result = self._audit_service.record_rejected_command(
+            actor_type=AuditActorType.AGENT,
+            actor_id="stage_agent",
+            action=f"tool.{request.tool_name}.rejected",
+            target_type="tool_action",
+            target_id=f"{request.tool_name}:{request.call_id}",
+            reason=f"Tool execution rejected: {error_code.value}.",
+            metadata={
+                "tool_name": request.tool_name,
+                "call_id": request.call_id,
+                "error_code": error_code.value,
+            },
+            trace_context=trace_context,
+        )
+        return _tool_audit_ref(result, trace_context=trace_context)
+
+
+class _RuntimeToolRunLogRecorder:
+    def __init__(
+        self,
+        log_writer: JsonlLogWriter,
+        *,
+        now: Callable[[], datetime],
+    ) -> None:
+        self._log_writer = log_writer
+        self._now = now
+
+    def record_tool_result(
+        self,
+        *,
+        request: Any,
+        result: Any,
+        duration_ms: int,
+    ) -> None:
+        summary = {
+            "tool_name": request.tool_name,
+            "call_id": request.call_id,
+            "status": getattr(result.status, "value", str(result.status)),
+            "duration_ms": duration_ms,
+            "side_effect_refs": list(getattr(result, "side_effect_refs", ())),
+            "artifact_refs": list(getattr(result, "artifact_refs", ())),
+        }
+        encoded = json.dumps(summary, sort_keys=True, separators=(",", ":"))
+        payload = LogPayloadSummary(
+            payload_type="tool_result",
+            summary=summary,
+            excerpt=encoded,
+            payload_size_bytes=len(encoded.encode("utf-8")),
+            content_hash=f"sha256:{hashlib.sha256(encoded.encode('utf-8')).hexdigest()}",
+            redaction_status=RedactionStatus.NOT_REQUIRED,
+        )
+        self._log_writer.write_run_log(
+            LogRecordInput(
+                source="runtime.tool_execution",
+                category=LogCategory.TOOL,
+                level=LogLevel.INFO,
+                message="Runtime tool execution result.",
+                trace_context=request.trace_context,
+                payload=payload,
+                created_at=self._now(),
+            )
+        )
+
+
+class _RuntimeToolRiskPolicy:
+    def inspect_tool_intent(
+        self,
+        *,
+        request: Any,
+        tool_name: str,
+        trace_context: TraceContext,
+    ) -> None:
+        del request, tool_name, trace_context
+
+
+def _tool_audit_ref(result: Any, *, trace_context: TraceContext) -> ToolAuditRef:
+    metadata_payload = getattr(result, "metadata_payload", None)
+    metadata_ref = getattr(metadata_payload, "payload_id", None)
+    return ToolAuditRef(
+        audit_id=str(result.audit_id),
+        action=str(result.entry.action),
+        trace_id=trace_context.trace_id,
+        correlation_id=trace_context.correlation_id,
+        metadata_ref=metadata_ref if isinstance(metadata_ref, str) else None,
+    )
 
 
 class RuntimeExecutionService:
@@ -1112,7 +1275,26 @@ class RuntimeExecutionService:
             now=factory_input.now,
         )
         prompt_renderer = PromptRenderer(PromptRegistry.load_builtin_assets())
-        tool_registry = ToolRegistry()
+        workspace_manager = WorkspaceManager(
+            settings=factory_input.environment_settings,
+            log_writer=factory_input.log_writer,
+            audit_service=AuditService(
+                factory_input.log_session,
+                audit_writer=factory_input.log_writer,
+            ),
+            now=factory_input.now,
+        )
+        workspace = self._run_workspace(
+            workspace_manager,
+            context=context,
+            trace_context=context.trace_context,
+        )
+        tool_registry = self._workspace_tool_registry(
+            workspace_manager=workspace_manager,
+            workspace=workspace,
+            log_session=factory_input.log_session,
+            log_writer=factory_input.log_writer,
+        )
         context_builder = self._context_builder(
             prompt_renderer=prompt_renderer,
             tool_registry=tool_registry,
@@ -1148,12 +1330,44 @@ class RuntimeExecutionService:
                 stage_artifacts
             ),
             change_sets=self._change_sets_from_stage_artifacts(stage_artifacts),
+            workspace_manager=workspace_manager,
+            workspace=workspace,
+            audit_recorder=_RuntimeToolAuditRecorder(
+                AuditService(
+                    factory_input.log_session,
+                    audit_writer=factory_input.log_writer,
+                )
+            ),
+            run_log_recorder=_RuntimeToolRunLogRecorder(
+                factory_input.log_writer,
+                now=factory_input.now,
+            ),
+            risk_policy=_RuntimeToolRiskPolicy(),
+            confirmation_port=ToolConfirmationService(
+                control_session=factory_input.control_session,
+                runtime_session=factory_input.runtime_session,
+                event_session=factory_input.event_session,
+                graph_session=factory_input.graph_session,
+                runtime_orchestration=self._runtime_orchestration(
+                    factory_input.graph_session
+                ),
+                audit_service=AuditService(
+                    factory_input.log_session,
+                    audit_writer=factory_input.log_writer,
+                ),
+                log_writer=factory_input.log_writer,
+                now=factory_input.now,
+            ),
             clarifications=self._clarifications_for_context(
                 factory_input.runtime_session,
                 run_id=context.run_id,
             ),
             approval_decisions=self._approval_decisions_for_context(
                 factory_input.runtime_session,
+                run_id=context.run_id,
+            ),
+            user_messages=self._user_messages_for_context(
+                factory_input.event_session,
                 run_id=context.run_id,
             ),
         )
@@ -1188,6 +1402,79 @@ class RuntimeExecutionService:
             tool_registry=tool_registry,
             artifact_store=artifact_store,
             now=now,
+        )
+
+    @staticmethod
+    def _user_messages_for_context(
+        event_session: Session,
+        *,
+        run_id: str,
+    ) -> tuple[dict[str, Any], ...]:
+        rows = (
+            event_session.query(DomainEventModel)
+            .filter(
+                DomainEventModel.run_id == run_id,
+                DomainEventModel.event_type == common.SseEventType.SESSION_MESSAGE_APPENDED,
+            )
+            .order_by(
+                DomainEventModel.occurred_at.asc(),
+                DomainEventModel.sequence_index.asc(),
+            )
+            .all()
+        )
+        messages: list[dict[str, Any]] = []
+        for row in rows:
+            payload = row.payload if isinstance(row.payload, dict) else {}
+            message_item = payload.get("message_item")
+            if isinstance(message_item, dict) and message_item.get("content"):
+                messages.append(dict(message_item))
+        return tuple(messages)
+
+    def _run_workspace(
+        self,
+        workspace_manager: WorkspaceManager,
+        *,
+        context: RuntimeExecutionContext,
+        trace_context: TraceContext,
+    ) -> RunWorkspace:
+        workspace_ref = context.workspace_snapshot_ref or f"workspace-{context.run_id}"
+        try:
+            return workspace_manager.get_run_workspace(
+                run_id=context.run_id,
+                workspace_ref=workspace_ref,
+                trace_context=trace_context,
+            )
+        except WorkspaceManagerError as exc:
+            if "not found" not in str(exc).lower():
+                raise
+        return workspace_manager.create_for_run(
+            run_id=context.run_id,
+            workspace_ref=workspace_ref,
+            trace_context=trace_context,
+        )
+
+    @staticmethod
+    def _workspace_tool_registry(
+        *,
+        workspace_manager: WorkspaceManager,
+        workspace: RunWorkspace,
+        log_session: Session,
+        log_writer: JsonlLogWriter,
+    ) -> ToolRegistry:
+        audit_service = AuditService(log_session, audit_writer=log_writer)
+        return ToolRegistry(
+            (
+                FileReadTool(manager=workspace_manager, workspace=workspace),
+                GlobTool(manager=workspace_manager, workspace=workspace),
+                GrepTool(manager=workspace_manager, workspace=workspace),
+                FileWriteTool(manager=workspace_manager, workspace=workspace),
+                FileEditTool(manager=workspace_manager, workspace=workspace),
+                BashTool(
+                    manager=workspace_manager,
+                    workspace=workspace,
+                    audit_service=audit_service,
+                ),
+            )
         )
 
     def _max_auto_run_next_steps(self, run_id: str) -> int:
@@ -2111,8 +2398,15 @@ class _RuntimeDispatchStageRunner:
         stage_artifacts: Sequence[StageArtifactModel],
         context_references: Sequence[ContextReference],
         change_sets: Sequence[ChangeSet],
+        workspace_manager: WorkspaceManager,
+        workspace: RunWorkspace,
+        audit_recorder: Any,
+        run_log_recorder: Any,
+        risk_policy: Any,
+        confirmation_port: Any,
         clarifications: Sequence[ClarificationRecordModel],
         approval_decisions: Sequence[ApprovalDecisionModel],
+        user_messages: Sequence[Any] = (),
     ) -> None:
         self._service = service
         self._runtime_session = runtime_session
@@ -2132,8 +2426,17 @@ class _RuntimeDispatchStageRunner:
         self._stage_artifacts = tuple(stage_artifacts)
         self._context_references = tuple(context_references)
         self._change_sets = tuple(change_sets)
+        self._workspace_boundary = _RuntimeWorkspaceBoundary(
+            manager=workspace_manager,
+            workspace=workspace,
+        )
+        self._audit_recorder = audit_recorder
+        self._run_log_recorder = run_log_recorder
+        self._risk_policy = risk_policy
+        self._confirmation_port = confirmation_port
         self._clarifications = tuple(clarifications)
         self._approval_decisions = tuple(approval_decisions)
+        self._user_messages = tuple(user_messages)
 
     def run_stage(self, invocation: StageNodeInvocation) -> StageNodeResult:
         self._ensure_stage(invocation)
@@ -2242,7 +2545,7 @@ class _RuntimeDispatchStageRunner:
                 stage_type,
             ),
             specified_action="Produce the structured stage artifact for the current stage.",
-            response_schema=agent_decision_response_schema(),
+            response_schema=self._response_schema(stage_type),
             output_schema_ref=f"schema://stage-agent/{stage_type.value}",
             requested_max_output_tokens=provider_config.max_output_tokens,
             stage_artifacts=self._stage_artifacts,
@@ -2250,8 +2553,43 @@ class _RuntimeDispatchStageRunner:
             change_sets=self._change_sets,
             clarifications=self._clarifications,
             approval_decisions=self._approval_decisions,
+            user_messages=self._user_messages,
+            workspace_boundary=self._workspace_boundary,
+            audit_recorder=self._audit_recorder,
+            run_log_recorder=self._run_log_recorder,
+            risk_policy=self._risk_policy,
+            confirmation_port=self._confirmation_port,
             progress_callback=self._publish_stage_progress,
             now=self._now,
+        )
+
+    def _response_schema(self, stage_type: StageType) -> dict[str, object]:
+        contract = dict(self._graph_definition.stage_contracts[stage_type.value])
+        artifact_type = contract.get("structured_artifact_required")
+        if not isinstance(artifact_type, str) or not artifact_type:
+            artifact_type = None
+        decision_types: tuple[AgentDecisionType, ...] = (
+            AgentDecisionType.REQUEST_TOOL_CONFIRMATION,
+            AgentDecisionType.SUBMIT_STAGE_ARTIFACT,
+            AgentDecisionType.REPAIR_STRUCTURED_OUTPUT,
+            AgentDecisionType.RETRY_WITH_REVISED_PLAN,
+            AgentDecisionType.FAIL_STAGE,
+        )
+        if (
+            contract.get("clarification_allowed") is True
+            or contract.get("can_request_clarification") is True
+        ):
+            decision_types = (
+                AgentDecisionType.REQUEST_TOOL_CONFIRMATION,
+                AgentDecisionType.SUBMIT_STAGE_ARTIFACT,
+                AgentDecisionType.REQUEST_CLARIFICATION,
+                AgentDecisionType.REPAIR_STRUCTURED_OUTPUT,
+                AgentDecisionType.RETRY_WITH_REVISED_PLAN,
+                AgentDecisionType.FAIL_STAGE,
+            )
+        return agent_decision_response_schema(
+            artifact_type=artifact_type,
+            allowed_decision_types=decision_types,
         )
 
     def _publish_stage_progress(

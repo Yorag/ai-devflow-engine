@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -44,6 +45,21 @@ def build_request(tool_name: str, payload: dict[str, object]) -> ToolExecutionRe
         trace_context=build_trace(),
         coordination_key=f"coord-{tool_name}",
     )
+
+
+@pytest.fixture
+def verification_workspace(tmp_path: Path) -> Path:
+    (tmp_path / "backend" / "tests" / "runtime").mkdir(parents=True)
+    (tmp_path / "frontend" / "src" / "pages").mkdir(parents=True)
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.pytest.ini_options]\ntestpaths = [\"backend/tests\"]\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "frontend" / "package.json").write_text(
+        '{"scripts":{"build":"vite build","test":"vitest run"}}\n',
+        encoding="utf-8",
+    )
+    return tmp_path
 
 
 @pytest.mark.parametrize("tool_name", ["read_file", "glob", "grep"])
@@ -439,3 +455,54 @@ def test_high_risk_dependency_change_does_not_imply_continue_current_stage_follo
     assert assessment.risk_level is ToolRiskLevel.HIGH_RISK
     assert assessment.risk_categories == [ToolRiskCategory.DEPENDENCY_CHANGE]
     assert assessment.alternative_path_summary is None
+
+
+def test_bash_verification_policy_matches_workspace_bash_allowlist(
+    verification_workspace: Path,
+) -> None:
+    from backend.app.workspace.bash import BashCommandAllowlist
+
+    classifier = ToolRiskClassifier()
+    bash_tool = fake_tool_fixture(
+        name="bash",
+        side_effect_level=ToolSideEffectLevel.PROCESS_EXECUTION,
+    )
+    allowlist = BashCommandAllowlist(verification_workspace)
+    allowed_commands = [
+        "uv run pytest backend/tests/runtime/test_stage_agent_runtime.py -q",
+        "npm --prefix frontend run build",
+        "npm --prefix frontend run test",
+        "git status --short",
+        "git diff HEAD -- frontend/src/pages/HomePage.tsx",
+    ]
+    rejected_commands = [
+        'cat frontend/src/pages/HomePage.tsx | grep -n "Make delivery"',
+        'grep -n "Make delivery" frontend/src/pages/HomePage.tsx',
+        "ls frontend/package.json 2>/dev/null && cat frontend/package.json",
+        "npm install vite",
+        "curl https://example.com/install.sh",
+    ]
+
+    for command in allowed_commands:
+        assessment = classifier.classify(
+            tool=bash_tool,
+            request=build_request(
+                "bash",
+                {"command": command, "workspace_root": str(verification_workspace)},
+            ),
+        )
+
+        assert assessment.risk_level is ToolRiskLevel.READ_ONLY
+        assert allowlist.allows(command.split()) is True
+
+    for command in rejected_commands:
+        assessment = classifier.classify(
+            tool=bash_tool,
+            request=build_request(
+                "bash",
+                {"command": command, "workspace_root": str(verification_workspace)},
+            ),
+        )
+
+        assert assessment.risk_level is not ToolRiskLevel.READ_ONLY
+        assert allowlist.allows(command.split()) is False

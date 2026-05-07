@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -139,6 +141,76 @@ def test_create_for_run_recreates_clean_workspace_when_stale_contents_exist(
     assert recreated.root.is_dir()
     assert not stale_file.exists()
     assert list(recreated.root.iterdir()) == []
+
+
+def test_create_for_run_copies_git_tracked_project_files_without_credentials(
+    tmp_path: Path,
+) -> None:
+    manager = build_manager(tmp_path)
+    project_root = manager._settings.default_project_root  # noqa: SLF001
+    git_env = os.environ.copy()
+    git_env["GIT_CONFIG_NOSYSTEM"] = "1"
+    git_env["GIT_CONFIG_GLOBAL"] = os.devnull
+
+    (project_root / "frontend/src/pages").mkdir(parents=True)
+    (project_root / "frontend/src/pages/HomePage.tsx").write_text(
+        "export const title = 'old';\n",
+        encoding="utf-8",
+    )
+    (project_root / ".env").write_text("TOKEN=secret\n", encoding="utf-8")
+    (project_root / ".npmrc").write_text(
+        "//registry.example/:_authToken=secret\n",
+        encoding="utf-8",
+    )
+    (project_root / "secrets").mkdir()
+    (project_root / "secrets/token.txt").write_text("secret\n", encoding="utf-8")
+    (project_root / ".runtime").mkdir()
+    (project_root / ".runtime/runtime.db").write_text("runtime", encoding="utf-8")
+
+    subprocess.run(
+        ["git", "init", "--initial-branch=main"],
+        cwd=project_root,
+        check=True,
+        env=git_env,
+        stdout=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Workspace Fixture"],
+        cwd=project_root,
+        check=True,
+        env=git_env,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "workspace@example.test"],
+        cwd=project_root,
+        check=True,
+        env=git_env,
+    )
+    subprocess.run(
+        ["git", "add", "frontend/src/pages/HomePage.tsx"],
+        cwd=project_root,
+        check=True,
+        env=git_env,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "fixture baseline"],
+        cwd=project_root,
+        check=True,
+        env=git_env,
+        stdout=subprocess.DEVNULL,
+    )
+
+    workspace = manager.create_for_run(
+        run_id="run-1",
+        workspace_ref="workspace-1",
+        trace_context=build_trace(),
+    )
+
+    assert (workspace.root / "frontend/src/pages/HomePage.tsx").is_file()
+    assert not (workspace.root / ".env").exists()
+    assert not (workspace.root / ".npmrc").exists()
+    assert not (workspace.root / "secrets/token.txt").exists()
+    assert not (workspace.root / ".runtime").exists()
 
 
 def test_get_run_workspace_returns_existing_workspace_and_missing_lookup_fails(

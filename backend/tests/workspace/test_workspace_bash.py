@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+import shlex
 
 from backend.app.api.error_codes import ErrorCode
 from backend.app.domain.enums import StageType, ToolRiskCategory, ToolRiskLevel
@@ -10,9 +11,14 @@ from backend.app.domain.trace_context import TraceContext
 from backend.app.tools.execution_gate import ToolExecutionContext, ToolExecutionRequest
 from backend.app.tools.protocol import ToolAuditRef, ToolInput, ToolResultStatus
 from backend.app.tools.registry import ToolRegistry
-from backend.app.tools.risk import ToolConfirmationGrant, ToolConfirmationRequestRecord
+from backend.app.tools.risk import (
+    ToolConfirmationGrant,
+    ToolConfirmationRequestRecord,
+    ToolRiskClassifier,
+)
 from backend.app.workspace.bash import BashTool, run_bash_command
 from backend.app.workspace.manager import EnvironmentSettings, RunWorkspace, WorkspaceManager
+from backend.tests.fixtures.tools import fake_tool_fixture
 
 
 NOW = datetime(2026, 5, 4, 11, 0, 0, tzinfo=UTC)
@@ -241,11 +247,9 @@ def test_bash_executes_allowlisted_build_command_shell_free_and_tracks_changed_f
         [BashTool(manager=manager, workspace=workspace, audit_service=audit, runner=runner)]
     )
 
-    result = _execute_confirmed(
-        registry,
+    result = registry.execute(
         _request("npm --prefix frontend run build"),
         _context(manager, workspace, audit, confirmations),
-        confirmations,
     )
 
     assert result.status is ToolResultStatus.SUCCEEDED
@@ -260,6 +264,7 @@ def test_bash_executes_allowlisted_build_command_shell_free_and_tracks_changed_f
     assert result.audit_ref.action == "tool.intent"
     assert audit.calls[0]["tool_name"] == "bash"
     assert audit.calls[0]["intent_audit_id"] == "audit-intent-call-bash"
+    assert confirmations.calls == []
     assert runner.calls == [
         {
             "argv": ["npm", "--prefix", "frontend", "run", "build"],
@@ -333,11 +338,9 @@ def test_bash_truncates_secret_bearing_output_without_leaking_token(
         [BashTool(manager=manager, workspace=workspace, audit_service=audit, runner=runner)]
     )
 
-    result = _execute_confirmed(
-        registry,
+    result = registry.execute(
         _request("uv run pytest backend/tests -q"),
         _context(manager, workspace, audit, confirmations),
-        confirmations,
     )
 
     assert result.status is ToolResultStatus.SUCCEEDED
@@ -377,11 +380,9 @@ def test_bash_returns_structured_failure_when_audit_write_is_required_but_unavai
         ]
     )
 
-    result = _execute_confirmed(
-        registry,
+    result = registry.execute(
         _request("uv run pytest backend/tests -q"),
         _context(manager, workspace, audit, confirmations),
-        confirmations,
     )
 
     assert result.status is ToolResultStatus.FAILED
@@ -410,11 +411,9 @@ def test_bash_failed_command_keeps_side_effect_refs_for_changed_files(
         [BashTool(manager=manager, workspace=workspace, audit_service=audit, runner=runner)]
     )
 
-    result = _execute_confirmed(
-        registry,
+    result = registry.execute(
         _request("npm --prefix frontend run build"),
         _context(manager, workspace, audit, confirmations),
-        confirmations,
     )
 
     assert result.status is ToolResultStatus.FAILED
@@ -617,11 +616,9 @@ def test_bash_redacts_cookie_and_password_output(
         [BashTool(manager=manager, workspace=workspace, audit_service=audit, runner=runner)]
     )
 
-    result = _execute_confirmed(
-        registry,
+    result = registry.execute(
         _request("uv run pytest backend/tests -q"),
         _context(manager, workspace, audit, confirmations),
-        confirmations,
     )
 
     assert result.status is ToolResultStatus.SUCCEEDED
@@ -658,10 +655,79 @@ def test_bash_redacts_space_separated_secret_flags_and_output(
         ),
     )
 
-    assert result.status is ToolResultStatus.SUCCEEDED
-    assert result.output_payload["command"] == "[redacted]"
-    assert result.output_payload["argv"] == ["[redacted]"]
-    assert result.output_payload["stdout_excerpt"] == "[redacted]"
-    assert result.output_payload["stderr_excerpt"] == "[redacted]"
+    assert result.status is ToolResultStatus.FAILED
+    assert result.error is not None
+    assert result.error.error_code is ErrorCode.BASH_COMMAND_NOT_ALLOWED
+    assert result.error.safe_details["command"] == "[redacted]"
     assert "raw-secret" not in (result.output_preview or "")
-    assert audit.calls[0]["command"] == "[redacted]"
+    assert audit.errors[0]["command"] == "[redacted]"
+
+
+def test_bash_verification_policy_accepts_same_commands_as_risk_classifier(
+    tmp_path: Path,
+) -> None:
+    from backend.app.tools.protocol import ToolSideEffectLevel
+    from backend.app.workspace.bash import BashCommandAllowlist
+
+    manager, workspace = _build_workspace(tmp_path)
+    (workspace.root / "frontend" / "src" / "pages").mkdir(parents=True)
+    (workspace.root / "frontend" / "src" / "pages" / "HomePage.tsx").write_text(
+        "export const title = 'Make delivery work traceable.';\n",
+        encoding="utf-8",
+    )
+    classifier = ToolRiskClassifier()
+    bash_tool = fake_tool_fixture(
+        name="bash",
+        side_effect_level=ToolSideEffectLevel.PROCESS_EXECUTION,
+    )
+    allowlist = BashCommandAllowlist(workspace.root)
+    allowed_commands = [
+        "uv run pytest backend/tests/runtime/test_stage_agent_runtime.py -q",
+        "npm --prefix frontend run build",
+        "npm --prefix frontend run test",
+        "git status --short",
+        "git diff HEAD -- frontend/src/pages/HomePage.tsx",
+    ]
+    rejected_commands = [
+        'cat frontend/src/pages/HomePage.tsx | grep -n "Make delivery"',
+        'grep -n "Make delivery" frontend/src/pages/HomePage.tsx',
+        "ls frontend/package.json 2>/dev/null && cat frontend/package.json",
+        "npm install vite",
+        "curl https://example.com/install.sh",
+    ]
+
+    for command in allowed_commands:
+        assessment = classifier.classify(
+            tool=bash_tool,
+            request=ToolExecutionRequest(
+                tool_name="bash",
+                call_id="call-bash-policy",
+                input_payload={
+                    "command": command,
+                    "workspace_root": str(workspace.root),
+                },
+                trace_context=_trace(),
+                coordination_key="coordination-bash-policy",
+            ),
+        )
+
+        assert assessment.risk_level is ToolRiskLevel.READ_ONLY
+        assert allowlist.allows(shlex.split(command, posix=True)) is True
+
+    for command in rejected_commands:
+        assessment = classifier.classify(
+            tool=bash_tool,
+            request=ToolExecutionRequest(
+                tool_name="bash",
+                call_id="call-bash-policy",
+                input_payload={
+                    "command": command,
+                    "workspace_root": str(workspace.root),
+                },
+                trace_context=_trace(),
+                coordination_key="coordination-bash-policy",
+            ),
+        )
+
+        assert assessment.risk_level is not ToolRiskLevel.READ_ONLY
+        assert allowlist.allows(shlex.split(command, posix=True)) is False

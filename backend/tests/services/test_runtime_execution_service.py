@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -1092,6 +1093,90 @@ def test_default_engine_factory_passes_persisted_context_to_stage_agent(
         item.decision_id == "approval-decision-context-runtime-dispatch"
         for item in kwargs["approval_decisions"]
     )
+    user_messages = kwargs["user_messages"]
+    assert user_messages
+    assert "Implement production runtime dispatch." in json.dumps(
+        user_messages,
+        ensure_ascii=False,
+        default=str,
+    )
+
+
+def test_default_stage_runner_uses_workspace_tool_registry(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fixture = _start_first_run(tmp_path)
+    homepage = (
+        fixture.settings.default_project_root
+        / "frontend"
+        / "src"
+        / "pages"
+        / "HomePage.tsx"
+    )
+    homepage.parent.mkdir(parents=True, exist_ok=True)
+    homepage.write_text(
+        "export function HomePage() { return <h1>Make delivery work traceable.</h1>; }\n",
+        encoding="utf-8",
+    )
+    CapturingStageAgentRuntime.instances = []
+    monkeypatch.setattr(
+        runtime_dispatch_module,
+        "StageAgentRuntime",
+        CapturingStageAgentRuntime,
+    )
+    service = RuntimeExecutionService(
+        database_manager=fixture.manager,
+        environment_settings=fixture.settings,
+    )
+    factory_input = _factory_input_for_fixture(service, fixture)
+
+    try:
+        engine = service._default_engine_factory(factory_input)  # noqa: SLF001
+        from backend.app.runtime.stage_runner_port import StageNodeInvocation
+
+        stage_type = StageType.TEST_GENERATION_EXECUTION
+        engine._stage_runner.run_stage(  # noqa: SLF001
+            StageNodeInvocation(
+                run_id=fixture.result.run.run_id,
+                stage_run_id=f"stage-run-{fixture.result.run.run_id}-{stage_type.value}",
+                stage_type=stage_type,
+                graph_node_key=stage_type.value,
+                stage_contract_ref=f"{factory_input.context.graph_definition_ref}/stage-contracts/{stage_type.value}",
+                runtime_context=factory_input.context,
+                trace_context=factory_input.context.trace_context.child_span(
+                    span_id="runtime-dispatch-test-execution-tools",
+                    created_at=NOW,
+                    stage_run_id=f"stage-run-{fixture.result.run.run_id}-{stage_type.value}",
+                ),
+            )
+        )
+    finally:
+        factory_input.control_session.close()
+        factory_input.runtime_session.close()
+        factory_input.graph_session.close()
+        factory_input.event_session.close()
+        factory_input.log_session.close()
+
+    assert len(CapturingStageAgentRuntime.instances) == 1
+    kwargs = CapturingStageAgentRuntime.instances[0].kwargs
+    tool_names = {
+        tool.name for tool in kwargs["tool_registry"].list_bindable_tools()
+    }
+    assert {
+        "read_file",
+        "glob",
+        "grep",
+        "edit_file",
+        "write_file",
+        "bash",
+    }.issubset(tool_names)
+    workspace = kwargs["workspace_boundary"].workspace
+    assert (workspace.root / "frontend/src/pages/HomePage.tsx").is_file()
+    assert kwargs["audit_recorder"] is not None
+    assert kwargs["run_log_recorder"] is not None
+    assert kwargs["confirmation_port"] is not None
+    assert kwargs["risk_policy"] is not None
 
 
 def test_default_engine_factory_reuses_checkpointer_across_engine_instances(
@@ -1244,6 +1329,18 @@ def test_default_engine_factory_starts_next_stage_before_projecting_run_next(
         "retry_with_revised_plan",
         "fail_stage",
     ]
+    solution_schema = captured_stage_configs[1]["response_schema"]
+    assert "request_clarification" not in (
+        solution_schema["properties"]["decision_type"]["enum"]
+    )
+    solution_submit_schema = next(
+        candidate
+        for candidate in solution_schema["oneOf"]
+        if candidate["properties"]["decision_type"]["const"] == "submit_stage_artifact"
+    )
+    assert solution_submit_schema["properties"]["artifact_type"]["const"] == (
+        "SolutionDesignArtifact"
+    )
 
 
 def test_dispatch_started_run_default_dispatcher_drives_until_final_stage_completed(
