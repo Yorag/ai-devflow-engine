@@ -62,7 +62,7 @@ describe("InspectorSections", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Solution Design details" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看方案设计详情" }));
 
     const inspector = screen.getByRole("complementary", { name: "Inspector" });
     expect(await within(inspector).findByRole("heading", { name: "Identity" })).toBeTruthy();
@@ -90,7 +90,7 @@ describe("InspectorSections", () => {
     );
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Open Allow dependency install details" }),
+      screen.getByRole("button", { name: "查看Allow dependency install详情" }),
     );
 
     const inspector = screen.getByRole("complementary", { name: "Inspector" });
@@ -108,7 +108,7 @@ describe("InspectorSections", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Code Generation details" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看代码生成详情" }));
 
     const inspector = screen.getByRole("complementary", { name: "Inspector" });
     expect(await within(inspector).findByText("Full diff for F5.1")).toBeTruthy();
@@ -124,7 +124,7 @@ describe("WorkspaceShell Inspector request plumbing", () => {
       await screen.findByRole("button", { name: "Open Add workspace shell" }),
     );
     fireEvent.click(
-      await screen.findByRole("button", { name: "Open Solution Design details" }),
+      await screen.findByRole("button", { name: "查看方案设计详情" }),
     );
 
     expect(await screen.findByText("Render grouped inspector sections")).toBeTruthy();
@@ -140,7 +140,7 @@ describe("InspectorSections detail states", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Open demo_delivery details" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看demo_delivery详情" }));
 
     const inspector = screen.getByRole("complementary", { name: "Inspector" });
     expect(
@@ -178,7 +178,7 @@ describe("InspectorSections detail states", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Open git_auto_delivery details" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看git_auto_delivery详情" }));
 
     const inspector = screen.getByRole("complementary", { name: "Inspector" });
     expect(
@@ -232,7 +232,7 @@ describe("InspectorSections detail states", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Solution Design details" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看方案设计详情" }));
 
     const inspector = screen.getByRole("complementary", { name: "Inspector" });
     expect(await within(inspector).findByText("Inspector unavailable")).toBeTruthy();

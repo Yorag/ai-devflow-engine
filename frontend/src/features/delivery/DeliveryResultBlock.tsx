@@ -3,6 +3,7 @@ import type {
   DeliveryResultFeedEntry,
   TopLevelFeedEntry,
 } from "../../api/types";
+import { formatStatusLabel } from "../feed/display-labels";
 
 export type DeliveryResultMetadata = {
   label: string;
@@ -26,7 +27,7 @@ export function buildDeliveryResultViewModel(
       entry.delivery_mode === "demo_delivery" ? "Demo delivery" : "Git auto delivery",
     summary: entry.summary,
     metadata: [
-      { label: "Mode", value: entry.delivery_mode },
+      { label: "模式", value: entry.delivery_mode },
       ...formatDeliveryHighlights(entry),
     ],
   };
@@ -38,31 +39,31 @@ export function formatDeliveryHighlights(
   const metadata: DeliveryResultMetadata[] = [];
 
   if (entry.delivery_mode === "demo_delivery" && entry.branch_name) {
-    metadata.push({ label: "Display branch", value: entry.branch_name });
+    metadata.push({ label: "展示分支", value: entry.branch_name });
   }
 
   if (entry.delivery_mode === "git_auto_delivery" && entry.branch_name) {
-    metadata.push({ label: "Branch", value: entry.branch_name });
+    metadata.push({ label: "分支", value: entry.branch_name });
   }
 
   if (entry.delivery_mode === "git_auto_delivery" && entry.commit_sha) {
-    metadata.push({ label: "Commit", value: entry.commit_sha });
+    metadata.push({ label: "提交", value: entry.commit_sha });
   }
 
   if (entry.delivery_mode === "git_auto_delivery" && entry.code_review_url) {
     metadata.push({
-      label: "Code review",
+      label: "代码评审",
       value: formatCodeReviewRequestTarget(entry.code_review_url),
       href: entry.code_review_url,
     });
   }
 
   if (entry.test_summary) {
-    metadata.push({ label: "Tests", value: entry.test_summary });
+    metadata.push({ label: "测试", value: entry.test_summary });
   }
 
   if (entry.result_ref) {
-    metadata.push({ label: "Reference", value: entry.result_ref });
+    metadata.push({ label: "引用", value: entry.result_ref });
   }
 
   return metadata;
@@ -91,10 +92,22 @@ export function DeliveryResultBlock({
       className="feed-entry feed-entry--delivery-result delivery-result-block"
       aria-label="Delivery result feed entry"
     >
-      <header className="feed-entry__header">
-        <span>Delivery result</span>
-        <time dateTime={entry.occurred_at}>{formatTimestamp(entry.occurred_at)}</time>
-        <strong>{formatLabel(entry.status)}</strong>
+      <header className="feed-entry__header feed-entry__header--with-actions">
+        <div className="feed-entry__header-main">
+          <span>交付结果</span>
+          <time dateTime={entry.occurred_at}>{formatTimestamp(entry.occurred_at)}</time>
+          <strong>{formatStatusLabel(entry.status)}</strong>
+        </div>
+        {onOpenInspectorTarget ? (
+          <button
+            type="button"
+            className="inspector-trigger inspector-trigger--quiet"
+            onClick={() => onOpenInspectorTarget(entry)}
+            aria-label={`查看${entry.delivery_mode}详情`}
+          >
+            查看详情
+          </button>
+        ) : null}
       </header>
       <div className="feed-entry__title-row delivery-result-block__title-row">
         <h2>{model.title}</h2>
@@ -122,31 +135,12 @@ export function DeliveryResultBlock({
           </span>
         ))}
       </div>
-      {onOpenInspectorTarget ? (
-        <div className="feed-entry__actions" aria-label="Delivery result actions">
-          <button
-            type="button"
-            className="inspector-trigger"
-            onClick={() => onOpenInspectorTarget(entry)}
-            aria-label={`Open ${entry.delivery_mode} details`}
-          >
-            Details
-          </button>
-        </div>
-      ) : null}
     </article>
   );
 }
 
 function formatDeliveryModeLabel(value: DeliveryMode): string {
   return value === "demo_delivery" ? "Demo Delivery" : "Git Auto Delivery";
-}
-
-function formatLabel(value: string): string {
-  return value
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
 }
 
 function formatTimestamp(value: string): string {

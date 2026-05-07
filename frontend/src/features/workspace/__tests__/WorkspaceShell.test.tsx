@@ -141,7 +141,7 @@ describe("WorkspaceShell", () => {
       await screen.findByRole("button", { name: "Open Add workspace shell" }),
     );
     fireEvent.click(
-      await screen.findByRole("button", { name: "Open Solution Design details" }),
+      await screen.findByRole("button", { name: "查看方案设计详情" }),
     );
 
     const shell = screen.getByRole("region", { name: "Workspace shell" });
@@ -1183,7 +1183,7 @@ describe("WorkspaceShell", () => {
       await screen.findByRole("button", { name: "Open Add workspace shell" }),
     );
     fireEvent.click(
-      await screen.findByRole("button", { name: "Open Solution Design details" }),
+      await screen.findByRole("button", { name: "查看方案设计详情" }),
     );
 
     expect(await screen.findByText("Draft execution plan")).toBeTruthy();
@@ -1278,7 +1278,7 @@ describe("WorkspaceShell", () => {
       await screen.findByRole("button", { name: "Open Add workspace shell" }),
     );
     fireEvent.click(
-      await screen.findByRole("button", { name: "Open Solution Design details" }),
+      await screen.findByRole("button", { name: "查看方案设计详情" }),
     );
 
     expect(await screen.findByText("Draft execution plan")).toBeTruthy();
@@ -1326,7 +1326,7 @@ describe("WorkspaceShell", () => {
       await screen.findByRole("button", { name: "Open Add workspace shell" }),
     );
     fireEvent.click(
-      await screen.findByRole("button", { name: "Open Solution Design details" }),
+      await screen.findByRole("button", { name: "查看方案设计详情" }),
     );
 
     expect(await screen.findByText("Draft execution plan")).toBeTruthy();
@@ -1450,11 +1450,11 @@ describe("WorkspaceShell", () => {
     const approvalEntry = await screen.findByRole("article", {
       name: "Approval request feed entry",
     });
-    fireEvent.click(within(approvalEntry).getByRole("button", { name: "Reject" }));
-    fireEvent.change(screen.getByLabelText("Reject reason"), {
+    fireEvent.click(within(approvalEntry).getByRole("button", { name: "退回" }));
+    fireEvent.change(screen.getByLabelText("退回原因"), {
       target: { value: "Need a clearer rollback explanation." },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Submit reject reason" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交退回原因" }));
 
     expect(await screen.findByText("Need a clearer rollback explanation.")).toBeTruthy();
   });
@@ -1559,7 +1559,7 @@ describe("WorkspaceShell", () => {
     ).toHaveProperty("disabled", true);
     expect(
       within(toolEntry).getByText(
-        "This tool confirmation belongs to a historical run.",
+        "该工具确认属于历史运行。",
       ),
     ).toBeTruthy();
   });

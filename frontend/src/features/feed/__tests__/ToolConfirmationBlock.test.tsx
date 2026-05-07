@@ -146,8 +146,8 @@ describe("ToolConfirmationBlock", () => {
       ),
     ).toBeTruthy();
     expect(screen.getByText("拒绝后当前运行将失败")).toBeTruthy();
-    expect(screen.queryByText("Approve")).toBeNull();
-    expect(screen.queryByText("Reject")).toBeNull();
+    expect(screen.queryByText("批准")).toBeNull();
+    expect(screen.queryByText("退回")).toBeNull();
   });
 
   it("renders read-only disabled states for paused, history, and terminal confirmations", () => {
@@ -183,7 +183,7 @@ describe("ToolConfirmationBlock", () => {
       true,
     );
     expect(
-      screen.getByText("This tool confirmation belongs to a historical run."),
+      screen.getByText("该工具确认属于历史运行。"),
     ).toBeTruthy();
 
     rerender(
@@ -268,14 +268,19 @@ describe("ToolConfirmationBlock", () => {
     expect(screen.getByText("拒绝后等待运行控制")).toBeTruthy();
   });
 
-  it("keeps the Inspector trigger secondary to the primary action row", () => {
+  it("keeps the Inspector trigger in the header instead of the primary action row", () => {
     const onOpenInspectorTarget = vi.fn();
     renderBlock(buildEntry(), { onOpenInspectorTarget });
 
     const actionRow = screen.getByLabelText("Tool confirmation actions");
+    expect(
+      within(actionRow).queryByRole("button", {
+        name: "查看Confirm bash tool action详情",
+      }),
+    ).toBeNull();
     fireEvent.click(
-      within(actionRow).getByRole("button", {
-        name: "Open Confirm bash tool action details",
+      screen.getByRole("button", {
+        name: "查看Confirm bash tool action详情",
       }),
     );
 

@@ -1,4 +1,5 @@
 import type { StageItemProjection } from "../../api/types";
+import { stageItemLabels } from "./display-labels";
 
 type DiffPreviewParseResult = {
   files: string[];
@@ -12,10 +13,10 @@ export function DiffPreview({ item }: { item: StageItemProjection }): JSX.Elemen
   return (
     <li
       className="stage-node-item stage-node-item--diff-preview"
-      aria-label="Diff Preview stage item"
+      aria-label="变更预览"
     >
       <header className="stage-node-item__header">
-        <span>Diff Preview</span>
+        <span>{stageItemLabels.diff_preview}</span>
         <strong>{item.title}</strong>
         <time dateTime={item.occurred_at}>{formatTimestamp(item.occurred_at)}</time>
       </header>
@@ -36,7 +37,7 @@ export function DiffPreview({ item }: { item: StageItemProjection }): JSX.Elemen
       ) : null}
       {parsed.remainder ? (
         <details className="stage-node-item__details">
-          <summary>More diff context</summary>
+          <summary>查看更多变更上下文</summary>
           <pre>{parsed.remainder}</pre>
         </details>
       ) : null}

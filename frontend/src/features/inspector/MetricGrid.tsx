@@ -73,45 +73,45 @@ export function getVisibleMetricEntries(metrics: MetricSet): MetricEntry[] {
 function formatMetricLabel(key: keyof MetricSet): string {
   switch (key) {
     case "duration_ms":
-      return "Duration";
+      return "耗时";
     case "input_tokens":
-      return "Input Tokens";
+      return "输入 Token";
     case "output_tokens":
-      return "Output Tokens";
+      return "输出 Token";
     case "total_tokens":
-      return "Total Tokens";
+      return "Token 总量";
     case "attempt_index":
-      return "Attempt";
+      return "尝试次数";
     case "context_file_count":
-      return "Context Files";
+      return "上下文文件";
     case "reasoning_step_count":
-      return "Reasoning Steps";
+      return "推理步骤";
     case "tool_call_count":
-      return "Tool Calls";
+      return "工具调用";
     case "changed_file_count":
-      return "Changed Files";
+      return "变更文件";
     case "added_line_count":
-      return "Added Lines";
+      return "新增行";
     case "removed_line_count":
-      return "Removed Lines";
+      return "删除行";
     case "generated_test_count":
-      return "Generated Tests";
+      return "生成测试";
     case "executed_test_count":
-      return "Executed Tests";
+      return "执行测试";
     case "passed_test_count":
-      return "Passed Tests";
+      return "通过测试";
     case "failed_test_count":
-      return "Failed Tests";
+      return "失败测试";
     case "skipped_test_count":
-      return "Skipped Tests";
+      return "跳过测试";
     case "test_gap_count":
-      return "Test Gaps";
+      return "测试缺口";
     case "retry_index":
-      return "Retry Index";
+      return "重试序号";
     case "source_attempt_index":
-      return "Source Attempt";
+      return "来源尝试";
     case "delivery_artifact_count":
-      return "Delivery Artifact Count";
+      return "交付产物";
   }
 }
 

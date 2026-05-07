@@ -62,7 +62,7 @@ describe("Project session history regression", () => {
     ).toHaveProperty("disabled", true);
     expect(
       within(historicalRun).getByText(
-        "This tool confirmation belongs to a historical run.",
+        "该工具确认属于历史运行。",
       ),
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: "终止当前运行" })).toBeTruthy();

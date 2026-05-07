@@ -28,14 +28,14 @@ export function RejectReasonForm({
   return (
     <form
       className="approval-block__reject-form"
-      aria-label="Reject approval with reason"
+      aria-label="填写退回原因"
       onSubmit={handleSubmit}
     >
       <label className="approval-block__field" htmlFor="approval-reject-reason">
-        <span>Reject reason</span>
+        <span>退回原因</span>
         <textarea
           id="approval-reject-reason"
-          aria-label="Reject reason"
+          aria-label="退回原因"
           rows={4}
           value={value}
           onChange={(event) => setValue(event.target.value)}
@@ -49,7 +49,7 @@ export function RejectReasonForm({
           className="workspace-button"
           disabled={!value.trim() || isBusy}
         >
-          {isBusy ? "Submitting rejection" : "Submit reject reason"}
+          {isBusy ? "正在提交退回原因" : "提交退回原因"}
         </button>
         <button
           type="button"
@@ -57,7 +57,7 @@ export function RejectReasonForm({
           disabled={isBusy}
           onClick={onCancel}
         >
-          Cancel
+          取消
         </button>
       </div>
     </form>

@@ -1,4 +1,5 @@
 import type { StageItemProjection } from "../../api/types";
+import { formatStatusLabel, stageItemLabels } from "./display-labels";
 
 type ToolCallParseResult = {
   toolName: string;
@@ -12,18 +13,18 @@ export function ToolCallItem({ item }: { item: StageItemProjection }): JSX.Eleme
   const parsed = parseToolCallContent(item.content);
 
   return (
-    <li className="stage-node-item stage-node-item--tool-call" aria-label="Tool Call stage item">
+    <li className="stage-node-item stage-node-item--tool-call" aria-label="工具调用">
       <header className="stage-node-item__header">
-        <span>Tool Call</span>
+        <span>{stageItemLabels.tool_call}</span>
         <strong>{item.title}</strong>
         <time dateTime={item.occurred_at}>{formatTimestamp(item.occurred_at)}</time>
       </header>
       {item.summary ? <p className="stage-node-item__summary">{item.summary}</p> : null}
       <div className="stage-node-item__tool-grid" aria-label="Tool call metadata">
-        <ToolDatum label="Tool" value={parsed.toolName} />
-        <ToolDatum label="Target" value={parsed.targetSummary} />
-        <ToolDatum label="Status" value={parsed.statusLabel} />
-        <ToolDatum label="Duration" value={readDuration(item.metrics)} />
+        <ToolDatum label="工具" value={parsed.toolName} />
+        <ToolDatum label="目标" value={parsed.targetSummary} />
+        <ToolDatum label="状态" value={parsed.statusLabel} />
+        <ToolDatum label="耗时" value={readDuration(item.metrics)} />
       </div>
       {parsed.commandExcerpt !== item.title ? (
         <p className="stage-node-item__command">{parsed.commandExcerpt}</p>
@@ -68,11 +69,10 @@ function parseToolCallContent(content: string | null): ToolCallParseResult {
   const toolName = commandExcerpt.split(" ")[0] ?? "tool";
   const targetSummary =
     lines.find((line) => line.startsWith("Target:"))?.replace("Target:", "").trim() ??
-    "Not recorded";
-  const statusLabel = formatLabel(
+    "未记录";
+  const statusValue =
     lines.find((line) => line.startsWith("Status:"))?.replace("Status:", "").trim() ??
-      "unknown",
-  );
+    "unknown";
   const outputSummary =
     lines
       .find((line) => line.startsWith("Output summary:"))
@@ -82,7 +82,7 @@ function parseToolCallContent(content: string | null): ToolCallParseResult {
   return {
     toolName,
     targetSummary,
-    statusLabel,
+    statusLabel: formatStatusLabel(statusValue.toLowerCase()),
     commandExcerpt,
     outputSummary,
   };
@@ -91,19 +91,12 @@ function parseToolCallContent(content: string | null): ToolCallParseResult {
 function readDuration(metrics: Record<string, unknown>): string {
   const value = metrics.duration_ms;
   if (typeof value !== "number") {
-    return "Duration unavailable";
+    return "未记录";
   }
   if (value >= 1000) {
     return `${Number((value / 1000).toFixed(1))}s`;
   }
   return `${value}ms`;
-}
-
-function formatLabel(value: string): string {
-  return value
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
 }
 
 function formatTimestamp(value: string): string {

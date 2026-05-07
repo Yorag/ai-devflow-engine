@@ -14,12 +14,12 @@ export function TestResultSummary({
   resultItem: StageItemProjection | null;
 }): JSX.Element | null {
   const metricItems = [
-    { label: "Generated Tests", value: metrics.generated_test_count },
-    { label: "Executed Tests", value: metrics.executed_test_count },
-    { label: "Passed Tests", value: metrics.passed_test_count },
-    { label: "Failed Tests", value: metrics.failed_test_count },
-    { label: "Skipped Tests", value: metrics.skipped_test_count },
-    { label: "Test Gaps", value: metrics.test_gap_count, suffix: "gap" },
+    { label: "生成测试", value: metrics.generated_test_count },
+    { label: "执行测试", value: metrics.executed_test_count },
+    { label: "通过测试", value: metrics.passed_test_count },
+    { label: "失败测试", value: metrics.failed_test_count },
+    { label: "跳过测试", value: metrics.skipped_test_count },
+    { label: "测试缺口", value: metrics.test_gap_count, suffix: "项" },
   ].filter(isTestMetricItem);
   const hasResultContent = Boolean(resultItem?.summary || resultItem?.content);
 
@@ -44,7 +44,7 @@ export function TestResultSummary({
       {resultItem?.summary ? <p>{resultItem.summary}</p> : null}
       {resultItem?.content ? (
         <details className="stage-node-item__details">
-          <summary>Test detail excerpt</summary>
+          <summary>查看测试详情摘录</summary>
           <pre>{resultItem.content}</pre>
         </details>
       ) : null}

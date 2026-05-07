@@ -31,18 +31,18 @@ describe("FeedEntryRenderer", () => {
     expect(screen.getByText("Add a workspace shell.")).toBeTruthy();
 
     const stageEntry = screen.getByRole("article", {
-      name: "Stage feed entry",
+      name: "阶段节点",
     });
-    expect(within(stageEntry).getByText("Solution Design")).toBeTruthy();
-    expect(within(stageEntry).getByText("Running")).toBeTruthy();
-    expect(within(stageEntry).getByText("2 items")).toBeTruthy();
+    expect(within(stageEntry).getByText("方案设计")).toBeTruthy();
+    expect(within(stageEntry).getByText("运行中")).toBeTruthy();
+    expect(within(stageEntry).getByText("2 项")).toBeTruthy();
 
     const approvalEntry = screen.getByRole("article", {
       name: "Approval request feed entry",
     });
     expect(within(approvalEntry).getByText("Review solution design")).toBeTruthy();
-    expect(within(approvalEntry).getByRole("button", { name: "Approve" })).toBeTruthy();
-    expect(within(approvalEntry).getByRole("button", { name: "Reject" })).toBeTruthy();
+    expect(within(approvalEntry).getByRole("button", { name: "批准" })).toBeTruthy();
+    expect(within(approvalEntry).getByRole("button", { name: "退回" })).toBeTruthy();
 
     const toolEntry = screen.getByRole("article", {
       name: "Tool confirmation feed entry",
@@ -55,8 +55,8 @@ describe("FeedEntryRenderer", () => {
     expect(
       within(toolEntry).getByRole("button", { name: "拒绝本次执行" }),
     ).toBeTruthy();
-    expect(within(toolEntry).queryByText("Approve")).toBeNull();
-    expect(within(toolEntry).queryByText("Reject")).toBeNull();
+    expect(within(toolEntry).queryByText("批准")).toBeNull();
+    expect(within(toolEntry).queryByText("退回")).toBeNull();
 
     expect(
       screen.getByRole("article", { name: "Control item feed entry" }),
@@ -66,7 +66,7 @@ describe("FeedEntryRenderer", () => {
     expect(
       screen.getByRole("article", { name: "Approval result feed entry" }),
     ).toBeTruthy();
-    expect(screen.getByText("Approved")).toBeTruthy();
+    expect(screen.getByText("已批准")).toBeTruthy();
 
     const deliveryEntry = screen.getByRole("article", {
       name: "Delivery result feed entry",
@@ -75,13 +75,13 @@ describe("FeedEntryRenderer", () => {
     expect(
       within(deliveryEntry).getByText("Demo delivery completed without Git writes."),
     ).toBeTruthy();
-    expect(within(deliveryEntry).getByText("Display branch")).toBeTruthy();
+    expect(within(deliveryEntry).getByText("展示分支")).toBeTruthy();
     expect(within(deliveryEntry).getByText("demo/run-completed")).toBeTruthy();
-    expect(within(deliveryEntry).getByText("Reference")).toBeTruthy();
+    expect(within(deliveryEntry).getByText("引用")).toBeTruthy();
     expect(
       within(deliveryEntry).getByText("demo-delivery-result:run-completed"),
     ).toBeTruthy();
-    expect(deliveryEntry.textContent).not.toMatch(/\bCommit\b/i);
+    expect(deliveryEntry.textContent).not.toMatch(/提交/);
     expect(deliveryEntry.textContent).not.toMatch(/\bCode review\b/i);
 
     const systemEntry = screen.getByRole("article", {
@@ -133,7 +133,7 @@ describe("FeedEntryRenderer", () => {
     expect(
       screen.getByRole("article", { name: "Control item feed entry" }),
     ).toBeTruthy();
-    expect(screen.getByText("Requirement Analysis")).toBeTruthy();
+    expect(screen.getByText("需求分析")).toBeTruthy();
   });
 
   it("renders the selected non-draft workspace feed instead of placeholder copy", async () => {
@@ -147,7 +147,7 @@ describe("FeedEntryRenderer", () => {
       await screen.findByRole("article", { name: "User message feed entry" }),
     ).toBeTruthy();
     expect(
-      screen.getByRole("article", { name: "Stage feed entry" }),
+      screen.getByRole("article", { name: "阶段节点" }),
     ).toBeTruthy();
     expect(
       screen.getByText("Designing the workspace shell boundaries."),
@@ -180,8 +180,8 @@ describe("FeedEntryRenderer", () => {
       }),
     );
 
-    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Reject" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "批准" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "退回" })).toBeTruthy();
 
     rerender(
       <QueryClientProvider client={createQueryClient()}>
@@ -193,8 +193,8 @@ describe("FeedEntryRenderer", () => {
       </QueryClientProvider>,
     );
 
-    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "批准" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "退回" })).toBeNull();
   });
 
   it("renders denied follow-up semantics on top-level tool confirmation entries", () => {
@@ -294,7 +294,7 @@ describe("FeedEntryRenderer guards", () => {
     expect(within(deliveryEntry).getByText("abc123def456")).toBeTruthy();
     expect(
       within(deliveryEntry).getByRole("link", {
-        name: "Code review github.example/pulls/1",
+        name: "代码评审 github.example/pulls/1",
       }),
     ).toBeTruthy();
     expect(

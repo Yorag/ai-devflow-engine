@@ -12,6 +12,7 @@ import {
   submitToolConfirmationDecision,
   type ToolConfirmationDecision,
 } from "../tool-confirmations/tool-confirmation-actions";
+import { formatStatusLabel } from "./display-labels";
 
 type ToolConfirmationBlockProps = {
   entry: ToolConfirmationFeedEntry;
@@ -49,7 +50,7 @@ export function ToolConfirmationBlock({
   const isHistorical =
     Boolean(currentRunId) && displayEntry.run_id !== currentRunId;
   const disabledReason = isHistorical
-    ? "This tool confirmation belongs to a historical run."
+    ? "该工具确认属于历史运行。"
     : displayEntry.disabled_reason;
   const isActionable =
     !isHistorical && displayEntry.is_actionable && pendingDecision === null;
@@ -101,33 +102,47 @@ export function ToolConfirmationBlock({
       className="feed-entry feed-entry--tool-confirmation tool-confirmation-block"
       aria-label="Tool confirmation feed entry"
     >
-      <EntryHeader
-        label="High-risk tool confirmation"
-        timestamp={displayEntry.requested_at}
-        badge={formatLabel(displayEntry.status)}
-      />
+      <header className="feed-entry__header feed-entry__header--with-actions">
+        <div className="feed-entry__header-main">
+          <span>高风险工具确认</span>
+          <time dateTime={displayEntry.requested_at}>
+            {formatTimestamp(displayEntry.requested_at)}
+          </time>
+          <strong>{formatStatusLabel(displayEntry.status)}</strong>
+        </div>
+        {onOpenInspectorTarget ? (
+          <button
+            type="button"
+            className="inspector-trigger inspector-trigger--quiet"
+            onClick={() => onOpenInspectorTarget(displayEntry)}
+            aria-label={`查看${displayEntry.title}详情`}
+          >
+            查看详情
+          </button>
+        ) : null}
+      </header>
       <h2>{displayEntry.title}</h2>
       <div
         className="feed-entry__meta-grid"
         aria-label="Tool confirmation metadata"
       >
-        <Metadata label="Tool" value={displayEntry.tool_name} />
+        <Metadata label="工具" value={displayEntry.tool_name} />
         {displayEntry.command_preview ? (
-          <Metadata label="Command" value={displayEntry.command_preview} />
+          <Metadata label="命令" value={displayEntry.command_preview} />
         ) : null}
-        <Metadata label="Target" value={displayEntry.target_summary} />
-        <Metadata label="Risk" value={formatLabel(displayEntry.risk_level)} />
+        <Metadata label="目标" value={displayEntry.target_summary} />
+        <Metadata label="风险等级" value={formatLabel(displayEntry.risk_level)} />
       </div>
       <p className="feed-entry__body">{displayEntry.reason}</p>
       {displayEntry.risk_categories.length > 0 ? (
         <ChipList
-          label="Risk categories"
+          label="风险类别"
           values={displayEntry.risk_categories.map(formatLabel)}
         />
       ) : null}
       {displayEntry.expected_side_effects.length > 0 ? (
         <ChipList
-          label="Expected side effects"
+          label="预期副作用"
           values={displayEntry.expected_side_effects}
         />
       ) : null}
@@ -160,16 +175,6 @@ export function ToolConfirmationBlock({
         >
           {pendingDecision === "deny" ? "正在拒绝..." : "拒绝本次执行"}
         </button>
-        {onOpenInspectorTarget ? (
-          <button
-            type="button"
-            className="inspector-trigger inspector-trigger--quiet"
-            onClick={() => onOpenInspectorTarget(displayEntry)}
-            aria-label={`Open ${displayEntry.title} details`}
-          >
-            Details
-          </button>
-        ) : null}
       </div>
     </article>
   );
@@ -201,24 +206,6 @@ function getToolConfirmationSignature(entry: ToolConfirmationFeedEntry): string 
     deny_followup_summary: entry.deny_followup_summary,
     disabled_reason: entry.disabled_reason,
   });
-}
-
-function EntryHeader({
-  label,
-  timestamp,
-  badge,
-}: {
-  label: string;
-  timestamp: string;
-  badge?: string;
-}): JSX.Element {
-  return (
-    <header className="feed-entry__header">
-      <span>{label}</span>
-      <time dateTime={timestamp}>{formatTimestamp(timestamp)}</time>
-      {badge ? <strong>{badge}</strong> : null}
-    </header>
-  );
 }
 
 function Metadata({ label, value }: { label: string; value: string }): JSX.Element {
