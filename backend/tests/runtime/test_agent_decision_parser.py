@@ -423,6 +423,161 @@ def test_response_schema_can_be_limited_to_current_artifact_type() -> None:
     assert "summary" not in artifact_schema["properties"]
 
 
+def test_stage_response_schema_uses_submit_artifact_protocol_without_repair_union() -> None:
+    from backend.app.runtime.agent_decision import stage_response_schema
+
+    schema = stage_response_schema(artifact_type="SolutionDesignArtifact")
+
+    assert schema["title"] == "StageResponse"
+    assert schema["properties"]["artifact_type"]["const"] == "SolutionDesignArtifact"
+    assert "decision_type" not in schema["required"]
+    assert "repair_structured_output" not in str(schema)
+    assert set(schema["properties"]["artifact_payload"]["required"]) >= {
+        "technical_plan",
+        "implementation_plan",
+        "impacted_files",
+        "requirement_refs",
+        "evidence_refs",
+    }
+
+
+def test_stage_response_schema_allows_bare_artifact_evidence_refs() -> None:
+    from backend.app.runtime.agent_decision import stage_response_schema
+
+    schema = stage_response_schema(artifact_type="CodeGenerationArtifact")
+    bare_schema = schema["oneOf"][0]
+
+    assert bare_schema["properties"]["evidence_refs"]["minItems"] == 1
+    assert "evidence_refs" not in bare_schema["required"]
+    assert "repair_structured_output" not in str(bare_schema)
+
+
+def test_parser_wraps_bare_stage_artifact_payload_as_submit_decision() -> None:
+    from backend.app.runtime.agent_decision import (
+        AgentDecisionParser,
+        AgentDecisionType,
+    )
+
+    payload = {
+        "technical_plan": "Update the homepage heading text only.",
+        "implementation_plan": [
+            (
+                "Edit frontend/src/pages/HomePage.tsx heading from "
+                "Make delivery work traceable. to Make delivery work."
+            )
+        ],
+        "impacted_files": ["frontend/src/pages/HomePage.tsx"],
+        "api_design": "No API changes.",
+        "data_flow_design": "No data-flow changes.",
+        "risks": ["Text-only change risk is limited to homepage copy."],
+        "test_strategy": [
+            "Inspect the file and run the frontend build if available."
+        ],
+        "validation_report": (
+            "Plan is scoped to the user requested homepage copy change."
+        ),
+        "requirement_refs": ["message://run-1/user/1"],
+        "evidence_refs": ["stage-process://stage-run-1/model-call/1"],
+    }
+
+    decision = AgentDecisionParser().parse_model_result(
+        model_result(structured_output=payload),
+        context_envelope=context_envelope(stage_type=StageType.SOLUTION_DESIGN),
+        stage_contract=stage_contract(
+            allowed_tools=[],
+            output_contract="SolutionDesignArtifact",
+            structured_artifact_required="SolutionDesignArtifact",
+        ),
+    )
+
+    assert decision.decision_type is AgentDecisionType.SUBMIT_STAGE_ARTIFACT
+    assert decision.stage_artifact is not None
+    assert decision.stage_artifact.artifact_type == "SolutionDesignArtifact"
+    assert decision.stage_artifact.artifact_payload["impacted_files"] == [
+        "frontend/src/pages/HomePage.tsx"
+    ]
+
+
+def test_parser_copies_top_level_evidence_refs_into_solution_payload() -> None:
+    from backend.app.runtime.agent_decision import AgentDecisionParser
+
+    decision = AgentDecisionParser().parse_model_result(
+        model_result(
+            structured_output={
+                "decision_type": "submit_stage_artifact",
+                "artifact_type": "SolutionDesignArtifact",
+                "artifact_payload": {
+                    "technical_plan": "Update homepage heading text only.",
+                    "implementation_plan": [
+                        "Edit frontend/src/pages/HomePage.tsx heading."
+                    ],
+                    "impacted_files": ["frontend/src/pages/HomePage.tsx"],
+                    "api_design": "No API changes.",
+                    "data_flow_design": "No data-flow changes.",
+                    "risks": ["Text-only copy risk."],
+                    "test_strategy": ["Inspect homepage heading."],
+                    "validation_report": "Plan matches the requested copy change.",
+                    "requirement_refs": ["message://run-1/user/1"],
+                },
+                "evidence_refs": ["stage-process://stage-run-1/model-call/1"],
+            }
+        ),
+        context_envelope=context_envelope(stage_type=StageType.SOLUTION_DESIGN),
+        stage_contract=stage_contract(
+            allowed_tools=[],
+            output_contract="SolutionDesignArtifact",
+            structured_artifact_required="SolutionDesignArtifact",
+        ),
+    )
+
+    assert decision.stage_artifact is not None
+    assert decision.stage_artifact.artifact_payload["evidence_refs"] == [
+        "stage-process://stage-run-1/model-call/1"
+    ]
+
+
+def test_parser_moves_legacy_top_level_artifact_fields_into_payload() -> None:
+    from backend.app.runtime.agent_decision import (
+        AgentDecisionParser,
+        AgentDecisionType,
+    )
+
+    decision = AgentDecisionParser().parse_model_result(
+        model_result(
+            structured_output={
+                "decision_type": "submit_stage_artifact",
+                "artifact_type": "CodeGenerationArtifact",
+                "changeset_ref": "changeset://run-1/code-generation/1",
+                "changed_files": ["frontend/src/pages/HomePage.tsx"],
+                "diff_refs": ["diff://run-1/code-generation/1"],
+                "file_edit_trace_refs": [
+                    (
+                        "file_edit_trace:run-1:call-edit-1:"
+                        "frontend/src/pages/HomePage.tsx"
+                    )
+                ],
+                "implementation_notes": "Updated homepage heading text.",
+                "requirement_refs": ["message://run-1/user/1"],
+                "solution_refs": ["stage-artifact://solution-design/output"],
+                "evidence_refs": [
+                    (
+                        "file_edit_trace:run-1:call-edit-1:"
+                        "frontend/src/pages/HomePage.tsx"
+                    )
+                ],
+            }
+        ),
+        context_envelope=context_envelope(),
+        stage_contract=stage_contract(),
+    )
+
+    assert decision.decision_type is AgentDecisionType.SUBMIT_STAGE_ARTIFACT
+    assert decision.stage_artifact is not None
+    assert decision.stage_artifact.artifact_payload["changed_files"] == [
+        "frontend/src/pages/HomePage.tsx"
+    ]
+
+
 def test_response_schema_can_remove_clarification_for_downstream_stages() -> None:
     from backend.app.runtime.agent_decision import (
         AgentDecisionType,

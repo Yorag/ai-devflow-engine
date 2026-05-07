@@ -133,6 +133,26 @@ class AgentDecisionType(StrEnum):
     FAIL_STAGE = "fail_stage"
 
 
+_STAGE_RESPONSE_DECISION_ORDER: tuple[AgentDecisionType, ...] = (
+    AgentDecisionType.REQUEST_TOOL_CONFIRMATION,
+    AgentDecisionType.SUBMIT_STAGE_ARTIFACT,
+    AgentDecisionType.REQUEST_CLARIFICATION,
+    AgentDecisionType.RETRY_WITH_REVISED_PLAN,
+    AgentDecisionType.FAIL_STAGE,
+)
+
+_SUBMIT_STAGE_ARTIFACT_ENVELOPE_FIELDS = frozenset(
+    {
+        "decision_type",
+        "artifact_type",
+        "artifact_payload",
+        "evidence_refs",
+        "risk_summary",
+        "failure_summary",
+    }
+)
+
+
 def agent_decision_response_schema(
     *,
     artifact_type: str | None = None,
@@ -377,6 +397,329 @@ def _allowed_structured_decision_types(
         item if isinstance(item, AgentDecisionType) else AgentDecisionType(item)
         for item in allowed_decision_types
     }
+
+
+def stage_response_schema(
+    artifact_type: str | None = None,
+    allowed_decision_types: Sequence[AgentDecisionType | str] | None = None,
+) -> JsonObject:
+    string_array_schema: JsonObject = {
+        "type": "array",
+        "items": {"type": "string", "minLength": 1},
+        "minItems": 1,
+    }
+    json_object_schema: JsonObject = {
+        "type": "object",
+        "additionalProperties": True,
+    }
+    json_value_schema: JsonObject = {
+        "anyOf": [
+            {"type": "object", "additionalProperties": True},
+            {"type": "array", "items": {}},
+            {"type": "string"},
+            {"type": "number"},
+            {"type": "boolean"},
+            {"type": "null"},
+        ]
+    }
+    decision_order = _stage_response_decision_order(allowed_decision_types)
+    artifact_type_schema: JsonObject = (
+        {"const": artifact_type}
+        if artifact_type
+        else {"type": "string", "minLength": 1}
+    )
+    artifact_payload_schema = _artifact_payload_schema(
+        artifact_type,
+        json_object_schema=json_object_schema,
+        json_value_schema=json_value_schema,
+    )
+    artifact_field_properties = _artifact_field_properties(
+        artifact_type,
+        json_value_schema=json_value_schema,
+        string_array_schema=string_array_schema,
+    )
+    properties: JsonObject = {
+        "decision_type": {
+            "type": "string",
+            "enum": [decision_type.value for decision_type in decision_order],
+        },
+        **artifact_field_properties,
+    }
+    if AgentDecisionType.REQUEST_TOOL_CONFIRMATION in decision_order:
+        properties.update(
+            {
+                "tool_name": {"type": "string", "minLength": 1},
+                "command_summary": {"type": "string", "minLength": 1},
+                "target_resource": {"type": "string", "minLength": 1},
+                "risk_level": {
+                    "type": "string",
+                    "enum": [item.value for item in ToolRiskLevel],
+                },
+                "risk_categories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [item.value for item in ToolRiskCategory],
+                    },
+                    "minItems": 1,
+                },
+                "expected_side_effects": string_array_schema,
+                "alternative_path_summary": {
+                    "type": "string",
+                    "minLength": 1,
+                },
+                "input_payload": json_object_schema,
+            }
+        )
+    if AgentDecisionType.SUBMIT_STAGE_ARTIFACT in decision_order:
+        properties.update(
+            {
+                "artifact_type": artifact_type_schema,
+                "artifact_payload": artifact_payload_schema,
+                "evidence_refs": string_array_schema,
+                "risk_summary": json_object_schema,
+                "failure_summary": json_object_schema,
+            }
+        )
+    if AgentDecisionType.REQUEST_CLARIFICATION in decision_order:
+        properties.update(
+            {
+                "question": {"type": "string", "minLength": 1},
+                "missing_facts": string_array_schema,
+                "impact_scope": {"type": "string", "minLength": 1},
+                "related_refs": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                },
+                "fields_to_update": string_array_schema,
+            }
+        )
+    if AgentDecisionType.RETRY_WITH_REVISED_PLAN in decision_order:
+        properties.update(
+            {
+                "reason": {"type": "string", "minLength": 1},
+                "revised_plan_steps": string_array_schema,
+                "evidence_refs": string_array_schema,
+            }
+        )
+    if AgentDecisionType.FAIL_STAGE in decision_order:
+        properties.update(
+            {
+                "failure_reason": {"type": "string", "minLength": 1},
+                "evidence_refs": string_array_schema,
+                "incomplete_items": string_array_schema,
+                "user_visible_summary": {"type": "string", "minLength": 1},
+            }
+        )
+    one_of: list[JsonObject] = []
+    if AgentDecisionType.SUBMIT_STAGE_ARTIFACT in decision_order:
+        if artifact_field_properties:
+            one_of.append(
+                _stage_response_bare_artifact_schema(
+                    artifact_type_schema=artifact_type_schema,
+                    artifact_field_properties=artifact_field_properties,
+                )
+            )
+        one_of.append(
+            _stage_response_submit_schema(
+                artifact_type_schema=artifact_type_schema,
+                artifact_payload_schema=artifact_payload_schema,
+                string_array_schema=string_array_schema,
+                json_object_schema=json_object_schema,
+            )
+        )
+    one_of.extend(
+        _stage_response_control_schema(
+            decision_type,
+            string_array_schema=string_array_schema,
+            json_object_schema=json_object_schema,
+        )
+        for decision_type in decision_order
+        if decision_type is not AgentDecisionType.SUBMIT_STAGE_ARTIFACT
+    )
+    return {
+        "title": "StageResponse",
+        "type": "object",
+        "properties": properties,
+        "required": [],
+        "additionalProperties": False,
+        "oneOf": one_of,
+    }
+
+
+def _artifact_field_properties(
+    artifact_type: str | None,
+    *,
+    json_value_schema: JsonObject,
+    string_array_schema: JsonObject,
+) -> JsonObject:
+    required_fields = _ARTIFACT_REQUIRED_FIELDS.get(artifact_type or "")
+    if required_fields is None:
+        return {}
+    properties = {field_name: json_value_schema for field_name in required_fields}
+    properties["evidence_refs"] = string_array_schema
+    return properties
+
+
+def _stage_response_bare_artifact_schema(
+    *,
+    artifact_type_schema: JsonObject,
+    artifact_field_properties: JsonObject,
+) -> JsonObject:
+    required = [
+        field_name
+        for field_name in artifact_field_properties
+        if field_name != "evidence_refs"
+    ]
+    return {
+        "type": "object",
+        "properties": {
+            "artifact_type": artifact_type_schema,
+            **artifact_field_properties,
+        },
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
+def _stage_response_submit_schema(
+    *,
+    artifact_type_schema: JsonObject,
+    artifact_payload_schema: JsonObject,
+    string_array_schema: JsonObject,
+    json_object_schema: JsonObject,
+) -> JsonObject:
+    return {
+        "type": "object",
+        "properties": {
+            "decision_type": {"const": AgentDecisionType.SUBMIT_STAGE_ARTIFACT.value},
+            "artifact_type": artifact_type_schema,
+            "artifact_payload": artifact_payload_schema,
+            "evidence_refs": string_array_schema,
+            "risk_summary": json_object_schema,
+            "failure_summary": json_object_schema,
+        },
+        "required": ["artifact_payload", "evidence_refs"],
+        "additionalProperties": False,
+    }
+
+
+def _stage_response_control_schema(
+    decision_type: AgentDecisionType,
+    *,
+    string_array_schema: JsonObject,
+    json_object_schema: JsonObject,
+) -> JsonObject:
+    if decision_type is AgentDecisionType.REQUEST_TOOL_CONFIRMATION:
+        return {
+            "type": "object",
+            "properties": {
+                "decision_type": {"const": decision_type.value},
+                "tool_name": {"type": "string", "minLength": 1},
+                "command_summary": {"type": "string", "minLength": 1},
+                "target_resource": {"type": "string", "minLength": 1},
+                "risk_level": {
+                    "type": "string",
+                    "enum": [item.value for item in ToolRiskLevel],
+                },
+                "risk_categories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [item.value for item in ToolRiskCategory],
+                    },
+                    "minItems": 1,
+                },
+                "expected_side_effects": string_array_schema,
+                "alternative_path_summary": {
+                    "type": "string",
+                    "minLength": 1,
+                },
+                "input_payload": json_object_schema,
+            },
+            "required": [
+                "decision_type",
+                "tool_name",
+                "command_summary",
+                "target_resource",
+                "risk_level",
+                "risk_categories",
+                "expected_side_effects",
+                "alternative_path_summary",
+            ],
+            "additionalProperties": False,
+        }
+    if decision_type is AgentDecisionType.REQUEST_CLARIFICATION:
+        return {
+            "type": "object",
+            "properties": {
+                "decision_type": {"const": decision_type.value},
+                "question": {"type": "string", "minLength": 1},
+                "missing_facts": string_array_schema,
+                "impact_scope": {"type": "string", "minLength": 1},
+                "related_refs": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                },
+                "fields_to_update": string_array_schema,
+            },
+            "required": [
+                "decision_type",
+                "question",
+                "missing_facts",
+                "impact_scope",
+                "fields_to_update",
+            ],
+            "additionalProperties": False,
+        }
+    if decision_type is AgentDecisionType.RETRY_WITH_REVISED_PLAN:
+        return {
+            "type": "object",
+            "properties": {
+                "decision_type": {"const": decision_type.value},
+                "reason": {"type": "string", "minLength": 1},
+                "revised_plan_steps": string_array_schema,
+                "evidence_refs": string_array_schema,
+            },
+            "required": [
+                "decision_type",
+                "reason",
+                "revised_plan_steps",
+                "evidence_refs",
+            ],
+            "additionalProperties": False,
+        }
+    return {
+        "type": "object",
+        "properties": {
+            "decision_type": {"const": AgentDecisionType.FAIL_STAGE.value},
+            "failure_reason": {"type": "string", "minLength": 1},
+            "evidence_refs": string_array_schema,
+            "incomplete_items": string_array_schema,
+            "user_visible_summary": {"type": "string", "minLength": 1},
+        },
+        "required": [
+            "decision_type",
+            "failure_reason",
+            "evidence_refs",
+            "incomplete_items",
+            "user_visible_summary",
+        ],
+        "additionalProperties": False,
+    }
+
+
+def _stage_response_decision_order(
+    allowed_decision_types: Sequence[AgentDecisionType | str] | None,
+) -> tuple[AgentDecisionType, ...]:
+    if allowed_decision_types is None:
+        return _STAGE_RESPONSE_DECISION_ORDER
+    allowed = _allowed_structured_decision_types(allowed_decision_types)
+    return tuple(
+        decision_type
+        for decision_type in _STAGE_RESPONSE_DECISION_ORDER
+        if decision_type in allowed
+    )
 
 
 def _artifact_payload_schema(
@@ -660,6 +1003,7 @@ class AgentDecisionParser:
             self._decision_from_structured_output(
                 structured,
                 model_result=model_result,
+                stage_contract=stage_contract,
             ),
             context_envelope=context_envelope,
             stage_contract=stage_contract,
@@ -864,16 +1208,19 @@ class AgentDecisionParser:
             return
 
         for field_name in _artifact_required_fields(stage_contract, decision):
-            if field_name not in decision.artifact_payload:
-                self._raise_error_from_trace(
-                    AgentDecisionErrorCode.STAGE_CONTRACT_VIOLATION,
-                    "Stage artifact payload is missing a required output field.",
-                    trace=model_result_context,
-                    safe_details={
-                        "artifact_type": decision.artifact_type,
-                        "missing_field": field_name,
-                    },
-                )
+            if field_name in decision.artifact_payload:
+                continue
+            if field_name == "evidence_refs":
+                continue
+            self._raise_error_from_trace(
+                AgentDecisionErrorCode.STAGE_CONTRACT_VIOLATION,
+                "Stage artifact payload is missing a required output field.",
+                trace=model_result_context,
+                safe_details={
+                    "artifact_type": decision.artifact_type,
+                    "missing_field": field_name,
+                },
+            )
 
     def _validate_tool_available_and_allowed(
         self,
@@ -958,9 +1305,15 @@ class AgentDecisionParser:
         structured: JsonObject,
         *,
         model_result: ModelCallResult,
+        stage_contract: Mapping[str, object],
     ) -> AgentDecision:
-        decision_type = self._structured_decision_type(
+        normalized = self._normalize_structured_stage_response(
             structured,
+            model_result=model_result,
+            stage_contract=stage_contract,
+        )
+        decision_type = self._structured_decision_type(
+            normalized,
             model_result=model_result,
         )
         if decision_type is AgentDecisionType.REQUEST_TOOL_CALL:
@@ -973,7 +1326,7 @@ class AgentDecisionParser:
             )
         payload = {
             key: value
-            for key, value in structured.items()
+            for key, value in normalized.items()
             if key != "decision_type"
         }
         trace = self._trace_from_model_result(
@@ -999,6 +1352,175 @@ class AgentDecisionParser:
                     "reason": _validation_reason(exc),
                 },
             )
+
+    def _normalize_structured_stage_response(
+        self,
+        structured: JsonObject,
+        *,
+        model_result: ModelCallResult,
+        stage_contract: Mapping[str, object],
+    ) -> JsonObject:
+        if "decision_type" not in structured:
+            return self._normalize_bare_stage_artifact(
+                structured,
+                model_result=model_result,
+                stage_contract=stage_contract,
+            )
+        raw_decision_type = structured.get("decision_type")
+        if raw_decision_type != AgentDecisionType.SUBMIT_STAGE_ARTIFACT.value:
+            return structured
+        if "artifact_payload" in structured:
+            return self._normalize_wrapped_submit_stage_artifact(
+                structured,
+                model_result=model_result,
+                stage_contract=stage_contract,
+            )
+        return self._normalize_legacy_submit_stage_artifact(
+            structured,
+            stage_contract=stage_contract,
+        )
+
+    def _normalize_bare_stage_artifact(
+        self,
+        structured: JsonObject,
+        *,
+        model_result: ModelCallResult,
+        stage_contract: Mapping[str, object],
+    ) -> JsonObject:
+        wrapped = self._normalize_wrapped_stage_artifact(
+            structured,
+            model_result=model_result,
+            stage_contract=stage_contract,
+        )
+        if wrapped is not None:
+            return wrapped
+        artifact_type = _stage_contract_artifact_type(stage_contract)
+        if artifact_type is None:
+            return structured
+        required_fields = _stage_artifact_required_fields_for_normalization(
+            stage_contract,
+            artifact_type=artifact_type,
+        )
+        if not _contains_stage_artifact_fields(
+            structured,
+            required_fields=required_fields,
+        ):
+            return structured
+
+        artifact_payload = dict(structured)
+        evidence_refs = structured.get("evidence_refs")
+        if "evidence_refs" not in artifact_payload:
+            artifact_payload["evidence_refs"] = evidence_refs or [
+                self._model_call_ref(model_result)
+            ]
+        return {
+            "decision_type": AgentDecisionType.SUBMIT_STAGE_ARTIFACT.value,
+            "artifact_type": artifact_type,
+            "artifact_payload": artifact_payload,
+            "evidence_refs": evidence_refs or [self._model_call_ref(model_result)],
+        }
+
+    def _normalize_wrapped_stage_artifact(
+        self,
+        structured: JsonObject,
+        *,
+        model_result: ModelCallResult,
+        stage_contract: Mapping[str, object],
+    ) -> JsonObject | None:
+        raw_payload = structured.get("artifact_payload")
+        if not isinstance(raw_payload, Mapping):
+            return None
+        artifact_type = _stage_contract_artifact_type(stage_contract)
+        if artifact_type is None:
+            return None
+        raw_artifact_type = structured.get("artifact_type")
+        if isinstance(raw_artifact_type, str) and raw_artifact_type != artifact_type:
+            return None
+        evidence_refs = structured.get("evidence_refs") or raw_payload.get(
+            "evidence_refs"
+        ) or [self._model_call_ref(model_result)]
+        payload = dict(raw_payload)
+        if "evidence_refs" not in payload:
+            payload["evidence_refs"] = evidence_refs
+        return {
+            "decision_type": AgentDecisionType.SUBMIT_STAGE_ARTIFACT.value,
+            "artifact_type": artifact_type,
+            "artifact_payload": payload,
+            "evidence_refs": evidence_refs,
+        }
+
+    def _normalize_wrapped_submit_stage_artifact(
+        self,
+        structured: JsonObject,
+        *,
+        model_result: ModelCallResult,
+        stage_contract: Mapping[str, object],
+    ) -> JsonObject:
+        artifact_payload = structured.get("artifact_payload")
+        if not isinstance(artifact_payload, Mapping):
+            return structured
+        artifact_type = (
+            structured.get("artifact_type")
+            if isinstance(structured.get("artifact_type"), str)
+            else _stage_contract_artifact_type(stage_contract)
+        )
+        if not isinstance(artifact_type, str):
+            return structured
+        required_fields = _stage_artifact_required_fields_for_normalization(
+            stage_contract,
+            artifact_type=artifact_type,
+        )
+        if "evidence_refs" not in required_fields or "evidence_refs" in artifact_payload:
+            return structured
+        evidence_refs = structured.get("evidence_refs") or [
+            self._model_call_ref(model_result)
+        ]
+        normalized = dict(structured)
+        normalized["artifact_payload"] = {
+            **dict(artifact_payload),
+            "evidence_refs": evidence_refs,
+        }
+        return normalized
+
+    def _normalize_legacy_submit_stage_artifact(
+        self,
+        structured: JsonObject,
+        *,
+        stage_contract: Mapping[str, object],
+    ) -> JsonObject:
+        raw_artifact_type = structured.get("artifact_type")
+        artifact_type = (
+            raw_artifact_type
+            if isinstance(raw_artifact_type, str) and raw_artifact_type.strip()
+            else _stage_contract_artifact_type(stage_contract)
+        )
+        if artifact_type is None:
+            return structured
+        required_fields = _stage_artifact_required_fields_for_normalization(
+            stage_contract,
+            artifact_type=artifact_type,
+        )
+        if not _contains_stage_artifact_fields(
+            structured,
+            required_fields=required_fields,
+        ):
+            return structured
+
+        normalized = {
+            key: value
+            for key, value in structured.items()
+            if key in _SUBMIT_STAGE_ARTIFACT_ENVELOPE_FIELDS
+        }
+        normalized["artifact_payload"] = {
+            key: value
+            for key, value in structured.items()
+            if key not in _SUBMIT_STAGE_ARTIFACT_ENVELOPE_FIELDS
+        }
+        if "evidence_refs" in structured and "evidence_refs" in required_fields:
+            normalized["artifact_payload"]["evidence_refs"] = structured[
+                "evidence_refs"
+            ]
+        return normalized
 
     def _structured_decision_type(
         self,
@@ -1227,6 +1749,68 @@ def _allowed_tool_names(value: object) -> tuple[str, ...] | None:
     return tuple(item for item in value if isinstance(item, str))
 
 
+def _stage_contract_artifact_type(
+    stage_contract: Mapping[str, object],
+) -> str | None:
+    structured_artifact_required = stage_contract.get("structured_artifact_required")
+    if isinstance(structured_artifact_required, str):
+        artifact_type = structured_artifact_required.strip()
+        if artifact_type:
+            return artifact_type
+    output_contract = stage_contract.get("output_contract")
+    if isinstance(output_contract, str):
+        artifact_type = output_contract.strip()
+        if artifact_type:
+            return artifact_type
+    return None
+
+
+def _stage_artifact_required_fields_for_normalization(
+    stage_contract: Mapping[str, object],
+    *,
+    artifact_type: str,
+) -> tuple[str, ...]:
+    output_contract = stage_contract.get("output_contract")
+    if isinstance(output_contract, Mapping):
+        required = _json_schema_required_fields(output_contract)
+        if required:
+            return required
+
+    candidates: list[str] = []
+    structured_artifact_required = stage_contract.get("structured_artifact_required")
+    if isinstance(structured_artifact_required, str) and structured_artifact_required:
+        candidates.append(structured_artifact_required)
+    if isinstance(output_contract, str) and output_contract:
+        candidates.append(output_contract)
+    candidates.append(artifact_type)
+
+    for candidate in candidates:
+        required = _ARTIFACT_REQUIRED_FIELDS.get(candidate)
+        if required is not None:
+            return required
+    return ()
+
+
+def _json_schema_required_fields(schema: Mapping[str, object]) -> tuple[str, ...]:
+    required = schema.get("required")
+    if not isinstance(required, Sequence) or isinstance(required, str):
+        return ()
+    return tuple(item for item in required if isinstance(item, str) and item)
+
+
+def _contains_stage_artifact_fields(
+    value: Mapping[str, object],
+    *,
+    required_fields: Sequence[str],
+) -> bool:
+    payload_required_fields = tuple(
+        field_name for field_name in required_fields if field_name != "evidence_refs"
+    )
+    if not payload_required_fields:
+        return False
+    return all(field_name in value for field_name in payload_required_fields)
+
+
 def _artifact_required_fields(
     stage_contract: Mapping[str, object],
     decision: SubmitStageArtifactDecision,
@@ -1334,4 +1918,5 @@ __all__ = [
     "SubmitStageArtifactDecision",
     "ToolCallDecision",
     "ToolConfirmationDecision",
+    "stage_response_schema",
 ]
