@@ -87,6 +87,31 @@ def test_stage_agent_records_provider_retry_and_circuit_breaker_traces() -> None
     assert "provider_circuit_breaker_trace" in runtime.artifact_store.append_keys()
 
 
+def test_stage_agent_notifies_progress_after_each_process_record() -> None:
+    progress_records: list[tuple[str, str]] = []
+    runtime = build_runtime(
+        provider_results=[model_result(structured_output=fail_stage_payload())],
+        progress_callback=lambda request, process_key, process_ref: progress_records.append(
+            (process_key, process_ref)
+        ),
+    )
+
+    runtime.run_stage(invocation())
+
+    assert progress_records[0] == (
+        "stage_agent_started",
+        "stage-artifact://artifact-stage-run-1#process/stage_agent_started",
+    )
+    assert (
+        "model_call_trace",
+        "stage-artifact://artifact-stage-run-1#process/model_call_trace",
+    ) in progress_records
+    assert (
+        "decision_trace",
+        "stage-artifact://artifact-stage-run-1#process/decision_trace",
+    ) in progress_records
+
+
 def test_stage_agent_repair_decision_records_repair_trace_and_uses_repair_prompt_next() -> None:
     runtime = build_runtime(
         provider_results=[
