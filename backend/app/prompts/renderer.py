@@ -290,6 +290,8 @@ class PromptRenderer:
             "Repair Scope",
             "Repair the prior response so it matches the current response_schema.",
             "Do not change the stage contract, tool boundary, or structured output requirement.",
+            "Do not return repair_structured_output during structured output repair.",
+            "Return one of the decision_type values allowed by the response_schema.",
             f"Parse error: {request.parse_error or 'Unknown parse error.'}",
             "Response schema:",
             _stable_json(request.response_schema),
@@ -382,6 +384,7 @@ class PromptRenderer:
 
         runtime = self.render_runtime_instructions(request)
         stage_contract = self.render_stage_contract(request)
+        stage_prompt = self.render_stage_prompt_fragment(request)
         user_stage_instruction = self._user_stage_instruction_section(request)
         agent_role = self._agent_role_section(request)
         task_objective = self._dynamic_section(
@@ -410,6 +413,7 @@ class PromptRenderer:
         sections = [
             runtime,
             stage_contract,
+            stage_prompt,
             user_stage_instruction,
             agent_role,
             task_objective,
@@ -425,6 +429,7 @@ class PromptRenderer:
             in {
                 "runtime_instructions",
                 "stage_contract",
+                "stage_prompt_fragment",
                 "available_tools",
                 "response_schema",
             }

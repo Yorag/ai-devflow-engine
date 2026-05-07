@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 import re
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from pydantic import ValidationError
 
@@ -24,13 +24,71 @@ from backend.app.domain.enums import StageType
 from backend.app.schemas.run import SolutionDesignArtifactRead
 
 
-_IMPLEMENTATION_PLAN_CONSUMER_STAGES = frozenset(
-    {
-        StageType.CODE_GENERATION,
-        StageType.TEST_GENERATION_EXECUTION,
-        StageType.CODE_REVIEW,
-    }
-)
+_STAGE_INPUT_ARTIFACT_TYPES: Mapping[StageType, tuple[str, ...]] = {
+    StageType.CODE_GENERATION: (
+        "RequirementAnalysisArtifact",
+        "SolutionDesignArtifact",
+    ),
+    StageType.TEST_GENERATION_EXECUTION: (
+        "RequirementAnalysisArtifact",
+        "SolutionDesignArtifact",
+        "CodeGenerationArtifact",
+    ),
+    StageType.CODE_REVIEW: (
+        "RequirementAnalysisArtifact",
+        "SolutionDesignArtifact",
+        "CodeGenerationArtifact",
+        "TestGenerationExecutionArtifact",
+    ),
+    StageType.DELIVERY_INTEGRATION: (
+        "CodeGenerationArtifact",
+        "TestGenerationExecutionArtifact",
+        "CodeReviewArtifact",
+    ),
+}
+_STAGE_OUTPUT_REQUIRED_FIELDS: Mapping[str, tuple[str, ...]] = {
+    "RequirementAnalysisArtifact": (
+        "structured_requirement",
+        "acceptance_criteria",
+        "clarification_summary",
+        "assumptions",
+        "non_goals",
+        "open_questions",
+        "source_message_refs",
+        "clarification_record_refs",
+        "attachment_refs",
+        "context_refs",
+        "analysis_notes",
+    ),
+    "CodeGenerationArtifact": (
+        "changeset_ref",
+        "changed_files",
+        "diff_refs",
+        "file_edit_trace_refs",
+        "implementation_notes",
+        "requirement_refs",
+        "solution_refs",
+    ),
+    "TestGenerationExecutionArtifact": (
+        "test_changes_ref",
+        "test_execution_result",
+        "test_gap_report",
+        "command_trace_refs",
+        "failed_test_refs",
+        "acceptance_criteria_refs",
+        "changeset_refs",
+    ),
+    "CodeReviewArtifact": (
+        "review_report",
+        "issue_list",
+        "risk_assessment",
+        "regression_decision",
+        "fix_requirements",
+        "evidence_refs",
+        "changeset_refs",
+        "test_result_refs",
+    ),
+}
 _WORKING_PROCESS_REF_KEYS = frozenset(
     {
         "command_trace_ref",
@@ -107,6 +165,13 @@ class ResolvedContextSources:
     recent_observations: tuple[ContextBlock, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class _StructuredStageOutput:
+    artifact_type: str
+    payload: Mapping[str, Any]
+    evidence_refs: tuple[str, ...] = ()
+
+
 class ContextSourceResolver:
     def resolve_stage_inputs(
         self,
@@ -116,44 +181,36 @@ class ContextSourceResolver:
         stage_run_id: str,
         stage_type: StageType,
         stage_artifacts: Sequence[StageArtifactModel],
+        user_messages: Sequence[Any] = (),
         allowed_context_run_ids: Sequence[str],
         built_at: datetime,
     ) -> tuple[ContextBlock, ...]:
-        del session_id, stage_run_id, built_at
-        if stage_type not in _IMPLEMENTATION_PLAN_CONSUMER_STAGES:
+        del stage_run_id, built_at
+        allowed = _allowed_run_ids(run_id, allowed_context_run_ids)
+        if stage_type is StageType.REQUIREMENT_ANALYSIS:
+            return _user_message_blocks(
+                user_messages,
+                session_id=session_id,
+                allowed_run_ids=allowed,
+            )
+
+        allowed_artifact_types = _STAGE_INPUT_ARTIFACT_TYPES.get(stage_type)
+        if not allowed_artifact_types:
             return ()
 
-        allowed = _allowed_run_ids(run_id, allowed_context_run_ids)
         blocks: list[ContextBlock] = []
-        seen_plan_ids: set[str] = set()
+        seen: set[str] = set()
         for artifact in stage_artifacts:
             if artifact.run_id not in allowed:
                 continue
-            solution = _solution_design_artifact(artifact)
-            if solution is None:
-                continue
-            plan = solution.implementation_plan
-            if plan.plan_id in seen_plan_ids:
-                continue
-            seen_plan_ids.add(plan.plan_id)
-            blocks.append(
-                _block(
-                    block_id=f"implementation-plan:{plan.plan_id}",
-                    section=ContextEnvelopeSection.INPUT_ARTIFACT_REFS,
-                    trust_level=ContextTrustLevel.TRUSTED_REFERENCE,
-                    boundary_action=ContextBoundaryAction.ALLOW,
-                    summary=_implementation_plan_summary(solution),
-                    content_ref=f"stage-artifact://{artifact.artifact_id}",
-                    sources=(
-                        ContextSourceRef(
-                            source_kind="solution_design_artifact",
-                            source_ref=f"stage-artifact://{artifact.artifact_id}",
-                            source_label=solution.artifact_id,
-                            version_ref=plan.plan_id,
-                        ),
-                    ),
-                )
-            )
+            for output in _structured_stage_outputs(artifact):
+                if output.artifact_type not in allowed_artifact_types:
+                    continue
+                block = _stage_output_block(artifact, output)
+                if block is None or block.block_id in seen:
+                    continue
+                seen.add(block.block_id)
+                blocks.append(block)
         return tuple(blocks)
 
     def resolve_context_references(
@@ -208,14 +265,156 @@ def _allowed_run_ids(
     return set(allowed_context_run_ids) or {run_id}
 
 
+def _user_message_blocks(
+    user_messages: Sequence[Any],
+    *,
+    session_id: str,
+    allowed_run_ids: set[str],
+) -> tuple[ContextBlock, ...]:
+    blocks: list[ContextBlock] = []
+    seen: set[str] = set()
+    for message in user_messages:
+        payload = _message_payload(message)
+        message_run_id = _optional_string(payload.get("run_id"))
+        if message_run_id is not None and message_run_id not in allowed_run_ids:
+            continue
+        message_id = _optional_string(payload.get("message_id"))
+        content = _optional_string(payload.get("content"))
+        if message_id is None or content is None:
+            continue
+        ref = f"message://{session_id}/{message_id}"
+        if ref in seen:
+            continue
+        seen.add(ref)
+        stage_ref = _optional_string(payload.get("stage_run_id")) or "none"
+        blocks.append(
+            _block(
+                block_id=f"user-message:{message_id}",
+                section=ContextEnvelopeSection.INPUT_ARTIFACT_REFS,
+                trust_level=ContextTrustLevel.UNTRUSTED_OBSERVATION,
+                boundary_action=ContextBoundaryAction.QUARANTINE,
+                summary=(
+                    f"User message {message_id}: run_id={message_run_id or 'none'}; "
+                    f"stage_run_id={stage_ref}; content={_short_text(content, limit=600)}"
+                ),
+                content_ref=ref,
+                sources=(
+                    ContextSourceRef(
+                        source_kind="user_message",
+                        source_ref=ref,
+                        source_label=message_id,
+                    ),
+                ),
+            )
+        )
+    return tuple(blocks)
+
+
+def _message_payload(message: Any) -> dict[str, Any]:
+    if isinstance(message, Mapping):
+        return dict(message)
+    model_dump = getattr(message, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump(mode="json")
+        return dict(dumped) if isinstance(dumped, Mapping) else {}
+    values: dict[str, Any] = {}
+    for key in ("message_id", "run_id", "stage_run_id", "author", "content"):
+        value = getattr(message, key, None)
+        if value is not None:
+            values[key] = value
+    return values
+
+
+def _optional_string(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _structured_stage_outputs(
+    artifact: StageArtifactModel,
+) -> tuple[_StructuredStageOutput, ...]:
+    process = _artifact_process(artifact)
+    outputs: list[_StructuredStageOutput] = []
+    snapshot = process.get("output_snapshot")
+    if isinstance(snapshot, Mapping):
+        artifact_type = snapshot.get("artifact_type")
+        payload = snapshot.get("artifact_payload")
+        if isinstance(artifact_type, str) and isinstance(payload, Mapping):
+            outputs.append(
+                _StructuredStageOutput(
+                    artifact_type=artifact_type,
+                    payload=payload,
+                    evidence_refs=_non_empty_strings(snapshot.get("evidence_refs")),
+                )
+            )
+
+    legacy_solution = process.get("solution_design_artifact")
+    if isinstance(legacy_solution, Mapping):
+        outputs.append(
+            _StructuredStageOutput(
+                artifact_type="SolutionDesignArtifact",
+                payload=legacy_solution,
+            )
+        )
+    return tuple(outputs)
+
+
+def _stage_output_block(
+    artifact: StageArtifactModel,
+    output: _StructuredStageOutput,
+) -> ContextBlock | None:
+    if output.artifact_type == "SolutionDesignArtifact":
+        solution = _solution_design_artifact(artifact, output.payload)
+        if solution is None:
+            return None
+        plan = solution.implementation_plan
+        return _block(
+            block_id=f"stage-output-artifact:{output.artifact_type}:{plan.plan_id}",
+            section=ContextEnvelopeSection.INPUT_ARTIFACT_REFS,
+            trust_level=ContextTrustLevel.TRUSTED_REFERENCE,
+            boundary_action=ContextBoundaryAction.ALLOW,
+            summary=(
+                f"Stage output artifact: artifact_type={output.artifact_type}; "
+                f"{_implementation_plan_summary(solution)}"
+            ),
+            content_ref=f"stage-artifact://{artifact.artifact_id}",
+            sources=(
+                ContextSourceRef(
+                    source_kind="stage_output_artifact",
+                    source_ref=f"stage-artifact://{artifact.artifact_id}",
+                    source_label=output.artifact_type,
+                    version_ref=plan.plan_id,
+                ),
+            ),
+        )
+
+    if not _has_required_fields(output.artifact_type, output.payload):
+        return None
+    return _block(
+        block_id=f"stage-output-artifact:{output.artifact_type}:{artifact.artifact_id}",
+        section=ContextEnvelopeSection.INPUT_ARTIFACT_REFS,
+        trust_level=ContextTrustLevel.TRUSTED_REFERENCE,
+        boundary_action=ContextBoundaryAction.ALLOW,
+        summary=_stage_output_summary(output.artifact_type, output.payload),
+        content_ref=f"stage-artifact://{artifact.artifact_id}",
+        sources=(
+            ContextSourceRef(
+                source_kind="stage_output_artifact",
+                source_ref=f"stage-artifact://{artifact.artifact_id}",
+                source_label=output.artifact_type,
+            ),
+        ),
+    )
+
+
 def _solution_design_artifact(
     artifact: StageArtifactModel,
+    payload: Mapping[str, Any],
 ) -> SolutionDesignArtifactRead | None:
-    payload = _artifact_process(artifact).get("solution_design_artifact")
-    if payload is None:
-        return None
+    candidate = dict(payload)
+    candidate.setdefault("artifact_id", artifact.artifact_id)
+    candidate.setdefault("stage_run_id", artifact.stage_run_id)
     try:
-        return SolutionDesignArtifactRead.model_validate(payload)
+        return SolutionDesignArtifactRead.model_validate(candidate)
     except (TypeError, ValueError, ValidationError):
         return None
 
@@ -224,19 +423,80 @@ def _implementation_plan_summary(solution: SolutionDesignArtifactRead) -> str:
     plan = solution.implementation_plan
     ordered_tasks = sorted(plan.tasks, key=lambda task: task.order_index)
     task_ids = _bounded_join(task.task_id for task in ordered_tasks)
+    task_details = _bounded_join(
+        f"task_id={task.task_id}" for task in ordered_tasks
+    )
     order = _bounded_join(
         f"{task.order_index}:{task.task_id}" for task in ordered_tasks
+    )
+    target_files = _bounded_join(
+        file_path
+        for task in ordered_tasks
+        for file_path in task.target_files
+    )
+    target_modules = _bounded_join(
+        module
+        for task in ordered_tasks
+        for module in task.target_modules
+    )
+    verification_commands = _bounded_join(
+        command
+        for task in ordered_tasks
+        for command in task.verification_commands
     )
     dependencies = _bounded_join(
         f"{task.task_id}<-{','.join(task.depends_on_task_ids)}"
         for task in ordered_tasks
         if task.depends_on_task_ids
     )
+    risks = _bounded_join(
+        task.risk_handling or "" for task in ordered_tasks
+    )
     return (
         f"Approved solution design implementation plan: plan_id={plan.plan_id}; "
         f"artifact_id={solution.artifact_id}; task_ids={task_ids}; "
-        f"order={order}; depends_on_task_ids={dependencies}."
+        f"tasks={task_details}; order={order}; target_files={target_files}; "
+        f"target_modules={target_modules}; "
+        f"verification_commands={verification_commands}; "
+        f"depends_on_task_ids={dependencies}; risk_handling={risks}."
     )
+
+
+def _stage_output_summary(
+    artifact_type: str,
+    payload: Mapping[str, Any],
+) -> str:
+    if artifact_type == "RequirementAnalysisArtifact":
+        return (
+            f"Stage output artifact: artifact_type={artifact_type}; "
+            f"structured_requirement={_short_text(_string_value(payload, 'structured_requirement'))}; "
+            f"acceptance_criteria={_bounded_join(_string_list(payload.get('acceptance_criteria')))}; "
+            f"source_message_refs={_bounded_join(_string_list(payload.get('source_message_refs')))}."
+        )
+    if artifact_type == "CodeGenerationArtifact":
+        return (
+            f"Stage output artifact: artifact_type={artifact_type}; "
+            f"changeset_ref={_string_value(payload, 'changeset_ref')}; "
+            f"changed_files={_bounded_join(_string_list(payload.get('changed_files')))}; "
+            f"diff_refs={_bounded_join(_string_list(payload.get('diff_refs')))}; "
+            f"file_edit_trace_refs={_bounded_join(_string_list(payload.get('file_edit_trace_refs')))}."
+        )
+    if artifact_type == "TestGenerationExecutionArtifact":
+        return (
+            f"Stage output artifact: artifact_type={artifact_type}; "
+            f"test_execution_result={_short_text(_string_value(payload, 'test_execution_result'))}; "
+            f"command_trace_refs={_bounded_join(_string_list(payload.get('command_trace_refs')))}; "
+            f"changeset_refs={_bounded_join(_string_list(payload.get('changeset_refs')))}."
+        )
+    if artifact_type == "CodeReviewArtifact":
+        return (
+            f"Stage output artifact: artifact_type={artifact_type}; "
+            f"regression_decision={_short_text(_string_value(payload, 'regression_decision'))}; "
+            f"evidence_refs={_bounded_join(_string_list(payload.get('evidence_refs')))}; "
+            f"changeset_refs={_bounded_join(_string_list(payload.get('changeset_refs')))}; "
+            f"test_result_refs={_bounded_join(_string_list(payload.get('test_result_refs')))}."
+        )
+    return f"Stage output artifact: artifact_type={artifact_type}."
 
 
 def _context_reference_blocks(
@@ -627,6 +887,33 @@ def _is_allowed_context_reference_source_ref(source_ref: str) -> bool:
 def _artifact_process(artifact: StageArtifactModel) -> dict[str, Any]:
     process = artifact.process
     return process if isinstance(process, dict) else {}
+
+
+def _has_required_fields(
+    artifact_type: str,
+    payload: Mapping[str, Any],
+) -> bool:
+    required_fields = _STAGE_OUTPUT_REQUIRED_FIELDS.get(artifact_type)
+    return required_fields is not None and all(
+        field_name in payload for field_name in required_fields
+    )
+
+
+def _string_value(payload: Mapping[str, Any], key: str) -> str:
+    value = payload.get(key)
+    return value if isinstance(value, str) else "none"
+
+
+def _string_list(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value,)
+    if not isinstance(value, list | tuple):
+        return ()
+    return tuple(item for item in value if isinstance(item, str) and item)
+
+
+def _non_empty_strings(value: object) -> tuple[str, ...]:
+    return _string_list(value)
 
 
 def _run_id_from_ref(ref: str) -> str | None:

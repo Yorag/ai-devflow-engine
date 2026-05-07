@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from backend.app.context.schemas import (
     ContextBoundaryAction,
@@ -28,6 +29,26 @@ from backend.app.schemas.run import (
 
 
 NOW = datetime(2026, 5, 4, 12, 0, tzinfo=UTC)
+
+
+def _user_message(
+    *,
+    message_id: str = "message-1",
+    run_id: str = "run-1",
+    stage_run_id: str = "stage-requirement-1",
+    content: str = (
+        "请只修改 frontend/src/pages/HomePage.tsx，把 "
+        "<h1>Make delivery work traceable.</h1> 改成 "
+        "<h1>Make delivery work.</h1>。不要修改其他文件。"
+    ),
+) -> dict[str, Any]:
+    return {
+        "message_id": message_id,
+        "run_id": run_id,
+        "stage_run_id": stage_run_id,
+        "author": "user",
+        "content": content,
+    }
 
 
 def _solution_design_artifact(
@@ -92,13 +113,15 @@ def _stage_artifact(
     *,
     artifact_id: str = "artifact-solution-design-1",
     run_id: str = "run-1",
+    stage_run_id: str | None = None,
+    artifact_type: str = "solution_design",
     process: object | None = None,
 ) -> StageArtifactModel:
     return StageArtifactModel(
         artifact_id=artifact_id,
         run_id=run_id,
-        stage_run_id=f"stage-{artifact_id}",
-        artifact_type="solution_design",
+        stage_run_id=stage_run_id or f"stage-{artifact_id}",
+        artifact_type=artifact_type,
         payload_ref=f"payload-{artifact_id}",
         process=process
         if process is not None
@@ -110,6 +133,104 @@ def _stage_artifact(
         metrics={},
         created_at=NOW,
     )
+
+
+def _output_snapshot_artifact(
+    *,
+    artifact_id: str,
+    stage_run_id: str,
+    artifact_type: str,
+    artifact_payload: dict[str, Any],
+    run_id: str = "run-1",
+    evidence_refs: list[str] | None = None,
+) -> StageArtifactModel:
+    return _stage_artifact(
+        artifact_id=artifact_id,
+        run_id=run_id,
+        stage_run_id=stage_run_id,
+        artifact_type=f"{artifact_type.lower()}_stage_agent_stage",
+        process={
+            "output_snapshot": {
+                "artifact_type": artifact_type,
+                "artifact_payload": artifact_payload,
+                "evidence_refs": evidence_refs or [f"stage-artifact://{artifact_id}"],
+                "risk_summary": None,
+                "failure_summary": None,
+            },
+            "output_refs": evidence_refs or [f"stage-artifact://{artifact_id}"],
+        },
+    )
+
+
+def _requirement_analysis_payload() -> dict[str, Any]:
+    return {
+        "structured_requirement": (
+            "Update frontend/src/pages/HomePage.tsx heading text."
+        ),
+        "acceptance_criteria": [
+            "The h1 text is Make delivery work.",
+            "No other files are modified.",
+        ],
+        "clarification_summary": "No clarification required.",
+        "assumptions": ["The target file exists."],
+        "non_goals": ["Do not update README.md."],
+        "open_questions": [],
+        "source_message_refs": ["message://session-1/message-1"],
+        "clarification_record_refs": [],
+        "attachment_refs": [],
+        "context_refs": [],
+        "analysis_notes": "Single-file copy change.",
+    }
+
+
+def _code_generation_payload() -> dict[str, Any]:
+    return {
+        "changeset_ref": "changeset://run-1/code-generation/1",
+        "changed_files": ["frontend/src/pages/HomePage.tsx"],
+        "diff_refs": ["diff://run-1/code-generation/1"],
+        "file_edit_trace_refs": [
+            "file_edit_trace:run-1:stage-code-generation-1:frontend/src/pages/HomePage.tsx"
+        ],
+        "implementation_notes": "Updated the homepage heading task.",
+        "requirement_refs": ["stage-artifact://artifact-requirement-1"],
+        "solution_refs": ["stage-artifact://artifact-solution-output-1"],
+    }
+
+
+def test_requirement_analysis_receives_new_requirement_user_message() -> None:
+    from backend.app.context.source_resolver import ContextSourceResolver
+
+    blocks = ContextSourceResolver().resolve_stage_inputs(
+        session_id="session-1",
+        run_id="run-1",
+        stage_run_id="stage-requirement-1",
+        stage_type=StageType.REQUIREMENT_ANALYSIS,
+        stage_artifacts=(),
+        user_messages=(
+            _user_message(),
+            _user_message(
+                message_id="message-foreign",
+                run_id="run-foreign",
+                content="Do not include this foreign run message.",
+            ),
+        ),
+        allowed_context_run_ids=("run-1",),
+        built_at=NOW,
+    )
+
+    assert len(blocks) == 1
+    block = blocks[0]
+    assert block.section is ContextEnvelopeSection.INPUT_ARTIFACT_REFS
+    assert block.trust_level is ContextTrustLevel.UNTRUSTED_OBSERVATION
+    assert block.boundary_action is ContextBoundaryAction.QUARANTINE
+    assert "frontend/src/pages/HomePage.tsx" in block.summary
+    assert "Make delivery work traceable." in block.summary
+    assert "Make delivery work." in block.summary
+    assert "foreign" not in block.summary
+    assert block.content_ref == "message://session-1/message-1"
+    assert [source.source_ref for source in block.sources] == [
+        "message://session-1/message-1"
+    ]
 
 
 def test_resolve_stage_inputs_includes_approved_implementation_plan_and_skips_foreign_run() -> None:
@@ -154,6 +275,133 @@ def test_resolve_stage_inputs_includes_approved_implementation_plan_and_skips_fo
         source.source_ref != "stage-artifact://artifact-foreign"
         for source in block.sources
     )
+
+
+def test_code_generation_receives_solution_plan_from_output_snapshot() -> None:
+    from backend.app.context.source_resolver import ContextSourceResolver
+
+    solution_payload = _solution_design_artifact(
+        artifact_id="artifact-solution-output-1",
+        plan_id="plan-1",
+    ).model_dump(mode="json")
+    solution_payload.pop("artifact_id")
+    solution_payload.pop("stage_run_id")
+    solution_payload["implementation_plan"]["tasks"][0]["task_id"] = (
+        "task-homepage-copy"
+    )
+    solution_payload["implementation_plan"]["tasks"][0]["target_files"] = [
+        "frontend/src/pages/HomePage.tsx"
+    ]
+    solution_payload["implementation_plan"]["tasks"][0]["target_modules"] = [
+        "frontend.pages.HomePage"
+    ]
+    solution_payload["implementation_plan"]["tasks"][0][
+        "verification_commands"
+    ] = ["npm --prefix frontend run build"]
+
+    blocks = ContextSourceResolver().resolve_stage_inputs(
+        session_id="session-1",
+        run_id="run-1",
+        stage_run_id="stage-run-code",
+        stage_type=StageType.CODE_GENERATION,
+        stage_artifacts=(
+            _output_snapshot_artifact(
+                artifact_id="artifact-requirement-1",
+                stage_run_id="stage-requirement-1",
+                artifact_type="RequirementAnalysisArtifact",
+                artifact_payload=_requirement_analysis_payload(),
+            ),
+            _output_snapshot_artifact(
+                artifact_id="artifact-solution-output-1",
+                stage_run_id="stage-solution-design-1",
+                artifact_type="SolutionDesignArtifact",
+                artifact_payload=solution_payload,
+            ),
+        ),
+        user_messages=(),
+        allowed_context_run_ids=("run-1",),
+        built_at=NOW,
+    )
+
+    summaries = "\n".join(block.summary for block in blocks)
+    assert "RequirementAnalysisArtifact" in summaries
+    assert "SolutionDesignArtifact" in summaries
+    assert "plan_id=plan-1" in summaries
+    assert "task_id=task-homepage-copy" in summaries
+    assert "target_files=frontend/src/pages/HomePage.tsx" in summaries
+    assert "target_modules=frontend.pages.HomePage" in summaries
+    assert "verification_commands=npm --prefix frontend run build" in summaries
+    assert "stage-artifact://artifact-requirement-1" in {
+        source.source_ref for block in blocks for source in block.sources
+    }
+    assert "stage-artifact://artifact-solution-output-1" in {
+        source.source_ref for block in blocks for source in block.sources
+    }
+
+
+def test_test_execution_receives_plan_and_code_generation_output() -> None:
+    from backend.app.context.source_resolver import ContextSourceResolver
+
+    solution_payload = _solution_design_artifact(plan_id="plan-1").model_dump(
+        mode="json"
+    )
+    solution_payload.pop("artifact_id")
+    solution_payload.pop("stage_run_id")
+    solution_payload["implementation_plan"]["tasks"][0]["task_id"] = (
+        "task-homepage-copy"
+    )
+    solution_payload["implementation_plan"]["tasks"][0]["target_files"] = [
+        "frontend/src/pages/HomePage.tsx"
+    ]
+    solution_payload["implementation_plan"]["tasks"][0][
+        "verification_commands"
+    ] = ["npm --prefix frontend run build"]
+
+    blocks = ContextSourceResolver().resolve_stage_inputs(
+        session_id="session-1",
+        run_id="run-1",
+        stage_run_id="stage-run-test",
+        stage_type=StageType.TEST_GENERATION_EXECUTION,
+        stage_artifacts=(
+            _output_snapshot_artifact(
+                artifact_id="artifact-requirement-1",
+                stage_run_id="stage-requirement-1",
+                artifact_type="RequirementAnalysisArtifact",
+                artifact_payload=_requirement_analysis_payload(),
+            ),
+            _output_snapshot_artifact(
+                artifact_id="artifact-solution-output-1",
+                stage_run_id="stage-solution-design-1",
+                artifact_type="SolutionDesignArtifact",
+                artifact_payload=solution_payload,
+            ),
+            _output_snapshot_artifact(
+                artifact_id="artifact-codegen-1",
+                stage_run_id="stage-code-generation-1",
+                artifact_type="CodeGenerationArtifact",
+                artifact_payload=_code_generation_payload(),
+                evidence_refs=[
+                    "file_edit_trace:run-1:stage-code-generation-1:frontend/src/pages/HomePage.tsx"
+                ],
+            ),
+        ),
+        user_messages=(),
+        allowed_context_run_ids=("run-1",),
+        built_at=NOW,
+    )
+
+    summaries = "\n".join(block.summary for block in blocks)
+    assert "RequirementAnalysisArtifact" in summaries
+    assert "SolutionDesignArtifact" in summaries
+    assert "plan_id=plan-1" in summaries
+    assert "task_id=task-homepage-copy" in summaries
+    assert "verification_commands=npm --prefix frontend run build" in summaries
+    assert "CodeGenerationArtifact" in summaries
+    assert "changed_files=frontend/src/pages/HomePage.tsx" in summaries
+    assert (
+        "file_edit_trace_refs=file_edit_trace:run-1:stage-code-generation-1:"
+        "frontend/src/pages/HomePage.tsx"
+    ) in summaries
 
 
 def test_resolve_stage_inputs_ignores_malformed_payloads_and_unrelated_stages() -> None:

@@ -181,6 +181,47 @@ def _request() -> object:
     )
 
 
+def _stage_handoff_request(stage_type: StageType) -> object:
+    from backend.app.prompts.renderer import PromptRenderRequest
+
+    artifact_by_stage = {
+        StageType.SOLUTION_DESIGN: "SolutionDesignArtifact",
+        StageType.CODE_GENERATION: "CodeGenerationArtifact",
+        StageType.TEST_GENERATION_EXECUTION: "TestGenerationExecutionArtifact",
+        StageType.CODE_REVIEW: "CodeReviewArtifact",
+    }
+    return PromptRenderRequest(
+        session_id="session-1",
+        run_id="run-1",
+        stage_run_id=f"stage-run-{stage_type.value}",
+        stage_type=stage_type,
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        template_snapshot_ref="template-snapshot-run-1",
+        system_prompt_ref="template-snapshot://run-1/agent-role/system-prompt",
+        stage_contracts={
+            stage_type.value: {
+                "stage_type": stage_type.value,
+                "stage_contract_ref": f"stage-contract-{stage_type.value}",
+                "stage_responsibility": stage_type.value,
+                "input_contract": {"requires": []},
+                "output_contract": artifact_by_stage[stage_type],
+                "structured_artifact_required": artifact_by_stage[stage_type],
+                "allowed_tools": [],
+            }
+        },
+        stage_work_instruction_ref=f"template-snapshot://run-1/{stage_type.value}",
+        user_stage_instruction="Follow the formal stage handoff contract.",
+        agent_role_prompt="Return the required structured artifact.",
+        task_objective="Execute the current stage.",
+        specified_action="Return a valid AgentDecision.",
+        available_tools=[],
+        response_schema={"type": "object", "properties": {}},
+        output_schema_ref="schema://agent-decision",
+        tool_schema_version="tool-schema-v1",
+        created_at=NOW,
+    )
+
+
 def test_render_stage_execution_messages_with_metadata_without_prompt_metadata_in_text() -> None:
     from backend.app.prompts.renderer import PromptRenderer
 
@@ -191,8 +232,8 @@ def test_render_stage_execution_messages_with_metadata_without_prompt_metadata_i
     message_text = "\n\n".join(message.content for message in result.messages)
     assert [message.role for message in result.messages] == ["system", "user"]
     assert "# Runtime Instructions" in result.messages[0].content
-    assert "Solution Design Stage Prompt" not in result.messages[0].content
-    assert "Use the current stage_contract" not in result.messages[0].content
+    assert "Solution Design Stage Prompt" in result.messages[0].content
+    assert "Use the current stage_contract" in result.messages[0].content
     assert "read_file description." in result.messages[0].content
     assert "Use read_file for workspace reads only." in result.messages[0].content
     assert '"solution"' in result.messages[0].content
@@ -211,6 +252,7 @@ def test_render_stage_execution_messages_with_metadata_without_prompt_metadata_i
     assert result.section_order == [
         "runtime_instructions",
         "stage_contract",
+        "stage_prompt_fragment",
         "user_stage_instruction",
         "agent_role_prompt",
         "task_objective",
@@ -220,6 +262,7 @@ def test_render_stage_execution_messages_with_metadata_without_prompt_metadata_i
     ]
     assert [ref.prompt_id for ref in result.metadata.prompt_refs] == [
         "runtime_instructions",
+        "stage_prompt_fragment.solution_design",
         "tool_usage_template",
         "tool_prompt_fragment.read_file",
     ]
@@ -259,6 +302,36 @@ def test_render_structured_output_repair_uses_repair_asset_and_current_schema() 
         "structured_output_repair"
     ]
     assert result.metadata.model_call_type is ModelCallType.STRUCTURED_OUTPUT_REPAIR
+
+
+def test_render_structured_output_repair_forbids_recursive_repair_decision() -> None:
+    from backend.app.prompts.renderer import PromptRenderRequest, PromptRenderer
+
+    request = PromptRenderRequest(
+        **{
+            **_request().model_dump(mode="python"),
+            "model_call_type": ModelCallType.STRUCTURED_OUTPUT_REPAIR,
+            "parse_error": "ambiguous_model_decision",
+            "response_schema": {
+                "type": "object",
+                "properties": {
+                    "decision_type": {
+                        "type": "string",
+                        "enum": ["submit_stage_artifact", "fail_stage"],
+                    }
+                },
+                "required": ["decision_type"],
+                "additionalProperties": False,
+            },
+        }
+    )
+
+    result = PromptRenderer(_registry()).render_structured_output_repair(request)
+    text = "\n\n".join(message.content for message in result.messages)
+
+    assert "Do not return repair_structured_output" in text
+    assert "submit_stage_artifact" in text
+    assert "fail_stage" in text
 
 
 def test_missing_prompt_asset_returns_structured_renderer_error() -> None:
@@ -344,6 +417,7 @@ def test_tool_usage_renders_only_available_tool_prompt_fragments_in_name_order()
     assert "write_file Tool Prompt" not in tool_section.body
     assert [ref.prompt_id for ref in result.metadata.prompt_refs] == [
         "runtime_instructions",
+        "stage_prompt_fragment.solution_design",
         "tool_usage_template",
         "tool_prompt_fragment.grep",
         "tool_prompt_fragment.read_file",
@@ -431,3 +505,53 @@ def test_render_request_rejects_non_json_response_schema_value() -> None:
         )
 
     assert "JSON-serializable" in str(exc_info.value)
+
+
+def test_stage_prompts_render_executable_plan_handoff_contract() -> None:
+    from backend.app.prompts.renderer import PromptRenderer
+
+    renderer = PromptRenderer(PromptRegistry.load_builtin_assets())
+
+    solution = "\n\n".join(
+        message.content
+        for message in renderer.render_messages(
+            _stage_handoff_request(StageType.SOLUTION_DESIGN)
+        ).messages
+    )
+    assert "implementation_plan" in solution
+    assert "task id" in solution
+    assert "order" in solution
+    assert "target file/module" in solution
+    assert "verification command" in solution
+    assert "dependency assumptions" in solution
+    assert "risk handling" in solution
+
+    code_generation = "\n\n".join(
+        message.content
+        for message in renderer.render_messages(
+            _stage_handoff_request(StageType.CODE_GENERATION)
+        ).messages
+    ).lower()
+    assert "execute the approved implementation-plan tasks" in code_generation
+    assert "do not request clarification" in code_generation
+    assert "file_edit_trace_refs" in code_generation
+
+    test_execution = "\n\n".join(
+        message.content
+        for message in renderer.render_messages(
+            _stage_handoff_request(StageType.TEST_GENERATION_EXECUTION)
+        ).messages
+    )
+    assert "plan verification commands" in test_execution
+    assert "task-scoped test gap report" in test_execution
+    assert "command_trace_refs" in test_execution
+
+    code_review = "\n\n".join(
+        message.content
+        for message in renderer.render_messages(
+            _stage_handoff_request(StageType.CODE_REVIEW)
+        ).messages
+    )
+    assert "implementation-plan task ids" in code_review
+    assert "code edit evidence" in code_review
+    assert "test evidence" in code_review

@@ -1,6 +1,6 @@
 ---
 prompt_id: stage_prompt_fragment.code_review
-prompt_version: 2026-05-06.2
+prompt_version: 2026-05-07.1
 prompt_type: stage_prompt_fragment
 authority_level: stage_contract_rendered
 model_call_type: stage_execution
@@ -21,6 +21,8 @@ Use the Requirement Analysis artifact, Solution Design artifact, implementation 
 
 Inspect changed behavior, tests, evidence, and known risks. Check correctness, regression risk, security or data handling risk, maintainability, compatibility, missing tests, and mismatch with accepted requirements. Lead with concrete findings when defects exist, including severity, source reference, impact, and required correction. If no blocking issue is found, state residual risks and verification limits in the response_schema artifact.
 
+Review against implementation-plan task ids from `SolutionDesignArtifact.implementation_plan`. For each relevant task, compare the planned target file/module and expected behavior with code edit evidence and test evidence, including successful file edit refs and command trace refs. Do not approve work whose artifact evidence does not connect back to the implementation-plan task ids.
+
 ## Tool Policy
 
 Use only rendered allowed_tools and tool descriptions for inspection. Do not perform delivery, merge, approval, audit, schema, or runtime control changes from this stage prompt fragment.
@@ -35,7 +37,7 @@ Findings must be actionable, tied to requirements or code behavior, and separate
 
 ## Evidence Requirements
 
-When response_schema asks for evidence, cite changed files, relevant symbols, command results, failing or passing tests, and unresolved risks. Keep summaries secondary to findings when defects are present.
+When response_schema asks for evidence, cite changed files, relevant symbols, implementation-plan task ids, code edit evidence, command results, test evidence, failing or passing tests, and unresolved risks. Keep summaries secondary to findings when defects are present.
 
 ## Failure And Escalation
 

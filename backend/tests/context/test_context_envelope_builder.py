@@ -611,19 +611,43 @@ def test_structured_output_repair_requires_parse_error_and_uses_repair_prompt_pa
     ] == [
         (
             "# Structured Output Repair\nRepair only invalid JSON.\nRepair Scope\n"
-            "Repair the prior response so it matches the current response_schema.\n"
-            "Do not change the stage contract, tool boundary, or structured "
-            "output requirement.\nParse error: Missing required field: decision\n"
-            "Response schema:\n"
-            '{"additionalProperties":false,"properties":{"decision":{"type":"string"}},"required":["decision"],"type":"object"}'
-        )
-    ]
+                "Repair the prior response so it matches the current response_schema.\n"
+                "Do not change the stage contract, tool boundary, or structured "
+                "output requirement.\n"
+                "Do not return repair_structured_output during structured output "
+                "repair.\n"
+                "Return one of the decision_type values allowed by the "
+                "response_schema.\n"
+                "Parse error: Missing required field: decision\n"
+                "Response schema:\n"
+                '{"additionalProperties":false,"properties":{"decision":{"type":"string"}},"required":["decision"],"type":"object"}'
+            )
+        ]
     assert any(
         record.section is ContextEnvelopeSection.RUNTIME_INSTRUCTIONS
         and record.prompt_section_refs
         and record.prompt_section_refs[0].section_id == "structured_output_repair"
         for record in result.manifest.records
     )
+
+
+def test_structured_output_repair_keeps_stage_context_sections() -> None:
+    result = _builder().build_for_stage_call(
+        _build_request(
+            model_call_type=ModelCallType.STRUCTURED_OUTPUT_REPAIR,
+            parse_error="Missing required field: decision",
+        )
+    )
+
+    rendered_text = "\n\n".join(message.content for message in result.rendered_messages)
+    assert "Task Objective" in rendered_text
+    assert "Generate the context envelope builder." in rendered_text
+    assert "Specified Action" in rendered_text
+    assert "Return a structured stage decision." in rendered_text
+    assert "Input Artifact Refs" in rendered_text
+    assert "Context References" in rendered_text
+    assert "Working Observations" in rendered_text
+    assert "Recent Observations" in rendered_text
 
 
 def test_non_prompt_sections_are_appended_in_canonical_order_and_hash_uses_full_messages() -> None:

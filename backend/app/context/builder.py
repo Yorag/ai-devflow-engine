@@ -78,6 +78,7 @@ class ContextBuildRequest:
     change_sets: tuple[ChangeSet, ...] = ()
     clarifications: tuple[ClarificationRecordModel, ...] = ()
     approval_decisions: tuple[ApprovalDecisionModel, ...] = ()
+    user_messages: tuple[Any, ...] = ()
     allowed_context_run_ids: tuple[str, ...] = ()
     reserved_output_tokens: int = 0
     max_recent_observation_blocks: int | None = None
@@ -136,6 +137,7 @@ class ContextEnvelopeBuilder:
             stage_run_id=request.stage_run_id,
             stage_type=request.stage_type,
             stage_artifacts=request.stage_artifacts,
+            user_messages=request.user_messages,
             allowed_context_run_ids=allowed_context_run_ids,
             built_at=built_at,
         )
@@ -883,6 +885,8 @@ class ContextEnvelopeBuilder:
     @staticmethod
     def _non_prompt_sections_text(envelope: ContextEnvelope) -> str:
         sections = (
+            ("Task Objective", envelope.task_objective),
+            ("Specified Action", envelope.specified_action),
             ("Input Artifact Refs", envelope.input_artifact_refs),
             ("Context References", envelope.context_references),
             ("Working Observations", envelope.working_observations),

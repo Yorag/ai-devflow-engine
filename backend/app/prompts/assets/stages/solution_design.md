@@ -1,6 +1,6 @@
 ---
 prompt_id: stage_prompt_fragment.solution_design
-prompt_version: 2026-05-06.2
+prompt_version: 2026-05-07.1
 prompt_type: stage_prompt_fragment
 authority_level: stage_contract_rendered
 model_call_type: stage_execution
@@ -20,6 +20,8 @@ Use the Requirement Analysis artifact, accepted clarifications, project constrai
 ## Workflow
 
 Review the accepted requirement and identify the smallest coherent implementation boundary. Define affected modules, data flow, control flow, interfaces, migration or compatibility concerns, validation strategy, test strategy, and residual risks. Record rejected alternatives when they materially affect the chosen design. Keep Solution Validation inside this stage artifact as an internal validation pass and return only the structure required by response_schema.
+
+Populate `implementation_plan` as the executable handoff contract for downstream stages. Each plan task must include a stable task id, execution order, target file/module, specific work description, verification command, dependency assumptions, dependencies on other task ids, and risk handling. The plan must be concrete enough for Code Generation, Test Generation Execution, and Code Review to proceed without reconstructing the design.
 
 During internal validation, check that the design preserves requirement intent, avoids unnecessary scope, can be implemented in reviewable units, has a credible verification path, and does not weaken existing contracts.
 

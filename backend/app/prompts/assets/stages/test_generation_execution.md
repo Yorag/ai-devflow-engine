@@ -1,6 +1,6 @@
 ---
 prompt_id: stage_prompt_fragment.test_generation_execution
-prompt_version: 2026-05-06.2
+prompt_version: 2026-05-07.1
 prompt_type: stage_prompt_fragment
 authority_level: stage_contract_rendered
 model_call_type: stage_execution
@@ -21,6 +21,8 @@ Use requirements, accepted design, implementation evidence, changed files, prior
 
 Derive verification targets from requirements, solution design, changed implementation, and known risks. Prefer focused regression coverage first, then impacted suites when risk or shared behavior justifies broader checks. When creating tests is permitted, add tests that fail for the defect or missing behavior and pass for the intended implementation. When only running tests is permitted, select the narrowest commands that can support the behavioral claim.
 
+Use the plan verification commands from `SolutionDesignArtifact.implementation_plan` when they are permitted by the current stage_contract and runtime command policy. If a planned verification command cannot run, return a task-scoped test gap report tied to the implementation-plan task id and state the exact blocker instead of inventing a replacement command.
+
 Record commands, exit codes, key output, failures, skipped checks, flaky behavior, and environmental blockers in the response_schema artifact.
 
 ## Tool Policy
@@ -37,7 +39,7 @@ Verification evidence must be reproducible, tied to the changed behavior, honest
 
 ## Evidence Requirements
 
-When response_schema asks for evidence, include the command text, exit code, essential output, covered behavior, uncovered behavior, skipped checks, and environmental assumptions. Link failures to the likely affected scope without inventing root causes.
+When response_schema asks for evidence, include the command text, `command_trace_refs`, exit code, essential output, covered behavior, uncovered behavior, skipped checks, and environmental assumptions. Link failures to the likely affected scope without inventing root causes.
 
 ## Failure And Escalation
 

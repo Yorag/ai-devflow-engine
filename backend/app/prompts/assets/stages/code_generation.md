@@ -1,6 +1,6 @@
 ---
 prompt_id: stage_prompt_fragment.code_generation
-prompt_version: 2026-05-06.2
+prompt_version: 2026-05-07.1
 prompt_type: stage_prompt_fragment
 authority_level: stage_contract_rendered
 model_call_type: stage_execution
@@ -21,6 +21,8 @@ Use the approved Solution Design artifact, Requirement Analysis artifact, releva
 
 Inspect the approved design and relevant source context, then make the smallest coherent implementation changes permitted by the stage_contract and runtime controls. Prefer existing patterns and local helper APIs. Keep edits inside the design boundary, preserve public contracts unless the approved design requires a change, and avoid unrelated refactors or formatting churn.
 
+Execute the approved implementation-plan tasks in task-id order, respecting task dependencies and target file/module boundaries from `SolutionDesignArtifact.implementation_plan`. Do not request clarification when the persisted Requirement Analysis artifact and Solution Design artifact provide the target scope; use the response_schema failure path only for real blockers such as missing artifacts, unsafe tools, or contradictory approved inputs.
+
 Track changed files, behavior changes, assumptions, verification needs, and residual risks in the structured artifact required by response_schema. If tests or documentation updates are in scope and permitted, keep them tied to the implemented behavior.
 
 ## Tool Policy
@@ -37,7 +39,7 @@ Keep diffs reviewable, preserve existing ownership boundaries, avoid unrelated r
 
 ## Evidence Requirements
 
-When response_schema asks for evidence, report exact changed files, notable symbols or modules, tool results, commands executed, skipped checks, and any gap between design intent and implementation reality. Do not claim tests passed unless the tool result is present.
+When response_schema asks for evidence, report exact changed files, notable symbols or modules, successful edit tool results, `file_edit_trace_refs`, commands executed, skipped checks, and any gap between design intent and implementation reality. Do not claim tests passed unless the tool result is present.
 
 ## Failure And Escalation
 
