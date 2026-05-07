@@ -316,7 +316,7 @@ def test_bind_tools_uses_langchain_tool_schema_with_strict_binding() -> None:
     adapter.bind_tools(model, (tool(),))
 
     assert model.bound_schemas == [tool().to_langchain_tool_schema()]
-    assert model.bound_kwargs == {"strict": True}
+    assert model.bound_kwargs == {"strict": True, "parallel_tool_calls": False}
 
 
 def test_invoke_structured_returns_normalized_tool_call_requests_and_usage() -> None:
@@ -484,6 +484,80 @@ def test_invoke_structured_fallback_dict_outputs_are_candidates_only() -> None:
 
     assert result.structured_output is None
     assert result.structured_output_candidates == ({"summary": "candidate"},)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"summary":"candidate"}',
+        '```json\n{"summary":"candidate"}\n```',
+    ],
+)
+def test_invoke_structured_parses_json_text_content_as_candidate(
+    content: str,
+) -> None:
+    from backend.app.providers.langchain_adapter import LangChainProviderAdapter
+
+    fake_provider = fake_provider_fixture(
+        provider_snapshot=provider_snapshot_fixture(
+            capabilities=provider_capabilities_fixture(
+                supports_structured_output=False
+            )
+        )
+    )
+    adapter = LangChainProviderAdapter(
+        provider_config=fake_provider.config,
+        provider_call_policy_snapshot=provider_policy_snapshot(),
+        chat_model_factory=lambda _config, _timeout, _max_tokens: _FakeBoundModel(
+            AIMessage(content=content)
+        ),
+    )
+
+    result = adapter.invoke_structured(
+        messages=(SystemMessage(content="system"), HumanMessage(content="user")),
+        response_schema={
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+            "required": ["summary"],
+            "additionalProperties": False,
+        },
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        tool_descriptions=(),
+        trace_context=trace_context(),
+    )
+
+    assert result.structured_output is None
+    assert result.structured_output_candidates == ({"summary": "candidate"},)
+
+
+def test_invoke_structured_ignores_non_object_json_text_content() -> None:
+    from backend.app.providers.langchain_adapter import LangChainProviderAdapter
+
+    fake_provider = fake_provider_fixture(
+        provider_snapshot=provider_snapshot_fixture(
+            capabilities=provider_capabilities_fixture(
+                supports_structured_output=False
+            )
+        )
+    )
+    adapter = LangChainProviderAdapter(
+        provider_config=fake_provider.config,
+        provider_call_policy_snapshot=provider_policy_snapshot(),
+        chat_model_factory=lambda _config, _timeout, _max_tokens: _FakeBoundModel(
+            AIMessage(content='["not","an","object"]')
+        ),
+    )
+
+    result = adapter.invoke_structured(
+        messages=(SystemMessage(content="system"), HumanMessage(content="user")),
+        response_schema={"type": "object"},
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        tool_descriptions=(),
+        trace_context=trace_context(),
+    )
+
+    assert result.structured_output is None
+    assert result.structured_output_candidates == ()
 
 
 def test_invoke_structured_normalizes_openai_tool_call_arguments() -> None:
@@ -909,7 +983,7 @@ def test_invoke_with_retry_does_not_retry_empty_structured_response() -> None:
     assert result.provider_retry_trace[-1].status == "not_retryable"
 
 
-def test_invoke_with_retry_does_not_retry_unparseable_structured_output() -> None:
+def test_invoke_with_retry_returns_unparseable_output_for_stage_repair() -> None:
     from backend.app.providers.langchain_adapter import LangChainProviderAdapter
 
     waits: list[float] = []
@@ -932,11 +1006,11 @@ def test_invoke_with_retry_does_not_retry_unparseable_structured_output() -> Non
 
     assert waits == []
     assert model.invocations == 1
-    assert result.provider_error_code is ErrorCode.PROVIDER_RETRY_EXHAUSTED
-    assert result.provider_retry_trace[-1].failure_kind == (
-        "structured_output_unparseable"
-    )
-    assert result.provider_retry_trace[-1].status == "not_retryable"
+    assert result.provider_error_code is None
+    assert result.provider_retry_trace == ()
+    assert result.structured_output is None
+    assert result.structured_output_candidates == ()
+    assert result.tool_call_requests == ()
 
 
 def test_invoke_with_retry_opens_circuit_and_blocks_later_same_binding_call() -> None:

@@ -24,6 +24,7 @@ from backend.app.runtime.agent_decision import (
     AgentDecisionParser,
     AgentDecisionParserError,
     AgentDecisionType,
+    agent_decision_response_schema,
 )
 from backend.app.runtime.stage_runner_port import StageNodeInvocation, StageNodeResult
 from backend.app.schemas.prompts import ModelCallType
@@ -68,6 +69,7 @@ class StageExecutionRequest:
     change_sets: tuple[Any, ...] = ()
     clarifications: tuple[Any, ...] = ()
     approval_decisions: tuple[Any, ...] = ()
+    user_messages: tuple[Any, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +103,21 @@ class StageRecoveryCursor:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class _StageArtifactEvidencePolicy:
+    artifact_type: str
+    payload_field: str
+    tool_names: tuple[str, ...]
+    ref_prefix: str
+
+
+@dataclass(frozen=True, slots=True)
+class _StageArtifactEvidenceResult:
+    decision: AgentDecision
+    request: StageExecutionRequest
+    result: StageNodeResult | None = None
+
+
 class StageAgentRuntime:
     def __init__(
         self,
@@ -128,6 +145,7 @@ class StageAgentRuntime:
         change_sets: Sequence[Any] = (),
         clarifications: Sequence[Any] = (),
         approval_decisions: Sequence[Any] = (),
+        user_messages: Sequence[Any] = (),
         runtime_tool_timeout_seconds: float | None = None,
         platform_tool_timeout_hard_limit_seconds: float | None = None,
         workspace_boundary: object | None = None,
@@ -161,6 +179,7 @@ class StageAgentRuntime:
         self._change_sets = tuple(change_sets)
         self._clarifications = tuple(clarifications)
         self._approval_decisions = tuple(approval_decisions)
+        self._user_messages = tuple(user_messages)
         self._runtime_tool_timeout_seconds = runtime_tool_timeout_seconds
         self._platform_tool_timeout_hard_limit_seconds = (
             platform_tool_timeout_hard_limit_seconds
@@ -225,10 +244,16 @@ class StageAgentRuntime:
             stage_run_id=request.invocation.stage_run_id,
         )
         model_result = self._provider_adapter.invoke_with_retry(
-            messages=self._provider_messages(build_result.rendered_messages),
+            messages=self._provider_messages(
+                build_result.rendered_messages,
+                tool_results=tool_results,
+            ),
             response_schema=dict(build_result.envelope.response_schema),
             model_call_type=request.model_call_type,
-            tool_descriptions=tuple(build_result.envelope.available_tools),
+            tool_descriptions=self._tool_descriptions_for_model_call(
+                request,
+                tuple(build_result.envelope.available_tools),
+            ),
             trace_context=iteration_trace,
             requested_max_output_tokens=request.requested_max_output_tokens,
         )
@@ -305,6 +330,16 @@ class StageAgentRuntime:
             return result, tool_result, request
 
         if decision.decision_type is AgentDecisionType.SUBMIT_STAGE_ARTIFACT:
+            evidence_result = self._normalize_or_repair_stage_artifact_evidence(
+                request,
+                decision,
+                tool_results=tool_results,
+                iteration_index=iteration_index,
+                **cursor_kwargs,
+            )
+            if evidence_result.result is not None or evidence_result.request is not request:
+                return (evidence_result.result, None, evidence_result.request)
+            decision = evidence_result.decision
             recovery_ref = self.persist_recovery_checkpoint(
                 request,
                 self._recovery_cursor(
@@ -380,6 +415,9 @@ class StageAgentRuntime:
                     request,
                     model_call_type=ModelCallType.STRUCTURED_OUTPUT_REPAIR,
                     parse_error=repair.parse_error,
+                    response_schema=self._structured_output_repair_response_schema(
+                        request
+                    ),
                 ),
             )
 
@@ -392,7 +430,16 @@ class StageAgentRuntime:
                     **cursor_kwargs,
                 ),
             )
-            return (None, None, request)
+            return (
+                None,
+                None,
+                replace(
+                    request,
+                    model_call_type=ModelCallType.STAGE_EXECUTION,
+                    parse_error=None,
+                    response_schema=self._base_response_schema(request),
+                ),
+            )
 
         if (
             decision.decision_type is AgentDecisionType.REQUEST_TOOL_CONFIRMATION
@@ -536,6 +583,149 @@ class StageAgentRuntime:
             ),
         )
 
+    def _normalize_or_repair_stage_artifact_evidence(
+        self,
+        request: StageExecutionRequest,
+        decision: AgentDecision,
+        *,
+        tool_results: tuple[ToolResult, ...],
+        iteration_index: int,
+        last_decision_trace_ref: str | None,
+        last_model_call_ref: str | None,
+    ) -> _StageArtifactEvidenceResult:
+        stage_artifact = decision.stage_artifact
+        if stage_artifact is None:
+            return _StageArtifactEvidenceResult(
+                decision=decision,
+                request=request,
+            )
+        policy = _evidence_policy_for_artifact(
+            stage_artifact.artifact_type,
+            allowed_tools=_allowed_tool_names(
+                self._stage_contract(request).get("allowed_tools")
+            ),
+        )
+        if policy is None:
+            return _StageArtifactEvidenceResult(
+                decision=decision,
+                request=request,
+            )
+
+        refs = _successful_side_effect_refs(
+            tool_results,
+            tool_names=policy.tool_names,
+            ref_prefix=policy.ref_prefix,
+        )
+        if not refs:
+            return self._repair_or_fail_missing_stage_artifact_evidence(
+                request,
+                decision,
+                policy=policy,
+                iteration_index=iteration_index,
+                last_decision_trace_ref=last_decision_trace_ref,
+                last_model_call_ref=last_model_call_ref,
+                completed_tool_call_ids=tuple(
+                    item.call_id
+                    for item in tool_results
+                    if item.status is ToolResultStatus.SUCCEEDED
+                ),
+            )
+
+        payload = dict(stage_artifact.artifact_payload)
+        payload[policy.payload_field] = list(refs)
+        evidence_refs = _dedupe_strings((*stage_artifact.evidence_refs, *refs))
+        normalized_stage_artifact = stage_artifact.model_copy(
+            update={
+                "artifact_payload": payload,
+                "evidence_refs": evidence_refs,
+            }
+        )
+        return _StageArtifactEvidenceResult(
+            decision=decision.model_copy(
+                update={"stage_artifact": normalized_stage_artifact}
+            ),
+            request=request,
+        )
+
+    def _repair_or_fail_missing_stage_artifact_evidence(
+        self,
+        request: StageExecutionRequest,
+        decision: AgentDecision,
+        *,
+        policy: "_StageArtifactEvidencePolicy",
+        iteration_index: int,
+        last_decision_trace_ref: str | None,
+        last_model_call_ref: str | None,
+        completed_tool_call_ids: tuple[str, ...],
+    ) -> _StageArtifactEvidenceResult:
+        parse_error = (
+            f"{policy.artifact_type}.{policy.payload_field} must cite at least one "
+            f"successful {policy.ref_prefix} side-effect ref from "
+            f"{', '.join(policy.tool_names)}."
+        )
+        repair_count = self._process_record_count("structured_output_repair_trace")
+        if (
+            repair_count
+            < request.runtime_limit_snapshot.agent_limits.max_structured_output_repair_attempts
+        ):
+            self._append_process_record(
+                request,
+                "structured_output_repair_trace",
+                {
+                    "parse_error_summary": _bounded_string(parse_error),
+                    "parse_error_code": "stage_artifact_missing_tool_evidence",
+                    "invalid_output_ref": last_model_call_ref,
+                    "repair_instruction_summary": (
+                        f"Execute the required tool action and submit "
+                        f"{policy.artifact_type} with {policy.payload_field} "
+                        "citing the successful tool side-effect refs."
+                    ),
+                    "decision_trace_ref": last_decision_trace_ref,
+                    "iteration_index": iteration_index,
+                    "artifact_type": policy.artifact_type,
+                    "missing_field": policy.payload_field,
+                },
+            )
+            self.persist_recovery_checkpoint(
+                request,
+                self._recovery_cursor(
+                    request,
+                    iteration_index=iteration_index,
+                    last_decision_trace_ref=last_decision_trace_ref,
+                    last_model_call_ref=last_model_call_ref,
+                    completed_tool_call_ids=completed_tool_call_ids,
+                ),
+            )
+            return _StageArtifactEvidenceResult(
+                decision=decision,
+                request=replace(
+                    request,
+                    model_call_type=ModelCallType.STRUCTURED_OUTPUT_REPAIR,
+                    parse_error=parse_error,
+                    response_schema=self._structured_output_repair_response_schema(
+                        request
+                    ),
+                ),
+            )
+        return _StageArtifactEvidenceResult(
+            decision=decision,
+            request=request,
+            result=self._failed_result(
+                request,
+                reason="stage_artifact_missing_tool_evidence",
+                iteration_index=iteration_index,
+                last_decision_trace_ref=last_decision_trace_ref,
+                last_model_call_ref=last_model_call_ref,
+                completed_tool_call_ids=completed_tool_call_ids,
+                safe_details={
+                    "artifact_type": policy.artifact_type,
+                    "missing_field": policy.payload_field,
+                    "required_tools": list(policy.tool_names),
+                    "required_ref_prefix": policy.ref_prefix,
+                },
+            ),
+        )
+
     def submit_stage_artifact(
         self,
         request: StageExecutionRequest,
@@ -629,6 +819,7 @@ class StageAgentRuntime:
             change_sets=self._change_sets,
             clarifications=self._clarifications,
             approval_decisions=self._approval_decisions,
+            user_messages=self._user_messages,
         )
 
     def _context_request(self, request: StageExecutionRequest) -> ContextBuildRequest:
@@ -658,6 +849,7 @@ class StageAgentRuntime:
             change_sets=request.change_sets,
             clarifications=request.clarifications,
             approval_decisions=request.approval_decisions,
+            user_messages=request.user_messages,
             provider_adapter=self._provider_adapter,
             reserved_output_tokens=request.requested_max_output_tokens or 0,
         )
@@ -711,7 +903,31 @@ class StageAgentRuntime:
                 request,
                 model_call_type=ModelCallType.STRUCTURED_OUTPUT_REPAIR,
                 parse_error=exc.error.error_code.value,
+                response_schema=self._structured_output_repair_response_schema(request),
             ),
+        )
+
+    def _structured_output_repair_response_schema(
+        self,
+        request: StageExecutionRequest,
+    ) -> dict[str, object]:
+        allowed = [
+            decision_type
+            for decision_type in _base_response_schema_decision_types(request)
+            if decision_type is not AgentDecisionType.REPAIR_STRUCTURED_OUTPUT
+        ]
+        return agent_decision_response_schema(
+            artifact_type=_stage_artifact_type(request),
+            allowed_decision_types=tuple(allowed),
+        )
+
+    def _base_response_schema(
+        self,
+        request: StageExecutionRequest,
+    ) -> dict[str, object]:
+        return agent_decision_response_schema(
+            artifact_type=_stage_artifact_type(request),
+            allowed_decision_types=_base_response_schema_decision_types(request),
         )
 
     def _ensure_stage_input(self, request: StageExecutionRequest) -> None:
@@ -779,8 +995,6 @@ class StageAgentRuntime:
             return "max_output_tokens_insufficient"
         if available_tools and not capabilities.supports_tool_calling:
             return "tool_calling_unsupported"
-        if not capabilities.supports_structured_output:
-            return "structured_output_unsupported"
         return None
 
     def _append_model_call_traces(
@@ -1144,8 +1358,12 @@ class StageAgentRuntime:
             and runtime_limits.get("skip_high_risk_tool_confirmations") is True
         )
 
-    @staticmethod
-    def _provider_messages(messages: Sequence[object]) -> tuple[BaseMessage, ...]:
+    def _provider_messages(
+        self,
+        messages: Sequence[object],
+        *,
+        tool_results: Sequence[ToolResult] = (),
+    ) -> tuple[BaseMessage, ...]:
         converted: list[BaseMessage] = []
         for message in messages:
             if isinstance(message, BaseMessage):
@@ -1159,7 +1377,51 @@ class StageAgentRuntime:
                 converted.append(AIMessage(content=content))
             else:
                 converted.append(HumanMessage(content=content))
+        tool_observation = self._tool_result_observation(tool_results)
+        if tool_observation is not None:
+            converted.append(HumanMessage(content=tool_observation))
         return tuple(converted)
+
+    @staticmethod
+    def _tool_descriptions_for_model_call(
+        request: StageExecutionRequest,
+        available_tools: tuple[object, ...],
+    ) -> tuple[object, ...]:
+        if request.model_call_type is ModelCallType.STRUCTURED_OUTPUT_REPAIR:
+            return ()
+        return available_tools
+
+    @staticmethod
+    def _tool_result_observation(
+        tool_results: Sequence[ToolResult],
+    ) -> str | None:
+        if not tool_results:
+            return None
+        payload = []
+        for result in tool_results:
+            payload.append(
+                {
+                    "tool_name": result.tool_name,
+                    "call_id": result.call_id,
+                    "status": result.status.value,
+                    "output_payload": dict(result.output_payload),
+                    "artifact_refs": list(result.artifact_refs),
+                    "side_effect_refs": list(result.side_effect_refs),
+                    "error_code": (
+                        result.error.error_code.value
+                        if result.error is not None
+                        else None
+                    ),
+                    "safe_details": _tool_error_safe_details(result),
+                }
+            )
+        return (
+            "Recent Tool Results\n"
+            "Use these tool results as evidence for the next single decision. "
+            "Do not repeat a successful read-only tool call unless a different "
+            "specific target is required.\n"
+            f"{json.dumps(payload, ensure_ascii=False, sort_keys=True)}"
+        )
 
     @staticmethod
     def _fallback_model_call_ref(model_result: ModelCallResult) -> str:
@@ -1210,6 +1472,104 @@ def _tool_error_safe_details(tool_result: ToolResult) -> dict[str, object]:
     if tool_result.error is None:
         return {}
     return dict(tool_result.error.safe_details)
+
+
+def _evidence_policy_for_artifact(
+    artifact_type: str,
+    *,
+    allowed_tools: tuple[str, ...] | None,
+) -> _StageArtifactEvidencePolicy | None:
+    if artifact_type == "CodeGenerationArtifact":
+        policy = _StageArtifactEvidencePolicy(
+            artifact_type=artifact_type,
+            payload_field="file_edit_trace_refs",
+            tool_names=("write_file", "edit_file"),
+            ref_prefix="file_edit_trace:",
+        )
+    elif artifact_type == "TestGenerationExecutionArtifact":
+        policy = _StageArtifactEvidencePolicy(
+            artifact_type=artifact_type,
+            payload_field="command_trace_refs",
+            tool_names=("bash",),
+            ref_prefix="command_trace:",
+        )
+    else:
+        return None
+
+    if allowed_tools is None:
+        return None
+    if not any(tool_name in allowed_tools for tool_name in policy.tool_names):
+        return None
+    return policy
+
+
+def _allowed_tool_names(value: object) -> tuple[str, ...] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, Sequence):
+        names = tuple(item for item in value if isinstance(item, str) and item)
+        return names
+    return None
+
+
+def _stage_artifact_type(request: StageExecutionRequest) -> str | None:
+    contract = request.graph_definition.stage_contracts[request.invocation.stage_type.value]
+    artifact_type = contract.get("structured_artifact_required")
+    if isinstance(artifact_type, str) and artifact_type:
+        return artifact_type
+    return None
+
+
+def _base_response_schema_decision_types(
+    request: StageExecutionRequest,
+) -> tuple[AgentDecisionType, ...]:
+    contract = request.graph_definition.stage_contracts[request.invocation.stage_type.value]
+    decision_types: tuple[AgentDecisionType, ...] = (
+        AgentDecisionType.REQUEST_TOOL_CONFIRMATION,
+        AgentDecisionType.SUBMIT_STAGE_ARTIFACT,
+        AgentDecisionType.REPAIR_STRUCTURED_OUTPUT,
+        AgentDecisionType.RETRY_WITH_REVISED_PLAN,
+        AgentDecisionType.FAIL_STAGE,
+    )
+    if (
+        contract.get("clarification_allowed") is True
+        or contract.get("can_request_clarification") is True
+    ):
+        decision_types = (
+            AgentDecisionType.REQUEST_TOOL_CONFIRMATION,
+            AgentDecisionType.SUBMIT_STAGE_ARTIFACT,
+            AgentDecisionType.REQUEST_CLARIFICATION,
+            AgentDecisionType.REPAIR_STRUCTURED_OUTPUT,
+            AgentDecisionType.RETRY_WITH_REVISED_PLAN,
+            AgentDecisionType.FAIL_STAGE,
+        )
+    return decision_types
+
+
+def _successful_side_effect_refs(
+    tool_results: Sequence[ToolResult],
+    *,
+    tool_names: tuple[str, ...],
+    ref_prefix: str,
+) -> tuple[str, ...]:
+    refs: list[str] = []
+    for result in tool_results:
+        if result.status is not ToolResultStatus.SUCCEEDED:
+            continue
+        if result.tool_name not in tool_names:
+            continue
+        refs.extend(
+            ref
+            for ref in result.side_effect_refs
+            if isinstance(ref, str) and ref.startswith(ref_prefix)
+        )
+    return _dedupe_strings(refs)
+
+
+def _dedupe_strings(values: Sequence[str]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(values))
 
 
 def _safe_trace_summary(model_result: ModelCallResult) -> dict[str, object]:

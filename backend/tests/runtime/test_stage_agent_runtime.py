@@ -216,12 +216,15 @@ def build_runtime(
     available_tools: tuple[ToolBindableDescription, ...] | None = None,
     model_binding_snapshot: ModelBindingSnapshotRead | None = None,
     requested_max_output_tokens: int | None = 100,
+    stage_type: StageType = StageType.CODE_GENERATION,
+    structured_artifact_required: str = "CodeGenerationArtifact",
     stage_artifacts: Sequence[Any] = (),
     context_references: Sequence[Any] = (),
     change_sets: Sequence[Any] = (),
     clarifications: Sequence[Any] = (),
     approval_decisions: Sequence[Any] = (),
     progress_callback: Any | None = None,
+    task_objective: str = "Implement the assigned runtime slice.",
 ) -> Any:
     from backend.app.runtime.stage_agent import StageAgentRuntime
 
@@ -231,7 +234,7 @@ def build_runtime(
         else (read_file_description(),)
     )
     context_builder = FakeContextBuilder(
-        context_envelope(available_tools=resolved_tools)
+        context_envelope(available_tools=resolved_tools, stage_type=stage_type)
     )
     provider_adapter = FakeProviderAdapter(provider_results)
     tool_registry = FakeToolRegistry(tool_results)
@@ -244,11 +247,15 @@ def build_runtime(
         artifact_store=artifact_store,
         stage_artifact_id="artifact-stage-run-1",
         template_snapshot=template_snapshot(),
-        graph_definition=graph_definition(allowed_tools=allowed_tools),
+        graph_definition=graph_definition(
+            allowed_tools=allowed_tools,
+            stage_type=stage_type,
+            structured_artifact_required=structured_artifact_required,
+        ),
         runtime_limit_snapshot=runtime_limits(),
         provider_snapshot=provider_snapshot(),
         model_binding_snapshot=model_binding_snapshot or model_binding(),
-        task_objective="Implement the assigned runtime slice.",
+        task_objective=task_objective,
         specified_action="Return a structured stage decision.",
         response_schema={"type": "object", "properties": {}},
         output_schema_ref="schema://agent-decision",
@@ -268,13 +275,16 @@ def build_runtime(
     return runtime
 
 
-def invocation() -> StageNodeInvocation:
+def invocation(
+    *,
+    stage_type: StageType = StageType.CODE_GENERATION,
+) -> StageNodeInvocation:
     return StageNodeInvocation(
         run_id="run-1",
         stage_run_id="stage-run-1",
-        stage_type=StageType.CODE_GENERATION,
-        graph_node_key="code_generation",
-        stage_contract_ref="stage-contract-code_generation",
+        stage_type=stage_type,
+        graph_node_key=stage_type.value,
+        stage_contract_ref=f"stage-contract-{stage_type.value}",
         runtime_context=runtime_context(),
         trace_context=trace_context(),
     )
@@ -320,14 +330,15 @@ def trace_context(*, stage_run_id: str | None = "stage-run-1") -> TraceContext:
 def context_envelope(
     *,
     available_tools: tuple[ToolBindableDescription, ...],
+    stage_type: StageType = StageType.CODE_GENERATION,
 ) -> ContextEnvelope:
     return ContextEnvelope(
         session_id="session-1",
         run_id="run-1",
         stage_run_id="stage-run-1",
-        stage_type=StageType.CODE_GENERATION,
+        stage_type=stage_type,
         template_snapshot_ref="template-snapshot-run-1",
-        stage_contract_ref="stage-contract-code_generation",
+        stage_contract_ref=f"stage-contract-{stage_type.value}",
         provider_snapshot_ref="provider-snapshot-run-1",
         model_binding_snapshot_ref="model-binding-snapshot-run-1",
         model_call_type=ModelCallType.STAGE_EXECUTION,
@@ -351,6 +362,7 @@ def context_envelope(
 def model_result(
     *,
     structured_output: dict[str, Any] | None = None,
+    structured_output_candidates: tuple[dict[str, Any], ...] = (),
     tool_call_requests: tuple[ModelCallToolRequest, ...] = (),
     provider_retry_trace: tuple[Any, ...] = (),
     provider_circuit_breaker_trace: tuple[Any, ...] = (),
@@ -360,6 +372,7 @@ def model_result(
         model_binding_snapshot_id="model-binding-snapshot-run-1",
         model_call_type=ModelCallType.STAGE_EXECUTION,
         structured_output=structured_output,
+        structured_output_candidates=structured_output_candidates,
         tool_call_requests=tool_call_requests,
         usage=ModelCallUsage(input_tokens=12, output_tokens=8, total_tokens=20),
         raw_response_ref=f"stage-process://stage-run-1/model-call/{id(structured_output)}",
@@ -401,6 +414,33 @@ def write_file_call(call_id: str) -> ModelCallToolRequest:
     )
 
 
+def edit_file_call(
+    call_id: str,
+    *,
+    old_text: str = "Make delivery work traceable.",
+    new_text: str = "Make delivery work.",
+) -> ModelCallToolRequest:
+    return ModelCallToolRequest(
+        call_id=call_id,
+        tool_name="edit_file",
+        input_payload={
+            "path": "frontend/src/pages/HomePage.tsx",
+            "old_text": old_text,
+            "new_text": new_text,
+        },
+        schema_version="tool-schema-v1",
+    )
+
+
+def bash_call(call_id: str) -> ModelCallToolRequest:
+    return ModelCallToolRequest(
+        call_id=call_id,
+        tool_name="bash",
+        input_payload={"command": "npm --prefix frontend run build"},
+        schema_version="tool-schema-v1",
+    )
+
+
 def succeeded_tool_result(call_id: str) -> ToolResult:
     return ToolResult(
         tool_name="read_file",
@@ -437,6 +477,45 @@ def succeeded_write_file_result(call_id: str) -> ToolResult:
         status=ToolResultStatus.SUCCEEDED,
         output_payload={"content_ref": f"tool-result://{call_id}/content"},
         artifact_refs=[f"tool-result://{call_id}"],
+        side_effect_refs=[
+            f"file_edit_trace:run-1:{call_id}:backend/app/runtime/stage_agent.py"
+        ],
+        trace_context=trace_context(),
+        coordination_key=f"stage-run-1:{call_id}",
+    )
+
+
+def succeeded_edit_file_result(call_id: str) -> ToolResult:
+    return ToolResult(
+        tool_name="edit_file",
+        call_id=call_id,
+        status=ToolResultStatus.SUCCEEDED,
+        output_payload={
+            "path": "frontend/src/pages/HomePage.tsx",
+            "replacements": 1,
+            "bytes_written": 42,
+        },
+        artifact_refs=[f"tool-result://{call_id}"],
+        side_effect_refs=[
+            f"file_edit_trace:run-1:{call_id}:frontend/src/pages/HomePage.tsx"
+        ],
+        trace_context=trace_context(),
+        coordination_key=f"stage-run-1:{call_id}",
+    )
+
+
+def succeeded_bash_result(call_id: str) -> ToolResult:
+    return ToolResult(
+        tool_name="bash",
+        call_id=call_id,
+        status=ToolResultStatus.SUCCEEDED,
+        output_payload={
+            "command": "npm --prefix frontend run build",
+            "argv": ["npm", "--prefix", "frontend", "run", "build"],
+            "exit_code": 0,
+        },
+        artifact_refs=[f"tool-result://{call_id}"],
+        side_effect_refs=[f"command_trace:run-1:{call_id}"],
         trace_context=trace_context(),
         coordination_key=f"stage-run-1:{call_id}",
     )
@@ -489,6 +568,62 @@ def write_file_description() -> ToolBindableDescription:
     )
 
 
+def edit_file_description() -> ToolBindableDescription:
+    return ToolBindableDescription(
+        name="edit_file",
+        description="Edit a file.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "minLength": 1},
+                "old_text": {"type": "string", "minLength": 1},
+                "new_text": {"type": "string"},
+            },
+            "required": ["path", "old_text", "new_text"],
+            "additionalProperties": False,
+        },
+        result_schema={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "replacements": {"type": "integer"},
+                "bytes_written": {"type": "integer"},
+            },
+            "required": ["path", "replacements", "bytes_written"],
+            "additionalProperties": False,
+        },
+        risk_level=ToolRiskLevel.HIGH_RISK,
+        risk_categories=[],
+        schema_version="tool-schema-v1",
+    )
+
+
+def bash_description() -> ToolBindableDescription:
+    return ToolBindableDescription(
+        name="bash",
+        description="Run an allowlisted command.",
+        input_schema={
+            "type": "object",
+            "properties": {"command": {"type": "string", "minLength": 1}},
+            "required": ["command"],
+            "additionalProperties": False,
+        },
+        result_schema={
+            "type": "object",
+            "properties": {
+                "command": {"type": "string"},
+                "argv": {"type": "array", "items": {"type": "string"}},
+                "exit_code": {"type": "integer"},
+            },
+            "required": ["command", "argv", "exit_code"],
+            "additionalProperties": False,
+        },
+        risk_level=ToolRiskLevel.HIGH_RISK,
+        risk_categories=[],
+        schema_version="tool-schema-v1",
+    )
+
+
 def code_generation_payload() -> dict[str, Any]:
     return {
         "changeset_ref": "changeset://run-1/code-generation/1",
@@ -501,9 +636,23 @@ def code_generation_payload() -> dict[str, Any]:
     }
 
 
+def execution_artifact_payload() -> dict[str, Any]:
+    return {
+        "test_changes_ref": "test-changes://run-1/1",
+        "test_execution_result": "passed",
+        "test_gap_report": [],
+        "command_trace_refs": ["command://run-1/bogus"],
+        "failed_test_refs": [],
+        "acceptance_criteria_refs": ["acceptance://run-1/1"],
+        "changeset_refs": ["changeset://run-1/code-generation/1"],
+    }
+
+
 def graph_definition(
     *,
     allowed_tools: Sequence[str] = ("read_file",),
+    stage_type: StageType = StageType.CODE_GENERATION,
+    structured_artifact_required: str = "CodeGenerationArtifact",
     skip_high_risk_tool_confirmations: bool = False,
     can_request_clarification: bool = False,
 ) -> GraphDefinition:
@@ -513,16 +662,20 @@ def graph_definition(
             "stage_contract_ref": f"stage-contract-{stage.value}",
             "stage_responsibility": stage.value,
             "input_contract": {"requires": []},
-            "output_contract": "CodeGenerationArtifact",
-            "structured_artifact_required": "CodeGenerationArtifact",
+            "output_contract": structured_artifact_required
+            if stage is stage_type
+            else "CodeGenerationArtifact",
+            "structured_artifact_required": structured_artifact_required
+            if stage is stage_type
+            else "CodeGenerationArtifact",
             "allowed_tools": list(allowed_tools)
-            if stage is StageType.CODE_GENERATION
+            if stage is stage_type
             else [],
             "runtime_limits": {
                 "skip_high_risk_tool_confirmations": skip_high_risk_tool_confirmations
             },
             "can_request_clarification": (
-                can_request_clarification if stage is StageType.CODE_GENERATION else False
+                can_request_clarification if stage is stage_type else False
             ),
         }
         for stage in StageType
@@ -862,6 +1015,115 @@ def test_stage_agent_rejects_tool_call_when_model_binding_lacks_tool_calling() -
     assert runtime.provider_adapter.calls == []
 
 
+def test_stage_agent_accepts_text_structured_candidate_when_native_structured_output_unsupported() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(
+                structured_output_candidates=(
+                    {
+                        "decision_type": "submit_stage_artifact",
+                        "artifact_type": "RequirementAnalysisArtifact",
+                        "artifact_payload": {
+                            "structured_requirement": {
+                                "summary": "Update homepage heading."
+                            },
+                            "acceptance_criteria": [
+                                "frontend/src/pages/HomePage.tsx heading is updated."
+                            ],
+                            "clarification_summary": "No clarification needed.",
+                            "assumptions": [],
+                            "non_goals": [],
+                            "open_questions": [],
+                            "source_message_refs": ["message://run-1/user/1"],
+                            "clarification_record_refs": [],
+                            "attachment_refs": [],
+                            "context_refs": [],
+                            "analysis_notes": "Target file and replacement text are explicit.",
+                        },
+                        "evidence_refs": ["stage-process://stage-run-1/model-call/1"],
+                    },
+                )
+            )
+        ],
+        available_tools=(),
+        allowed_tools=(),
+        model_binding_snapshot=model_binding(supports_structured_output=False),
+        stage_type=StageType.REQUIREMENT_ANALYSIS,
+        structured_artifact_required="RequirementAnalysisArtifact",
+    )
+
+    result = runtime.run_stage(invocation(stage_type=StageType.REQUIREMENT_ANALYSIS))
+
+    assert result.status is StageStatus.COMPLETED
+    assert len(runtime.provider_adapter.calls) == 1
+    assert runtime.artifact_store.complete_calls[0]["output_snapshot"]["artifact_type"] == (
+        "RequirementAnalysisArtifact"
+    )
+
+
+def test_structured_output_repair_schema_excludes_recursive_repair_decision() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(structured_output={"decision_type": "not-a-decision"}),
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "CodeGenerationArtifact",
+                    "artifact_payload": code_generation_payload(),
+                    "evidence_refs": ["stage-process://stage-run-1/model-call/repair"],
+                }
+            ),
+        ],
+    )
+
+    result = runtime.run_stage(invocation())
+
+    assert result.status is StageStatus.COMPLETED
+    repair_request = runtime.context_builder.requests[1]
+    assert repair_request.model_call_type is ModelCallType.STRUCTURED_OUTPUT_REPAIR
+    assert "repair_structured_output" not in repair_request.response_schema[
+        "properties"
+    ]["decision_type"]["enum"]
+
+
+def test_retry_from_structured_output_repair_returns_to_stage_execution_with_tools() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(structured_output={"decision_type": "not-a-decision"}),
+            model_result(
+                structured_output={
+                    "decision_type": "retry_with_revised_plan",
+                    "reason": "Need source evidence before submitting.",
+                    "revised_plan_steps": ["Read the target file."],
+                    "evidence_refs": ["stage-process://stage-run-1/model-call/repair"],
+                }
+            ),
+            model_result(tool_call_requests=(read_file_call("call-1"),)),
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "CodeGenerationArtifact",
+                    "artifact_payload": code_generation_payload(),
+                    "evidence_refs": ["tool-result://call-1"],
+                }
+            ),
+        ],
+        tool_results=[succeeded_tool_result("call-1")],
+    )
+
+    result = runtime.run_stage(invocation())
+
+    assert result.status is StageStatus.COMPLETED
+    assert runtime.context_builder.requests[1].model_call_type is (
+        ModelCallType.STRUCTURED_OUTPUT_REPAIR
+    )
+    assert runtime.context_builder.requests[2].model_call_type is (
+        ModelCallType.STAGE_EXECUTION
+    )
+    assert runtime.provider_adapter.calls[1]["tool_descriptions"] == ()
+    assert runtime.provider_adapter.calls[2]["tool_descriptions"] != ()
+
+
 def test_stage_agent_creates_stage_input_before_process_records() -> None:
     runtime = build_runtime(
         provider_results=[
@@ -947,3 +1209,178 @@ def test_stage_agent_passes_context_sources_to_context_builder() -> None:
     assert request.change_sets == (change_set,)
     assert request.clarifications == (clarification,)
     assert request.approval_decisions == (approval_decision,)
+
+
+def test_code_generation_normalizes_file_edit_refs_from_successful_tool_result() -> None:
+    expected_ref = "file_edit_trace:run-1:call-edit-1:frontend/src/pages/HomePage.tsx"
+    payload = code_generation_payload()
+    payload["file_edit_trace_refs"] = ["model-invented-edit-ref"]
+    runtime = build_runtime(
+        provider_results=[
+            model_result(tool_call_requests=(edit_file_call("call-edit-1"),)),
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "CodeGenerationArtifact",
+                    "artifact_payload": payload,
+                    "evidence_refs": ["stage-process://stage-run-1/model-call/submit"],
+                }
+            ),
+        ],
+        tool_results=[succeeded_edit_file_result("call-edit-1")],
+        allowed_tools=["edit_file"],
+        available_tools=(edit_file_description(),),
+    )
+
+    result = runtime.run_stage(invocation())
+
+    assert result.status is StageStatus.COMPLETED
+    output = runtime.artifact_store.complete_calls[0]["output_snapshot"]
+    assert output["artifact_payload"]["file_edit_trace_refs"] == [expected_ref]
+    assert expected_ref in output["evidence_refs"]
+    assert expected_ref in runtime.artifact_store.complete_calls[0]["output_refs"]
+
+
+def test_code_generation_requires_successful_edit_evidence() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "CodeGenerationArtifact",
+                    "artifact_payload": code_generation_payload(),
+                    "evidence_refs": ["stage-process://stage-run-1/model-call/1"],
+                }
+            ),
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "CodeGenerationArtifact",
+                    "artifact_payload": code_generation_payload(),
+                    "evidence_refs": ["stage-process://stage-run-1/model-call/2"],
+                }
+            ),
+        ],
+        allowed_tools=["edit_file"],
+        available_tools=(edit_file_description(),),
+    )
+
+    result = runtime.run_stage(invocation())
+
+    assert result.status is StageStatus.FAILED
+    assert runtime.artifact_store.complete_calls == []
+    assert "structured_output_repair_trace" in runtime.artifact_store.append_keys()
+    failure = runtime.artifact_store.process["stage_agent_failed"]
+    assert failure["reason"] == "stage_artifact_missing_tool_evidence"
+    assert failure["safe_details"]["missing_field"] == "file_edit_trace_refs"
+
+
+def test_execution_normalizes_command_refs_from_successful_bash_result() -> None:
+    expected_ref = "command_trace:run-1:call-bash-1"
+    payload = execution_artifact_payload()
+    payload["command_trace_refs"] = ["model-invented-command-ref"]
+    runtime = build_runtime(
+        provider_results=[
+            model_result(tool_call_requests=(bash_call("call-bash-1"),)),
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "TestGenerationExecutionArtifact",
+                    "artifact_payload": payload,
+                    "evidence_refs": ["stage-process://stage-run-1/model-call/submit"],
+                }
+            ),
+        ],
+        tool_results=[succeeded_bash_result("call-bash-1")],
+        allowed_tools=["bash"],
+        available_tools=(bash_description(),),
+        stage_type=StageType.TEST_GENERATION_EXECUTION,
+        structured_artifact_required="TestGenerationExecutionArtifact",
+    )
+
+    result = runtime.run_stage(invocation(stage_type=StageType.TEST_GENERATION_EXECUTION))
+
+    assert result.status is StageStatus.COMPLETED
+    output = runtime.artifact_store.complete_calls[0]["output_snapshot"]
+    assert output["artifact_payload"]["command_trace_refs"] == [expected_ref]
+    assert expected_ref in output["evidence_refs"]
+    assert expected_ref in runtime.artifact_store.complete_calls[0]["output_refs"]
+
+
+def test_execution_requires_successful_command_evidence() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "TestGenerationExecutionArtifact",
+                    "artifact_payload": execution_artifact_payload(),
+                    "evidence_refs": ["stage-process://stage-run-1/model-call/1"],
+                }
+            ),
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "TestGenerationExecutionArtifact",
+                    "artifact_payload": execution_artifact_payload(),
+                    "evidence_refs": ["stage-process://stage-run-1/model-call/2"],
+                }
+            ),
+        ],
+        allowed_tools=["bash"],
+        available_tools=(bash_description(),),
+        stage_type=StageType.TEST_GENERATION_EXECUTION,
+        structured_artifact_required="TestGenerationExecutionArtifact",
+    )
+
+    result = runtime.run_stage(invocation(stage_type=StageType.TEST_GENERATION_EXECUTION))
+
+    assert result.status is StageStatus.FAILED
+    assert runtime.artifact_store.complete_calls == []
+    assert "structured_output_repair_trace" in runtime.artifact_store.append_keys()
+    failure = runtime.artifact_store.process["stage_agent_failed"]
+    assert failure["reason"] == "stage_artifact_missing_tool_evidence"
+    assert failure["safe_details"]["missing_field"] == "command_trace_refs"
+
+
+def test_code_generation_does_not_rewrite_edit_file_payload_from_user_regex() -> None:
+    old_text = "Make delivery work traceable. EXTRA"
+    new_text = "Make delivery work. EXTRA"
+    expected_ref = "file_edit_trace:run-1:call-edit-1:frontend/src/pages/HomePage.tsx"
+    payload = code_generation_payload()
+    payload["file_edit_trace_refs"] = [expected_ref]
+    runtime = build_runtime(
+        provider_results=[
+            model_result(
+                tool_call_requests=(
+                    edit_file_call(
+                        "call-edit-1",
+                        old_text=old_text,
+                        new_text=new_text,
+                    ),
+                )
+            ),
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "CodeGenerationArtifact",
+                    "artifact_payload": payload,
+                    "evidence_refs": [expected_ref],
+                }
+            ),
+        ],
+        tool_results=[succeeded_edit_file_result("call-edit-1")],
+        allowed_tools=["edit_file"],
+        available_tools=(edit_file_description(),),
+        task_objective=(
+            "项目官网主页面把 <h1>Make delivery work traceable.</h1> "
+            "改成 <h1>Make delivery work.</h1>。"
+        ),
+    )
+
+    result = runtime.run_stage(invocation())
+
+    assert result.status is StageStatus.COMPLETED
+    executed_payload = runtime.tool_registry.execute_calls[0]["request"].input_payload
+    assert executed_payload["old_text"] == old_text
+    assert executed_payload["new_text"] == new_text

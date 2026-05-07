@@ -15,6 +15,8 @@ from backend.tests.runtime.test_stage_agent_runtime import (
     build_runtime,
     invocation,
     model_result,
+    read_file_call,
+    succeeded_tool_result,
     trace_context,
 )
 
@@ -135,6 +137,41 @@ def test_stage_agent_repair_decision_records_repair_trace_and_uses_repair_prompt
     )
     assert runtime.context_builder.requests[1].parse_error == "missing field"
     assert runtime.context_builder.requests[1].trace_context == trace_context()
+
+
+def test_stage_agent_does_not_bind_tools_during_structured_output_repair() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(structured_output={"decision_type": "not-a-decision"}),
+            model_result(structured_output=fail_stage_payload()),
+        ],
+    )
+
+    runtime.run_stage(invocation())
+
+    assert runtime.context_builder.requests[1].model_call_type is (
+        ModelCallType.STRUCTURED_OUTPUT_REPAIR
+    )
+    assert runtime.provider_adapter.calls[1]["tool_descriptions"] == ()
+
+
+def test_stage_agent_includes_tool_result_observations_in_next_model_call() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(tool_call_requests=(read_file_call("call-1"),)),
+            model_result(structured_output=fail_stage_payload()),
+        ],
+        tool_results=[succeeded_tool_result("call-1")],
+    )
+
+    runtime.run_stage(invocation())
+
+    second_call_messages = runtime.provider_adapter.calls[1]["messages"]
+    rendered_text = "\n\n".join(str(message.content) for message in second_call_messages)
+    assert "Recent Tool Results" in rendered_text
+    assert "call-1" in rendered_text
+    assert "read_file" in rendered_text
+    assert "tool-result://call-1/content" in rendered_text
 
 
 def test_stage_agent_retry_with_revised_plan_continues_to_next_iteration() -> None:

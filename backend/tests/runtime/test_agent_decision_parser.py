@@ -397,6 +397,125 @@ def test_parse_rejects_structured_tool_call_because_tools_must_be_native() -> No
     )
 
 
+def test_response_schema_can_be_limited_to_current_artifact_type() -> None:
+    from backend.app.runtime.agent_decision import agent_decision_response_schema
+
+    schema = agent_decision_response_schema(artifact_type="CodeGenerationArtifact")
+    submit_schema = next(
+        candidate
+        for candidate in schema["oneOf"]
+        if candidate["properties"]["decision_type"]["const"] == "submit_stage_artifact"
+    )
+    artifact_schema = submit_schema["properties"]["artifact_payload"]
+
+    assert submit_schema["properties"]["artifact_type"]["const"] == (
+        "CodeGenerationArtifact"
+    )
+    assert set(artifact_schema["required"]) >= {
+        "changeset_ref",
+        "changed_files",
+        "diff_refs",
+        "file_edit_trace_refs",
+        "implementation_notes",
+        "requirement_refs",
+        "solution_refs",
+    }
+    assert "summary" not in artifact_schema["properties"]
+
+
+def test_response_schema_can_remove_clarification_for_downstream_stages() -> None:
+    from backend.app.runtime.agent_decision import (
+        AgentDecisionType,
+        agent_decision_response_schema,
+    )
+
+    schema = agent_decision_response_schema(
+        allowed_decision_types=(
+            AgentDecisionType.SUBMIT_STAGE_ARTIFACT,
+            AgentDecisionType.FAIL_STAGE,
+        )
+    )
+
+    assert schema["properties"]["decision_type"]["enum"] == [
+        "submit_stage_artifact",
+        "fail_stage",
+    ]
+    assert [
+        candidate["properties"]["decision_type"]["const"]
+        for candidate in schema["oneOf"]
+    ] == ["submit_stage_artifact", "fail_stage"]
+
+
+def test_parser_rejects_structured_clarification_when_stage_disallows_it() -> None:
+    from backend.app.runtime.agent_decision import (
+        AgentDecisionErrorCode,
+        AgentDecisionParser,
+        AgentDecisionParserError,
+    )
+
+    with pytest.raises(AgentDecisionParserError) as error:
+        AgentDecisionParser().parse_model_result(
+            model_result(
+                structured_output={
+                    "decision_type": "request_clarification",
+                    "question": "Which file should be modified?",
+                    "missing_facts": ["target file"],
+                    "impact_scope": "Implementation cannot proceed.",
+                    "related_refs": [],
+                    "fields_to_update": ["target_file"],
+                }
+            ),
+            context_envelope=context_envelope(stage_type=StageType.CODE_GENERATION),
+            stage_contract=stage_contract(can_request_clarification=False),
+        )
+
+    assert (
+        error.value.error.error_code
+        is AgentDecisionErrorCode.CLARIFICATION_NOT_ALLOWED
+    )
+
+
+def test_parser_rejects_structured_decision_type_excluded_by_response_schema() -> None:
+    from backend.app.runtime.agent_decision import (
+        AgentDecisionErrorCode,
+        AgentDecisionParser,
+        AgentDecisionParserError,
+        AgentDecisionType,
+        agent_decision_response_schema,
+    )
+
+    envelope = context_envelope().model_copy(
+        update={
+            "response_schema": agent_decision_response_schema(
+                allowed_decision_types=(
+                    AgentDecisionType.SUBMIT_STAGE_ARTIFACT,
+                    AgentDecisionType.FAIL_STAGE,
+                )
+            )
+        }
+    )
+
+    with pytest.raises(AgentDecisionParserError) as error:
+        AgentDecisionParser().parse_model_result(
+            model_result(
+                structured_output={
+                    "decision_type": "repair_structured_output",
+                    "parse_error": "missing field",
+                    "repair_instruction": "try again",
+                    "invalid_output_ref": "sha256:bad",
+                }
+            ),
+            context_envelope=envelope,
+            stage_contract=stage_contract(),
+        )
+
+    assert (
+        error.value.error.error_code
+        is AgentDecisionErrorCode.INVALID_STRUCTURED_OUTPUT
+    )
+    assert error.value.error.safe_details["decision_type"] == "repair_structured_output"
+
+
 def test_parse_submit_stage_artifact_validates_stage_contract_and_evidence_refs() -> None:
     from backend.app.runtime.agent_decision import (
         AgentDecisionParser,
@@ -741,6 +860,78 @@ def test_parse_rejects_invalid_tool_candidates_and_ambiguous_outputs() -> None:
         ambiguous.value.error.error_code
         is AgentDecisionErrorCode.AMBIGUOUS_MODEL_DECISION
     )
+
+
+def test_parse_accepts_first_call_when_multiple_native_tool_calls_are_read_only() -> None:
+    from backend.app.runtime.agent_decision import AgentDecisionParser, AgentDecisionType
+
+    decision = AgentDecisionParser().parse_model_result(
+        model_result(
+            tool_call_requests=(
+                ModelCallToolRequest(
+                    call_id="call-1",
+                    tool_name="read_file",
+                    input_payload={"path": "src/app.py"},
+                    schema_version="tool-schema-v1",
+                ),
+                ModelCallToolRequest(
+                    call_id="call-2",
+                    tool_name="read_file",
+                    input_payload={"path": "src/other.py"},
+                    schema_version="tool-schema-v1",
+                ),
+            )
+        ),
+        context_envelope=context_envelope(),
+        stage_contract=stage_contract(),
+    )
+
+    assert decision.decision_type is AgentDecisionType.REQUEST_TOOL_CALL
+    assert decision.tool_call is not None
+    assert decision.tool_call.call_id == "call-1"
+    assert decision.tool_call.input_payload == {"path": "src/app.py"}
+
+
+def test_parse_rejects_multiple_native_tool_calls_when_any_call_has_side_effect_risk() -> None:
+    from backend.app.runtime.agent_decision import (
+        AgentDecisionErrorCode,
+        AgentDecisionParser,
+        AgentDecisionParserError,
+    )
+
+    write_tool = tool_description("write_file")
+    write_tool = write_tool.model_copy(update={"risk_level": ToolRiskLevel.HIGH_RISK})
+
+    with pytest.raises(AgentDecisionParserError) as error:
+        AgentDecisionParser().parse_model_result(
+            model_result(
+                tool_call_requests=(
+                    ModelCallToolRequest(
+                        call_id="call-1",
+                        tool_name="read_file",
+                        input_payload={"path": "src/app.py"},
+                        schema_version="tool-schema-v1",
+                    ),
+                    ModelCallToolRequest(
+                        call_id="call-2",
+                        tool_name="write_file",
+                        input_payload={"path": "src/app.py"},
+                        schema_version="tool-schema-v1",
+                    ),
+                )
+            ),
+            context_envelope=context_envelope(
+                available_tools=(tool_description(), write_tool),
+            ),
+            stage_contract=stage_contract(allowed_tools=["read_file", "write_file"]),
+        )
+
+    assert (
+        error.value.error.error_code
+        is AgentDecisionErrorCode.AMBIGUOUS_MODEL_DECISION
+    )
+    assert error.value.error.safe_details["tool_call_count"] == 2
+    assert error.value.error.safe_details["non_read_only_tool_name"] == "write_file"
 
 
 def test_parse_error_safe_details_bound_model_controlled_strings() -> None:

@@ -161,7 +161,11 @@ class LangChainProviderAdapter:
             description.to_langchain_tool_schema()
             for description in tool_descriptions
         ]
-        return chat_model.bind_tools(tool_schemas, strict=True)
+        return chat_model.bind_tools(
+            tool_schemas,
+            strict=True,
+            parallel_tool_calls=False,
+        )
 
     def with_structured_output(self, chat_model: Any, response_schema: JsonObject) -> Any:
         if not self.provider_config.supports_structured_output:
@@ -431,17 +435,6 @@ class LangChainProviderAdapter:
                     "Provider response was empty.",
                 )
             )
-        if (
-            result.structured_output is None
-            and not result.structured_output_candidates
-            and not result.tool_call_requests
-        ):
-            raise ProviderNonRetryableFailure(
-                classify_provider_failure(
-                    "structured_output_unparseable",
-                    "Provider structured output could not be parsed.",
-                )
-            )
 
     def _invoke_structured_once(
         self,
@@ -644,6 +637,36 @@ class LangChainProviderAdapter:
     def _content_candidate(self, content: Any) -> JsonObject | None:
         if isinstance(content, Mapping):
             return dict(content)
+        if isinstance(content, str):
+            return self._json_object_from_text_content(content)
+        return None
+
+    def _json_object_from_text_content(self, content: str) -> JsonObject | None:
+        text = content.strip()
+        if text == "":
+            return None
+        fenced_payload = self._json_fence_payload(text)
+        if fenced_payload is not None:
+            text = fenced_payload
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(parsed, Mapping):
+            return None
+        return dict(parsed)
+
+    def _json_fence_payload(self, text: str) -> str | None:
+        if not text.startswith("```") or not text.endswith("```"):
+            return None
+        inner = text[3:-3].strip()
+        if inner == "":
+            return None
+        first_line, separator, remainder = inner.partition("\n")
+        if separator and first_line.strip().lower() == "json":
+            return remainder.strip()
+        if first_line.lstrip().startswith(("{", "[")):
+            return inner
         return None
 
     def _normalize_tool_calls(

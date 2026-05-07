@@ -133,7 +133,11 @@ class AgentDecisionType(StrEnum):
     FAIL_STAGE = "fail_stage"
 
 
-def agent_decision_response_schema() -> JsonObject:
+def agent_decision_response_schema(
+    *,
+    artifact_type: str | None = None,
+    allowed_decision_types: Sequence[AgentDecisionType | str] | None = None,
+) -> JsonObject:
     string_array_schema: JsonObject = {
         "type": "array",
         "items": {"type": "string", "minLength": 1},
@@ -143,6 +147,43 @@ def agent_decision_response_schema() -> JsonObject:
         "type": "object",
         "additionalProperties": True,
     }
+    json_value_schema: JsonObject = {
+        "anyOf": [
+            {"type": "object", "additionalProperties": True},
+            {"type": "array", "items": {}},
+            {"type": "string"},
+            {"type": "number"},
+            {"type": "boolean"},
+            {"type": "null"},
+        ]
+    }
+    default_decision_order = (
+        AgentDecisionType.REQUEST_TOOL_CONFIRMATION,
+        AgentDecisionType.SUBMIT_STAGE_ARTIFACT,
+        AgentDecisionType.REQUEST_CLARIFICATION,
+        AgentDecisionType.REPAIR_STRUCTURED_OUTPUT,
+        AgentDecisionType.RETRY_WITH_REVISED_PLAN,
+        AgentDecisionType.FAIL_STAGE,
+    )
+    if allowed_decision_types is None:
+        decision_order = default_decision_order
+    else:
+        allowed = _allowed_structured_decision_types(allowed_decision_types)
+        decision_order = tuple(
+            decision_type
+            for decision_type in default_decision_order
+            if decision_type in allowed
+        )
+    artifact_type_schema: JsonObject = (
+        {"const": artifact_type}
+        if artifact_type
+        else {"type": "string", "minLength": 1}
+    )
+    artifact_payload_schema = _artifact_payload_schema(
+        artifact_type,
+        json_object_schema=json_object_schema,
+        json_value_schema=json_value_schema,
+    )
 
     def decision_schema(
         decision_type: AgentDecisionType,
@@ -160,6 +201,116 @@ def agent_decision_response_schema() -> JsonObject:
             "additionalProperties": False,
         }
 
+    schema_by_decision = {
+        AgentDecisionType.REQUEST_TOOL_CONFIRMATION: decision_schema(
+            AgentDecisionType.REQUEST_TOOL_CONFIRMATION,
+            properties={
+                "tool_name": {"type": "string", "minLength": 1},
+                "command_summary": {"type": "string", "minLength": 1},
+                "target_resource": {"type": "string", "minLength": 1},
+                "risk_level": {
+                    "type": "string",
+                    "enum": [item.value for item in ToolRiskLevel],
+                },
+                "risk_categories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [item.value for item in ToolRiskCategory],
+                    },
+                    "minItems": 1,
+                },
+                "expected_side_effects": string_array_schema,
+                "alternative_path_summary": {"type": "string", "minLength": 1},
+                "input_payload": json_object_schema,
+            },
+            required=[
+                "tool_name",
+                "command_summary",
+                "target_resource",
+                "risk_level",
+                "risk_categories",
+                "expected_side_effects",
+                "alternative_path_summary",
+            ],
+        ),
+        AgentDecisionType.SUBMIT_STAGE_ARTIFACT: decision_schema(
+            AgentDecisionType.SUBMIT_STAGE_ARTIFACT,
+            properties={
+                "artifact_type": artifact_type_schema,
+                "artifact_payload": artifact_payload_schema,
+                "evidence_refs": string_array_schema,
+                "risk_summary": json_object_schema,
+                "failure_summary": json_object_schema,
+            },
+            required=[
+                "artifact_type",
+                "artifact_payload",
+                "evidence_refs",
+            ],
+        ),
+        AgentDecisionType.REQUEST_CLARIFICATION: decision_schema(
+            AgentDecisionType.REQUEST_CLARIFICATION,
+            properties={
+                "question": {"type": "string", "minLength": 1},
+                "missing_facts": string_array_schema,
+                "impact_scope": {"type": "string", "minLength": 1},
+                "related_refs": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                },
+                "fields_to_update": string_array_schema,
+            },
+            required=[
+                "question",
+                "missing_facts",
+                "impact_scope",
+                "fields_to_update",
+            ],
+        ),
+        AgentDecisionType.REPAIR_STRUCTURED_OUTPUT: decision_schema(
+            AgentDecisionType.REPAIR_STRUCTURED_OUTPUT,
+            properties={
+                "parse_error": {"type": "string", "minLength": 1},
+                "repair_instruction": {"type": "string", "minLength": 1},
+                "invalid_output_ref": {"type": "string", "minLength": 1},
+            },
+            required=[
+                "parse_error",
+                "repair_instruction",
+                "invalid_output_ref",
+            ],
+        ),
+        AgentDecisionType.RETRY_WITH_REVISED_PLAN: decision_schema(
+            AgentDecisionType.RETRY_WITH_REVISED_PLAN,
+            properties={
+                "reason": {"type": "string", "minLength": 1},
+                "revised_plan_steps": string_array_schema,
+                "evidence_refs": string_array_schema,
+            },
+            required=[
+                "reason",
+                "revised_plan_steps",
+                "evidence_refs",
+            ],
+        ),
+        AgentDecisionType.FAIL_STAGE: decision_schema(
+            AgentDecisionType.FAIL_STAGE,
+            properties={
+                "failure_reason": {"type": "string", "minLength": 1},
+                "evidence_refs": string_array_schema,
+                "incomplete_items": string_array_schema,
+                "user_visible_summary": {"type": "string", "minLength": 1},
+            },
+            required=[
+                "failure_reason",
+                "evidence_refs",
+                "incomplete_items",
+                "user_visible_summary",
+            ],
+        ),
+    }
+
     return {
         "title": "AgentDecision",
         "type": "object",
@@ -167,12 +318,7 @@ def agent_decision_response_schema() -> JsonObject:
             "decision_type": {
                 "type": "string",
                 "enum": [
-                    AgentDecisionType.REQUEST_TOOL_CONFIRMATION.value,
-                    AgentDecisionType.SUBMIT_STAGE_ARTIFACT.value,
-                    AgentDecisionType.REQUEST_CLARIFICATION.value,
-                    AgentDecisionType.REPAIR_STRUCTURED_OUTPUT.value,
-                    AgentDecisionType.RETRY_WITH_REVISED_PLAN.value,
-                    AgentDecisionType.FAIL_STAGE.value,
+                    decision_type.value for decision_type in decision_order
                 ],
             },
             "tool_name": {"type": "string", "minLength": 1},
@@ -193,8 +339,8 @@ def agent_decision_response_schema() -> JsonObject:
             "expected_side_effects": string_array_schema,
             "alternative_path_summary": {"type": "string", "minLength": 1},
             "input_payload": json_object_schema,
-            "artifact_type": {"type": "string", "minLength": 1},
-            "artifact_payload": json_object_schema,
+            "artifact_type": artifact_type_schema,
+            "artifact_payload": artifact_payload_schema,
             "evidence_refs": string_array_schema,
             "risk_summary": json_object_schema,
             "failure_summary": json_object_schema,
@@ -218,114 +364,41 @@ def agent_decision_response_schema() -> JsonObject:
         "required": ["decision_type"],
         "additionalProperties": False,
         "oneOf": [
-            decision_schema(
-                AgentDecisionType.REQUEST_TOOL_CONFIRMATION,
-                properties={
-                    "tool_name": {"type": "string", "minLength": 1},
-                    "command_summary": {"type": "string", "minLength": 1},
-                    "target_resource": {"type": "string", "minLength": 1},
-                    "risk_level": {
-                        "type": "string",
-                        "enum": [item.value for item in ToolRiskLevel],
-                    },
-                    "risk_categories": {
-                        "type": "array",
-                        "items": {
-                            "type": "string",
-                            "enum": [item.value for item in ToolRiskCategory],
-                        },
-                        "minItems": 1,
-                    },
-                    "expected_side_effects": string_array_schema,
-                    "alternative_path_summary": {"type": "string", "minLength": 1},
-                    "input_payload": json_object_schema,
-                },
-                required=[
-                    "tool_name",
-                    "command_summary",
-                    "target_resource",
-                    "risk_level",
-                    "risk_categories",
-                    "expected_side_effects",
-                    "alternative_path_summary",
-                ],
-            ),
-            decision_schema(
-                AgentDecisionType.SUBMIT_STAGE_ARTIFACT,
-                properties={
-                    "artifact_type": {"type": "string", "minLength": 1},
-                    "artifact_payload": json_object_schema,
-                    "evidence_refs": string_array_schema,
-                    "risk_summary": json_object_schema,
-                    "failure_summary": json_object_schema,
-                },
-                required=[
-                    "artifact_type",
-                    "artifact_payload",
-                    "evidence_refs",
-                ],
-            ),
-            decision_schema(
-                AgentDecisionType.REQUEST_CLARIFICATION,
-                properties={
-                    "question": {"type": "string", "minLength": 1},
-                    "missing_facts": string_array_schema,
-                    "impact_scope": {"type": "string", "minLength": 1},
-                    "related_refs": {
-                        "type": "array",
-                        "items": {"type": "string", "minLength": 1},
-                    },
-                    "fields_to_update": string_array_schema,
-                },
-                required=[
-                    "question",
-                    "missing_facts",
-                    "impact_scope",
-                    "fields_to_update",
-                ],
-            ),
-            decision_schema(
-                AgentDecisionType.REPAIR_STRUCTURED_OUTPUT,
-                properties={
-                    "parse_error": {"type": "string", "minLength": 1},
-                    "repair_instruction": {"type": "string", "minLength": 1},
-                    "invalid_output_ref": {"type": "string", "minLength": 1},
-                },
-                required=[
-                    "parse_error",
-                    "repair_instruction",
-                    "invalid_output_ref",
-                ],
-            ),
-            decision_schema(
-                AgentDecisionType.RETRY_WITH_REVISED_PLAN,
-                properties={
-                    "reason": {"type": "string", "minLength": 1},
-                    "revised_plan_steps": string_array_schema,
-                    "evidence_refs": string_array_schema,
-                },
-                required=[
-                    "reason",
-                    "revised_plan_steps",
-                    "evidence_refs",
-                ],
-            ),
-            decision_schema(
-                AgentDecisionType.FAIL_STAGE,
-                properties={
-                    "failure_reason": {"type": "string", "minLength": 1},
-                    "evidence_refs": string_array_schema,
-                    "incomplete_items": string_array_schema,
-                    "user_visible_summary": {"type": "string", "minLength": 1},
-                },
-                required=[
-                    "failure_reason",
-                    "evidence_refs",
-                    "incomplete_items",
-                    "user_visible_summary",
-                ],
-            ),
+            schema_by_decision[decision_type]
+            for decision_type in decision_order
         ],
+    }
+
+
+def _allowed_structured_decision_types(
+    allowed_decision_types: Sequence[AgentDecisionType | str],
+) -> set[AgentDecisionType]:
+    return {
+        item if isinstance(item, AgentDecisionType) else AgentDecisionType(item)
+        for item in allowed_decision_types
+    }
+
+
+def _artifact_payload_schema(
+    artifact_type: str | None,
+    *,
+    json_object_schema: JsonObject,
+    json_value_schema: JsonObject,
+) -> JsonObject:
+    required_fields = (
+        _ARTIFACT_REQUIRED_FIELDS.get(artifact_type)
+        if artifact_type is not None
+        else None
+    )
+    if required_fields is None:
+        return json_object_schema
+    return {
+        "type": "object",
+        "properties": {
+            field_name: json_value_schema for field_name in required_fields
+        },
+        "required": list(required_fields),
+        "additionalProperties": True,
     }
 
 
@@ -549,13 +622,29 @@ class AgentDecisionParser:
             )
         if has_tool_calls:
             if len(model_result.tool_call_requests) != 1:
+                first_tool_call = self._first_sequential_read_only_tool_call(
+                    model_result,
+                    context_envelope=context_envelope,
+                    stage_contract=stage_contract,
+                )
+                if first_tool_call is not None:
+                    return self.validate_against_stage_contract(
+                        self._decision_from_tool_call(
+                            first_tool_call,
+                            model_result=model_result,
+                        ),
+                        context_envelope=context_envelope,
+                        stage_contract=stage_contract,
+                    )
                 self._raise_error(
                     AgentDecisionErrorCode.AMBIGUOUS_MODEL_DECISION,
                     "Model returned multiple native tool calls for a single decision.",
                     model_result=model_result,
-                    safe_details={
-                        "tool_call_count": len(model_result.tool_call_requests)
-                    },
+                    safe_details=self._multiple_tool_call_safe_details(
+                        model_result,
+                        context_envelope=context_envelope,
+                        stage_contract=stage_contract,
+                    ),
                 )
             return self.validate_against_stage_contract(
                 self._decision_from_tool_call(
@@ -576,6 +665,60 @@ class AgentDecisionParser:
             stage_contract=stage_contract,
         )
 
+    def _first_sequential_read_only_tool_call(
+        self,
+        model_result: ModelCallResult,
+        *,
+        context_envelope: ContextEnvelope,
+        stage_contract: dict[str, object],
+    ) -> ModelCallToolRequest | None:
+        for tool_call in model_result.tool_call_requests:
+            tool = self._tool_description_for_call(
+                tool_call,
+                context_envelope=context_envelope,
+                stage_contract=stage_contract,
+            )
+            if tool is None or tool.risk_level is not ToolRiskLevel.READ_ONLY:
+                return None
+        return model_result.tool_call_requests[0]
+
+    def _multiple_tool_call_safe_details(
+        self,
+        model_result: ModelCallResult,
+        *,
+        context_envelope: ContextEnvelope,
+        stage_contract: dict[str, object],
+    ) -> JsonObject:
+        details: JsonObject = {
+            "tool_call_count": len(model_result.tool_call_requests)
+        }
+        for tool_call in model_result.tool_call_requests:
+            tool = self._tool_description_for_call(
+                tool_call,
+                context_envelope=context_envelope,
+                stage_contract=stage_contract,
+            )
+            if tool is None:
+                details["unavailable_tool_name"] = tool_call.tool_name
+                break
+            if tool.risk_level is not ToolRiskLevel.READ_ONLY:
+                details["non_read_only_tool_name"] = tool_call.tool_name
+                break
+        return details
+
+    @staticmethod
+    def _tool_description_for_call(
+        tool_call: ModelCallToolRequest,
+        *,
+        context_envelope: ContextEnvelope,
+        stage_contract: dict[str, object],
+    ) -> ToolBindableDescription | None:
+        allowed_tools = _allowed_tool_names(stage_contract.get("allowed_tools"))
+        if allowed_tools is not None and tool_call.tool_name not in allowed_tools:
+            return None
+        available = {tool.name: tool for tool in context_envelope.available_tools}
+        return available.get(tool_call.tool_name)
+
     def validate_against_stage_contract(
         self,
         decision: AgentDecision,
@@ -589,6 +732,12 @@ class AgentDecisionParser:
                 model_result_context=decision.decision_trace,
                 context_envelope=context_envelope,
                 stage_contract=stage_contract,
+            )
+        else:
+            self._validate_decision_type_allowed_by_response_schema(
+                decision.decision_type,
+                model_result_context=decision.decision_trace,
+                context_envelope=context_envelope,
             )
         if decision.tool_confirmation is not None:
             self._validate_tool_available_and_allowed(
@@ -616,6 +765,23 @@ class AgentDecisionParser:
                     safe_details={},
                 )
         return decision
+
+    def _validate_decision_type_allowed_by_response_schema(
+        self,
+        decision_type: AgentDecisionType,
+        *,
+        model_result_context: AgentDecisionTrace,
+        context_envelope: ContextEnvelope,
+    ) -> None:
+        allowed = _response_schema_decision_types(context_envelope.response_schema)
+        if allowed is None or decision_type in allowed:
+            return
+        self._raise_error_from_trace(
+            AgentDecisionErrorCode.INVALID_STRUCTURED_OUTPUT,
+            "Structured AgentDecision decision_type is not allowed by the current response schema.",
+            trace=model_result_context,
+            safe_details={"decision_type": decision_type.value},
+        )
 
     def _validate_tool_call(
         self,
@@ -1079,6 +1245,29 @@ def _artifact_required_fields(
         if required is not None:
             return required
     return ()
+
+
+def _response_schema_decision_types(
+    response_schema: Mapping[str, object],
+) -> set[AgentDecisionType] | None:
+    properties = response_schema.get("properties")
+    if not isinstance(properties, Mapping):
+        return None
+    decision_type_schema = properties.get("decision_type")
+    if not isinstance(decision_type_schema, Mapping):
+        return None
+    enum_values = decision_type_schema.get("enum")
+    if not isinstance(enum_values, Sequence) or isinstance(enum_values, str):
+        return None
+    allowed: set[AgentDecisionType] = set()
+    for value in enum_values:
+        if not isinstance(value, str):
+            continue
+        try:
+            allowed.add(AgentDecisionType(value))
+        except ValueError:
+            continue
+    return allowed or None
 
 
 def _safe_candidate_details(candidate: Mapping[str, object]) -> JsonObject:
