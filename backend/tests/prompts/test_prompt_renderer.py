@@ -297,7 +297,8 @@ def test_render_structured_output_repair_uses_repair_asset_and_current_schema() 
     assert "# Structured Output Repair" in text
     assert "Missing required field: solution" in text
     assert '"solution"' in text
-    assert "Do not change the stage contract" in text
+    assert "format so it matches the current response_schema" in text
+    assert "Do not change the original business decision" in text
     assert [ref.prompt_id for ref in result.metadata.prompt_refs] == [
         "structured_output_repair"
     ]

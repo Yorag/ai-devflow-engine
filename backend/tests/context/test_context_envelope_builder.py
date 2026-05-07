@@ -611,13 +611,16 @@ def test_structured_output_repair_requires_parse_error_and_uses_repair_prompt_pa
     ] == [
         (
             "# Structured Output Repair\nRepair only invalid JSON.\nRepair Scope\n"
-                "Repair the prior response so it matches the current response_schema.\n"
-                "Do not change the stage contract, tool boundary, or structured "
-                "output requirement.\n"
+                "Repair the prior response format so it matches the current "
+                "response_schema.\n"
+                "Do not change the original business decision, status, stage, "
+                "artifact type, stage contract, tool boundary, or structured output "
+                "requirement.\n"
                 "Do not return repair_structured_output during structured output "
                 "repair.\n"
-                "Return one of the decision_type values allowed by the "
-                "response_schema.\n"
+                "Return the same decision path as the prior response when it is "
+                "identifiable; do not convert submit_stage_artifact into fail_stage "
+                "or fail_stage into submit_stage_artifact.\n"
                 "Parse error: Missing required field: decision\n"
                 "Response schema:\n"
                 '{"additionalProperties":false,"properties":{"decision":{"type":"string"}},"required":["decision"],"type":"object"}'

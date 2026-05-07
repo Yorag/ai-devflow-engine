@@ -1,6 +1,6 @@
 ---
 prompt_id: structured_output_repair
-prompt_version: 2026-05-06.1
+prompt_version: 2026-05-07.1
 prompt_type: structured_output_repair
 authority_level: system_trusted
 model_call_type: structured_output_repair
@@ -11,7 +11,7 @@ source_ref: backend://prompts/repairs/structured_output_repair.md
 
 ## Repair Objective
 
-Repair the candidate output so it satisfies the active response schema while preserving the original stage intent, known facts, allowed tools, approval rules, delivery mode, audit boundaries, and runtime controls.
+Repair the candidate output so it satisfies the active response schema while preserving the original stage intent, business decision, status, stage, artifact type, known facts, allowed tools, approval rules, delivery mode, audit boundaries, and runtime controls. This is a format repair only.
 
 ## Immutable Inputs
 
@@ -25,7 +25,7 @@ You may replace invalid empty strings, nulls, or malformed containers only when 
 
 ## Prohibited Repairs
 
-Do not invent missing facts. Do not add new evidence, tool results, approvals, delivery results, changed files, commands, risks, or decisions that are not present in the candidate output or immutable inputs. Do not change a failure into success, a blocked result into completed work, a rejected decision into an accepted decision, or an uncertain statement into a confirmed fact.
+Do not invent missing facts. Do not add new evidence, tool results, approvals, delivery results, changed files, commands, risks, or decisions that are not present in the candidate output or immutable inputs. Do not change a failure into success, success into failure, a blocked result into completed work, a rejected decision into an accepted decision, a submit artifact into a fail_stage, a fail_stage into a submit artifact, one artifact type into another artifact type, or an uncertain statement into a confirmed fact.
 
 Do not call tools, request new information, modify files, create new stage semantics, or broaden the task. If the candidate output cannot be repaired without changing meaning, use the schema-defined failure path.
 
