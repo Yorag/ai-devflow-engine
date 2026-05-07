@@ -2,6 +2,7 @@ from pathlib import Path
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import load_dotenv
 
 
 APP_TITLE = "AI DevFlow Engine API"
@@ -17,6 +18,10 @@ def _repo_root() -> Path:
 
 def _default_platform_runtime_root() -> Path:
     return Path.cwd() / ".runtime"
+
+
+def load_default_dotenv() -> bool:
+    return load_dotenv(dotenv_path=_repo_root() / ".env", override=False)
 
 
 class EnvironmentSettings(BaseSettings):

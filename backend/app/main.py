@@ -9,7 +9,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.app import __version__
 from backend.app.api.errors import register_error_handlers
 from backend.app.api.router import build_api_router
-from backend.app.core.config import APP_TITLE, DOCS_URL, OPENAPI_URL, EnvironmentSettings
+from backend.app.core.config import (
+    APP_TITLE,
+    DOCS_URL,
+    OPENAPI_URL,
+    EnvironmentSettings,
+    load_default_dotenv,
+)
 from backend.app.db.base import DatabaseRole
 from backend.app.db.session import DatabaseManager
 from backend.app.domain.trace_context import TraceContext
@@ -85,6 +91,8 @@ def ensure_startup_control_plane_seed(app: FastAPI) -> None:
 
 
 def create_app(settings: EnvironmentSettings | None = None) -> FastAPI:
+    if settings is None:
+        load_default_dotenv()
     environment_settings = settings or EnvironmentSettings()
     app = FastAPI(
         title=APP_TITLE,

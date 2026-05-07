@@ -1,6 +1,7 @@
 import json
+import os
 
-from backend.app.core.config import EnvironmentSettings
+from backend.app.core.config import EnvironmentSettings, load_default_dotenv
 from backend.tests.support.settings import override_environment_settings
 
 
@@ -33,6 +34,34 @@ def test_environment_settings_loads_startup_values_from_environment(monkeypatch,
     )
     assert settings.frontend_api_base_url == "http://localhost:5173/api"
     assert settings.credential_env_prefixes == ("CUSTOM_", "OPENAI_")
+
+
+def test_load_default_dotenv_loads_repo_env_without_overriding_explicit_env(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".env").write_text(
+        "\n".join(
+            [
+                'LANGSMITH_TRACING="true"',
+                'LANGSMITH_PROJECT="from-dotenv"',
+                'LANGSMITH_API_KEY="from-dotenv-key"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("backend.app.core.config._repo_root", lambda: repo_root)
+    monkeypatch.delenv("LANGSMITH_TRACING", raising=False)
+    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+    monkeypatch.setenv("LANGSMITH_PROJECT", "from-shell")
+
+    assert load_default_dotenv()
+
+    assert os.environ["LANGSMITH_TRACING"] == "true"
+    assert os.environ["LANGSMITH_API_KEY"] == "from-dotenv-key"
+    assert os.environ["LANGSMITH_PROJECT"] == "from-shell"
 
 
 def test_workspace_root_defaults_under_platform_runtime_root(tmp_path) -> None:
