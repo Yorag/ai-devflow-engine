@@ -233,6 +233,40 @@ def test_requirement_analysis_receives_new_requirement_user_message() -> None:
     ]
 
 
+def test_solution_design_receives_requirement_analysis_output() -> None:
+    from backend.app.context.source_resolver import ContextSourceResolver
+
+    blocks = ContextSourceResolver().resolve_stage_inputs(
+        session_id="session-1",
+        run_id="run-1",
+        stage_run_id="stage-solution-design-1",
+        stage_type=StageType.SOLUTION_DESIGN,
+        stage_artifacts=(
+            _output_snapshot_artifact(
+                artifact_id="artifact-requirement-1",
+                stage_run_id="stage-requirement-1",
+                artifact_type="RequirementAnalysisArtifact",
+                artifact_payload=_requirement_analysis_payload(),
+            ),
+        ),
+        user_messages=(),
+        allowed_context_run_ids=("run-1",),
+        built_at=NOW,
+    )
+
+    assert len(blocks) == 1
+    block = blocks[0]
+    assert block.section is ContextEnvelopeSection.INPUT_ARTIFACT_REFS
+    assert block.trust_level is ContextTrustLevel.TRUSTED_REFERENCE
+    assert block.boundary_action is ContextBoundaryAction.ALLOW
+    assert "RequirementAnalysisArtifact" in block.summary
+    assert "frontend/src/pages/HomePage.tsx" in block.summary
+    assert "Make delivery work" in block.summary
+    assert [source.source_ref for source in block.sources] == [
+        "stage-artifact://artifact-requirement-1"
+    ]
+
+
 def test_resolve_stage_inputs_includes_approved_implementation_plan_and_skips_foreign_run() -> None:
     from backend.app.context.source_resolver import ContextSourceResolver
 

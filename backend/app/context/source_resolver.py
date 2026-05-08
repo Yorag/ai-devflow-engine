@@ -25,6 +25,7 @@ from backend.app.schemas.run import SolutionDesignArtifactRead
 
 
 _STAGE_INPUT_ARTIFACT_TYPES: Mapping[StageType, tuple[str, ...]] = {
+    StageType.SOLUTION_DESIGN: ("RequirementAnalysisArtifact",),
     StageType.CODE_GENERATION: (
         "RequirementAnalysisArtifact",
         "SolutionDesignArtifact",

@@ -648,6 +648,16 @@ class LangChainProviderAdapter:
         fenced_payload = self._json_fence_payload(text)
         if fenced_payload is not None:
             text = fenced_payload
+        parsed = self._parse_json_object_text(text)
+        if parsed is None and fenced_payload is None:
+            embedded_payload = self._embedded_json_object_payload(text)
+            if embedded_payload is not None:
+                parsed = self._parse_json_object_text(embedded_payload)
+        if parsed is None:
+            return None
+        return parsed
+
+    def _parse_json_object_text(self, text: str) -> JsonObject | None:
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError:
@@ -656,10 +666,27 @@ class LangChainProviderAdapter:
             return None
         return dict(parsed)
 
+    def _embedded_json_object_payload(self, text: str) -> str | None:
+        decoder = json.JSONDecoder()
+        for index, char in enumerate(text):
+            if char != "{":
+                continue
+            try:
+                parsed, end = decoder.raw_decode(text[index:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, Mapping):
+                return text[index : index + end]
+        return None
+
     def _json_fence_payload(self, text: str) -> str | None:
-        if not text.startswith("```") or not text.endswith("```"):
+        start = text.find("```")
+        if start == -1:
             return None
-        inner = text[3:-3].strip()
+        end = text.find("```", start + 3)
+        if end == -1:
+            return None
+        inner = text[start + 3 : end].strip()
         if inner == "":
             return None
         first_line, separator, remainder = inner.partition("\n")

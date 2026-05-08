@@ -530,6 +530,76 @@ def test_invoke_structured_parses_json_text_content_as_candidate(
     assert result.structured_output_candidates == ({"summary": "candidate"},)
 
 
+def test_invoke_structured_parses_json_fence_embedded_in_text_as_candidate() -> None:
+    from backend.app.providers.langchain_adapter import LangChainProviderAdapter
+
+    fake_provider = fake_provider_fixture(
+        provider_snapshot=provider_snapshot_fixture(
+            capabilities=provider_capabilities_fixture(
+                supports_structured_output=False
+            )
+        )
+    )
+    adapter = LangChainProviderAdapter(
+        provider_config=fake_provider.config,
+        provider_call_policy_snapshot=provider_policy_snapshot(),
+        chat_model_factory=lambda _config, _timeout, _max_tokens: _FakeBoundModel(
+            AIMessage(content='Here is the response:\n```json\n{"summary":"candidate"}\n```')
+        ),
+    )
+
+    result = adapter.invoke_structured(
+        messages=(SystemMessage(content="system"), HumanMessage(content="user")),
+        response_schema={
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+            "required": ["summary"],
+            "additionalProperties": False,
+        },
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        tool_descriptions=(),
+        trace_context=trace_context(),
+    )
+
+    assert result.structured_output is None
+    assert result.structured_output_candidates == ({"summary": "candidate"},)
+
+
+def test_invoke_structured_parses_embedded_json_object_text_as_candidate() -> None:
+    from backend.app.providers.langchain_adapter import LangChainProviderAdapter
+
+    fake_provider = fake_provider_fixture(
+        provider_snapshot=provider_snapshot_fixture(
+            capabilities=provider_capabilities_fixture(
+                supports_structured_output=False
+            )
+        )
+    )
+    adapter = LangChainProviderAdapter(
+        provider_config=fake_provider.config,
+        provider_call_policy_snapshot=provider_policy_snapshot(),
+        chat_model_factory=lambda _config, _timeout, _max_tokens: _FakeBoundModel(
+            AIMessage(content='Result:\n{"summary":"candidate"}\nEnd.')
+        ),
+    )
+
+    result = adapter.invoke_structured(
+        messages=(SystemMessage(content="system"), HumanMessage(content="user")),
+        response_schema={
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+            "required": ["summary"],
+            "additionalProperties": False,
+        },
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        tool_descriptions=(),
+        trace_context=trace_context(),
+    )
+
+    assert result.structured_output is None
+    assert result.structured_output_candidates == ({"summary": "candidate"},)
+
+
 def test_invoke_structured_ignores_non_object_json_text_content() -> None:
     from backend.app.providers.langchain_adapter import LangChainProviderAdapter
 
