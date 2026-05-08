@@ -8,7 +8,7 @@ from typing import Any, Protocol
 from langgraph.types import Command
 
 from backend.app.domain.graph_definition import GraphDefinition
-from backend.app.domain.enums import StageType
+from backend.app.domain.enums import StageStatus, StageType
 from backend.app.domain.runtime_refs import (
     GraphInterruptStatus,
     GraphInterruptType,
@@ -306,6 +306,65 @@ class LangGraphRuntimeEngine:
             resume_payload=resume_payload,
             runtime_port=runtime_port,
             checkpoint_port=checkpoint_port,
+        )
+
+    def resume_stage_tool_confirmation(
+        self,
+        *,
+        context: RuntimeExecutionContext,
+        interrupt: RuntimeInterrupt,
+        resume_payload: RuntimeResumePayload,
+        runtime_port: RuntimeCommandPort,
+        checkpoint_port: CheckpointPort,
+    ) -> RuntimeEngineResult:
+        self._validate_resume_context(context, interrupt)
+        if interrupt.interrupt_ref.interrupt_type is not GraphInterruptType.TOOL_CONFIRMATION:
+            raise ValueError("stage tool confirmation resume requires tool confirmation")
+        resume_trace = context.trace_context.child_span(
+            span_id=f"langgraph-stage-tool-confirmation-resume-{interrupt.interrupt_ref.interrupt_id}",
+            created_at=self._now(),
+            run_id=context.run_id,
+            stage_run_id=interrupt.stage_run_id,
+            tool_confirmation_id=interrupt.interrupt_ref.tool_confirmation_id,
+            graph_thread_id=interrupt.interrupt_ref.thread.thread_id,
+        )
+        orchestration = RuntimeOrchestrationService(
+            runtime_port=runtime_port,
+            checkpoint_port=checkpoint_port,
+            clock=self._now,
+        )
+        command_result = orchestration.resume_tool_confirmation(
+            interrupt=interrupt.interrupt_ref,
+            resume_payload=resume_payload,
+            trace_context=resume_trace,
+        )
+        graph_context = context.model_copy(update={"thread": command_result.thread})
+        result = StageNodeResult.model_validate(
+            self._stage_runner.run_stage(
+                self._stage_invocation(
+                    context=graph_context,
+                    stage_type=interrupt.stage_type,
+                    trace_context=resume_trace,
+                )
+            )
+        )
+        checkpoint = self._sync_stage_result_to_graph(
+            context=graph_context,
+            result=result,
+            checkpoint_port=checkpoint_port,
+            trace_context=resume_trace,
+        )
+        return RuntimeStepResult(
+            run_id=result.run_id,
+            stage_run_id=result.stage_run_id,
+            stage_type=result.stage_type,
+            status=result.status,
+            trace_context=resume_trace,
+            artifact_refs=result.artifact_refs,
+            domain_event_refs=result.domain_event_refs,
+            log_summary_refs=result.log_summary_refs,
+            audit_refs=result.audit_refs,
+            checkpoint_ref=checkpoint,
         )
 
     def create_graph_interrupt(
@@ -624,6 +683,73 @@ class LangGraphRuntimeEngine:
             if StageType(str(node["stage_type"])) is stage_type:
                 return str(node["node_key"])
         return stage_type.value
+
+    def _stage_invocation(
+        self,
+        *,
+        context: RuntimeExecutionContext,
+        stage_type: StageType,
+        trace_context: TraceContext,
+    ) -> Any:
+        from backend.app.runtime.stage_runner_port import StageNodeInvocation
+
+        stage_run_id = context.thread.current_stage_run_id
+        if stage_run_id is None:
+            raise ValueError("stage resume requires current_stage_run_id")
+        graph_node_key = self._node_key_for_stage(stage_type)
+        return StageNodeInvocation(
+            run_id=context.run_id,
+            stage_run_id=stage_run_id,
+            stage_type=stage_type,
+            graph_node_key=graph_node_key,
+            stage_contract_ref=(
+                f"{self._graph_definition.graph_definition_id}/"
+                f"stage-contracts/{stage_type.value}"
+            ),
+            runtime_context=context,
+            trace_context=trace_context,
+        )
+
+    def _sync_stage_result_to_graph(
+        self,
+        *,
+        context: RuntimeExecutionContext,
+        result: Any,
+        checkpoint_port: CheckpointPort,
+        trace_context: TraceContext,
+    ) -> Any:
+        compiled_graph = self._compile_graph(context)
+        config = langgraph_thread_config(thread_id=context.thread.thread_id)
+        snapshot = compiled_graph.get_state(config)
+        completed_stage_run_ids = list(snapshot.values.get("completed_stage_run_ids") or [])
+        if (
+            result.status is StageStatus.COMPLETED
+            and result.stage_run_id not in completed_stage_run_ids
+        ):
+            completed_stage_run_ids.append(result.stage_run_id)
+        update = {
+            "run_id": context.run_id,
+            "session_id": context.session_id,
+            "current_node_key": self._node_key_for_stage(result.stage_type),
+            "completed_stage_run_ids": completed_stage_run_ids,
+            "last_result": result.model_dump(mode="json"),
+            "route_key": result.route_key or "__default__",
+        }
+        latest_config = compiled_graph.update_state(
+            config,
+            update,
+            as_node=self._node_key_for_stage(result.stage_type),
+        )
+        return save_graph_checkpoint(
+            compiled_graph=compiled_graph,
+            config=latest_config,
+            checkpoint_port=checkpoint_port,
+            thread=context.thread,
+            trace_context=trace_context,
+            stage_run_id=result.stage_run_id,
+            stage_type=result.stage_type,
+            workspace_snapshot_ref=context.workspace_snapshot_ref,
+        )
 
     def _stage_type_for_node(self, node_key: str) -> StageType | None:
         for node in self._graph_definition.stage_nodes:

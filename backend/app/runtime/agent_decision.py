@@ -890,6 +890,7 @@ class AgentDecision(_StrictBaseModel):
     decision_type: AgentDecisionType
     decision_trace: AgentDecisionTrace
     tool_call: ToolCallDecision | None = None
+    tool_calls: tuple[ToolCallDecision, ...] = Field(default_factory=tuple)
     tool_confirmation: ToolConfirmationDecision | None = None
     stage_artifact: SubmitStageArtifactDecision | None = None
     clarification: ClarificationDecision | None = None
@@ -899,8 +900,19 @@ class AgentDecision(_StrictBaseModel):
 
     @model_validator(mode="after")
     def validate_single_payload(self) -> Self:
+        if self.decision_type is AgentDecisionType.REQUEST_TOOL_CALL:
+            if self.tool_call is None and self.tool_calls:
+                self.tool_call = self.tool_calls[0]
+            if self.tool_call is not None and not self.tool_calls:
+                self.tool_calls = (self.tool_call,)
+            if (
+                self.tool_call is not None
+                and self.tool_calls
+                and self.tool_calls[0] != self.tool_call
+            ):
+                raise ValueError("tool_call must match the first tool_calls item")
         payloads = {
-            AgentDecisionType.REQUEST_TOOL_CALL: self.tool_call,
+            AgentDecisionType.REQUEST_TOOL_CALL: self.tool_calls,
             AgentDecisionType.REQUEST_TOOL_CONFIRMATION: self.tool_confirmation,
             AgentDecisionType.SUBMIT_STAGE_ARTIFACT: self.stage_artifact,
             AgentDecisionType.REQUEST_CLARIFICATION: self.clarification,
@@ -908,12 +920,12 @@ class AgentDecision(_StrictBaseModel):
             AgentDecisionType.RETRY_WITH_REVISED_PLAN: self.retry,
             AgentDecisionType.FAIL_STAGE: self.fail_stage,
         }
-        if payloads[self.decision_type] is None:
+        if not payloads[self.decision_type]:
             raise ValueError("decision payload must match decision_type")
         extra_payloads = [
             decision_type.value
             for decision_type, payload in payloads.items()
-            if decision_type is not self.decision_type and payload is not None
+            if decision_type is not self.decision_type and bool(payload)
         ]
         if extra_payloads:
             raise ValueError("only one decision payload may be set")
@@ -964,34 +976,21 @@ class AgentDecisionParser:
                 safe_details={"tool_call_count": len(model_result.tool_call_requests)},
             )
         if has_tool_calls:
-            if len(model_result.tool_call_requests) != 1:
-                first_tool_call = self._first_sequential_read_only_tool_call(
-                    model_result,
-                    context_envelope=context_envelope,
+            if len(model_result.tool_call_requests) == 1:
+                control_decision = self._control_decision_from_native_tool_call(
+                    model_result.tool_call_requests[0],
+                    model_result=model_result,
                     stage_contract=stage_contract,
                 )
-                if first_tool_call is not None:
+                if control_decision is not None:
                     return self.validate_against_stage_contract(
-                        self._decision_from_tool_call(
-                            first_tool_call,
-                            model_result=model_result,
-                        ),
+                        control_decision,
                         context_envelope=context_envelope,
                         stage_contract=stage_contract,
                     )
-                self._raise_error(
-                    AgentDecisionErrorCode.AMBIGUOUS_MODEL_DECISION,
-                    "Model returned multiple native tool calls for a single decision.",
-                    model_result=model_result,
-                    safe_details=self._multiple_tool_call_safe_details(
-                        model_result,
-                        context_envelope=context_envelope,
-                        stage_contract=stage_contract,
-                    ),
-                )
             return self.validate_against_stage_contract(
-                self._decision_from_tool_call(
-                    model_result.tool_call_requests[0],
+                self._decision_from_tool_calls(
+                    model_result.tool_call_requests,
                     model_result=model_result,
                 ),
                 context_envelope=context_envelope,
@@ -1006,6 +1005,55 @@ class AgentDecisionParser:
                 stage_contract=stage_contract,
             ),
             context_envelope=context_envelope,
+            stage_contract=stage_contract,
+        )
+
+    def _decision_from_tool_calls(
+        self,
+        tool_calls: Sequence[ModelCallToolRequest],
+        *,
+        model_result: ModelCallResult,
+    ) -> AgentDecision:
+        model_call_ref = self._model_call_ref(model_result)
+        decision_type = AgentDecisionType.REQUEST_TOOL_CALL
+        trace = self._trace_from_model_result(
+            model_result,
+            status="accepted",
+            decision_type=decision_type,
+        )
+        decisions = tuple(
+            ToolCallDecision(
+                call_id=tool_call.call_id,
+                tool_name=tool_call.tool_name,
+                input_payload=dict(tool_call.input_payload),
+                schema_version=tool_call.schema_version,
+                model_call_ref=model_call_ref,
+            )
+            for tool_call in tool_calls
+        )
+        return AgentDecision(
+            decision_type=decision_type,
+            decision_trace=trace,
+            tool_call=decisions[0],
+            tool_calls=decisions,
+        )
+
+    def _control_decision_from_native_tool_call(
+        self,
+        tool_call: ModelCallToolRequest,
+        *,
+        model_result: ModelCallResult,
+        stage_contract: Mapping[str, object],
+    ) -> AgentDecision | None:
+        if tool_call.tool_name != AgentDecisionType.SUBMIT_STAGE_ARTIFACT.value:
+            return None
+        structured = {
+            "decision_type": AgentDecisionType.SUBMIT_STAGE_ARTIFACT.value,
+            **dict(tool_call.input_payload),
+        }
+        return self._decision_from_structured_output(
+            structured,
+            model_result=model_result,
             stage_contract=stage_contract,
         )
 
@@ -1070,13 +1118,14 @@ class AgentDecisionParser:
         context_envelope: ContextEnvelope,
         stage_contract: dict[str, object],
     ) -> AgentDecision:
-        if decision.tool_call is not None:
-            self._validate_tool_call(
-                decision.tool_call,
-                model_result_context=decision.decision_trace,
-                context_envelope=context_envelope,
-                stage_contract=stage_contract,
-            )
+        if decision.tool_calls:
+            for tool_call in decision.tool_calls:
+                self._validate_tool_call(
+                    tool_call,
+                    context_envelope=context_envelope,
+                    stage_contract=stage_contract,
+                    model_result_context=decision.decision_trace,
+                )
         else:
             self._validate_decision_type_allowed_by_response_schema(
                 decision.decision_type,
@@ -1471,11 +1520,14 @@ class AgentDecisionParser:
             artifact_type=artifact_type,
         )
         if "evidence_refs" not in required_fields or "evidence_refs" in artifact_payload:
-            return structured
+            normalized = dict(structured)
+            normalized["artifact_type"] = artifact_type
+            return normalized
         evidence_refs = structured.get("evidence_refs") or [
             self._model_call_ref(model_result)
         ]
         normalized = dict(structured)
+        normalized["artifact_type"] = artifact_type
         normalized["artifact_payload"] = {
             **dict(artifact_payload),
             "evidence_refs": evidence_refs,

@@ -578,6 +578,59 @@ def test_parser_moves_legacy_top_level_artifact_fields_into_payload() -> None:
     ]
 
 
+def test_parser_accepts_native_submit_stage_artifact_control_call() -> None:
+    from backend.app.runtime.agent_decision import (
+        AgentDecisionParser,
+        AgentDecisionType,
+    )
+
+    decision = AgentDecisionParser().parse_model_result(
+        model_result(
+            tool_call_requests=(
+                ModelCallToolRequest(
+                    call_id="call-submit-1",
+                    tool_name="submit_stage_artifact",
+                    input_payload={
+                        "artifact_payload": {
+                            "technical_plan": "Update homepage heading text only.",
+                            "implementation_plan": [
+                                "Edit frontend/src/pages/HomePage.tsx heading."
+                            ],
+                            "impacted_files": ["frontend/src/pages/HomePage.tsx"],
+                            "api_design": "No API changes.",
+                            "data_flow_design": "No data-flow changes.",
+                            "risks": ["Text-only copy risk."],
+                            "test_strategy": ["Inspect homepage heading."],
+                            "validation_report": (
+                                "Plan matches the requested copy change."
+                            ),
+                            "requirement_refs": ["message://run-1/user/1"],
+                        },
+                        "evidence_refs": ["stage-process://stage-run-1/model-call/1"],
+                    },
+                    schema_version=None,
+                ),
+            )
+        ),
+        context_envelope=context_envelope(
+            stage_type=StageType.SOLUTION_DESIGN,
+            available_tools=(),
+        ),
+        stage_contract=stage_contract(
+            allowed_tools=[],
+            output_contract="SolutionDesignArtifact",
+            structured_artifact_required="SolutionDesignArtifact",
+        ),
+    )
+
+    assert decision.decision_type is AgentDecisionType.SUBMIT_STAGE_ARTIFACT
+    assert decision.stage_artifact is not None
+    assert decision.stage_artifact.artifact_type == "SolutionDesignArtifact"
+    assert decision.stage_artifact.artifact_payload["evidence_refs"] == [
+        "stage-process://stage-run-1/model-call/1"
+    ]
+
+
 def test_response_schema_can_remove_clarification_for_downstream_stages() -> None:
     from backend.app.runtime.agent_decision import (
         AgentDecisionType,
@@ -1017,8 +1070,11 @@ def test_parse_rejects_invalid_tool_candidates_and_ambiguous_outputs() -> None:
     )
 
 
-def test_parse_accepts_first_call_when_multiple_native_tool_calls_are_read_only() -> None:
+def test_parse_accepts_multiple_native_tool_calls_as_batch() -> None:
     from backend.app.runtime.agent_decision import AgentDecisionParser, AgentDecisionType
+
+    write_tool = tool_description("write_file")
+    write_tool = write_tool.model_copy(update={"risk_level": ToolRiskLevel.HIGH_RISK})
 
     decision = AgentDecisionParser().parse_model_result(
         model_result(
@@ -1031,62 +1087,26 @@ def test_parse_accepts_first_call_when_multiple_native_tool_calls_are_read_only(
                 ),
                 ModelCallToolRequest(
                     call_id="call-2",
-                    tool_name="read_file",
-                    input_payload={"path": "src/other.py"},
+                    tool_name="write_file",
+                    input_payload={"path": "src/app.py"},
                     schema_version="tool-schema-v1",
                 ),
             )
         ),
-        context_envelope=context_envelope(),
-        stage_contract=stage_contract(),
+        context_envelope=context_envelope(
+            available_tools=(tool_description(), write_tool),
+        ),
+        stage_contract=stage_contract(allowed_tools=["read_file", "write_file"]),
     )
 
     assert decision.decision_type is AgentDecisionType.REQUEST_TOOL_CALL
     assert decision.tool_call is not None
     assert decision.tool_call.call_id == "call-1"
-    assert decision.tool_call.input_payload == {"path": "src/app.py"}
-
-
-def test_parse_rejects_multiple_native_tool_calls_when_any_call_has_side_effect_risk() -> None:
-    from backend.app.runtime.agent_decision import (
-        AgentDecisionErrorCode,
-        AgentDecisionParser,
-        AgentDecisionParserError,
-    )
-
-    write_tool = tool_description("write_file")
-    write_tool = write_tool.model_copy(update={"risk_level": ToolRiskLevel.HIGH_RISK})
-
-    with pytest.raises(AgentDecisionParserError) as error:
-        AgentDecisionParser().parse_model_result(
-            model_result(
-                tool_call_requests=(
-                    ModelCallToolRequest(
-                        call_id="call-1",
-                        tool_name="read_file",
-                        input_payload={"path": "src/app.py"},
-                        schema_version="tool-schema-v1",
-                    ),
-                    ModelCallToolRequest(
-                        call_id="call-2",
-                        tool_name="write_file",
-                        input_payload={"path": "src/app.py"},
-                        schema_version="tool-schema-v1",
-                    ),
-                )
-            ),
-            context_envelope=context_envelope(
-                available_tools=(tool_description(), write_tool),
-            ),
-            stage_contract=stage_contract(allowed_tools=["read_file", "write_file"]),
-        )
-
-    assert (
-        error.value.error.error_code
-        is AgentDecisionErrorCode.AMBIGUOUS_MODEL_DECISION
-    )
-    assert error.value.error.safe_details["tool_call_count"] == 2
-    assert error.value.error.safe_details["non_read_only_tool_name"] == "write_file"
+    assert [call.call_id for call in decision.tool_calls] == ["call-1", "call-2"]
+    assert [call.tool_name for call in decision.tool_calls] == [
+        "read_file",
+        "write_file",
+    ]
 
 
 def test_parse_error_safe_details_bound_model_controlled_strings() -> None:

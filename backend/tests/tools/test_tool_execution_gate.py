@@ -312,10 +312,13 @@ def context(
 def request(
     tool_name: str = "read_file",
     payload: dict[str, object] | None = None,
+    *,
+    call_id: str | None = None,
 ) -> ToolExecutionRequest:
+    resolved_call_id = call_id or f"call-{tool_name.lower().replace('_', '-')}"
     return ToolExecutionRequest(
         tool_name=tool_name,
-        call_id=f"call-{tool_name.lower().replace('_', '-')}",
+        call_id=resolved_call_id,
         input_payload=payload if payload is not None else {"path": "src/app.py"},
         trace_context=build_trace(),
         coordination_key=f"coordination-{tool_name.lower().replace('_', '-')}",
@@ -1139,6 +1142,67 @@ def test_execute_confirmed_high_risk_action_runs_only_when_grant_matches() -> No
     )
 
     result = registry.execute(matching_request, pending_context)
+
+    assert result.status is ToolResultStatus.SUCCEEDED
+    assert len(confirmations.calls) == 1
+    assert tool.calls
+
+
+def test_execute_confirmed_high_risk_action_runs_when_model_reissues_call_id() -> None:
+    tool = ExecutableFakeTool(
+        name="bash",
+        side_effect_level=ToolSideEffectLevel.PROCESS_EXECUTION,
+        permission_boundary=ToolPermissionBoundary(
+            boundary_type="workspace",
+            requires_workspace=False,
+            resource_scopes=(),
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"command": {"type": "string", "minLength": 1}},
+            "required": ["command"],
+            "additionalProperties": False,
+        },
+    )
+    registry = ToolRegistry([tool])
+    confirmations = RecordingConfirmationPort()
+    audit = RecordingAudit()
+    pending_context = ToolExecutionContext(
+        **{
+            **context(allowed_tools=["bash"], audit_recorder=audit).__dict__,
+            "confirmation_port": confirmations,
+        }
+    )
+    pending = registry.execute(
+        request("bash", {"command": "pip install pytest"}),
+        pending_context,
+    )
+    reissued_request = request(
+        "bash",
+        {"command": "pip install pytest"},
+        call_id="call-bash-reissued",
+    )
+    reissued_request = ToolExecutionRequest(
+        **{
+            **reissued_request.model_dump(),
+            "trace_context": reissued_request.trace_context.model_copy(
+                update={"tool_confirmation_id": "tool-confirmation-1"}
+            ),
+            "confirmation_grant": ToolConfirmationGrant(
+                tool_confirmation_id="tool-confirmation-1",
+                confirmation_object_ref=confirmations.calls[0][
+                    "confirmation_object_ref"
+                ],
+                tool_name="bash",
+                input_digest=pending.error.safe_details["input_digest"],
+                target_summary=pending.error.safe_details["target_summary"],
+                risk_level=ToolRiskLevel.HIGH_RISK,
+                risk_categories=[ToolRiskCategory.DEPENDENCY_CHANGE],
+            ),
+        }
+    )
+
+    result = registry.execute(reissued_request, pending_context)
 
     assert result.status is ToolResultStatus.SUCCEEDED
     assert len(confirmations.calls) == 1

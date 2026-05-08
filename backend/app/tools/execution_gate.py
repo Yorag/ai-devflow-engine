@@ -557,7 +557,12 @@ class ToolExecutionGate:
         return (
             request.trace_context.tool_confirmation_id == grant.tool_confirmation_id
             and grant.tool_name == tool_name
-            and grant.confirmation_object_ref == assessment.confirmation_object_ref
+            and _confirmation_object_refs_match(
+                grant.confirmation_object_ref,
+                assessment.confirmation_object_ref,
+                tool_name=tool_name,
+                input_digest=assessment.input_digest,
+            )
             and grant.input_digest == assessment.input_digest
             and grant.target_summary == assessment.target_summary
             and grant.risk_level is assessment.risk_level
@@ -921,6 +926,36 @@ class ToolExecutionGate:
             )
         except Exception:
             return
+
+
+def _confirmation_object_refs_match(
+    grant_ref: str,
+    assessment_ref: str,
+    *,
+    tool_name: str,
+    input_digest: str,
+) -> bool:
+    if grant_ref == assessment_ref:
+        return True
+    grant_tool_ref = _parse_tool_call_confirmation_ref(grant_ref)
+    assessment_tool_ref = _parse_tool_call_confirmation_ref(assessment_ref)
+    if grant_tool_ref is None or assessment_tool_ref is None:
+        return False
+    digest_prefix = input_digest[:12]
+    return (
+        grant_tool_ref == (tool_name, digest_prefix)
+        and assessment_tool_ref == (tool_name, digest_prefix)
+    )
+
+
+def _parse_tool_call_confirmation_ref(value: str) -> tuple[str, str] | None:
+    parts = value.split(":")
+    if len(parts) != 4 or parts[0] != "tool-call":
+        return None
+    _prefix, tool_name, _call_id, digest_prefix = parts
+    if not tool_name or not digest_prefix:
+        return None
+    return tool_name, digest_prefix
 
 
 __all__ = [

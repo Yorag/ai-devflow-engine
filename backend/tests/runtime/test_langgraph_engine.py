@@ -13,12 +13,22 @@ from backend.app.domain.graph_definition import GraphDefinition
 from backend.app.domain.runtime_refs import (
     CheckpointPurpose,
     CheckpointRef,
+    GraphInterruptRef,
+    GraphInterruptStatus,
+    GraphInterruptType,
     GraphThreadRef,
     GraphThreadStatus,
+    RuntimeCommandResult,
+    RuntimeCommandType,
+    RuntimeResumePayload,
 )
 from backend.app.domain.trace_context import TraceContext
 from backend.app.observability.log_writer import LogRecordInput
-from backend.app.runtime.base import RuntimeExecutionContext, RuntimeStepResult
+from backend.app.runtime.base import (
+    RuntimeExecutionContext,
+    RuntimeInterrupt,
+    RuntimeStepResult,
+)
 from backend.app.services.graph_compiler import GraphCompiler
 
 
@@ -106,6 +116,19 @@ class CapturingRuntimeCommandPort:
         return _capture
 
 
+class AllowingToolConfirmationRuntimeCommandPort(CapturingRuntimeCommandPort):
+    def resume_tool_confirmation(self, **kwargs: Any) -> RuntimeCommandResult:
+        self.calls.append(("resume_tool_confirmation", kwargs))
+        interrupt = kwargs["interrupt"]
+        return RuntimeCommandResult(
+            command_type=RuntimeCommandType.RESUME_TOOL_CONFIRMATION,
+            thread=interrupt.thread.model_copy(update={"status": GraphThreadStatus.RUNNING}),
+            interrupt_ref=interrupt.model_copy(update={"status": GraphInterruptStatus.RESUMED}),
+            payload_ref=kwargs["resume_payload"].payload_ref,
+            trace_context=kwargs["trace_context"],
+        )
+
+
 class FakeStageRunner:
     def __init__(self, *, route_once: str | None = None) -> None:
         self.invocations: list[Any] = []
@@ -139,13 +162,26 @@ class FakeStageRunner:
 
 
 class WaitingStageRunner:
-    def __init__(self) -> None:
+    def __init__(self, *, wait_once: bool = False) -> None:
         self.invocations: list[Any] = []
+        self._wait_once = wait_once
 
     def run_stage(self, invocation: Any) -> Any:
         from backend.app.runtime.stage_runner_port import StageNodeResult
 
         self.invocations.append(invocation)
+        if self._wait_once and len(self.invocations) > 1:
+            return StageNodeResult(
+                run_id=invocation.run_id,
+                stage_run_id=invocation.stage_run_id,
+                stage_type=invocation.stage_type,
+                status=StageStatus.COMPLETED,
+                artifact_refs=["artifact-resumed-tool-confirmation"],
+                domain_event_refs=[],
+                log_summary_refs=[],
+                audit_refs=[],
+                route_key=None,
+            )
         return StageNodeResult(
             run_id=invocation.run_id,
             stage_run_id=invocation.stage_run_id,
@@ -439,6 +475,87 @@ def test_langgraph_runtime_does_not_advance_after_waiting_stage_result() -> None
     assert [call.stage_type for call in runner.invocations] == [
         StageType.REQUIREMENT_ANALYSIS
     ]
+
+
+def test_langgraph_runtime_resumes_stage_tool_confirmation_by_reinvoking_current_stage() -> None:
+    runner = WaitingStageRunner(wait_once=True)
+    engine, _runner, checkpoint_port, _runtime_port = build_engine(runner=runner)
+    runtime_port = AllowingToolConfirmationRuntimeCommandPort()
+    context = build_context()
+    waiting = engine.run_next(
+        context=context,
+        runtime_port=runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    assert isinstance(waiting, RuntimeStepResult)
+    assert waiting.status is StageStatus.WAITING_TOOL_CONFIRMATION
+
+    waiting_thread = GraphThreadRef(
+        thread_id="graph-thread-1",
+        run_id="run-1",
+        status=GraphThreadStatus.WAITING_TOOL_CONFIRMATION,
+        current_stage_run_id=waiting.stage_run_id,
+        current_stage_type=waiting.stage_type,
+    )
+    interrupt = RuntimeInterrupt(
+        run_id="run-1",
+        stage_run_id=waiting.stage_run_id,
+        stage_type=waiting.stage_type,
+        interrupt_ref=GraphInterruptRef(
+            interrupt_id="interrupt-tool-confirmation-1",
+            thread=waiting_thread,
+            interrupt_type=GraphInterruptType.TOOL_CONFIRMATION,
+            status=GraphInterruptStatus.PENDING,
+            run_id="run-1",
+            stage_run_id=waiting.stage_run_id,
+            stage_type=waiting.stage_type,
+            payload_ref="tool-confirmation-1",
+            tool_confirmation_id="tool-confirmation-1",
+            tool_action_ref="tool-call:bash:call-bash:abc123",
+            checkpoint_ref=waiting.checkpoint_ref,
+        ),
+        payload_ref="tool-confirmation-1",
+        trace_context=build_trace(
+            stage_run_id=waiting.stage_run_id,
+            tool_confirmation_id="tool-confirmation-1",
+        ),
+    )
+    result = engine.resume_stage_tool_confirmation(
+        context=build_context(
+            thread=waiting_thread,
+            trace_context=build_trace(
+                stage_run_id=waiting.stage_run_id,
+                tool_confirmation_id="tool-confirmation-1",
+            ),
+        ),
+        interrupt=interrupt,
+        resume_payload=RuntimeResumePayload(
+            resume_id="resume-tool-confirmation-1",
+            payload_ref="tool-confirmation-1",
+            values={
+                "decision": "allowed",
+                "tool_confirmation_id": "tool-confirmation-1",
+            },
+        ),
+        runtime_port=runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+
+    assert isinstance(result, RuntimeStepResult)
+    assert result.status is StageStatus.COMPLETED
+    assert result.artifact_refs == ["artifact-resumed-tool-confirmation"]
+    assert [call.stage_type for call in runner.invocations] == [
+        StageType.REQUIREMENT_ANALYSIS,
+        StageType.REQUIREMENT_ANALYSIS,
+    ]
+    snapshot = engine._checkpointer.get_tuple(  # noqa: SLF001
+        {"configurable": {"thread_id": "graph-thread-1"}}
+    )
+    values = snapshot.checkpoint["channel_values"]
+    assert snapshot.checkpoint["channel_values"]["last_result"]["status"] == "completed"
+    assert values["completed_stage_run_ids"] == [waiting.stage_run_id]
+    assert snapshot.pending_writes == []
+    assert checkpoint_port.calls[-1]["purpose"] is CheckpointPurpose.RUNNING_SAFE_POINT
 
 
 def test_langgraph_runtime_logs_sanitized_internal_graph_events() -> None:

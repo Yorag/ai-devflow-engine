@@ -274,6 +274,16 @@ class RuntimeEngine(Protocol):
         checkpoint_port: CheckpointPort,
     ) -> RuntimeEngineResult: ...
 
+    def resume_stage_tool_confirmation(
+        self,
+        *,
+        context: RuntimeExecutionContext,
+        interrupt: RuntimeInterrupt,
+        resume_payload: RuntimeResumePayload,
+        runtime_port: RuntimeCommandPort,
+        checkpoint_port: CheckpointPort,
+    ) -> RuntimeEngineResult: ...
+
     def terminate(
         self,
         *,

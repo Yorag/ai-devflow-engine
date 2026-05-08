@@ -906,6 +906,64 @@ def test_stage_agent_executes_tool_decision_through_tool_registry_and_continues(
         "read_file",
     )
     assert "tool_trace" in runtime.artifact_store.append_keys()
+    tool_trace = next(
+        call["process_value"]
+        for call in runtime.artifact_store.append_calls
+        if call["process_key"] == "tool_trace"
+    )
+    assert tool_trace["input_payload_summary"] == {
+        "input_keys": ["path"],
+        "payload_size_bytes": 39,
+        "redaction_status": "summary_only",
+        "path": "backend/app/runtime/nodes.py",
+    }
+
+
+def test_stage_agent_executes_native_tool_call_batch_before_next_model_call() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(
+                tool_call_requests=(
+                    edit_file_call("call-edit-1"),
+                    edit_file_call("call-edit-2", old_text="Start", new_text="Begin"),
+                )
+            ),
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "CodeGenerationArtifact",
+                    "artifact_payload": code_generation_payload(),
+                    "evidence_refs": ["tool-result://call-edit-1"],
+                }
+            ),
+        ],
+        tool_results=[
+            succeeded_edit_file_result("call-edit-1"),
+            succeeded_edit_file_result("call-edit-2"),
+        ],
+        allowed_tools=["edit_file"],
+        available_tools=(edit_file_description(),),
+    )
+
+    result = runtime.run_stage(invocation())
+
+    assert result.status is StageStatus.COMPLETED
+    assert [
+        call["request"].call_id for call in runtime.tool_registry.execute_calls
+    ] == ["call-edit-1", "call-edit-2"]
+    tool_trace = runtime.artifact_store.process["tool_trace"]
+    assert isinstance(tool_trace, list)
+    assert [entry["call_id"] for entry in tool_trace] == [
+        "call-edit-1",
+        "call-edit-2",
+    ]
+    payload = runtime.artifact_store.complete_calls[0]["output_snapshot"][
+        "artifact_payload"
+    ]
+    assert payload["file_edit_trace_refs"] == [
+        "file_edit_trace:run-1:call-edit-1:frontend/src/pages/HomePage.tsx",
+        "file_edit_trace:run-1:call-edit-2:frontend/src/pages/HomePage.tsx",
+    ]
 
 
 def test_stage_agent_traces_tool_loop_with_readable_runtime_events() -> None:
@@ -998,6 +1056,79 @@ def test_stage_agent_high_risk_tool_result_waits_for_confirmation_without_comple
     assert "tool_confirmation_trace" in runtime.artifact_store.append_keys()
     assert "recovery_checkpoint" in runtime.artifact_store.append_keys()
     assert runtime.artifact_store.complete_calls == []
+
+
+def test_stage_agent_passes_allowed_confirmation_grant_to_reissued_tool_call() -> None:
+    payload = execution_artifact_payload()
+    payload["command_trace_refs"] = ["model-invented-command-ref"]
+    confirmation_ref = "tool-confirmation-1"
+    command = "npm --prefix frontend run build"
+    input_digest = (
+        "2b030a34d31d4f39ac5435a491ee4cff1e993be901c9dc9dcc83627618425c45"
+    )
+    existing_artifact = SimpleNamespace(
+        artifact_id="artifact-stage-run-1",
+        run_id="run-1",
+        stage_run_id="stage-run-1",
+        artifact_type="test_generation_execution_stage_agent_stage",
+        payload_ref="stage-artifact://artifact-stage-run-1/input",
+        process={
+            "tool_confirmation_trace": {
+                "tool_name": "bash",
+                "call_id": "call-bash-original",
+                "tool_confirmation_ref": confirmation_ref,
+                "status": "waiting_confirmation",
+                "safe_details": {
+                    "risk_level": "high_risk",
+                    "risk_categories": ["unknown_command"],
+                    "target_summary": f"command: {command}",
+                    "input_digest": input_digest,
+                },
+            }
+        },
+        metrics={},
+    )
+    runtime = build_runtime(
+        provider_results=[
+            model_result(tool_call_requests=(bash_call("call-bash-reissued"),)),
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "TestGenerationExecutionArtifact",
+                    "artifact_payload": payload,
+                    "evidence_refs": ["stage-process://stage-run-1/model-call/submit"],
+                }
+            ),
+        ],
+        tool_results=[succeeded_bash_result("call-bash-reissued")],
+        allowed_tools=["bash"],
+        available_tools=(bash_description(),),
+        stage_type=StageType.TEST_GENERATION_EXECUTION,
+        structured_artifact_required="TestGenerationExecutionArtifact",
+        stage_artifacts=[existing_artifact],
+    )
+    stage_invocation = invocation(stage_type=StageType.TEST_GENERATION_EXECUTION)
+    stage_invocation = StageNodeInvocation(
+        run_id=stage_invocation.run_id,
+        stage_run_id=stage_invocation.stage_run_id,
+        stage_type=stage_invocation.stage_type,
+        graph_node_key=stage_invocation.graph_node_key,
+        stage_contract_ref=stage_invocation.stage_contract_ref,
+        runtime_context=stage_invocation.runtime_context,
+        trace_context=stage_invocation.trace_context.model_copy(
+            update={"tool_confirmation_id": confirmation_ref}
+        ),
+    )
+
+    result = runtime.run_stage(stage_invocation)
+
+    assert result.status is StageStatus.COMPLETED
+    request = runtime.tool_registry.execute_calls[0]["request"]
+    assert request.confirmation_grant is not None
+    assert request.confirmation_grant.tool_confirmation_id == confirmation_ref
+    assert request.confirmation_grant.tool_name == "bash"
+    assert request.confirmation_grant.input_digest == input_digest
+    assert request.confirmation_grant.target_summary == f"command: {command}"
 
 
 def test_stage_agent_persists_structured_clarification_request_before_waiting() -> None:

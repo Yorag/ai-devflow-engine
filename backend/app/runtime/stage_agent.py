@@ -10,7 +10,12 @@ from typing import Any
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from backend.app.context.builder import ContextBuildRequest, ContextEnvelopeBuilder
-from backend.app.domain.enums import StageStatus, StageType, ToolRiskLevel
+from backend.app.domain.enums import (
+    StageStatus,
+    StageType,
+    ToolRiskCategory,
+    ToolRiskLevel,
+)
 from backend.app.domain.graph_definition import GraphDefinition
 from backend.app.domain.provider_snapshot import ProviderSnapshot
 from backend.app.domain.template_snapshot import TemplateSnapshot
@@ -45,6 +50,7 @@ from backend.app.tools.protocol import (
     ToolResultStatus,
 )
 from backend.app.tools.registry import ToolRegistry
+from backend.app.tools.risk import ToolConfirmationGrant
 
 
 JsonObject = dict[str, Any]
@@ -231,7 +237,7 @@ class StageAgentRuntime:
         request: StageExecutionRequest,
         iteration_index: int,
         tool_results: tuple[ToolResult, ...],
-    ) -> tuple[StageNodeResult | None, ToolResult | None, StageExecutionRequest]:
+    ) -> tuple[StageNodeResult | None, tuple[ToolResult, ...], StageExecutionRequest]:
         with self._runtime_tracer.trace_iteration(
             iteration_index=iteration_index,
             model_call_type=request.model_call_type.value,
@@ -244,7 +250,7 @@ class StageAgentRuntime:
         request: StageExecutionRequest,
         iteration_index: int,
         tool_results: tuple[ToolResult, ...],
-    ) -> tuple[StageNodeResult | None, ToolResult | None, StageExecutionRequest]:
+    ) -> tuple[StageNodeResult | None, tuple[ToolResult, ...], StageExecutionRequest]:
         build_result = self._context_builder.build_for_stage_call(
             self._context_request(request)
         )
@@ -259,7 +265,7 @@ class StageAgentRuntime:
                     reason=capability_failure,
                     iteration_index=iteration_index,
                 ),
-                None,
+                (),
                 request,
             )
 
@@ -324,7 +330,7 @@ class StageAgentRuntime:
                     last_model_call_ref=model_call_ref,
                     last_decision_trace_ref=exc.error.decision_trace.trace_ref,
                 ),
-                None,
+                (),
                 request,
             )
 
@@ -347,7 +353,13 @@ class StageAgentRuntime:
         }
         if decision.decision_type is AgentDecisionType.REQUEST_TOOL_CALL:
             limits = request.runtime_limit_snapshot.agent_limits
-            if len(tool_results) >= limits.max_tool_calls_per_stage:
+            batch_tool_calls = decision.tool_calls or (
+                (decision.tool_call,) if decision.tool_call is not None else ()
+            )
+            if (
+                len(tool_results) + len(batch_tool_calls)
+                > limits.max_tool_calls_per_stage
+            ):
                 return (
                     self._failed_result(
                         request,
@@ -355,23 +367,38 @@ class StageAgentRuntime:
                         iteration_index=iteration_index,
                         **cursor_kwargs,
                     ),
-                    None,
+                    (),
                     request,
                 )
-            tool_result = self.execute_tool_decision(request, decision, iteration_index)
-            result = self._result_from_tool_result(
-                request,
-                decision,
-                tool_result,
-                iteration_index,
-                completed_tool_call_ids=tuple(
-                    item.call_id
-                    for item in tool_results
-                    if item.status is ToolResultStatus.SUCCEEDED
-                ),
-                **cursor_kwargs,
+            batch_results: list[ToolResult] = []
+            completed_ids = tuple(
+                item.call_id
+                for item in tool_results
+                if item.status is ToolResultStatus.SUCCEEDED
             )
-            return result, tool_result, request
+            for tool_call in batch_tool_calls:
+                single_decision = decision.model_copy(
+                    update={"tool_call": tool_call, "tool_calls": (tool_call,)}
+                )
+                tool_result = self.execute_tool_decision(
+                    request,
+                    single_decision,
+                    iteration_index,
+                )
+                batch_results.append(tool_result)
+                result = self._result_from_tool_result(
+                    request,
+                    single_decision,
+                    tool_result,
+                    iteration_index,
+                    completed_tool_call_ids=completed_ids,
+                    **cursor_kwargs,
+                )
+                if tool_result.status is ToolResultStatus.SUCCEEDED:
+                    completed_ids = (*completed_ids, tool_result.call_id)
+                if result is not None:
+                    return result, tuple(batch_results), request
+            return None, tuple(batch_results), request
 
         if decision.decision_type is AgentDecisionType.SUBMIT_STAGE_ARTIFACT:
             evidence_result = self._normalize_or_repair_stage_artifact_evidence(
@@ -382,7 +409,7 @@ class StageAgentRuntime:
                 **cursor_kwargs,
             )
             if evidence_result.result is not None or evidence_result.request is not request:
-                return (evidence_result.result, None, evidence_result.request)
+                return (evidence_result.result, (), evidence_result.request)
             decision = evidence_result.decision
             semantic_failure = self._semantic_failure_for_stage_artifact(
                 request,
@@ -391,7 +418,7 @@ class StageAgentRuntime:
                 **cursor_kwargs,
             )
             if semantic_failure is not None:
-                return (semantic_failure, None, request)
+                return (semantic_failure, (), request)
             recovery_ref = self.persist_recovery_checkpoint(
                 request,
                 self._recovery_cursor(
@@ -407,7 +434,7 @@ class StageAgentRuntime:
                     iteration_index,
                     recovery_ref=recovery_ref,
                 ),
-                None,
+                (),
                 request,
             )
 
@@ -421,7 +448,7 @@ class StageAgentRuntime:
                         iteration_index=iteration_index,
                         **cursor_kwargs,
                     ),
-                    None,
+                    (),
                     request,
                 )
             repair_count = self._process_record_count("structured_output_repair_trace")
@@ -436,7 +463,7 @@ class StageAgentRuntime:
                         iteration_index=iteration_index,
                         **cursor_kwargs,
                     ),
-                    None,
+                    (),
                     request,
                 )
             self._append_process_record(
@@ -462,7 +489,7 @@ class StageAgentRuntime:
             )
             return (
                 None,
-                None,
+                (),
                 replace(
                     request,
                     model_call_type=ModelCallType.STRUCTURED_OUTPUT_REPAIR,
@@ -484,7 +511,7 @@ class StageAgentRuntime:
             )
             return (
                 None,
-                None,
+                (),
                 replace(
                     request,
                     model_call_type=ModelCallType.STAGE_EXECUTION,
@@ -506,7 +533,7 @@ class StageAgentRuntime:
                         iteration_index=iteration_index,
                         **cursor_kwargs,
                     ),
-                    None,
+                    (),
                     request,
                 )
             tool_result = self.execute_tool_confirmation_decision(
@@ -526,7 +553,7 @@ class StageAgentRuntime:
                 ),
                 **cursor_kwargs,
             )
-            return result, tool_result, request
+            return result, (tool_result,), request
 
         self.persist_recovery_checkpoint(
             request,
@@ -543,7 +570,7 @@ class StageAgentRuntime:
                 iteration_index,
                 **cursor_kwargs,
             ),
-            None,
+            (),
             request,
         )
 
@@ -564,6 +591,10 @@ class StageAgentRuntime:
             trace_context=request.invocation.trace_context,
             coordination_key=(
                 f"{request.invocation.stage_run_id}:{decision.tool_call.call_id}"
+            ),
+            confirmation_grant=self._confirmation_grant_for_tool_call(
+                request,
+                tool_name=decision.tool_call.tool_name,
             ),
         )
         return self._execute_tool_request(
@@ -606,6 +637,78 @@ class StageAgentRuntime:
             tool_request,
             stage_contract=stage_contract,
         )
+
+    def _confirmation_grant_for_tool_call(
+        self,
+        request: StageExecutionRequest,
+        *,
+        tool_name: str,
+    ) -> ToolConfirmationGrant | None:
+        confirmation_id = request.invocation.trace_context.tool_confirmation_id
+        if confirmation_id is None:
+            return None
+        confirmation = self._matching_tool_confirmation_trace(
+            request,
+            tool_confirmation_id=confirmation_id,
+            tool_name=tool_name,
+        )
+        if confirmation is None:
+            return None
+        safe_details = confirmation.get("safe_details")
+        if not isinstance(safe_details, Mapping):
+            return None
+        input_digest = _optional_string(safe_details.get("input_digest"))
+        target_summary = _optional_string(safe_details.get("target_summary"))
+        risk_level = _tool_risk_level_from_value(safe_details.get("risk_level"))
+        risk_categories = _tool_risk_categories_from_value(
+            safe_details.get("risk_categories")
+        )
+        if input_digest is None or target_summary is None or risk_level is None:
+            return None
+        return ToolConfirmationGrant(
+            tool_confirmation_id=confirmation_id,
+            confirmation_object_ref=_confirmation_object_ref(
+                tool_name=tool_name,
+                call_id=_optional_string(confirmation.get("call_id")) or "unknown",
+                input_digest=input_digest,
+            ),
+            tool_name=tool_name,
+            input_digest=input_digest,
+            target_summary=target_summary,
+            risk_level=risk_level,
+            risk_categories=risk_categories,
+        )
+
+    def _matching_tool_confirmation_trace(
+        self,
+        request: StageExecutionRequest,
+        *,
+        tool_confirmation_id: str,
+        tool_name: str,
+    ) -> Mapping[str, object] | None:
+        records = [
+            record
+            for record in self._tool_confirmation_trace_records(request)
+            if record.get("tool_confirmation_ref") == tool_confirmation_id
+            and record.get("tool_name") == tool_name
+        ]
+        return records[-1] if records else None
+
+    def _tool_confirmation_trace_records(
+        self,
+        request: StageExecutionRequest,
+    ) -> tuple[Mapping[str, object], ...]:
+        records: list[Mapping[str, object]] = []
+        process_record = self._process_records.get("tool_confirmation_trace")
+        records.extend(_mapping_records(process_record))
+        for artifact in request.stage_artifacts:
+            if getattr(artifact, "stage_run_id", None) != request.invocation.stage_run_id:
+                continue
+            process = getattr(artifact, "process", None)
+            if not isinstance(process, Mapping):
+                continue
+            records.extend(_mapping_records(process.get("tool_confirmation_trace")))
+        return tuple(records)
 
     def _execute_tool_request(
         self,
@@ -806,14 +909,13 @@ class StageAgentRuntime:
             request.runtime_limit_snapshot.agent_limits.max_react_iterations_per_stage
         )
         for iteration_index in range(1, max_iterations + 1):
-            result, tool_result, next_request = self.run_iteration(
+            result, tool_batch, next_request = self.run_iteration(
                 current_request,
                 iteration_index,
                 tuple(tool_results),
             )
             current_request = next_request
-            if tool_result is not None:
-                tool_results.append(tool_result)
+            tool_results.extend(tool_batch)
             if result is not None:
                 return result
         return self._failed_result(
@@ -889,7 +991,7 @@ class StageAgentRuntime:
         *,
         iteration_index: int,
         last_model_call_ref: str,
-    ) -> tuple[None, None, StageExecutionRequest] | None:
+    ) -> tuple[None, tuple[ToolResult, ...], StageExecutionRequest] | None:
         intended_decision_type = _repairable_decision_type_from_parser_error(
             request,
             exc,
@@ -929,7 +1031,7 @@ class StageAgentRuntime:
         )
         return (
             None,
-            None,
+            (),
             replace(
                 request,
                 model_call_type=ModelCallType.STRUCTURED_OUTPUT_REPAIR,
@@ -1550,6 +1652,9 @@ class StageAgentRuntime:
                 else None
             ),
             "safe_details": _tool_error_safe_details(tool_result),
+            "input_payload_summary": _safe_tool_input_payload_summary(
+                decision.tool_call.input_payload if decision.tool_call is not None else {}
+            ),
             "decision_trace_ref": decision.decision_trace.trace_ref,
             "iteration_index": iteration_index,
         }
@@ -1559,6 +1664,57 @@ def _tool_error_safe_details(tool_result: ToolResult) -> dict[str, object]:
     if tool_result.error is None:
         return {}
     return dict(tool_result.error.safe_details)
+
+
+def _mapping_records(value: object) -> tuple[Mapping[str, object], ...]:
+    if isinstance(value, Mapping):
+        return (value,)
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        return tuple(item for item in value if isinstance(item, Mapping))
+    return ()
+
+
+def _optional_string(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _tool_risk_level_from_value(value: object) -> ToolRiskLevel | None:
+    if isinstance(value, ToolRiskLevel):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        return ToolRiskLevel(value)
+    except ValueError:
+        return None
+
+
+def _tool_risk_categories_from_value(value: object) -> list[ToolRiskCategory]:
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes | bytearray):
+        return []
+    categories: list[ToolRiskCategory] = []
+    for item in value:
+        if isinstance(item, ToolRiskCategory):
+            category = item
+        elif isinstance(item, str):
+            try:
+                category = ToolRiskCategory(item)
+            except ValueError:
+                continue
+        else:
+            continue
+        if category not in categories:
+            categories.append(category)
+    return categories
+
+
+def _confirmation_object_ref(
+    *,
+    tool_name: str,
+    call_id: str,
+    input_digest: str,
+) -> str:
+    return f"tool-call:{tool_name}:{call_id}:{input_digest[:12]}"
 
 
 def _evidence_policy_for_artifact(
@@ -1958,6 +2114,67 @@ def _safe_payload_summary(summary: Mapping[str, object]) -> dict[str, object]:
         "invalid_tool_call_count",
     )
     return {key: summary[key] for key in safe_keys if key in summary}
+
+
+def _safe_tool_input_payload_summary(payload: Mapping[str, object]) -> dict[str, object]:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    summary: dict[str, object] = {
+        "input_keys": sorted(str(key) for key in payload),
+        "payload_size_bytes": len(encoded.encode("utf-8")),
+        "redaction_status": "summary_only",
+    }
+    for key in (
+        "path",
+        "pattern",
+        "glob",
+        "query",
+        "command",
+        "argv",
+        "cwd",
+        "old_path",
+        "new_path",
+        "old_text",
+        "new_text",
+    ):
+        if key not in payload or _is_sensitive_input_key(key):
+            continue
+        value = payload[key]
+        if isinstance(value, str):
+            summary[key] = _redact_inline_secret_text(_bounded_string(value, limit=500))
+        elif isinstance(value, Sequence) and not isinstance(value, bytes | bytearray | str):
+            summary[key] = [
+                _redact_inline_secret_text(_bounded_string(str(item), limit=200))
+                for item in value[:20]
+            ]
+        elif isinstance(value, int | float | bool) or value is None:
+            summary[key] = value
+    return summary
+
+
+def _is_sensitive_input_key(key: str) -> bool:
+    lowered = key.lower()
+    return any(
+        token in lowered
+        for token in (
+            "api_key",
+            "authorization",
+            "bearer",
+            "content",
+            "password",
+            "secret",
+            "token",
+        )
+    )
+
+
+def _redact_inline_secret_text(value: str) -> str:
+    lowered = value.lower()
+    for marker in ("bearer ", "api_key=", "token=", "password=", "secret="):
+        index = lowered.find(marker)
+        if index == -1:
+            continue
+        return f"{value[: index + len(marker)]}[redacted]"
+    return value
 
 
 def _bounded_string(value: str, *, limit: int = 200) -> str:

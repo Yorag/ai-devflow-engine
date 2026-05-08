@@ -33,6 +33,7 @@ from backend.app.domain.enums import (
     StageStatus,
     StageType,
     ToolConfirmationStatus,
+    ToolRiskCategory,
     ToolRiskLevel,
 )
 from backend.app.domain.runtime_refs import (
@@ -60,6 +61,8 @@ from backend.app.services.runtime_dispatch import (
     RuntimeExecutionService,
 )
 from backend.app.services.graph_runtime import GraphCheckpointPort, GraphRuntimeCommandPort
+from backend.app.services.runtime_orchestration import RuntimeOrchestrationService
+from backend.app.services.tool_confirmations import ToolConfirmationService
 import backend.app.services.runtime_dispatch as runtime_dispatch_module
 from backend.tests.services.test_start_first_run import (
     NOW,
@@ -188,6 +191,57 @@ class FailingAfterGraphResumeEngine:
             trace_context=interrupt.trace_context,
         )
         raise RuntimeError("langgraph resume crashed after graph command")
+
+
+class ResumingStageToolConfirmationEngine:
+    def __init__(self) -> None:
+        self.resume_calls: list[EngineCall] = []
+        self.stage_tool_confirmation_resume_calls: list[EngineCall] = []
+
+    def start(self, *, context, runtime_port, checkpoint_port):  # noqa: ANN001
+        del context, runtime_port, checkpoint_port
+        raise AssertionError("start should not be called")
+
+    def run_next(self, *, context, runtime_port, checkpoint_port):  # noqa: ANN001
+        del context, runtime_port, checkpoint_port
+        raise AssertionError("run_next should not be called")
+
+    def resume(  # noqa: ANN001
+        self,
+        *,
+        context,
+        interrupt,
+        resume_payload,
+        runtime_port,
+        checkpoint_port,
+    ):
+        del context, interrupt, resume_payload, runtime_port, checkpoint_port
+        raise AssertionError("graph resume should not be called")
+
+    def resume_stage_tool_confirmation(  # noqa: ANN001
+        self,
+        *,
+        context,
+        interrupt,
+        resume_payload,
+        runtime_port,
+        checkpoint_port,
+    ):
+        self.stage_tool_confirmation_resume_calls.append(
+            EngineCall(
+                context=context,
+                runtime_port=runtime_port,
+                checkpoint_port=checkpoint_port,
+                interrupt=interrupt,
+                resume_payload=resume_payload,
+            )
+        )
+        runtime_port.resume_tool_confirmation(
+            interrupt=interrupt.interrupt_ref,
+            resume_payload=resume_payload,
+            trace_context=interrupt.trace_context,
+        )
+        return _step_result(context, status=StageStatus.COMPLETED)
 
 
 class CapturingStageAgentRuntime:
@@ -777,6 +831,156 @@ def test_waiting_tool_confirmation_step_creates_actionable_request_and_interrupt
             .all()
         }
         assert "tool_confirmation_requested" in event_types
+
+
+def test_waiting_tool_confirmation_step_reuses_request_created_by_stage_tool_gate(
+    tmp_path: Path,
+) -> None:
+    fixture = _start_first_run(tmp_path)
+    created_ids: list[str] = []
+
+    class StageToolGateEngine:
+        def start(self, *, context, runtime_port, checkpoint_port):  # noqa: ANN001
+            created = ToolConfirmationService(
+                control_session=factory_input.control_session,
+                runtime_session=factory_input.runtime_session,
+                event_session=factory_input.event_session,
+                graph_session=factory_input.graph_session,
+                runtime_orchestration=RuntimeOrchestrationService(
+                    runtime_port=runtime_port,
+                    checkpoint_port=checkpoint_port,
+                    clock=lambda: NOW,
+                ),
+                log_writer=factory_input.log_writer,
+                now=lambda: NOW,
+            ).create_request(
+                session_id=context.session_id,
+                run_id=context.run_id,
+                stage_run_id=context.thread.current_stage_run_id,
+                confirmation_object_ref="tool-action://bash/vitest",
+                tool_name="bash",
+                command_preview="npx vitest run src/pages/__tests__/HomePage.test.tsx",
+                target_summary="command: npx vitest run src/pages/__tests__/HomePage.test.tsx",
+                risk_level=ToolRiskLevel.HIGH_RISK,
+                risk_categories=[ToolRiskCategory.UNKNOWN_COMMAND],
+                reason="Verify the homepage copy change.",
+                expected_side_effects=["Runs focused frontend tests."],
+                alternative_path_summary=None,
+                planned_deny_followup_action="run_failed",
+                planned_deny_followup_summary=(
+                    "The current run will fail because no low-risk alternative path exists."
+                ),
+                trace_context=context.trace_context,
+            )
+            created_ids.append(created.tool_confirmation_id)
+            artifact_id = "artifact-stage-tool-gate-confirmation"
+            factory_input.runtime_session.add(
+                StageArtifactModel(
+                    artifact_id=artifact_id,
+                    run_id=context.run_id,
+                    stage_run_id=context.thread.current_stage_run_id,
+                    artifact_type="test_generation_execution_stage_agent_stage",
+                    payload_ref=f"stage-artifact://{artifact_id}/input",
+                    process={
+                        "tool_confirmation_trace": {
+                            "tool_name": "bash",
+                            "tool_confirmation_ref": created.tool_confirmation_id,
+                            "status": "waiting_confirmation",
+                            "risk_level": "high_risk",
+                            "risk_categories": ["unknown_command"],
+                            "target_summary": (
+                                "command: npx vitest run "
+                                "src/pages/__tests__/HomePage.test.tsx"
+                            ),
+                        }
+                    },
+                    metrics={},
+                    created_at=NOW,
+                )
+            )
+            factory_input.runtime_session.commit()
+            return _step_result(
+                context,
+                status=StageStatus.WAITING_TOOL_CONFIRMATION,
+                artifact_refs=[f"stage-artifact://{artifact_id}"],
+            )
+
+    factory_input: RuntimeEngineFactoryInput
+
+    def factory(input_: RuntimeEngineFactoryInput) -> StageToolGateEngine:
+        nonlocal factory_input
+        factory_input = input_
+        return StageToolGateEngine()
+
+    service = RuntimeExecutionService(
+        database_manager=fixture.manager,
+        environment_settings=fixture.settings,
+        engine_factory=factory,
+    )
+
+    service.dispatch_started_run(fixture.command)
+
+    assert len(created_ids) == 1
+    with fixture.manager.session(DatabaseRole.RUNTIME) as session:
+        requests = session.query(ToolConfirmationRequestModel).all()
+        assert [request.tool_confirmation_id for request in requests] == created_ids
+        run = session.get(PipelineRunModel, fixture.result.run.run_id)
+        stage = session.get(StageRunModel, fixture.result.stage.stage_run_id)
+        assert run is not None
+        assert stage is not None
+        assert run.status is RunStatus.WAITING_TOOL_CONFIRMATION
+        assert stage.status is StageStatus.WAITING_TOOL_CONFIRMATION
+
+
+def test_allowed_stage_tool_gate_confirmation_resumes_current_stage(
+    tmp_path: Path,
+) -> None:
+    fixture = _start_first_run(tmp_path)
+    interrupt = _persist_waiting_tool_confirmation_interrupt(fixture)
+    resume_payload = RuntimeResumePayload(
+        resume_id="resume-stage-tool-gate-confirmation",
+        payload_ref="tool-confirmation-runtime-dispatch",
+        values={
+            "decision": "allowed",
+            "tool_confirmation_id": "tool-confirmation-runtime-dispatch",
+            "confirmation_object_ref": "tool-call:bash:call-bash:abc123",
+        },
+    )
+    fake_engine = ResumingStageToolConfirmationEngine()
+    service = RuntimeExecutionService(
+        database_manager=fixture.manager,
+        environment_settings=fixture.settings,
+        engine_factory=lambda _factory_input: fake_engine,
+    )
+
+    service.resume(
+        interrupt=interrupt,
+        resume_payload=resume_payload,
+        trace_context=interrupt.trace_context,
+    )
+
+    assert fake_engine.stage_tool_confirmation_resume_calls
+    assert fake_engine.stage_tool_confirmation_resume_calls[0].resume_payload == resume_payload
+    assert fake_engine.resume_calls == []
+    with fixture.manager.session(DatabaseRole.RUNTIME) as session:
+        run = session.get(PipelineRunModel, fixture.result.run.run_id)
+        stage = session.get(StageRunModel, fixture.result.stage.stage_run_id)
+        assert run is not None
+        assert stage is not None
+        assert run.status is RunStatus.RUNNING
+        assert stage.status is StageStatus.COMPLETED
+
+    with fixture.manager.session(DatabaseRole.GRAPH) as session:
+        graph_interrupt = session.get(
+            GraphInterruptModel,
+            interrupt.interrupt_ref.interrupt_id,
+        )
+        thread = session.get(GraphThreadModel, fixture.result.run.graph_thread_ref)
+        assert graph_interrupt is not None
+        assert thread is not None
+        assert graph_interrupt.status == "responded"
+        assert thread.status == "running"
+        assert thread.current_interrupt_id is None
 
 
 def test_terminal_result_marks_run_session_and_thread_completed(
@@ -1846,6 +2050,104 @@ def _persist_waiting_clarification_interrupt(
         interrupt_ref=interrupt_ref,
         payload_ref=interrupt_ref.payload_ref,
         trace_context=fixture.command.trace_context,
+    )
+
+
+def _persist_waiting_tool_confirmation_interrupt(
+    fixture: StartedRunFixture,
+) -> RuntimeInterrupt:
+    tool_confirmation_id = "tool-confirmation-runtime-dispatch"
+    tool_action_ref = "tool-call:bash:call-bash:abc123"
+    with fixture.manager.session(DatabaseRole.GRAPH) as graph_session:
+        thread = GraphThreadRef(
+            thread_id=fixture.result.run.graph_thread_ref,
+            run_id=fixture.result.run.run_id,
+            status=GraphThreadStatus.RUNNING,
+            current_stage_run_id=fixture.result.stage.stage_run_id,
+            current_stage_type=fixture.result.stage.stage_type,
+        )
+        checkpoint = GraphCheckpointPort(graph_session, now=lambda: NOW).save_checkpoint(
+            thread=thread,
+            purpose=CheckpointPurpose.WAITING_TOOL_CONFIRMATION,
+            trace_context=fixture.command.trace_context,
+            stage_run_id=fixture.result.stage.stage_run_id,
+            stage_type=fixture.result.stage.stage_type,
+            payload_ref="graph-checkpoint://runtime-dispatch/tool-confirmation",
+        )
+        interrupt_ref = GraphRuntimeCommandPort(
+            graph_session,
+            now=lambda: NOW,
+        ).create_interrupt(
+            thread=thread,
+            interrupt_type=GraphInterruptType.TOOL_CONFIRMATION,
+            run_id=fixture.result.run.run_id,
+            stage_run_id=fixture.result.stage.stage_run_id,
+            stage_type=fixture.result.stage.stage_type,
+            payload_ref=tool_confirmation_id,
+            checkpoint=checkpoint,
+            trace_context=fixture.command.trace_context,
+            tool_confirmation_id=tool_confirmation_id,
+            tool_action_ref=tool_action_ref,
+        )
+        graph_session.commit()
+
+    with fixture.manager.session(DatabaseRole.RUNTIME) as runtime_session:
+        run = runtime_session.get(PipelineRunModel, fixture.result.run.run_id)
+        stage = runtime_session.get(StageRunModel, fixture.result.stage.stage_run_id)
+        assert run is not None
+        assert stage is not None
+        request = ToolConfirmationRequestModel(
+            tool_confirmation_id=tool_confirmation_id,
+            run_id=run.run_id,
+            stage_run_id=stage.stage_run_id,
+            confirmation_object_ref=tool_action_ref,
+            tool_name="bash",
+            command_preview="npm --prefix frontend run build",
+            target_summary="command: npm --prefix frontend run build",
+            risk_level=ToolRiskLevel.HIGH_RISK,
+            risk_categories=[ToolRiskCategory.UNKNOWN_COMMAND.value],
+            reason="Verify the current stage.",
+            expected_side_effects=["Runs focused verification."],
+            alternative_path_summary=None,
+            planned_deny_followup_action="run_failed",
+            planned_deny_followup_summary="The current run will fail.",
+            deny_followup_action=None,
+            deny_followup_summary=None,
+            user_decision=None,
+            status=ToolConfirmationStatus.PENDING,
+            graph_interrupt_ref=interrupt_ref.interrupt_id,
+            audit_log_ref=None,
+            process_ref=None,
+            requested_at=NOW,
+            responded_at=None,
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        run.status = RunStatus.WAITING_TOOL_CONFIRMATION
+        stage.status = StageStatus.WAITING_TOOL_CONFIRMATION
+        runtime_session.add_all([run, stage, request])
+        runtime_session.commit()
+
+    with fixture.manager.session(DatabaseRole.CONTROL) as control_session:
+        session = control_session.get(SessionModel, fixture.result.session.session_id)
+        assert session is not None
+        session.status = SessionStatus.WAITING_TOOL_CONFIRMATION
+        control_session.add(session)
+        control_session.commit()
+
+    return RuntimeInterrupt(
+        run_id=fixture.result.run.run_id,
+        stage_run_id=fixture.result.stage.stage_run_id,
+        stage_type=fixture.result.stage.stage_type,
+        interrupt_ref=interrupt_ref,
+        payload_ref=interrupt_ref.payload_ref,
+        trace_context=fixture.command.trace_context.child_span(
+            span_id="runtime-interrupt-tool-confirmation",
+            created_at=NOW,
+            stage_run_id=fixture.result.stage.stage_run_id,
+            tool_confirmation_id=tool_confirmation_id,
+            graph_thread_id=fixture.result.run.graph_thread_ref,
+        ),
     )
 
 

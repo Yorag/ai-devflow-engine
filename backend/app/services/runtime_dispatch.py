@@ -33,6 +33,7 @@ from backend.app.db.models.runtime import (
     RuntimeLimitSnapshotModel,
     StageArtifactModel,
     StageRunModel,
+    ToolConfirmationRequestModel,
 )
 from backend.app.db.session import DatabaseManager
 from backend.app.domain.changes import ChangeSet, ContextReference
@@ -42,6 +43,7 @@ from backend.app.domain.enums import (
     SessionStatus,
     StageStatus,
     StageType,
+    ToolConfirmationStatus,
     ToolRiskCategory,
     ToolRiskLevel,
 )
@@ -492,13 +494,25 @@ class RuntimeExecutionService:
             elif method_name == "resume":
                 if interrupt is None or resume_payload is None:
                     raise ValueError("resume requires interrupt and resume_payload")
-                result = engine.resume(
-                    context=context,
+                if self._should_resume_stage_tool_confirmation(
                     interrupt=interrupt,
                     resume_payload=resume_payload,
-                    runtime_port=runtime_port,
-                    checkpoint_port=checkpoint_port,
-                )
+                ):
+                    result = engine.resume_stage_tool_confirmation(
+                        context=context,
+                        interrupt=interrupt,
+                        resume_payload=resume_payload,
+                        runtime_port=runtime_port,
+                        checkpoint_port=checkpoint_port,
+                    )
+                else:
+                    result = engine.resume(
+                        context=context,
+                        interrupt=interrupt,
+                        resume_payload=resume_payload,
+                        runtime_port=runtime_port,
+                        checkpoint_port=checkpoint_port,
+                    )
             else:
                 raise ValueError(f"unsupported runtime execution method: {method_name}")
             if self._result_is_failed(result):
@@ -573,6 +587,17 @@ class RuntimeExecutionService:
             graph_session.close()
             event_session.close()
             log_session.close()
+
+    @staticmethod
+    def _should_resume_stage_tool_confirmation(
+        *,
+        interrupt: RuntimeInterrupt,
+        resume_payload: RuntimeResumePayload,
+    ) -> bool:
+        return (
+            interrupt.interrupt_ref.interrupt_type is GraphInterruptType.TOOL_CONFIRMATION
+            and resume_payload.values.get("decision") == ToolConfirmationStatus.ALLOWED.value
+        )
 
     def _build_context(
         self,
@@ -898,6 +923,11 @@ class RuntimeExecutionService:
             )
             return True
         if result.status is StageStatus.WAITING_TOOL_CONFIRMATION:
+            if self._tool_confirmation_already_requested(
+                result=result,
+                runtime_session=runtime_session,
+            ):
+                return False
             self._request_runtime_tool_confirmation(
                 result=result,
                 context=context,
@@ -922,6 +952,31 @@ class RuntimeExecutionService:
             )
             return True
         return False
+
+    def _tool_confirmation_already_requested(
+        self,
+        *,
+        result: RuntimeStepResult,
+        runtime_session: Session,
+    ) -> bool:
+        artifact = self._latest_stage_artifact(
+            runtime_session,
+            run_id=result.run_id,
+            stage_run_id=result.stage_run_id,
+            artifact_refs=result.artifact_refs,
+        )
+        process = dict(artifact.process) if artifact is not None else {}
+        confirmation = self._latest_process_mapping(process, "tool_confirmation_trace")
+        confirmation_ref = _optional_text(confirmation.get("tool_confirmation_ref"))
+        if confirmation_ref is None:
+            return False
+        request = runtime_session.get(ToolConfirmationRequestModel, confirmation_ref)
+        return (
+            request is not None
+            and request.run_id == result.run_id
+            and request.stage_run_id == result.stage_run_id
+            and request.status is ToolConfirmationStatus.PENDING
+        )
 
     def _request_runtime_clarification(
         self,
