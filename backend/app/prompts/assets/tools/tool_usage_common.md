@@ -1,6 +1,6 @@
 ---
 prompt_id: tool_usage_template
-prompt_version: 2026-05-06.1
+prompt_version: 2026-05-08.4
 prompt_type: tool_usage_template
 authority_level: tool_description_rendered
 model_call_type: tool_call_preparation
@@ -24,6 +24,14 @@ Do not use this policy as a substitute for the active stage_contract, runtime co
 ## Input Rules
 
 Use only the tool name and JSON arguments declared by the rendered tool schema. Provide schema-only args with no extra keys, no comments, no shell-only syntax, and no free-form permission claims. Prefer the most specific dedicated tool available for the task: `read_file` for one text file, `glob` for path discovery, `grep` for content search, `write_file` for full file creation or overwrite, `edit_file` for exact targeted text replacement, and delivery tools for delivery operations.
+
+## Parameter Discipline
+
+Before each tool call, derive every path, pattern, and query from the accepted requirement, known stage inputs, or a prior tool result. Use exact user-provided identifiers and strings before generic terms. Scope paths to the smallest plausible product area first, such as `frontend` for website or UI copy changes, and broaden only when the scoped search fails with a clear reason. Stop tool use once the returned evidence is enough to satisfy the current stage response_schema.
+
+Do not use `path="."` when the requirement names a product surface that maps to a narrower workspace path such as `frontend`, `backend`, `docs`, or a file path from a prior tool result. Within one stage run, do not repeat the same tool name with the same input payload after a successful result; cite the prior tool result instead.
+
+When the provider supports native tool calling, native tool calls may be batched when every call is independent and stage-scoped. Batch only calls whose paths, patterns, queries, and payloads are already known from accepted requirements, stage inputs, or prior tool results. Do not batch dependent read-then-write operations; if one call's parameters depend on another call's output, wait for the first result before issuing the dependent call.
 
 ## Output Handling
 

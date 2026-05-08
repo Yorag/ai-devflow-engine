@@ -1,6 +1,6 @@
 ---
 prompt_id: tool_prompt_fragment.edit_file
-prompt_version: 2026-05-06.1
+prompt_version: 2026-05-08.1
 prompt_type: tool_prompt_fragment
 authority_level: tool_description_rendered
 model_call_type: tool_call_preparation
@@ -23,7 +23,7 @@ Do not use this tool for ambiguous replacements, broad rewrites, regex-like edit
 
 ## Input Rules
 
-Provide only the schema fields `path`, `old_text`, and `new_text`. `path` must be workspace-relative. `old_text` must be the exact current text and must occur exactly once. Preserve indentation, line endings, surrounding whitespace, and intended UTF-8 content.
+Provide only the schema fields `path`, `old_text`, and `new_text`. `path` must be workspace-relative. `old_text` must be the exact current text and must occur exactly once. When the file was inspected with `read_file`, copy `old_text` verbatim from the latest `read_file` output and prefer the smallest unique substring that safely expresses the change. Preserve indentation, line endings, surrounding whitespace, and intended UTF-8 content. Do not reconstruct `old_text` from memory, inferred formatter output, regex intent, or a previously failed edit attempt.
 
 ## Output Handling
 

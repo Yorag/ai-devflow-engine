@@ -1,6 +1,6 @@
 ---
 prompt_id: stage_prompt_fragment.solution_design
-prompt_version: 2026-05-07.1
+prompt_version: 2026-05-08.2
 prompt_type: stage_prompt_fragment
 authority_level: stage_contract_rendered
 model_call_type: stage_execution
@@ -28,6 +28,18 @@ During internal validation, check that the design preserves requirement intent, 
 ## Tool Policy
 
 Use the rendered allowed_tools boundary from stage_contract and tool descriptions. Do not direct file edits, delivery actions, approval changes, audit changes, or schema changes from this stage prompt fragment.
+
+## Requirement-Scoped Tool Planning
+
+Before requesting any tool, infer the smallest likely product surface from the accepted requirement and bind tool parameters to that surface. For UI copy changes, exact user-provided strings are primary evidence: search those strings first, scoped to the likely frontend area such as `path="frontend"`, then read only the matched file needed to form the design.
+
+Do not call `glob` with `**/*` or repeat broad repository discovery unless the accepted requirement explicitly requires repository-wide inventory. If an exact scoped `grep` returns a relevant file, submit the design instead of continuing discovery. If the first scoped search misses, make one narrower or adjacent fallback derived from the requirement language, then either submit a design with the known assumption or use the failure path with the missing fact.
+
+## Completion Trigger
+
+For a website homepage copy requirement, one relevant source-file match plus one `read_file` of that source file is enough evidence for Solution Design. After `grep` finds the old text in a homepage/source page file and `read_file` confirms the surrounding component, submit `SolutionDesignArtifact` immediately. You must not inspect test files, run path discovery, or search the same string again to confirm the same fact.
+
+Within one stage run, you must not repeat any successful grep or read_file call with the same input payload. Use the previous tool result as evidence instead of requesting the same observation again.
 
 ## Product Semantics To Preserve
 

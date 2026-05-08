@@ -1,6 +1,6 @@
 ---
 prompt_id: tool_prompt_fragment.glob
-prompt_version: 2026-05-06.1
+prompt_version: 2026-05-08.3
 prompt_type: tool_prompt_fragment
 authority_level: tool_description_rendered
 model_call_type: tool_call_preparation
@@ -24,6 +24,10 @@ Do not use this tool to read file contents, search text inside files, create or 
 ## Input Rules
 
 Provide only the schema field `pattern` as a non-empty string. Use a relative glob pattern scoped to the workspace. Do not pass absolute paths, drive-qualified paths, parent-directory escapes, shell pipelines, command substitutions, or extra keys.
+
+Do not use repository-wide discovery such as `**/*` unless the requirement explicitly asks for a whole-repository inventory. Do not use workspace-wide `**/` patterns such as `**/*.html`, `**/*.tsx`, or `**/package.json` when a product surface or prior artifact provides a narrower path. Prefer patterns that name the inferred product area, file family, or feature surface, for example `frontend/src/**/*.tsx` for a frontend component search. If the requirement provides exact visible text or a symbol, prefer `grep` before `glob`.
+
+Do not use `glob` after grep has already found a relevant source file for the requirement. Glob is only for path discovery when text search cannot identify the target path or when the requirement is path-structure oriented.
 
 ## Output Handling
 

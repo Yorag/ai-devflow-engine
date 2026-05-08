@@ -1,6 +1,6 @@
 ---
 prompt_id: tool_prompt_fragment.grep
-prompt_version: 2026-05-06.1
+prompt_version: 2026-05-08.2
 prompt_type: tool_prompt_fragment
 authority_level: tool_description_rendered
 model_call_type: tool_call_preparation
@@ -24,6 +24,10 @@ Do not use this tool for known-file full reads, path-only discovery, file creati
 ## Input Rules
 
 Provide only the schema fields `pattern` and `path` as non-empty strings. Keep `path` workspace-relative and scope it as tightly as practical. Provide the search expression as data, not as shell flags or a command line. Do not include shell pipes, redirection, command substitution, parent-directory escapes, or extra keys.
+
+Search exact user-provided strings first when the requirement contains visible copy, labels, identifiers, routes, or error messages. Set `path` to the smallest likely product area before broadening, such as `frontend` for website and UI text. Do not search `.` first when the requirement names a product surface that maps to a narrower workspace path.
+
+Do not use `path="."` when a narrower inferred path is available. If a successful grep returns a relevant match, use that match as evidence and read the matched source file when context is needed; do not repeat the same grep or broaden the search to confirm the same string.
 
 ## Output Handling
 

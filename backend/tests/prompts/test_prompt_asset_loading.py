@@ -343,6 +343,80 @@ def test_runtime_instructions_define_real_development_boundaries() -> None:
     assert "structured output repair is runtime-internal" in body
 
 
+def test_solution_design_and_tool_prompts_constrain_tool_parameters_by_requirement() -> None:
+    from backend.app.prompts.registry import PromptRegistry
+
+    registry = PromptRegistry.load_builtin_assets()
+    solution_body = registry.get(
+        "stage_prompt_fragment.solution_design"
+    ).sections[0].body
+    tool_usage_body = registry.get("tool_usage_template").sections[0].body
+    glob_body = registry.get("tool_prompt_fragment.glob").sections[0].body
+    grep_body = registry.get("tool_prompt_fragment.grep").sections[0].body
+
+    assert "Requirement-Scoped Tool Planning" in solution_body
+    assert "exact user-provided strings" in solution_body
+    assert 'path="frontend"' in solution_body
+    assert "Do not call `glob` with `**/*`" in solution_body
+    assert "submit the design instead of continuing discovery" in solution_body
+    assert "Completion Trigger" in solution_body
+    assert "must not inspect test files" in solution_body
+    assert "must not repeat any successful grep or read_file call" in solution_body
+    assert 'Do not use `path="."`' in tool_usage_body
+    assert "do not repeat the same tool name with the same input payload" in tool_usage_body
+    assert "Parameter Discipline" in tool_usage_body
+    assert "derive every path, pattern, and query from the accepted requirement" in tool_usage_body
+    assert "Do not use repository-wide discovery such as `**/*`" in glob_body
+    assert "Search exact user-provided strings first" in grep_body
+    assert 'Do not use `path="."`' in grep_body
+    assert "If a successful grep returns a relevant match" in grep_body
+    assert "Do not use `glob` after grep has already found" in glob_body
+
+
+def test_test_stage_and_edit_file_prompts_constrain_exact_edit_parameters() -> None:
+    from backend.app.prompts.registry import PromptRegistry
+
+    registry = PromptRegistry.load_builtin_assets()
+    test_stage_body = registry.get(
+        "stage_prompt_fragment.test_generation_execution"
+    ).sections[0].body
+    edit_file_body = registry.get("tool_prompt_fragment.edit_file").sections[0].body
+
+    assert "Test Edit Parameter Discipline" in test_stage_body
+    assert "copy the smallest exact substring verbatim" in test_stage_body
+    assert "Do not reconstruct multiline assertion blocks" in test_stage_body
+    assert "retry once with a newly copied exact substring" in test_stage_body
+    assert "do not repeat the same failing `old_text`" in test_stage_body
+    assert "copy `old_text` verbatim from the latest `read_file` output" in edit_file_body
+    assert "smallest unique substring" in edit_file_body
+    assert "Do not reconstruct `old_text` from memory" in edit_file_body
+
+
+def test_code_generation_and_common_tool_prompts_define_batch_tool_boundaries() -> None:
+    from backend.app.prompts.registry import PromptRegistry
+
+    registry = PromptRegistry.load_builtin_assets()
+    code_generation_body = registry.get(
+        "stage_prompt_fragment.code_generation"
+    ).sections[0].body
+    tool_usage_body = registry.get("tool_usage_template").sections[0].body
+    glob_body = registry.get("tool_prompt_fragment.glob").sections[0].body
+
+    assert "Design-Bound Implementation Targeting" in code_generation_body
+    assert "use the target files already named" in code_generation_body
+    assert "Do not rediscover target files with `glob`" in code_generation_body
+    assert "Batch Tool Decision Protocol" in code_generation_body
+    assert "Batch independent tool calls" in code_generation_body
+    assert "Do not batch a read with a write that depends on that read" in (
+        code_generation_body
+    )
+    assert "native tool calls may be batched" in tool_usage_body
+    assert "independent and stage-scoped" in tool_usage_body
+    assert "Do not batch dependent read-then-write operations" in tool_usage_body
+    assert "Do not use workspace-wide `**/` patterns" in glob_body
+    assert "`**/*.html`" in glob_body
+
+
 def test_load_builtin_assets_rejects_missing_front_matter(tmp_path: Path) -> None:
     from backend.app.prompts.registry import PromptAssetMetadataError, PromptRegistry
 

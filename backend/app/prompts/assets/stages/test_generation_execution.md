@@ -1,6 +1,6 @@
 ---
 prompt_id: stage_prompt_fragment.test_generation_execution
-prompt_version: 2026-05-07.1
+prompt_version: 2026-05-08.1
 prompt_type: stage_prompt_fragment
 authority_level: stage_contract_rendered
 model_call_type: stage_execution
@@ -25,9 +25,15 @@ Use the plan verification commands from `SolutionDesignArtifact.implementation_p
 
 Record commands, exit codes, key output, failures, skipped checks, flaky behavior, and environmental blockers in the response_schema artifact.
 
+## Test Edit Parameter Discipline
+
+When updating tests for an implemented text or UI-copy change, inspect the target test file with `read_file` before calling `edit_file`. For `edit_file.old_text`, copy the smallest exact substring verbatim from the latest `read_file` output that uniquely identifies the required test expectation, such as one assertion value line. Do not reconstruct multiline assertion blocks from memory, formatting conventions, or inferred indentation when a smaller unique line can express the replacement.
+
+If `edit_file` reports a missing or non-unique target and the stage still permits file reads, read the current file again and retry once with a newly copied exact substring, and do not repeat the same failing `old_text`. Do not broaden into unrelated tests, and do not use shell commands as a workaround for a dedicated edit tool failure.
+
 ## Tool Policy
 
-Use only the rendered allowed_tools and tool descriptions provided for this stage. Do not add dependency installs, migrations, lockfile changes, environment changes, approval bypasses, audit bypasses, or delivery actions unless they are already permitted by the current stage_contract and runtime controls.
+Use only the rendered allowed_tools and tool descriptions provided for this stage. Do not add dependency installs, migrations, lockfile changes, environment changes, approval-control changes, audit-control changes, or delivery actions unless they are already permitted by the current stage_contract and runtime controls.
 
 ## Product Semantics To Preserve
 
