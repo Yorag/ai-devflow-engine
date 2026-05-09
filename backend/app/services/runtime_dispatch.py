@@ -8,6 +8,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
+from uuid import uuid4
 
 from fastapi import Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -24,6 +25,7 @@ from backend.app.db.models.graph import (
     GraphThreadModel,
 )
 from backend.app.db.models.runtime import (
+    ApprovalRequestModel,
     ApprovalDecisionModel,
     ClarificationRecordModel,
     ModelBindingSnapshotModel,
@@ -38,6 +40,7 @@ from backend.app.db.models.runtime import (
 from backend.app.db.session import DatabaseManager
 from backend.app.domain.changes import ChangeSet, ContextReference
 from backend.app.domain.enums import (
+    ApprovalStatus,
     ApprovalType,
     RunStatus,
     SessionStatus,
@@ -90,7 +93,7 @@ from backend.app.runtime.persistent_checkpointer import SQLiteLangGraphCheckpoin
 from backend.app.runtime.stage_agent import StageAgentRuntime
 from backend.app.runtime.stage_runner_port import StageNodeInvocation, StageNodeResult
 from backend.app.schemas import common
-from backend.app.schemas.feed import ExecutionNodeProjection, StageItemProjection
+from backend.app.schemas.feed import ApprovalRequestFeedEntry, ExecutionNodeProjection, StageItemProjection
 from backend.app.schemas.observability import (
     AuditActorType,
     AuditResult,
@@ -906,7 +909,6 @@ class RuntimeExecutionService:
             stage_run_id=stage.stage_run_id,
             occurred_at=occurred_at,
         )
-
     def _project_waiting_step_as_actionable_interrupt(
         self,
         *,
@@ -1235,6 +1237,103 @@ class RuntimeExecutionService:
             payload={"stage_node": stage_node.model_dump(mode="json")},
             trace_context=result.trace_context,
             session_id=session_model.session_id,
+            run_id=run.run_id,
+            stage_run_id=stage.stage_run_id,
+            occurred_at=occurred_at,
+        )
+        self._maybe_materialize_runtime_approval_request(
+            result=result,
+            run=run,
+            stage=stage,
+            runtime_session=runtime_session,
+            event_session=event_session,
+        )
+
+    def _maybe_materialize_runtime_approval_request(
+        self,
+        *,
+        result: RuntimeInterrupt,
+        run: PipelineRunModel,
+        stage: StageRunModel,
+        runtime_session: Session,
+        event_session: Session,
+    ) -> None:
+        if result.interrupt_ref.interrupt_type is not GraphInterruptType.APPROVAL:
+            return
+        existing = (
+            runtime_session.query(ApprovalRequestModel)
+            .filter(
+                ApprovalRequestModel.graph_interrupt_ref
+                == result.interrupt_ref.interrupt_id
+            )
+            .first()
+        )
+        if existing is not None:
+            return
+
+        occurred_at = self._now()
+        if stage.stage_type is StageType.SOLUTION_DESIGN:
+            approval_type = ApprovalType.SOLUTION_DESIGN_APPROVAL
+        elif stage.stage_type is StageType.CODE_REVIEW:
+            approval_type = ApprovalType.CODE_REVIEW_APPROVAL
+        else:
+            raise RuntimeError(
+                "Approval interrupts are only supported for solution_design or code_review stages."
+            )
+        approval_id = (
+            result.interrupt_ref.approval_id
+            or f"approval-{uuid4().hex}"
+        )
+        approval = ApprovalRequestModel(
+            approval_id=approval_id,
+            run_id=run.run_id,
+            stage_run_id=stage.stage_run_id,
+            approval_type=approval_type,
+            status=ApprovalStatus.PENDING,
+            payload_ref=result.payload_ref,
+            graph_interrupt_ref=result.interrupt_ref.interrupt_id,
+            requested_at=occurred_at,
+            resolved_at=None,
+            created_at=occurred_at,
+            updated_at=occurred_at,
+        )
+        runtime_session.add(approval)
+
+        projection = ApprovalRequestFeedEntry(
+            entry_id=f"entry-{approval.approval_id}",
+            run_id=run.run_id,
+            occurred_at=occurred_at,
+            approval_id=approval.approval_id,
+            approval_type=approval.approval_type,
+            status=approval.status,
+            title=(
+                "Review solution design"
+                if approval_type is ApprovalType.SOLUTION_DESIGN_APPROVAL
+                else "Review code review result"
+            ),
+            approval_object_excerpt=(
+                f"Review the {stage.stage_type.value} result before continuing."
+            ),
+            risk_excerpt="Runtime requested approval before continuing.",
+            approval_object_preview={
+                "stage_run_id": stage.stage_run_id,
+                "stage_type": stage.stage_type.value,
+                "payload_ref": result.payload_ref,
+            },
+            approve_action="approve",
+            reject_action="reject",
+            is_actionable=True,
+            requested_at=occurred_at,
+            delivery_readiness_status=None,
+            delivery_readiness_message=None,
+            open_settings_action=None,
+            disabled_reason=None,
+        )
+        EventStore(event_session, now=self._now).append(
+            DomainEventType.APPROVAL_REQUESTED,
+            payload={"approval_request": projection.model_dump(mode="json")},
+            trace_context=result.trace_context,
+            session_id=run.session_id,
             run_id=run.run_id,
             stage_run_id=stage.stage_run_id,
             occurred_at=occurred_at,

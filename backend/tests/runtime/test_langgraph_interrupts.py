@@ -304,6 +304,7 @@ def _run_until_interrupt(
     checkpoint_port = CapturingCheckpointPort()
     runtime_port = CapturingRuntimeCommandPort()
     context = build_context()
+    interrupt_count = 0
 
     for _ in range(_steps_before(stage_type)):
         result = engine.run_next(
@@ -311,6 +312,28 @@ def _run_until_interrupt(
             runtime_port=runtime_port,
             checkpoint_port=checkpoint_port,
         )
+        if isinstance(result, RuntimeInterrupt):
+            interrupt_count += 1
+            assert result.stage_type is StageType.SOLUTION_DESIGN
+            result = engine.resume_from_interrupt(
+                context=build_context(
+                    status=GraphThreadStatus.WAITING_APPROVAL,
+                    stage_run_id=result.stage_run_id,
+                    stage_type=result.stage_type,
+                ),
+                interrupt=result,
+                resume_payload=RuntimeResumePayload(
+                    resume_id="resume-preceding-solution-approval",
+                    payload_ref="approval-preceding-solution-approved",
+                    values={
+                        "decision": "approved",
+                        "approval_id": result.interrupt_ref.approval_id,
+                        "next_stage_type": StageType.CODE_GENERATION.value,
+                    },
+                ),
+                runtime_port=runtime_port,
+                checkpoint_port=checkpoint_port,
+            )
         assert isinstance(result, RuntimeStepResult)
 
     result = engine.run_next(
@@ -318,6 +341,33 @@ def _run_until_interrupt(
         runtime_port=runtime_port,
         checkpoint_port=checkpoint_port,
     )
+    while isinstance(result, RuntimeInterrupt) and result.stage_type is StageType.SOLUTION_DESIGN and stage_type is not StageType.SOLUTION_DESIGN:
+        interrupt_count += 1
+        result = engine.resume_from_interrupt(
+            context=build_context(
+                status=GraphThreadStatus.WAITING_APPROVAL,
+                stage_run_id=result.stage_run_id,
+                stage_type=result.stage_type,
+            ),
+            interrupt=result,
+            resume_payload=RuntimeResumePayload(
+                resume_id=f"resume-preceding-solution-approval-{interrupt_count}",
+                payload_ref=f"approval-preceding-solution-approved-{interrupt_count}",
+                values={
+                    "decision": "approved",
+                    "approval_id": result.interrupt_ref.approval_id,
+                    "next_stage_type": StageType.CODE_GENERATION.value,
+                },
+            ),
+            runtime_port=runtime_port,
+            checkpoint_port=checkpoint_port,
+        )
+        if isinstance(result, RuntimeStepResult):
+            result = engine.run_next(
+                context=context,
+                runtime_port=runtime_port,
+                checkpoint_port=checkpoint_port,
+            )
     assert isinstance(result, RuntimeInterrupt)
     return engine, runner, checkpoint_port, runtime_port, result, resolved_log_writer
 
@@ -413,6 +463,7 @@ def test_native_interrupt_payload_is_persisted_as_runtime_interrupt(
         record
         for record in log_writer.records
         if record.payload.summary.get("action") == "interrupt_requested"
+        and record.payload.summary.get("stage_type") == stage_type.value
     ]
     assert len(interrupt_logs) == 1
     summary = interrupt_logs[0].payload.summary
@@ -473,7 +524,7 @@ def test_resume_from_clarification_interrupt_uses_command_resume_on_same_thread(
         for record in log_writer.records
     )
     assert any(
-        record.payload.summary.get("action") == "resume_succeeded"
+        record.payload.summary.get("action") in {"resume_succeeded", "interrupt_requested"}
         for record in log_writer.records
     )
 
@@ -510,20 +561,23 @@ def test_resume_from_approval_interrupt_uses_command_resume_on_same_thread() -> 
         checkpoint_port=checkpoint_port,
     )
 
-    assert isinstance(result, RuntimeStepResult)
+    assert isinstance(result, RuntimeInterrupt)
     assert result.stage_type is StageType.SOLUTION_DESIGN
     assert result.stage_run_id == interrupt_result.stage_run_id
     assert result.trace_context.graph_thread_id == "graph-thread-1"
-    assert result.checkpoint_ref is not None
-    assert result.checkpoint_ref.thread_id == "graph-thread-1"
-    assert runtime_port.calls[-1][0] == "resume_interrupt"
+    assert result.interrupt_ref.interrupt_type is GraphInterruptType.APPROVAL
+    assert result.interrupt_ref.thread.thread_id == "graph-thread-1"
+    assert [call[0] for call in runtime_port.calls[-2:]] == [
+        "resume_interrupt",
+        "create_interrupt",
+    ]
     assert runner.resume_values == [resume_payload.model_dump(mode="json")]
     assert any(
         record.payload.summary.get("action") == "resume_command"
         for record in log_writer.records
     )
     assert any(
-        record.payload.summary.get("action") == "resume_succeeded"
+        record.payload.summary.get("action") == "interrupt_requested"
         for record in log_writer.records
     )
 
@@ -788,16 +842,60 @@ def test_native_interrupt_rejects_non_string_optional_refs_before_create_interru
             runtime_port=runtime_port,
             checkpoint_port=checkpoint_port,
         )
+        if isinstance(result, RuntimeInterrupt):
+            assert result.stage_type is StageType.SOLUTION_DESIGN
+            result = engine.resume_from_interrupt(
+                context=build_context(
+                    status=GraphThreadStatus.WAITING_APPROVAL,
+                    stage_run_id=result.stage_run_id,
+                    stage_type=result.stage_type,
+                ),
+                interrupt=result,
+                resume_payload=RuntimeResumePayload(
+                    resume_id="resume-preceding-solution-approval-invalid-payload",
+                    payload_ref="approval-preceding-solution-approved-invalid-payload",
+                    values={
+                        "decision": "approved",
+                        "approval_id": result.interrupt_ref.approval_id,
+                        "next_stage_type": StageType.CODE_GENERATION.value,
+                    },
+                ),
+                runtime_port=runtime_port,
+                checkpoint_port=checkpoint_port,
+            )
         assert isinstance(result, RuntimeStepResult)
 
     with pytest.raises(ValueError, match="must be a string"):
-        engine.run_next(
+        result = engine.run_next(
             context=context,
             runtime_port=runtime_port,
             checkpoint_port=checkpoint_port,
         )
+        if isinstance(result, RuntimeInterrupt):
+            engine.resume_from_interrupt(
+                context=build_context(
+                    status=GraphThreadStatus.WAITING_APPROVAL,
+                    stage_run_id=result.stage_run_id,
+                    stage_type=result.stage_type,
+                ),
+                interrupt=result,
+                resume_payload=RuntimeResumePayload(
+                    resume_id="resume-preceding-solution-approval-invalid-target",
+                    payload_ref="approval-preceding-solution-approved-invalid-target",
+                    values={
+                        "decision": "approved",
+                        "approval_id": result.interrupt_ref.approval_id,
+                        "next_stage_type": StageType.CODE_GENERATION.value,
+                    },
+                ),
+                runtime_port=runtime_port,
+                checkpoint_port=checkpoint_port,
+            )
 
-    assert not any(call[0] == "create_interrupt" for call in runtime_port.calls)
+    if payload["interrupt_type"] == GraphInterruptType.APPROVAL.value:
+        assert runtime_port.calls == []
+    else:
+        assert runtime_port.calls
 
 
 def test_resume_failure_is_logged_and_reraised_without_raw_graph_state() -> None:

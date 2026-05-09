@@ -116,6 +116,37 @@ class CapturingRuntimeCommandPort:
         return _capture
 
 
+class AllowingInterruptRuntimeCommandPort(CapturingRuntimeCommandPort):
+    def create_interrupt(self, **kwargs: Any) -> GraphInterruptRef:
+        self.calls.append(("create_interrupt", kwargs))
+        thread = kwargs["thread"].model_copy(
+            update={"status": GraphThreadStatus.WAITING_APPROVAL}
+        )
+        return GraphInterruptRef(
+            interrupt_id=f"interrupt-{kwargs['approval_id']}",
+            thread=thread,
+            interrupt_type=kwargs["interrupt_type"],
+            status=GraphInterruptStatus.PENDING,
+            run_id=kwargs["run_id"],
+            stage_run_id=kwargs["stage_run_id"],
+            stage_type=kwargs["stage_type"],
+            payload_ref=kwargs["payload_ref"],
+            approval_id=kwargs["approval_id"],
+            checkpoint_ref=kwargs["checkpoint"],
+        )
+
+    def resume_interrupt(self, **kwargs: Any) -> RuntimeCommandResult:
+        self.calls.append(("resume_interrupt", kwargs))
+        interrupt = kwargs["interrupt"]
+        return RuntimeCommandResult(
+            command_type=RuntimeCommandType.RESUME_INTERRUPT,
+            thread=interrupt.thread.model_copy(update={"status": GraphThreadStatus.RUNNING}),
+            interrupt_ref=interrupt.model_copy(update={"status": GraphInterruptStatus.RESUMED}),
+            payload_ref=kwargs["resume_payload"].payload_ref,
+            trace_context=kwargs["trace_context"],
+        )
+
+
 class AllowingToolConfirmationRuntimeCommandPort(CapturingRuntimeCommandPort):
     def resume_tool_confirmation(self, **kwargs: Any) -> RuntimeCommandResult:
         self.calls.append(("resume_tool_confirmation", kwargs))
@@ -310,15 +341,97 @@ def test_langgraph_runtime_advances_one_business_stage_per_run_next_call() -> No
         log_writer=CapturingRunLogWriter()
     )
     context = build_context()
+    interrupt_runtime_port = AllowingInterruptRuntimeCommandPort()
 
-    results = [
+    results: list[RuntimeStepResult | RuntimeInterrupt] = []
+    results.append(
         engine.run_next(
             context=context,
-            runtime_port=runtime_port,
+            runtime_port=interrupt_runtime_port,
             checkpoint_port=checkpoint_port,
         )
-        for _ in range(6)
-    ]
+    )
+    results.append(
+        engine.run_next(
+            context=context,
+            runtime_port=interrupt_runtime_port,
+            checkpoint_port=checkpoint_port,
+        )
+    )
+    solution_approval = engine.run_next(
+        context=context,
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    assert isinstance(solution_approval, RuntimeInterrupt)
+    results.append(
+        engine.resume_from_interrupt(
+            context=build_context(
+                thread=GraphThreadRef(
+                    thread_id="graph-thread-1",
+                    run_id="run-1",
+                    status=GraphThreadStatus.WAITING_APPROVAL,
+                    current_stage_run_id=solution_approval.stage_run_id,
+                    current_stage_type=solution_approval.stage_type,
+                ),
+                trace_context=build_trace(stage_run_id=solution_approval.stage_run_id),
+            ),
+            interrupt=solution_approval,
+            resume_payload=RuntimeResumePayload(
+                resume_id="resume-solution-approval-sequence",
+                payload_ref="approval-decision-solution-sequence",
+                values={
+                    "decision": "approved",
+                    "approval_id": solution_approval.interrupt_ref.approval_id,
+                    "next_stage_type": StageType.CODE_GENERATION.value,
+                },
+            ),
+            runtime_port=interrupt_runtime_port,
+            checkpoint_port=checkpoint_port,
+        )
+    )
+    results.extend(
+        [
+            engine.run_next(
+                context=context,
+                runtime_port=interrupt_runtime_port,
+                checkpoint_port=checkpoint_port,
+            )
+            for _ in range(2)
+        ]
+    )
+    review_approval = engine.run_next(
+        context=context,
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    assert isinstance(review_approval, RuntimeInterrupt)
+    results.append(
+        engine.resume_from_interrupt(
+            context=build_context(
+                thread=GraphThreadRef(
+                    thread_id="graph-thread-1",
+                    run_id="run-1",
+                    status=GraphThreadStatus.WAITING_APPROVAL,
+                    current_stage_run_id=review_approval.stage_run_id,
+                    current_stage_type=review_approval.stage_type,
+                ),
+                trace_context=build_trace(stage_run_id=review_approval.stage_run_id),
+            ),
+            interrupt=review_approval,
+            resume_payload=RuntimeResumePayload(
+                resume_id="resume-review-approval-sequence",
+                payload_ref="approval-decision-review-sequence",
+                values={
+                    "decision": "approved",
+                    "approval_id": review_approval.interrupt_ref.approval_id,
+                    "next_stage_type": StageType.DELIVERY_INTEGRATION.value,
+                },
+            ),
+            runtime_port=interrupt_runtime_port,
+            checkpoint_port=checkpoint_port,
+        )
+    )
 
     assert all(isinstance(result, RuntimeStepResult) for result in results)
     assert [result.stage_type for result in results] == EXPECTED_STAGE_SEQUENCE
@@ -334,7 +447,11 @@ def test_langgraph_runtime_advances_one_business_stage_per_run_next_call() -> No
         f"graph-definition-run-1/stage-contracts/{stage.value}"
         for stage in EXPECTED_STAGE_SEQUENCE
     ]
-    assert all(call.runtime_context is context for call in runner.invocations)
+    assert all(call.runtime_context.run_id == context.run_id for call in runner.invocations)
+    assert all(
+        call.runtime_context.thread.thread_id == context.thread.thread_id
+        for call in runner.invocations
+    )
     assert all(
         call.trace_context.graph_thread_id == "graph-thread-1"
         for call in runner.invocations
@@ -395,14 +512,393 @@ def test_langgraph_runtime_wires_code_review_conditional_regression_route() -> N
     runner = FakeStageRunner(route_once="review_regression_retry")
     engine, _runner, checkpoint_port, runtime_port = build_engine(runner=runner)
     context = build_context()
+    interrupt_runtime_port = AllowingInterruptRuntimeCommandPort()
 
-    for _ in range(6):
+    engine.run_next(
+        context=context,
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    engine.run_next(
+        context=context,
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    solution_approval = engine.run_next(
+        context=context,
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    assert isinstance(solution_approval, RuntimeInterrupt)
+    approved_solution = engine.resume_from_interrupt(
+        context=build_context(
+            thread=GraphThreadRef(
+                thread_id="graph-thread-1",
+                run_id="run-1",
+                status=GraphThreadStatus.WAITING_APPROVAL,
+                current_stage_run_id=solution_approval.stage_run_id,
+                current_stage_type=solution_approval.stage_type,
+            ),
+            trace_context=build_trace(stage_run_id=solution_approval.stage_run_id),
+        ),
+        interrupt=solution_approval,
+        resume_payload=RuntimeResumePayload(
+            resume_id="resume-solution-approval-regression-route",
+            payload_ref="approval-decision-solution-regression-route",
+            values={
+                "decision": "approved",
+                "approval_id": solution_approval.interrupt_ref.approval_id,
+                "next_stage_type": StageType.CODE_GENERATION.value,
+            },
+        ),
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    assert isinstance(approved_solution, RuntimeStepResult)
+
+    for _ in range(3):
         engine.run_next(
             context=context,
-            runtime_port=runtime_port,
+            runtime_port=interrupt_runtime_port,
             checkpoint_port=checkpoint_port,
         )
 
+    assert [call.stage_type for call in runner.invocations] == [
+        StageType.REQUIREMENT_ANALYSIS,
+        StageType.SOLUTION_DESIGN,
+        StageType.CODE_GENERATION,
+        StageType.TEST_GENERATION_EXECUTION,
+        StageType.CODE_REVIEW,
+        StageType.CODE_GENERATION,
+    ]
+
+
+def test_langgraph_runtime_inserts_solution_design_approval_gate_before_code_generation() -> None:
+    engine, runner, checkpoint_port, runtime_port = build_engine()
+    context = build_context()
+    interrupt_runtime_port = AllowingInterruptRuntimeCommandPort()
+
+    requirement = engine.run_next(
+        context=context,
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    solution = engine.run_next(
+        context=context,
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    approval = engine.run_next(
+        context=context,
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+
+    assert isinstance(requirement, RuntimeStepResult)
+    assert isinstance(solution, RuntimeStepResult)
+    assert isinstance(approval, RuntimeInterrupt)
+    assert approval.stage_type is StageType.SOLUTION_DESIGN
+    assert approval.stage_run_id == solution.stage_run_id
+    assert approval.interrupt_ref.interrupt_type is GraphInterruptType.APPROVAL
+    assert approval.interrupt_ref.approval_id is not None
+    assert approval.interrupt_ref.checkpoint_ref.purpose is CheckpointPurpose.WAITING_APPROVAL
+    assert interrupt_runtime_port.calls[-1][0] == "create_interrupt"
+    assert [call.stage_type for call in runner.invocations] == [
+        StageType.REQUIREMENT_ANALYSIS,
+        StageType.SOLUTION_DESIGN,
+    ]
+
+
+def test_langgraph_runtime_approval_approve_resumes_into_code_generation() -> None:
+    engine, runner, checkpoint_port, runtime_port = build_engine()
+    context = build_context()
+    interrupt_runtime_port = AllowingInterruptRuntimeCommandPort()
+
+    engine.run_next(
+        context=context,
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    solution = engine.run_next(
+        context=context,
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    approval = engine.run_next(
+        context=context,
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    assert isinstance(solution, RuntimeStepResult)
+    assert isinstance(approval, RuntimeInterrupt)
+
+    result = engine.resume_from_interrupt(
+        context=build_context(
+            thread=GraphThreadRef(
+                thread_id="graph-thread-1",
+                run_id="run-1",
+                status=GraphThreadStatus.WAITING_APPROVAL,
+                current_stage_run_id=approval.stage_run_id,
+                current_stage_type=approval.stage_type,
+            ),
+            trace_context=build_trace(stage_run_id=approval.stage_run_id),
+        ),
+        interrupt=approval,
+        resume_payload=RuntimeResumePayload(
+            resume_id="resume-solution-approval-approved",
+            payload_ref="approval-decision-approved",
+            values={
+                "decision": "approved",
+                "approval_id": approval.interrupt_ref.approval_id,
+                "next_stage_type": StageType.CODE_GENERATION.value,
+            },
+        ),
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+
+    assert isinstance(result, RuntimeStepResult)
+    assert result.stage_type is StageType.CODE_GENERATION
+    assert result.stage_run_id == "stage-run-run-1-code_generation"
+    assert result.status is StageStatus.COMPLETED
+    assert interrupt_runtime_port.calls[-1][0] == "resume_interrupt"
+    assert [call.stage_type for call in runner.invocations] == [
+        StageType.REQUIREMENT_ANALYSIS,
+        StageType.SOLUTION_DESIGN,
+        StageType.CODE_GENERATION,
+    ]
+
+
+def test_langgraph_runtime_approval_reject_resumes_into_solution_design() -> None:
+    engine, runner, checkpoint_port, runtime_port = build_engine()
+    context = build_context()
+    interrupt_runtime_port = AllowingInterruptRuntimeCommandPort()
+
+    engine.run_next(
+        context=context,
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    solution = engine.run_next(
+        context=context,
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    approval = engine.run_next(
+        context=context,
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    assert isinstance(solution, RuntimeStepResult)
+    assert isinstance(approval, RuntimeInterrupt)
+
+    result = engine.resume_from_interrupt(
+        context=build_context(
+            thread=GraphThreadRef(
+                thread_id="graph-thread-1",
+                run_id="run-1",
+                status=GraphThreadStatus.WAITING_APPROVAL,
+                current_stage_run_id=approval.stage_run_id,
+                current_stage_type=approval.stage_type,
+            ),
+            trace_context=build_trace(stage_run_id=approval.stage_run_id),
+        ),
+        interrupt=approval,
+        resume_payload=RuntimeResumePayload(
+            resume_id="resume-solution-approval-rejected",
+            payload_ref="approval-decision-rejected",
+            values={
+                "decision": "rejected",
+                "reason": "Revise architecture.",
+                "approval_id": approval.interrupt_ref.approval_id,
+                "next_stage_type": StageType.SOLUTION_DESIGN.value,
+            },
+        ),
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+
+    assert isinstance(result, RuntimeStepResult)
+    assert result.stage_type is StageType.SOLUTION_DESIGN
+    assert result.stage_run_id == solution.stage_run_id
+    assert result.status is StageStatus.COMPLETED
+    assert interrupt_runtime_port.calls[-1][0] == "resume_interrupt"
+    assert [call.stage_type for call in runner.invocations] == [
+        StageType.REQUIREMENT_ANALYSIS,
+        StageType.SOLUTION_DESIGN,
+        StageType.SOLUTION_DESIGN,
+    ]
+
+
+def test_langgraph_runtime_inserts_code_review_approval_gate_before_delivery_integration() -> None:
+    engine, runner, checkpoint_port, runtime_port = build_engine()
+    context = build_context()
+    interrupt_runtime_port = AllowingInterruptRuntimeCommandPort()
+
+    engine.run_next(
+        context=context,
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    engine.run_next(
+        context=context,
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    solution_approval = engine.run_next(
+        context=context,
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    assert isinstance(solution_approval, RuntimeInterrupt)
+    approved_solution = engine.resume_from_interrupt(
+        context=build_context(
+            thread=GraphThreadRef(
+                thread_id="graph-thread-1",
+                run_id="run-1",
+                status=GraphThreadStatus.WAITING_APPROVAL,
+                current_stage_run_id=solution_approval.stage_run_id,
+                current_stage_type=solution_approval.stage_type,
+            ),
+            trace_context=build_trace(stage_run_id=solution_approval.stage_run_id),
+        ),
+        interrupt=solution_approval,
+        resume_payload=RuntimeResumePayload(
+            resume_id="resume-solution-approval-for-review",
+            payload_ref="approval-decision-solution-approved",
+            values={
+                "decision": "approved",
+                "approval_id": solution_approval.interrupt_ref.approval_id,
+                "next_stage_type": StageType.CODE_GENERATION.value,
+            },
+        ),
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    assert isinstance(approved_solution, RuntimeStepResult)
+
+    approval = None
+    for _ in range(4):
+        step = engine.run_next(
+            context=context,
+            runtime_port=interrupt_runtime_port,
+            checkpoint_port=checkpoint_port,
+        )
+        if isinstance(step, RuntimeInterrupt):
+            approval = step
+            if step.stage_type is StageType.CODE_REVIEW:
+                break
+            continue
+        assert isinstance(step, RuntimeStepResult)
+
+    assert approval is not None
+    assert isinstance(approval, RuntimeInterrupt)
+    assert approval.stage_type is StageType.CODE_REVIEW
+    assert approval.interrupt_ref.interrupt_type is GraphInterruptType.APPROVAL
+    assert approval.interrupt_ref.approval_id is not None
+    assert approval.interrupt_ref.checkpoint_ref.purpose is CheckpointPurpose.WAITING_APPROVAL
+    assert [call.stage_type for call in runner.invocations] == [
+        StageType.REQUIREMENT_ANALYSIS,
+        StageType.SOLUTION_DESIGN,
+        StageType.CODE_GENERATION,
+        StageType.TEST_GENERATION_EXECUTION,
+        StageType.CODE_REVIEW,
+    ]
+
+
+def test_langgraph_runtime_code_review_reject_resumes_into_code_generation() -> None:
+    engine, runner, checkpoint_port, runtime_port = build_engine()
+    context = build_context()
+    interrupt_runtime_port = AllowingInterruptRuntimeCommandPort()
+
+    engine.run_next(
+        context=context,
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    engine.run_next(
+        context=context,
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    solution_approval = engine.run_next(
+        context=context,
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    assert isinstance(solution_approval, RuntimeInterrupt)
+    approved_solution = engine.resume_from_interrupt(
+        context=build_context(
+            thread=GraphThreadRef(
+                thread_id="graph-thread-1",
+                run_id="run-1",
+                status=GraphThreadStatus.WAITING_APPROVAL,
+                current_stage_run_id=solution_approval.stage_run_id,
+                current_stage_type=solution_approval.stage_type,
+            ),
+            trace_context=build_trace(stage_run_id=solution_approval.stage_run_id),
+        ),
+        interrupt=solution_approval,
+        resume_payload=RuntimeResumePayload(
+            resume_id="resume-solution-approval-for-review-reject",
+            payload_ref="approval-decision-solution-approved-2",
+            values={
+                "decision": "approved",
+                "approval_id": solution_approval.interrupt_ref.approval_id,
+                "next_stage_type": StageType.CODE_GENERATION.value,
+            },
+        ),
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+    assert isinstance(approved_solution, RuntimeStepResult)
+
+    approval = None
+    for _ in range(4):
+        step = engine.run_next(
+            context=context,
+            runtime_port=interrupt_runtime_port,
+            checkpoint_port=checkpoint_port,
+        )
+        if isinstance(step, RuntimeInterrupt):
+            approval = step
+            if step.stage_type is StageType.CODE_REVIEW:
+                break
+            continue
+        assert isinstance(step, RuntimeStepResult)
+    assert approval is not None
+    assert isinstance(approval, RuntimeInterrupt)
+
+    result = engine.resume_from_interrupt(
+        context=build_context(
+            thread=GraphThreadRef(
+                thread_id="graph-thread-1",
+                run_id="run-1",
+                status=GraphThreadStatus.WAITING_APPROVAL,
+                current_stage_run_id=approval.stage_run_id,
+                current_stage_type=approval.stage_type,
+            ),
+            trace_context=build_trace(stage_run_id=approval.stage_run_id),
+        ),
+        interrupt=approval,
+        resume_payload=RuntimeResumePayload(
+            resume_id="resume-review-approval-rejected",
+            payload_ref="review-approval-decision-rejected",
+            values={
+                "decision": "rejected",
+                "reason": "Fix regression risk.",
+                "approval_id": approval.interrupt_ref.approval_id,
+                "next_stage_type": StageType.CODE_GENERATION.value,
+            },
+        ),
+        runtime_port=interrupt_runtime_port,
+        checkpoint_port=checkpoint_port,
+    )
+
+    assert isinstance(result, RuntimeStepResult)
+    assert result.stage_type is StageType.CODE_GENERATION
+    assert result.stage_run_id == "stage-run-run-1-code_generation"
+    assert result.status is StageStatus.COMPLETED
     assert [call.stage_type for call in runner.invocations] == [
         StageType.REQUIREMENT_ANALYSIS,
         StageType.SOLUTION_DESIGN,

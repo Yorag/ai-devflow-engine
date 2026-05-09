@@ -963,6 +963,55 @@ def test_waiting_tool_confirmation_step_reuses_request_created_by_stage_tool_gat
         assert stage.status is StageStatus.WAITING_TOOL_CONFIRMATION
 
 
+def test_runtime_approval_interrupt_creates_actionable_request_and_interrupt(
+    tmp_path: Path,
+) -> None:
+    fixture = _start_first_run(tmp_path)
+    command = _move_fixture_to_stage(fixture, StageType.SOLUTION_DESIGN)
+    interrupt = _runtime_approval_interrupt(
+        fixture,
+        stage_run_id=command.stage_run_id,
+        stage_type=command.stage_type,
+    )
+    fake_engine = CapturingRuntimeEngine(start_result=interrupt)
+    service = RuntimeExecutionService(
+        database_manager=fixture.manager,
+        environment_settings=fixture.settings,
+        engine_factory=lambda _factory_input: fake_engine,
+    )
+
+    service.dispatch_started_run(command)
+
+    with fixture.manager.session(DatabaseRole.RUNTIME) as session:
+        approval = session.query(ApprovalRequestModel).one()
+        run = session.get(PipelineRunModel, fixture.result.run.run_id)
+        stage = session.get(StageRunModel, command.stage_run_id)
+        assert approval.run_id == fixture.result.run.run_id
+        assert approval.stage_run_id == command.stage_run_id
+        assert approval.approval_type is ApprovalType.SOLUTION_DESIGN_APPROVAL
+        assert approval.status is ApprovalStatus.PENDING
+        assert approval.graph_interrupt_ref == interrupt.interrupt_ref.interrupt_id
+        assert approval.payload_ref == interrupt.payload_ref
+        assert run is not None
+        assert stage is not None
+        assert run.status is RunStatus.WAITING_APPROVAL
+        assert stage.status is StageStatus.WAITING_APPROVAL
+
+    with fixture.manager.session(DatabaseRole.CONTROL) as session:
+        control_session = session.get(SessionModel, fixture.result.session.session_id)
+        assert control_session is not None
+        assert control_session.status is SessionStatus.WAITING_APPROVAL
+
+    with fixture.manager.session(DatabaseRole.EVENT) as session:
+        event_types = {
+            event.event_type
+            for event in session.query(DomainEventModel)
+            .filter(DomainEventModel.run_id == fixture.result.run.run_id)
+            .all()
+        }
+        assert "approval_requested" in event_types
+
+
 def test_allowed_stage_tool_gate_confirmation_resumes_current_stage(
     tmp_path: Path,
 ) -> None:
@@ -1536,16 +1585,16 @@ def test_default_engine_factory_starts_next_stage_before_projecting_run_next(
         assert requirement_stage is not None
         assert solution_stage is not None
         assert requirement_stage.status is StageStatus.COMPLETED
-        assert solution_stage.status is StageStatus.COMPLETED
+        assert solution_stage.status is StageStatus.WAITING_APPROVAL
         assert solution_stage.stage_type is StageType.SOLUTION_DESIGN
-        assert run.status is RunStatus.COMPLETED
-        assert run.current_stage_run_id is None
+        assert run.status is RunStatus.WAITING_APPROVAL
+        assert run.current_stage_run_id == solution_stage.stage_run_id
 
     with fixture.manager.session(DatabaseRole.CONTROL) as session:
         control_session = session.get(SessionModel, fixture.result.session.session_id)
         assert control_session is not None
-        assert control_session.status is SessionStatus.COMPLETED
-        assert control_session.latest_stage_type is StageType.DELIVERY_INTEGRATION
+        assert control_session.status is SessionStatus.WAITING_APPROVAL
+        assert control_session.latest_stage_type is StageType.SOLUTION_DESIGN
 
     assert [
         config["model_binding_stage_type"] for config in captured_stage_configs
@@ -1626,10 +1675,6 @@ def test_dispatch_started_run_default_dispatcher_drives_until_final_stage_comple
     expected_stages = [
         StageType.REQUIREMENT_ANALYSIS,
         StageType.SOLUTION_DESIGN,
-        StageType.CODE_GENERATION,
-        StageType.TEST_GENERATION_EXECUTION,
-        StageType.CODE_REVIEW,
-        StageType.DELIVERY_INTEGRATION,
     ]
     with fixture.manager.session(DatabaseRole.RUNTIME) as session:
         run = session.get(PipelineRunModel, fixture.result.run.run_id)
@@ -1640,20 +1685,21 @@ def test_dispatch_started_run_default_dispatcher_drives_until_final_stage_comple
             .all()
         )
         assert run is not None
-        assert run.status is RunStatus.COMPLETED
-        assert run.current_stage_run_id is None
+        assert run.status is RunStatus.WAITING_APPROVAL
+        assert run.current_stage_run_id is not None
         assert [stage.stage_type for stage in stages] == expected_stages
-        assert all(stage.status is StageStatus.COMPLETED for stage in stages)
+        assert stages[0].status is StageStatus.COMPLETED
+        assert stages[1].status is StageStatus.WAITING_APPROVAL
 
     with fixture.manager.session(DatabaseRole.CONTROL) as session:
         control_session = session.get(SessionModel, fixture.result.session.session_id)
         assert control_session is not None
-        assert control_session.status is SessionStatus.COMPLETED
+        assert control_session.status is SessionStatus.WAITING_APPROVAL
 
     with fixture.manager.session(DatabaseRole.GRAPH) as session:
         thread = session.get(GraphThreadModel, fixture.result.run.graph_thread_ref)
         assert thread is not None
-        assert thread.status == "completed"
+        assert thread.status == "interrupted"
 
     assert captured_stage_types == expected_stages
 
@@ -1867,19 +1913,12 @@ def test_dispatch_started_run_default_dispatcher_allows_auto_regression_retry_pa
     assert captured_stage_types == [
         StageType.REQUIREMENT_ANALYSIS,
         StageType.SOLUTION_DESIGN,
-        StageType.CODE_GENERATION,
-        StageType.TEST_GENERATION_EXECUTION,
-        StageType.CODE_REVIEW,
-        StageType.CODE_GENERATION,
-        StageType.TEST_GENERATION_EXECUTION,
-        StageType.CODE_REVIEW,
-        StageType.DELIVERY_INTEGRATION,
     ]
     with fixture.manager.session(DatabaseRole.RUNTIME) as session:
         run = session.get(PipelineRunModel, fixture.result.run.run_id)
         assert run is not None
-        assert run.status is RunStatus.COMPLETED
-        assert run.current_stage_run_id is None
+        assert run.status is RunStatus.WAITING_APPROVAL
+        assert run.current_stage_run_id is not None
 
 
 def test_default_checkpointer_persists_across_service_instances(tmp_path: Path) -> None:
@@ -2177,6 +2216,133 @@ def _persist_waiting_tool_confirmation_interrupt(
             created_at=NOW,
             stage_run_id=fixture.result.stage.stage_run_id,
             tool_confirmation_id=tool_confirmation_id,
+            graph_thread_id=fixture.result.run.graph_thread_ref,
+        ),
+    )
+
+
+def _runtime_approval_interrupt(
+    fixture: StartedRunFixture,
+    *,
+    stage_run_id: str,
+    stage_type: StageType,
+) -> RuntimeInterrupt:
+    checkpoint = CheckpointRef(
+        checkpoint_id="checkpoint-runtime-approval",
+        thread_id=fixture.result.run.graph_thread_ref,
+        run_id=fixture.result.run.run_id,
+        stage_run_id=stage_run_id,
+        stage_type=stage_type,
+        purpose=CheckpointPurpose.WAITING_APPROVAL,
+        payload_ref="langgraph://graph-thread-1/checkpoints/default/runtime-approval",
+    )
+    thread_ref = GraphThreadRef(
+        thread_id=fixture.result.run.graph_thread_ref,
+        run_id=fixture.result.run.run_id,
+        status=GraphThreadStatus.WAITING_APPROVAL,
+        current_stage_run_id=stage_run_id,
+        current_stage_type=stage_type,
+        checkpoint_id=checkpoint.checkpoint_id,
+    )
+    interrupt_ref = GraphInterruptRef(
+        interrupt_id="interrupt-runtime-approval",
+        thread=thread_ref,
+        interrupt_type=GraphInterruptType.APPROVAL,
+        status=GraphInterruptStatus.PENDING,
+        run_id=fixture.result.run.run_id,
+        stage_run_id=stage_run_id,
+        stage_type=stage_type,
+        payload_ref="approval-runtime-dispatch",
+        approval_id="approval-runtime-dispatch",
+        checkpoint_ref=checkpoint,
+    )
+    return RuntimeInterrupt(
+        run_id=fixture.result.run.run_id,
+        stage_run_id=stage_run_id,
+        stage_type=stage_type,
+        interrupt_ref=interrupt_ref,
+        payload_ref="approval-runtime-dispatch",
+        trace_context=fixture.command.trace_context.child_span(
+            span_id="runtime-interrupt-approval",
+            created_at=NOW,
+            stage_run_id=stage_run_id,
+            approval_id="approval-runtime-dispatch",
+            graph_thread_id=fixture.result.run.graph_thread_ref,
+        ),
+    )
+
+
+def _move_fixture_to_stage(
+    fixture: StartedRunFixture,
+    stage_type: StageType,
+) -> RuntimeDispatchCommand:
+    run_id = fixture.result.run.run_id
+    stage_run_id = f"stage-run-{run_id}-{stage_type.value}"
+    with fixture.manager.session(DatabaseRole.RUNTIME) as runtime_session:
+        run = runtime_session.get(PipelineRunModel, run_id)
+        assert run is not None
+        stage = runtime_session.get(StageRunModel, stage_run_id)
+        if stage is None:
+            stage = StageRunModel(
+                stage_run_id=stage_run_id,
+                run_id=run.run_id,
+                stage_type=stage_type,
+                status=StageStatus.RUNNING,
+                attempt_index=1,
+                graph_node_key=stage_type.value,
+                stage_contract_ref=f"graph-definition-run-1/stage-contracts/{stage_type.value}",
+                input_ref=None,
+                output_ref=None,
+                summary=f"{stage_type.value} started by test fixture.",
+                started_at=NOW,
+                ended_at=None,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+            runtime_session.add(stage)
+        original_stage = runtime_session.get(
+            StageRunModel,
+            fixture.result.stage.stage_run_id,
+        )
+        if original_stage is not None:
+            original_stage.status = StageStatus.COMPLETED
+            original_stage.ended_at = NOW
+            original_stage.updated_at = NOW
+            runtime_session.add(original_stage)
+        stage.status = StageStatus.RUNNING
+        stage.updated_at = NOW
+        runtime_session.add(stage)
+        run.current_stage_run_id = stage_run_id
+        run.updated_at = NOW
+        runtime_session.add(run)
+        runtime_session.commit()
+
+    with fixture.manager.session(DatabaseRole.CONTROL) as control_session:
+        session = control_session.get(SessionModel, fixture.result.session.session_id)
+        assert session is not None
+        session.latest_stage_type = stage_type
+        session.updated_at = NOW
+        control_session.add(session)
+        control_session.commit()
+
+    with fixture.manager.session(DatabaseRole.GRAPH) as graph_session:
+        thread = graph_session.get(GraphThreadModel, fixture.result.run.graph_thread_ref)
+        assert thread is not None
+        thread.current_node_key = stage_type.value
+        thread.updated_at = NOW
+        graph_session.add(thread)
+        graph_session.commit()
+
+    return RuntimeDispatchCommand(
+        session_id=fixture.command.session_id,
+        run_id=fixture.command.run_id,
+        stage_run_id=stage_run_id,
+        stage_type=stage_type,
+        graph_thread_id=fixture.command.graph_thread_id,
+        trace_context=fixture.command.trace_context.child_span(
+            span_id=f"runtime-dispatch-started-{fixture.result.run.run_id}-{stage_type.value}",
+            created_at=NOW,
+            stage_run_id=stage_run_id,
             graph_thread_id=fixture.result.run.graph_thread_ref,
         ),
     )

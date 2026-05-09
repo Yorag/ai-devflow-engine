@@ -30,7 +30,10 @@ from backend.app.runtime.checkpoints import (
     save_graph_checkpoint,
     save_graph_interrupt_checkpoint,
 )
-from backend.app.runtime.nodes import LangGraphRuntimeState, build_stage_graph
+from backend.app.runtime.nodes import (
+    LangGraphRuntimeState,
+    build_stage_graph,
+)
 from backend.app.runtime.stage_runner_port import StageNodeResult, StageNodeRunnerPort
 from backend.app.schemas.observability import LogCategory, LogLevel, RedactionStatus
 from backend.app.services.runtime_orchestration import (
@@ -515,7 +518,10 @@ class LangGraphRuntimeEngine:
                     resume_payload=resume_payload,
                     trace_context=resume_trace,
                 )
-            resume_node = self._node_key_for_stage(interrupt.stage_type)
+            resume_node = self._resume_interrupt_after_node(
+                interrupt=interrupt,
+                resume_payload=resume_payload,
+            )
             compiled_graph.invoke(
                 Command(resume=resume_payload.model_dump(mode="json")),
                 config=config,
@@ -756,6 +762,44 @@ class LangGraphRuntimeEngine:
             if str(node["node_key"]) == node_key:
                 return StageType(str(node["stage_type"]))
         return None
+
+    def _resume_interrupt_after_node(
+        self,
+        *,
+        interrupt: RuntimeInterrupt,
+        resume_payload: RuntimeResumePayload,
+    ) -> str:
+        if interrupt.interrupt_ref.interrupt_type is not GraphInterruptType.APPROVAL:
+            return self._node_key_for_stage(interrupt.stage_type)
+        next_stage_type = self._approval_resume_target_stage(
+            source_stage_type=interrupt.stage_type,
+            resume_payload=resume_payload,
+        )
+        return self._node_key_for_stage(next_stage_type)
+
+    def _approval_resume_target_stage(
+        self,
+        *,
+        source_stage_type: StageType,
+        resume_payload: RuntimeResumePayload,
+    ) -> StageType:
+        values = resume_payload.values
+        next_stage_type = values.get("next_stage_type")
+        if isinstance(next_stage_type, str) and next_stage_type:
+            return StageType(next_stage_type)
+        decision = str(values.get("decision") or "").strip().lower()
+        if decision == "rejected":
+            if source_stage_type is StageType.SOLUTION_DESIGN:
+                return StageType.SOLUTION_DESIGN
+            if source_stage_type is StageType.CODE_REVIEW:
+                return StageType.CODE_GENERATION
+        if source_stage_type is StageType.SOLUTION_DESIGN:
+            return StageType.CODE_GENERATION
+        if source_stage_type is StageType.CODE_REVIEW:
+            return StageType.DELIVERY_INTEGRATION
+        raise ValueError(
+            f"Unsupported approval source stage: {source_stage_type!r}"
+        )
 
     def _record_log(
         self,
