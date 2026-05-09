@@ -1177,6 +1177,7 @@ class StageAgentRuntime:
                 "model_call_type": model_result.model_call_type.value,
                 "raw_response_ref": model_result.raw_response_ref,
                 "native_reasoning_ref": model_result.native_reasoning_ref,
+                "raw_output_text": model_result.raw_output_text,
                 "usage": model_result.usage.model_dump(mode="json"),
                 "retry_trace_refs": retry_refs,
                 "retry_trace_count": len(retry_refs),

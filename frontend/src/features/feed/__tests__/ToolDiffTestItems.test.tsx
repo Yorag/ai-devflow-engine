@@ -181,10 +181,9 @@ describe("real backend code and test generation payload contract", () => {
     expect(within(toolItem).getByText("patch applied, 1 file changed")).toBeTruthy();
     expect(toolItem.textContent).not.toContain("成功，耗时");
     expect(toolItem.textContent).not.toContain("tool-call-ref-codegen");
-
-    const diffItem = screen.getByRole("listitem", { name: "变更预览" });
-    expect(within(diffItem).getByText("backend/app/schemas/feed.py")).toBeTruthy();
-    expect(within(diffItem).getByText("@@ StageItemProjection")).toBeTruthy();
+    expect(within(toolItem).getByText("backend/app/schemas/feed.py")).toBeTruthy();
+    expect(within(toolItem).getByText("@@ StageItemProjection")).toBeTruthy();
+    expect(screen.queryByRole("listitem", { name: "变更预览" })).toBeNull();
   });
 
   it("renders backend MetricSet-style test_generation_execution payloads and hides omitted metrics", () => {

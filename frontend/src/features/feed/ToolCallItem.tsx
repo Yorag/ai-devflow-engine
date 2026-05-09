@@ -1,4 +1,5 @@
 import type { StageItemProjection } from "../../api/types";
+import { parseDiffPreviewContent } from "./DiffPreview";
 import { formatStatusLabel, stageItemLabels } from "./display-labels";
 
 type ToolCallParseResult = {
@@ -13,12 +14,15 @@ type ToolCallParseResult = {
 
 export function ToolCallItem({
   item,
+  diffItem = null,
   stepIndex = 0,
 }: {
   item: StageItemProjection;
+  diffItem?: StageItemProjection | null;
   stepIndex?: number;
 }): JSX.Element {
   const parsed = parseToolCallContent(item.content);
+  const diff = diffItem ? parseDiffPreviewContent(diffItem.content) : null;
 
   return (
     <li className="stage-node-item stage-node-item--tool-call" aria-label="工具调用">
@@ -37,10 +41,30 @@ export function ToolCallItem({
       {parsed.commandExcerpt && parsed.commandExcerpt !== item.title ? (
         <p className="stage-node-item__command">{parsed.commandExcerpt}</p>
       ) : null}
+      {diff && diff.files.length > 0 ? (
+        <ul className="stage-node-item__file-list" aria-label="变更文件">
+          {diff.files.map((file) => (
+            <li key={file}>{file}</li>
+          ))}
+        </ul>
+      ) : null}
+      {diff && diff.previewLines.length > 0 ? (
+        <pre className="stage-node-item__diff-snippet">
+          {diff.previewLines.map((line) => (
+            <span key={line}>{line}</span>
+          ))}
+        </pre>
+      ) : null}
       {parsed.detailText ? (
         <details className="stage-node-item__details">
           <summary>查看输出</summary>
           <pre>{parsed.detailText}</pre>
+        </details>
+      ) : null}
+      {diff?.remainder ? (
+        <details className="stage-node-item__details">
+          <summary>查看更多变更上下文</summary>
+          <pre>{diff.remainder}</pre>
         </details>
       ) : null}
     </li>

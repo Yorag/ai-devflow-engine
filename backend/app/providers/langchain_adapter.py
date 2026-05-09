@@ -95,6 +95,7 @@ class ModelCallResult(_StrictBaseModel):
     usage: ModelCallUsage = Field(default_factory=ModelCallUsage)
     raw_response_ref: str | None = None
     native_reasoning_ref: str | None = None
+    raw_output_text: str | None = None
     provider_retry_trace: tuple[ProviderRetryTraceRecord, ...] = ()
     provider_circuit_breaker_trace: tuple[ProviderCircuitBreakerTraceRecord, ...] = ()
     trace_summary: ModelCallTraceSummary
@@ -505,6 +506,10 @@ class LangChainProviderAdapter:
             native_reasoning_ref=self._native_reasoning_ref(
                 normalized["ai_message"]
             ),
+            raw_output_text=self._raw_output_text(
+                raw_response,
+                ai_message=normalized["ai_message"],
+            ),
         )
 
     def _provider_failure_result(
@@ -879,6 +884,48 @@ class LangChainProviderAdapter:
         digest = sha256(reasoning.encode("utf-8")).hexdigest()
         return f"sha256:{digest}"
 
+    def _raw_output_text(
+        self,
+        response: Any,
+        *,
+        ai_message: AIMessage | None,
+    ) -> str | None:
+        if ai_message is not None:
+            return self._content_text(ai_message.content)
+        if isinstance(response, Mapping):
+            raw = response.get("raw")
+            if isinstance(raw, AIMessage):
+                return self._content_text(raw.content)
+        return None
+
+    def _content_text(self, content: Any) -> str | None:
+        if isinstance(content, str):
+            text = content.strip()
+            return text or None
+        if isinstance(content, list):
+            parts = [
+                text
+                for item in content
+                if (text := self._content_part_text(item)) is not None
+            ]
+            joined = "\n\n".join(parts).strip()
+            return joined or None
+        return None
+
+    def _content_part_text(self, part: Any) -> str | None:
+        if isinstance(part, str):
+            text = part.strip()
+            return text or None
+        if not isinstance(part, Mapping):
+            return None
+        if part.get("type") != "text":
+            return None
+        text = part.get("text")
+        if not isinstance(text, str):
+            return None
+        normalized = text.strip()
+        return normalized or None
+
     def _result(
         self,
         *,
@@ -895,6 +942,7 @@ class LangChainProviderAdapter:
         usage: ModelCallUsage | None = None,
         raw_response_ref: str | None = None,
         native_reasoning_ref: str | None = None,
+        raw_output_text: str | None = None,
         provider_retry_trace: tuple[ProviderRetryTraceRecord, ...] = (),
         provider_circuit_breaker_trace: tuple[ProviderCircuitBreakerTraceRecord, ...] = (),
     ) -> ModelCallResult:
@@ -911,6 +959,7 @@ class LangChainProviderAdapter:
             usage=usage or ModelCallUsage(),
             raw_response_ref=raw_response_ref,
             native_reasoning_ref=native_reasoning_ref,
+            raw_output_text=raw_output_text,
             provider_retry_trace=provider_retry_trace,
             provider_circuit_breaker_trace=provider_circuit_breaker_trace,
             trace_summary=ModelCallTraceSummary(

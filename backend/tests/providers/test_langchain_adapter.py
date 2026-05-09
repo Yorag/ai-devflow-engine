@@ -1340,6 +1340,45 @@ def test_invoke_structured_emits_native_reasoning_ref_when_capability_is_true() 
     assert result.native_reasoning_ref.startswith("sha256:")
 
 
+def test_invoke_structured_extracts_model_visible_output_text_without_reasoning() -> None:
+    from backend.app.providers.langchain_adapter import LangChainProviderAdapter
+
+    fake_provider = fake_provider_fixture(
+        provider_snapshot=provider_snapshot_fixture(
+            capabilities=provider_capabilities_fixture(supports_native_reasoning=True)
+        )
+    )
+    adapter = LangChainProviderAdapter(
+        provider_config=fake_provider.config,
+        provider_call_policy_snapshot=provider_policy_snapshot(),
+        chat_model_factory=lambda _config, _timeout, _max_tokens: _FakeBoundModel(
+            AIMessage(
+                content="I need to inspect the workspace tool implementation before answering.",
+                additional_kwargs={"reasoning": "internal native reasoning"},
+            )
+        ),
+    )
+
+    result = adapter.invoke_structured(
+        messages=(SystemMessage(content="system"), HumanMessage(content="user")),
+        response_schema={
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+            "required": ["summary"],
+            "additionalProperties": False,
+        },
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        tool_descriptions=(),
+        trace_context=trace_context(),
+    )
+
+    assert result.raw_output_text == (
+        "I need to inspect the workspace tool implementation before answering."
+    )
+    assert result.native_reasoning_ref is not None
+    assert "internal native reasoning" not in str(result.model_dump())
+
+
 def test_trace_summary_redacts_credentials_and_truncates_model_visible_text() -> None:
     from backend.app.providers.langchain_adapter import LangChainProviderAdapter
 

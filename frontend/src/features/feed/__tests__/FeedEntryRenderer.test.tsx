@@ -36,21 +36,26 @@ describe("FeedEntryRenderer", () => {
     expect(within(stageEntry).getByText("方案设计")).toBeTruthy();
     expect(within(stageEntry).getByText("运行中")).toBeTruthy();
     expect(within(stageEntry).getByText("思考")).toBeTruthy();
-    expect(within(stageEntry).getByText("模型记录")).toBeTruthy();
+    expect(within(stageEntry).queryByText("模型记录")).toBeNull();
     expect(within(stageEntry).queryByText("决策")).toBeNull();
     expect(within(stageEntry).getByText('read_file path="frontend/src/features/feed/StageNode.tsx"')).toBeTruthy();
 
     const approvalEntry = screen.getByRole("article", {
       name: "Approval request feed entry",
     });
-    expect(within(approvalEntry).getByText("Review solution design")).toBeTruthy();
+    expect(within(approvalEntry).getByText("审批请求")).toBeTruthy();
+    expect(within(approvalEntry).getByText("等待方案设计审批")).toBeTruthy();
+    expect(
+      within(approvalEntry).getByText(
+        "The plan updates workspace shell layout and query usage.",
+      ),
+    ).toBeTruthy();
     expect(within(approvalEntry).getByRole("button", { name: "批准" })).toBeTruthy();
     expect(within(approvalEntry).getByRole("button", { name: "退回" })).toBeTruthy();
 
     const toolEntry = screen.getByRole("article", {
       name: "Tool confirmation feed entry",
     });
-    expect(within(toolEntry).getByText("Allow dependency install")).toBeTruthy();
     expect(within(toolEntry).getByText("npm install")).toBeTruthy();
     expect(
       within(toolEntry).getByRole("button", { name: "允许本次执行" }),
@@ -58,6 +63,12 @@ describe("FeedEntryRenderer", () => {
     expect(
       within(toolEntry).getByRole("button", { name: "拒绝本次执行" }),
     ).toBeTruthy();
+    expect(within(toolEntry).queryByText("frontend/package-lock.json")).toBeNull();
+    expect(
+      within(toolEntry).queryByText(
+        "Installing dependencies changes lock files and downloads packages.",
+      ),
+    ).toBeNull();
     expect(within(toolEntry).queryByText("批准")).toBeNull();
     expect(within(toolEntry).queryByText("退回")).toBeNull();
 
@@ -66,10 +77,12 @@ describe("FeedEntryRenderer", () => {
     ).toBeTruthy();
     expect(screen.getByText("Clarification needed")).toBeTruthy();
 
-    expect(
-      screen.getByRole("article", { name: "Approval result feed entry" }),
-    ).toBeTruthy();
-    expect(screen.getByText("已批准")).toBeTruthy();
+    const approvalResultEntry = screen.getByRole("article", {
+      name: "Approval result feed entry",
+    });
+    expect(within(approvalResultEntry).getByText("审批结果")).toBeTruthy();
+    expect(within(approvalResultEntry).getByText("代码评审审批已批准")).toBeTruthy();
+    expect(within(approvalResultEntry).getByText("下一步：交付集成")).toBeTruthy();
 
     const deliveryEntry = screen.getByRole("article", {
       name: "Delivery result feed entry",

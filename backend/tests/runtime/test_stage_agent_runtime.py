@@ -405,6 +405,7 @@ def model_result(
     structured_output: dict[str, Any] | None = None,
     structured_output_candidates: tuple[dict[str, Any], ...] = (),
     tool_call_requests: tuple[ModelCallToolRequest, ...] = (),
+    raw_output_text: str | None = None,
     provider_retry_trace: tuple[Any, ...] = (),
     provider_circuit_breaker_trace: tuple[Any, ...] = (),
 ) -> ModelCallResult:
@@ -418,6 +419,7 @@ def model_result(
         usage=ModelCallUsage(input_tokens=12, output_tokens=8, total_tokens=20),
         raw_response_ref=f"stage-process://stage-run-1/model-call/{id(structured_output)}",
         native_reasoning_ref="sha256:native-reasoning",
+        raw_output_text=raw_output_text,
         provider_retry_trace=provider_retry_trace,
         provider_circuit_breaker_trace=provider_circuit_breaker_trace,
         trace_summary=ModelCallTraceSummary(

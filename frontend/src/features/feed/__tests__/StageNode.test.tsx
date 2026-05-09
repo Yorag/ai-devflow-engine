@@ -130,8 +130,20 @@ const requirementAnalysisStage: ExecutionNodeProjection = {
       type: "result",
       title: "Requirement analysis result",
       summary: "The stage can continue into Solution Design.",
-      content:
-        '{"artifact_type":"RequirementAnalysisArtifact","evidence_refs":["message-4944117081b84a85acefe870fa998f3e"],"summary":"Provider binding behavior is now explicit."}',
+      content: [
+        "需求规格",
+        "- Keep provider binding fixed for the active run.",
+        "",
+        "验收条件",
+        "- Retries keep the original provider binding.",
+        "- New runs can use updated provider configuration.",
+        "",
+        "澄清结论",
+        "- The active run snapshot remains immutable once execution starts.",
+        "",
+        "分析说明",
+        "- This preserves deterministic retry behavior and keeps provider changes scoped to future runs.",
+      ].join("\n"),
       artifact_refs: ["requirement-analysis-output"],
     }),
   ],
@@ -166,17 +178,20 @@ describe("StageNode", () => {
 
     const flow = article.querySelector(".stage-node-items");
     const steps = Array.from(flow?.children ?? []) as HTMLElement[];
-    expect(steps).toHaveLength(7);
+    expect(steps).toHaveLength(5);
     expect(within(steps[0]).getByText("助手提问")).toBeTruthy();
     expect(within(steps[0]).getByText("Should the started run keep the original provider binding after a retry?")).toBeTruthy();
     expect(within(steps[2]).getByText("思考")).toBeTruthy();
     expect(within(steps[2]).getByText("The active run snapshot is immutable.")).toBeTruthy();
-    expect(within(steps[3]).getByText("模型记录")).toBeTruthy();
-    expect(within(steps[4]).getByText("工具调用")).toBeTruthy();
-    expect(within(steps[4]).getByText("read_file frontend/src/api/types.ts")).toBeTruthy();
-    expect(within(steps[5]).getByText("变更预览")).toBeTruthy();
-    expect(within(steps[6]).getByText("阶段结果")).toBeTruthy();
-    expect(within(steps[6]).getByText("The stage can continue into Solution Design.")).toBeTruthy();
+    expect(within(steps[3]).getByText("工具调用")).toBeTruthy();
+    expect(within(steps[3]).getByText("read_file frontend/src/api/types.ts")).toBeTruthy();
+    expect(within(steps[3]).getByText("frontend/src/features/feed/StageNode.tsx", { exact: false })).toBeTruthy();
+    expect(within(steps[4]).getByText("阶段结果")).toBeTruthy();
+    expect(within(steps[4]).getByText("The stage can continue into Solution Design.")).toBeTruthy();
+    expect(within(steps[4]).getByText("需求规格")).toBeTruthy();
+    expect(within(steps[4]).getByText("Keep provider binding fixed for the active run.")).toBeTruthy();
+    expect(within(steps[4]).getByText("验收条件")).toBeTruthy();
+    expect(within(steps[4]).getByText("Retries keep the original provider binding.")).toBeTruthy();
 
     expect(article.textContent).not.toContain("provider-trace-1");
     expect(article.textContent).not.toContain("provider-artifact-1");
@@ -187,6 +202,7 @@ describe("StageNode", () => {
     expect(article.textContent).not.toContain("message-4944117081b84a85acefe870fa998f3e");
     expect(article.textContent).not.toContain("Freeze the provider binding per run.");
     expect(article.textContent).not.toContain("决策");
+    expect(article.textContent).not.toContain("模型记录");
   });
 
   it("renders Requirement Analysis clarification as localized continuous dialogue rows", () => {
@@ -216,20 +232,21 @@ describe("StageNode", () => {
     expect(screen.getByRole("listitem", { name: "思考" })).toBeTruthy();
     expect(screen.getByText("The active run snapshot is immutable.")).toBeTruthy();
     expect(screen.queryByRole("listitem", { name: "决策" })).toBeNull();
-    expect(screen.getByRole("listitem", { name: "模型记录" })).toBeTruthy();
+    expect(screen.queryByRole("listitem", { name: "模型记录" })).toBeNull();
     const toolItem = screen.getByRole("listitem", { name: "工具调用" });
     expect(toolItem).toBeTruthy();
     expect(within(toolItem).getByText("read_file frontend/src/api/types.ts")).toBeTruthy();
-    expect(screen.getByRole("listitem", { name: "变更预览" })).toBeTruthy();
     expect(
-      screen.getByText("frontend/src/features/feed/StageNode.tsx", { exact: false }),
+      within(toolItem).getByText("frontend/src/features/feed/StageNode.tsx", { exact: false }),
     ).toBeTruthy();
     expect(screen.getByRole("listitem", { name: "阶段结果" })).toBeTruthy();
     expect(screen.getByText("The stage can continue into Solution Design.")).toBeTruthy();
+    expect(screen.getByText("Keep provider binding fixed for the active run.")).toBeTruthy();
     expect(screen.queryByRole("listitem", { name: "模型服务调用" })).toBeNull();
+    expect(screen.queryByRole("listitem", { name: "变更预览" })).toBeNull();
   });
 
-  it("renders expandable details for compact long-content item types while suppressing hidden internal trace items", () => {
+  it("renders expandable details for visible compact item types while suppressing hidden internal trace items", () => {
     render(
       <StageNodeItems
         items={[
@@ -286,7 +303,7 @@ describe("StageNode", () => {
       />,
     );
 
-    const closedCompactLabels = ["思考", "上下文", "模型记录"];
+    const closedCompactLabels = ["思考", "上下文"];
 
     for (const label of closedCompactLabels) {
       const item = screen.getByRole("listitem", { name: label });
@@ -299,9 +316,9 @@ describe("StageNode", () => {
     const toolItem = screen.getByRole("listitem", { name: "工具调用" });
     expect(toolItem.querySelector("details")).toBeNull();
     expect(within(toolItem).getByText("Tool call remains visible.")).toBeTruthy();
-
-    const diffItem = screen.getByRole("listitem", { name: "变更预览" });
-    expect(diffItem.querySelector("details")).toBeNull();
+    expect(within(toolItem).getByText("Diff preview content may remain open.")).toBeTruthy();
+    expect(screen.queryByRole("listitem", { name: "模型记录" })).toBeNull();
+    expect(screen.queryByRole("listitem", { name: "变更预览" })).toBeNull();
     expect(screen.queryByRole("listitem", { name: "工具确认" })).toBeNull();
     expect(screen.queryByRole("listitem", { name: "决策" })).toBeNull();
   });
@@ -347,7 +364,7 @@ describe("StageNode", () => {
     expect(screen.getByText("Rendered without the list wrapper.")).toBeTruthy();
   });
 
-  it("renders specialized tool-call and diff-preview content instead of the generic compact block", () => {
+  it("renders merged tool execution content instead of splitting command and diff into separate main-flow blocks", () => {
     render(<StageNode entry={mockCodeGenerationStageNode} />);
 
     const toolItem = screen.getByRole("listitem", { name: "工具调用" });
@@ -359,12 +376,11 @@ describe("StageNode", () => {
     expect(toolItem.textContent).not.toContain("成功，耗时");
     expect(toolItem.textContent).not.toContain("tool-call-ref");
     expect(toolItem.textContent).not.toContain("sha256:");
-
-    const diffItem = screen.getByRole("listitem", { name: "变更预览" });
     expect(
-      within(diffItem).getByText("frontend/src/features/feed/ToolCallItem.tsx"),
+      within(toolItem).getByText("frontend/src/features/feed/ToolCallItem.tsx"),
     ).toBeTruthy();
-    expect(within(diffItem).getByText("@@ renderStageItemByType")).toBeTruthy();
+    expect(within(toolItem).getByText("@@ renderStageItemByType")).toBeTruthy();
+    expect(screen.queryByRole("listitem", { name: "变更预览" })).toBeNull();
   });
 
   it("renders test-result summary above test_generation_execution internal items", () => {

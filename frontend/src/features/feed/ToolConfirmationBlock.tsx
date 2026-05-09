@@ -118,24 +118,9 @@ export function ToolConfirmationBlock({
           </button>
         ) : null}
       </header>
-      <h2>{displayEntry.title}</h2>
       <p className="feed-entry__command">
         {displayEntry.command_preview ?? displayEntry.tool_name}
       </p>
-      <p className="feed-entry__supporting">{displayEntry.target_summary}</p>
-      <p className="feed-entry__body">{displayEntry.reason}</p>
-      {displayEntry.risk_categories.length > 0 ? (
-        <ChipList
-          label="风险类别"
-          values={displayEntry.risk_categories.map(formatLabel)}
-        />
-      ) : null}
-      {displayEntry.expected_side_effects.length > 0 ? (
-        <ChipList
-          label="预期副作用"
-          values={displayEntry.expected_side_effects}
-        />
-      ) : null}
       {displayEntry.decision === "denied" && displayEntry.deny_followup_summary ? (
         <div className="tool-confirmation-block__follow-up">
           <strong>
@@ -196,27 +181,4 @@ function getToolConfirmationSignature(entry: ToolConfirmationFeedEntry): string 
     deny_followup_summary: entry.deny_followup_summary,
     disabled_reason: entry.disabled_reason,
   });
-}
-
-function ChipList({
-  label,
-  values,
-}: {
-  label: string;
-  values: string[];
-}): JSX.Element {
-  return (
-    <div className="feed-entry__chip-group" aria-label={label}>
-      {values.map((value) => (
-        <span key={value}>{value}</span>
-      ))}
-    </div>
-  );
-}
-
-function formatLabel(value: string): string {
-  return value
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
 }

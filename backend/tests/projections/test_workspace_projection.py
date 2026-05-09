@@ -585,6 +585,9 @@ def test_workspace_projection_hydrates_stage_node_items_from_stage_artifact(
                             "model_id": "gpt-5.2",
                             "model_call_type": "stage_execution",
                             "iteration_index": 1,
+                            "raw_output_text": (
+                                "I need to inspect the feed renderer before editing."
+                            ),
                             "output_summary": {
                                 "excerpt": "I need to inspect the feed renderer before editing.",
                             },
@@ -595,6 +598,9 @@ def test_workspace_projection_hydrates_stage_node_items_from_stage_artifact(
                             "model_id": "gpt-5.2",
                             "model_call_type": "stage_execution",
                             "iteration_index": 2,
+                            "raw_output_text": (
+                                "The edit is complete and ready to summarize."
+                            ),
                             "output_summary": {
                                 "excerpt": "The edit is complete and ready to summarize.",
                             },
@@ -707,10 +713,19 @@ def test_workspace_projection_hydrates_stage_node_items_from_stage_artifact(
         "decision",
         "result",
     ]
+    assert stage_node["items"][0]["content"] == (
+        "I need to inspect the feed renderer before editing."
+    )
     assert stage_node["items"][2]["title"] == (
         "read_file path=frontend/src/features/feed/StageNodeItems.tsx"
     )
+    assert stage_node["items"][3]["content"] == (
+        "The edit is complete and ready to summarize."
+    )
     assert stage_node["items"][2]["summary"] is None
+    assert stage_node["items"][5]["summary"] == "Stage feed projection now shows real steps."
+    assert "已修改文件" in stage_node["items"][5]["content"]
+    assert "frontend/src/features/feed/StageNodeItems.tsx" in stage_node["items"][5]["content"]
     assert "sha256:internal" not in str(stage_node)
 
 

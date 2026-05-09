@@ -54,7 +54,7 @@ export function DiffPreview({
   );
 }
 
-function parseDiffPreviewContent(content: string | null): DiffPreviewParseResult {
+export function parseDiffPreviewContent(content: string | null): DiffPreviewParseResult {
   const sections = content?.split("\n\n") ?? [];
   const fileSection = sections[0] ?? "";
   const remainder = sections.slice(2).join("\n\n") || null;

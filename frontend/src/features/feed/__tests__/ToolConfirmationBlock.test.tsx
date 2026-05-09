@@ -88,6 +88,23 @@ function renderBlock(
 }
 
 describe("ToolConfirmationBlock", () => {
+  it("renders only the command and actions for a pending confirmation", () => {
+    renderBlock(buildEntry());
+
+    const article = screen.getByRole("article", {
+      name: "Tool confirmation feed entry",
+    });
+    expect(within(article).getByText("npm install")).toBeTruthy();
+    expect(within(article).queryByText("Confirm bash tool action")).toBeNull();
+    expect(within(article).queryByText("frontend/package-lock.json")).toBeNull();
+    expect(
+      within(article).queryByText(
+        "Installing dependencies changes lock files and downloads packages.",
+      ),
+    ).toBeNull();
+    expect(within(article).queryByText("package-lock update")).toBeNull();
+  });
+
   it("submits allow for the current active run and invalidates workspace queries", async () => {
     vi.mocked(
       toolConfirmationActions.submitToolConfirmationDecision,

@@ -87,6 +87,20 @@ function renderApprovalBlock(
 }
 
 describe("ApprovalBlock", () => {
+  it("renders approval requests with transcript-style semantics", () => {
+    renderApprovalBlock(buildApprovalEntry());
+
+    const article = screen.getByRole("article", {
+      name: "Approval request feed entry",
+    });
+    expect(within(article).getByText("审批请求")).toBeTruthy();
+    expect(within(article).getByText("等待代码评审审批")).toBeTruthy();
+    expect(
+      within(article).getByText("The patch updates the workspace approval block."),
+    ).toBeTruthy();
+    expect(within(article).getByText("Touches only frontend AL06 files.")).toBeTruthy();
+  });
+
   it("submits approve inline for the current pending run and invalidates workspace queries", async () => {
     vi.mocked(approveApproval).mockResolvedValue({
       entry_id: "entry-approval-result",

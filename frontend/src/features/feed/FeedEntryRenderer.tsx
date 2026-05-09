@@ -186,14 +186,20 @@ function ApprovalResultEntry({
       className="feed-entry feed-entry--approval-result"
       aria-label="Approval result feed entry"
     >
-      <EntryHeader label={formatApprovalType(entry.approval_type)} />
-      <h2>{formatStatusLabel(entry.decision)}</h2>
+      <EntryHeader label="审批结果" />
+      <h2>{`${formatApprovalType(entry.approval_type)}${formatDecisionSuffix(entry.decision)}`}</h2>
       {entry.reason ? <p className="feed-entry__body">{entry.reason}</p> : null}
       <p className="feed-entry__supporting">
         下一步：{stageLabels[entry.next_stage_type]}
       </p>
     </article>
   );
+}
+
+function formatDecisionSuffix(
+  decision: ApprovalResultFeedEntry["decision"],
+): string {
+  return decision === "approved" ? "已批准" : "已退回";
 }
 
 function SystemStatusEntry({

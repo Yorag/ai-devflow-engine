@@ -229,6 +229,7 @@ def test_stage_agent_parser_error_fails_without_structured_repair_iteration() ->
 def test_stage_agent_model_call_trace_omits_prompt_and_response_summaries() -> None:
     result_with_summaries = model_result(
         structured_output=fail_stage_payload(),
+        raw_output_text="I cannot continue because the required file is missing.",
     ).model_copy(
         update={
             "usage": ModelCallUsage(input_tokens=1, output_tokens=1, total_tokens=2),
@@ -275,3 +276,6 @@ def test_stage_agent_model_call_trace_omits_prompt_and_response_summaries() -> N
     assert "raw response body" not in str(model_trace)
     assert "rendered user task" not in str(model_trace)
     assert model_trace["display_summary"] == "Model decided to fail the stage: Cannot continue."
+    assert model_trace["raw_output_text"] == (
+        "I cannot continue because the required file is missing."
+    )

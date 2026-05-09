@@ -547,6 +547,10 @@ def test_completed_step_result_projects_stage_process_records_as_feed_items(
                         "display_summary": (
                             "Need to inspect the workspace tool implementation."
                         ),
+                        "raw_output_text": (
+                            "I need to inspect the workspace tool implementation "
+                            "before answering."
+                        ),
                         "input_summary": {
                             "excerpt": "User asked what code search mode is active.",
                             "content_hash": "sha256:input",
@@ -627,7 +631,9 @@ def test_completed_step_result_projects_stage_process_records_as_feed_items(
         assert items[0]["title"] == "Call gpt-5.2"
         assert items[0]["metrics"]["total_tokens"] == 162
         assert "inspect the workspace tool implementation" in items[0]["summary"]
-        assert items[0]["content"] is None
+        assert items[0]["content"] == (
+            "I need to inspect the workspace tool implementation before answering."
+        )
         assert items[1]["content"] is None
         assert "Selected the structured artifact path." in items[1]["summary"]
         assert items[2]["title"] == (

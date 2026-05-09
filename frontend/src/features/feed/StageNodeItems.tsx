@@ -14,11 +14,24 @@ import { TestResultSummary } from "./TestResultSummary";
 import { ToolCallItem } from "./ToolCallItem";
 
 type StageNodeItem = StageItemProjection | ProviderCallStageItem;
-type HiddenStageItemType = "provider_call" | "tool_confirmation" | "decision";
+type HiddenStageItemType =
+  | "provider_call"
+  | "tool_confirmation"
+  | "decision"
+  | "model_call";
+type ToolExecutionDisplayItem = {
+  item_id: string;
+  type: "tool_execution";
+  toolItem: StageItemProjection;
+  diffItem: StageItemProjection | null;
+};
+type DisplayStageItem = StageNodeItem | ToolExecutionDisplayItem;
+
 const hiddenMainFlowTypes: ReadonlySet<HiddenStageItemType> = new Set([
   "provider_call",
   "tool_confirmation",
   "decision",
+  "model_call",
 ]);
 
 export type StageNodeItemsProps = {
@@ -59,16 +72,51 @@ export function StageNodeItems({
   );
 }
 
-export function stageNodeItemsForDisplay(items: StageNodeItem[]): StageNodeItem[] {
-  return items.filter((item) => !hiddenMainFlowTypes.has(item.type as HiddenStageItemType));
+export function stageNodeItemsForDisplay(items: StageNodeItem[]): DisplayStageItem[] {
+  const visibleItems = items.filter(
+    (item) => !hiddenMainFlowTypes.has(item.type as HiddenStageItemType),
+  );
+  const displayItems: DisplayStageItem[] = [];
+
+  for (let index = 0; index < visibleItems.length; index += 1) {
+    const item = visibleItems[index];
+    if (item.type === "tool_call") {
+      const nextItem = visibleItems[index + 1];
+      if (nextItem?.type === "diff_preview") {
+        displayItems.push({
+          item_id: `${item.item_id}::tool-execution`,
+          type: "tool_execution",
+          toolItem: item,
+          diffItem: nextItem,
+        });
+        index += 1;
+        continue;
+      }
+    }
+
+    displayItems.push(item);
+  }
+
+  return displayItems;
 }
 
 export function renderStageItemByType(
-  item: StageNodeItem,
+  item: DisplayStageItem,
   index = 0,
 ): JSX.Element {
   if (item.type === "provider_call") {
     return <ProviderCallItem item={item} stepIndex={index} key={item.item_id} />;
+  }
+
+  if (item.type === "tool_execution") {
+    return (
+      <ToolCallItem
+        item={item.toolItem}
+        diffItem={item.diffItem}
+        stepIndex={index}
+        key={item.item_id}
+      />
+    );
   }
 
   switch (item.type) {
@@ -120,6 +168,8 @@ function ProminentItem({
   stepIndex: number;
 }): JSX.Element {
   const readableContent = readReadableContent(item.content);
+  const resultContent =
+    item.type === "result" ? parseResultContent(readableContent?.text ?? "") : null;
 
   return (
     <li
@@ -130,7 +180,7 @@ function ProminentItem({
       {item.summary ? <p className="stage-node-item__summary">{item.summary}</p> : null}
       {readableContent && readableContent.text !== item.summary ? (
         item.type === "result" ? (
-          <ResultContent text={readableContent.text} />
+          <ResultContent text={readableContent.text} parsed={resultContent} />
         ) : (
           <p className="stage-node-item__content">{readableContent.text}</p>
         )
@@ -139,7 +189,59 @@ function ProminentItem({
   );
 }
 
-function ResultContent({ text }: { text: string }): JSX.Element {
+type ResultSection =
+  | { type: "paragraph"; title: string | null; text: string }
+  | { type: "list"; title: string | null; items: string[] };
+
+function ResultContent({
+  text,
+  parsed,
+}: {
+  text: string;
+  parsed: ResultSection[] | null;
+}): JSX.Element {
+  if (parsed && parsed.length > 0) {
+    return (
+      <div className="stage-node-item__result-sections">
+        {parsed.map((section, index) => {
+          if (section.type === "paragraph") {
+            return (
+              <div
+                key={`${section.type}-${index}-${section.text}`}
+                className="stage-node-item__result-section"
+              >
+                {section.title ? (
+                  <strong className="stage-node-item__result-heading">
+                    {section.title}
+                  </strong>
+                ) : null}
+                <p className="stage-node-item__content">{section.text}</p>
+              </div>
+            );
+          }
+
+          return (
+            <section
+              key={`${section.type}-${index}-${section.title ?? "items"}`}
+              className="stage-node-item__result-section"
+            >
+              {section.title ? (
+                <strong className="stage-node-item__result-heading">
+                  {section.title}
+                </strong>
+              ) : null}
+              <ul className="stage-node-item__result-list">
+                {section.items.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </section>
+          );
+        })}
+      </div>
+    );
+  }
+
   const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
   if (lines.length <= 1) {
     return <p className="stage-node-item__content">{text}</p>;
@@ -165,6 +267,7 @@ function CompactItem({
     readableContent?.source === "plain" && readableContent.text !== item.summary
       ? readableContent.text
       : fallbackCompactDetails(item);
+  const detailsVariant = compactDetailsVariant(item, readableContent, detailsContent);
 
   return (
     <li
@@ -177,12 +280,50 @@ function CompactItem({
         <p className="stage-node-item__content">{readableContent.text}</p>
       ) : null}
       {detailsContent ? (
-        <details className="stage-node-item__details" open={item.type === "diff_preview"}>
+        <details className="stage-node-item__details">
           <summary>{formatCompactSummary(item.type)}</summary>
-          <pre>{detailsContent}</pre>
+          {detailsVariant === "transcript" ? (
+            <TranscriptDetails text={detailsContent} />
+          ) : (
+            <pre>{detailsContent}</pre>
+          )}
         </details>
       ) : null}
     </li>
+  );
+}
+
+function compactDetailsVariant(
+  item: StageItemProjection,
+  readableContent: { text: string; source: "plain" | "structured" } | null,
+  detailsContent: string | null,
+): "transcript" | "pre" {
+  if (
+    item.type === "model_call" &&
+    readableContent?.source === "plain" &&
+    detailsContent === readableContent.text
+  ) {
+    return "transcript";
+  }
+  return "pre";
+}
+
+function TranscriptDetails({ text }: { text: string }): JSX.Element {
+  const paragraphs = text
+    .split(/\n{2,}/u)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+
+  if (paragraphs.length === 0) {
+    return <div className="stage-node-item__details-body">{text}</div>;
+  }
+
+  return (
+    <div className="stage-node-item__details-body">
+      {paragraphs.map((paragraph) => (
+        <p key={paragraph}>{paragraph}</p>
+      ))}
+    </div>
   );
 }
 
@@ -287,7 +428,7 @@ function formatProviderStatusPhrase(status: ProviderCallStageItem["status"]): st
   }
 }
 
-function stageItemIcon(type: StageNodeItem["type"]): string {
+function stageItemIcon(type: DisplayStageItem["type"]): string {
   switch (type) {
     case "dialogue":
       return "?";
@@ -301,6 +442,7 @@ function stageItemIcon(type: StageNodeItem["type"]): string {
     case "provider_call":
       return "@";
     case "tool_call":
+    case "tool_execution":
       return "$";
     case "tool_confirmation":
       return "!";
@@ -323,14 +465,11 @@ function fallbackCompactDetails(item: StageItemProjection): string | null {
 }
 
 function modelCallDetails(item: StageItemProjection): string | null {
-  const lines: string[] = [];
-  const normalizedTitle = item.title.replace(/^Call\s+/i, "").trim();
-  if (normalizedTitle && normalizedTitle !== item.title) {
-    lines.push(`模型: ${normalizedTitle}`);
-  } else if (item.title && item.title !== "Model call") {
-    lines.push(`调用: ${item.title}`);
+  if (readReadableContent(item.content)?.source === "plain") {
+    return null;
   }
 
+  const lines: string[] = [];
   const callType = readStringMetric(item.metrics, "model_call_type");
   if (callType) {
     lines.push(`调用类型: ${formatLabel(callType)}`);
@@ -436,6 +575,66 @@ function extractStructuredSummary(value: unknown): string | null {
 
   const artifactType = record.artifact_type;
   return typeof artifactType === "string" ? `${formatLabel(artifactType)} 已生成。` : null;
+}
+
+function parseResultContent(text: string): ResultSection[] | null {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const blocks = trimmed
+    .split(/\n{2,}/u)
+    .map((block) => block.trim())
+    .filter(Boolean);
+  const sections: ResultSection[] = [];
+
+  for (const block of blocks) {
+    const lines = block
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length === 0) {
+      continue;
+    }
+
+    const firstLine = lines[0];
+    const remainder = lines.slice(1);
+    const firstLineLooksLikeHeading = remainder.length > 0 && !isBulletLine(firstLine);
+    const bulletLines = (firstLineLooksLikeHeading ? remainder : lines)
+      .map(stripBulletPrefix)
+      .filter(Boolean);
+    const allBulletLines = bulletLines.length > 0 && (
+      firstLineLooksLikeHeading
+        ? remainder.every(isBulletLine)
+        : lines.every(isBulletLine)
+    );
+
+    if (allBulletLines) {
+      sections.push({
+        type: "list",
+        title: firstLineLooksLikeHeading ? firstLine : null,
+        items: bulletLines,
+      });
+      continue;
+    }
+
+    sections.push({
+      type: "paragraph",
+      title: firstLineLooksLikeHeading ? firstLine : null,
+      text: (firstLineLooksLikeHeading ? remainder : lines).join("\n"),
+    });
+  }
+
+  return sections.length > 0 ? sections : null;
+}
+
+function isBulletLine(line: string): boolean {
+  return /^[-*]\s+/u.test(line);
+}
+
+function stripBulletPrefix(line: string): string {
+  return line.replace(/^[-*]\s+/u, "").trim();
 }
 
 function formatDurationMs(value: number): string {

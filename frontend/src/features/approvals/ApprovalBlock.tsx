@@ -111,10 +111,11 @@ export function ApprovalBlock({
       aria-label="Approval request feed entry"
     >
       <header className="feed-entry__header">
-        <span>{formatApprovalType(entry.approval_type)}</span>
+        <span>审批请求</span>
         <strong>{formatStatusLabel(entry.status)}</strong>
       </header>
-      <h2>{entry.title}</h2>
+      <h2>{`等待${formatApprovalType(entry.approval_type)}`}</h2>
+      <p className="feed-entry__summary">{entry.title}</p>
       <p className="feed-entry__body">{entry.approval_object_excerpt}</p>
       {entry.risk_excerpt ? (
         <p className="feed-entry__supporting">{entry.risk_excerpt}</p>
