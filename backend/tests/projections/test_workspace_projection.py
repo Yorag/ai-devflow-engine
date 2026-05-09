@@ -23,6 +23,7 @@ from backend.app.db.models.runtime import (
     ProviderSnapshotModel,
     RuntimeBase,
     RuntimeLimitSnapshotModel,
+    StageArtifactModel,
     StageRunModel,
     ToolConfirmationRequestModel,
 )
@@ -559,6 +560,158 @@ def test_workspace_projection_aggregates_visible_session_runtime_runs_feed_and_c
     assert tool_confirmation.is_actionable is True
     assert "graph_thread_ref" not in dumped
     assert "latest-config-not-a-run-snapshot" not in str(dumped)
+
+
+def test_workspace_projection_hydrates_stage_node_items_from_stage_artifact(
+    tmp_path,
+) -> None:
+    from backend.app.services.projections.workspace import WorkspaceProjectionService
+
+    manager = _manager(tmp_path)
+    _seed_workspace(manager)
+    with manager.session(DatabaseRole.RUNTIME) as session:
+        session.add(
+            StageArtifactModel(
+                artifact_id="artifact-stage-active-rich",
+                run_id="run-active",
+                stage_run_id="stage-active",
+                artifact_type="code_generation_stage_agent_stage",
+                payload_ref="stage-artifact://artifact-stage-active-rich/output",
+                process={
+                    "model_call_trace": [
+                        {
+                            "model_call_ref": "model-call-1",
+                            "provider_id": "openai",
+                            "model_id": "gpt-5.2",
+                            "model_call_type": "stage_execution",
+                            "iteration_index": 1,
+                            "output_summary": {
+                                "excerpt": "I need to inspect the feed renderer before editing.",
+                            },
+                        },
+                        {
+                            "model_call_ref": "model-call-2",
+                            "provider_id": "openai",
+                            "model_id": "gpt-5.2",
+                            "model_call_type": "stage_execution",
+                            "iteration_index": 2,
+                            "output_summary": {
+                                "excerpt": "The edit is complete and ready to summarize.",
+                            },
+                        },
+                    ],
+                    "decision_trace": [
+                        {
+                            "trace_ref": "decision-1",
+                            "decision_type": "request_tool_call",
+                            "status": "accepted",
+                            "safe_message": "Read the feed renderer.",
+                            "iteration_index": 1,
+                        },
+                        {
+                            "trace_ref": "decision-2",
+                            "decision_type": "submit_stage_artifact",
+                            "status": "accepted",
+                            "safe_message": "Submit the code generation artifact.",
+                            "iteration_index": 2,
+                        },
+                    ],
+                    "tool_trace": {
+                        "tool_name": "read_file",
+                        "call_id": "tool-call-1",
+                        "status": "succeeded",
+                        "artifact_refs": [],
+                        "output_preview": "StageNodeItems renders stage rows.",
+                        "input_payload_summary": {
+                            "path": "frontend/src/features/feed/StageNodeItems.tsx",
+                        },
+                        "iteration_index": 1,
+                    },
+                    "output_snapshot": {
+                        "artifact_type": "CodeGenerationArtifact",
+                        "artifact_payload": {
+                            "summary": "Stage feed projection now shows real steps.",
+                            "changed_files": [
+                                "frontend/src/features/feed/StageNodeItems.tsx"
+                            ],
+                            "evidence_refs": ["sha256:internal"],
+                        },
+                    },
+                    "output_refs": ["stage-artifact://artifact-stage-active-rich/output"],
+                },
+                metrics={"tool_call_count": 1},
+                created_at=NOW + timedelta(minutes=6),
+            )
+        )
+        session.commit()
+
+    with manager.session(DatabaseRole.EVENT) as session:
+        store = EventStore(
+            session,
+            now=lambda: NOW,
+            id_factory=iter(["event-stage-coarse"]).__next__,
+        )
+        store.append(
+            DomainEventType.STAGE_UPDATED,
+            payload={
+                "stage_node": ExecutionNodeProjection(
+                    entry_id="entry-stage-coarse",
+                    run_id="run-active",
+                    occurred_at=NOW + timedelta(minutes=7),
+                    stage_run_id="stage-active",
+                    stage_type=common.StageType.CODE_GENERATION,
+                    status=common.StageStatus.WAITING_TOOL_CONFIRMATION,
+                    attempt_index=1,
+                    started_at=NOW + timedelta(minutes=2),
+                    ended_at=None,
+                    summary="Old coarse stage event.",
+                    items=[
+                        StageItemProjection(
+                            item_id="item-coarse-model",
+                            type=StageItemType.MODEL_CALL,
+                            occurred_at=NOW + timedelta(minutes=7),
+                            title="Model call",
+                            summary="Coarse model call.",
+                            content=None,
+                            artifact_refs=[],
+                            metrics={},
+                        )
+                    ],
+                    metrics={},
+                ).model_dump(mode="json")
+            },
+            trace_context=_trace(run_id="run-active", stage_run_id="stage-active"),
+        )
+        session.commit()
+
+    with (
+        manager.session(DatabaseRole.CONTROL) as control_session,
+        manager.session(DatabaseRole.RUNTIME) as runtime_session,
+        manager.session(DatabaseRole.EVENT) as event_session,
+    ):
+        workspace = WorkspaceProjectionService(
+            control_session,
+            runtime_session,
+            event_session,
+        ).get_session_workspace("session-1")
+
+    dumped = workspace.model_dump(mode="json")
+    stage_node = next(
+        entry for entry in dumped["narrative_feed"] if entry["type"] == "stage_node"
+    )
+    assert [item["type"] for item in stage_node["items"]] == [
+        "model_call",
+        "decision",
+        "tool_call",
+        "model_call",
+        "decision",
+        "result",
+    ]
+    assert stage_node["items"][2]["title"] == (
+        "read_file path=frontend/src/features/feed/StageNodeItems.tsx"
+    )
+    assert stage_node["items"][2]["summary"] is None
+    assert "sha256:internal" not in str(stage_node)
 
 
 def test_workspace_projection_hydrates_denied_tool_confirmation_deny_followup_from_runtime_model(

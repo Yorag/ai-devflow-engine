@@ -116,7 +116,6 @@ describe("RunBoundary grouping", () => {
       name: "Run metadata unavailable boundary",
     });
     expect(within(fallbackBoundary).getByText("Run metadata unavailable")).toBeTruthy();
-    expect(within(fallbackBoundary).getByText("run-orphan")).toBeTruthy();
     expect(within(fallbackBoundary).getByText("1 entry")).toBeTruthy();
     expect(within(fallbackBoundary).queryByText("Running")).toBeNull();
     expect(within(fallbackBoundary).queryByText("Initial Requirement")).toBeNull();

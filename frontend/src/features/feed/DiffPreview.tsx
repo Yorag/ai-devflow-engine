@@ -7,7 +7,13 @@ type DiffPreviewParseResult = {
   remainder: string | null;
 };
 
-export function DiffPreview({ item }: { item: StageItemProjection }): JSX.Element {
+export function DiffPreview({
+  item,
+  stepIndex = 0,
+}: {
+  item: StageItemProjection;
+  stepIndex?: number;
+}): JSX.Element {
   const parsed = parseDiffPreviewContent(item.content);
 
   return (
@@ -16,13 +22,16 @@ export function DiffPreview({ item }: { item: StageItemProjection }): JSX.Elemen
       aria-label="变更预览"
     >
       <header className="stage-node-item__header">
-        <span>{stageItemLabels.diff_preview}</span>
+        <span className="stage-node-item__step sr-only">{formatStepNumber(stepIndex)}</span>
+        <span className="stage-node-item__icon" aria-hidden="true">
+          +
+        </span>
+        <span className="stage-node-item__kind">{stageItemLabels.diff_preview}</span>
         <strong>{item.title}</strong>
-        <time dateTime={item.occurred_at}>{formatTimestamp(item.occurred_at)}</time>
       </header>
       {item.summary ? <p className="stage-node-item__summary">{item.summary}</p> : null}
       {parsed.files.length > 0 ? (
-        <ul className="stage-node-item__file-list" aria-label="Changed files">
+        <ul className="stage-node-item__file-list" aria-label="变更文件">
           {parsed.files.map((file) => (
             <li key={file}>{file}</li>
           ))}
@@ -41,7 +50,6 @@ export function DiffPreview({ item }: { item: StageItemProjection }): JSX.Elemen
           <pre>{parsed.remainder}</pre>
         </details>
       ) : null}
-      <ReferenceList refs={item.artifact_refs} />
     </li>
   );
 }
@@ -74,20 +82,6 @@ function parseDiffPreviewContent(content: string | null): DiffPreviewParseResult
   };
 }
 
-function ReferenceList({ refs }: { refs: string[] }): JSX.Element | null {
-  if (refs.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="stage-node-item__refs" aria-label="Artifact references">
-      {refs.map((ref) => (
-        <span key={ref}>{ref}</span>
-      ))}
-    </div>
-  );
-}
-
-function formatTimestamp(value: string): string {
-  return value.includes("T") ? value.replace("T", " ").slice(0, 16) : value;
+function formatStepNumber(index: number): string {
+  return String(index + 1).padStart(2, "0");
 }

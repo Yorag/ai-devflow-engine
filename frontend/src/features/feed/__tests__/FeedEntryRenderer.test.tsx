@@ -31,11 +31,14 @@ describe("FeedEntryRenderer", () => {
     expect(screen.getByText("Add a workspace shell.")).toBeTruthy();
 
     const stageEntry = screen.getByRole("article", {
-      name: "阶段节点",
+      name: "阶段执行流",
     });
     expect(within(stageEntry).getByText("方案设计")).toBeTruthy();
     expect(within(stageEntry).getByText("运行中")).toBeTruthy();
-    expect(within(stageEntry).getByText("2 项")).toBeTruthy();
+    expect(within(stageEntry).getByText("思考")).toBeTruthy();
+    expect(within(stageEntry).getByText("模型记录")).toBeTruthy();
+    expect(within(stageEntry).queryByText("决策")).toBeNull();
+    expect(within(stageEntry).getByText('read_file path="frontend/src/features/feed/StageNode.tsx"')).toBeTruthy();
 
     const approvalEntry = screen.getByRole("article", {
       name: "Approval request feed entry",
@@ -48,7 +51,7 @@ describe("FeedEntryRenderer", () => {
       name: "Tool confirmation feed entry",
     });
     expect(within(toolEntry).getByText("Allow dependency install")).toBeTruthy();
-    expect(within(toolEntry).getByText("bash")).toBeTruthy();
+    expect(within(toolEntry).getByText("npm install")).toBeTruthy();
     expect(
       within(toolEntry).getByRole("button", { name: "允许本次执行" }),
     ).toBeTruthy();
@@ -77,10 +80,6 @@ describe("FeedEntryRenderer", () => {
     ).toBeTruthy();
     expect(within(deliveryEntry).getByText("展示分支")).toBeTruthy();
     expect(within(deliveryEntry).getByText("demo/run-completed")).toBeTruthy();
-    expect(within(deliveryEntry).getByText("引用")).toBeTruthy();
-    expect(
-      within(deliveryEntry).getByText("demo-delivery-result:run-completed"),
-    ).toBeTruthy();
     expect(deliveryEntry.textContent).not.toMatch(/提交/);
     expect(deliveryEntry.textContent).not.toMatch(/\bCode review\b/i);
 
@@ -133,7 +132,7 @@ describe("FeedEntryRenderer", () => {
     expect(
       screen.getByRole("article", { name: "Control item feed entry" }),
     ).toBeTruthy();
-    expect(screen.getByText("需求分析")).toBeTruthy();
+    expect(screen.getByText("Clarification needed")).toBeTruthy();
   });
 
   it("renders the selected non-draft workspace feed instead of placeholder copy", async () => {
@@ -147,7 +146,7 @@ describe("FeedEntryRenderer", () => {
       await screen.findByRole("article", { name: "User message feed entry" }),
     ).toBeTruthy();
     expect(
-      screen.getByRole("article", { name: "阶段节点" }),
+      screen.getByRole("article", { name: "阶段执行流" }),
     ).toBeTruthy();
     expect(
       screen.getByText("Designing the workspace shell boundaries."),
@@ -279,7 +278,6 @@ describe("FeedEntryRenderer guards", () => {
     ).toBeTruthy();
     expect(screen.getByText("Demo delivery")).toBeTruthy();
     expect(screen.getByText("demo/run-completed")).toBeTruthy();
-    expect(screen.getByText("demo-delivery-result:run-completed")).toBeTruthy();
   });
 
   it("renders real backend-shaped git delivery_result payloads", () => {
@@ -299,9 +297,6 @@ describe("FeedEntryRenderer guards", () => {
     ).toBeTruthy();
     expect(
       within(deliveryEntry).getByText("Resolved upstream test summary."),
-    ).toBeTruthy();
-    expect(
-      within(deliveryEntry).getByText("git-delivery-result:run-delivery"),
     ).toBeTruthy();
   });
 });

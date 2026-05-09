@@ -25,10 +25,8 @@ describe("buildDeliveryResultViewModel", () => {
     expect(model.title).toBe("Demo delivery");
     expect(model.summary).toBe("Demo delivery completed without Git writes.");
     expect(model.metadata).toEqual([
-      { label: "模式", value: "demo_delivery" },
       { label: "展示分支", value: "demo/run-completed" },
       { label: "测试", value: "Deterministic test path completed." },
-      { label: "引用", value: "demo-delivery-result:run-completed" },
     ]);
     expect("highlights" in model).toBe(false);
   });
@@ -76,17 +74,11 @@ describe("DeliveryResultBlock", () => {
     expect(
       within(article).getByText("Demo delivery completed without Git writes."),
     ).toBeTruthy();
-    expect(within(article).getByText("模式")).toBeTruthy();
-    expect(within(article).getByText("demo_delivery")).toBeTruthy();
     expect(within(article).getByText("展示分支")).toBeTruthy();
     expect(within(article).getByText("demo/run-completed")).toBeTruthy();
     expect(within(article).getByText("测试")).toBeTruthy();
     expect(
       within(article).getByText("Deterministic test path completed."),
-    ).toBeTruthy();
-    expect(within(article).getByText("引用")).toBeTruthy();
-    expect(
-      within(article).getByText("demo-delivery-result:run-completed"),
     ).toBeTruthy();
     expect(article.textContent).not.toMatch(/提交/);
     expect(article.textContent).not.toMatch(/代码评审/);
@@ -113,6 +105,7 @@ describe("DeliveryResultBlock", () => {
     });
     expect(article.textContent).toContain("展示分支");
     expect(article.textContent).toContain("feat/leaked");
+    expect(article.textContent).not.toContain("模式");
     expect(article.textContent).not.toMatch(/提交:\s*abc1234/i);
     expect(article.textContent).not.toMatch(
       /代码评审:\s*https:\/\/example\.test\/pr\/17/i,

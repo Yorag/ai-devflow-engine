@@ -112,7 +112,6 @@ export function ApprovalBlock({
     >
       <header className="feed-entry__header">
         <span>{formatApprovalType(entry.approval_type)}</span>
-        <time dateTime={entry.requested_at}>{formatTimestamp(entry.requested_at)}</time>
         <strong>{formatStatusLabel(entry.status)}</strong>
       </header>
       <h2>{entry.title}</h2>
@@ -230,8 +229,4 @@ function errorHasCode(error: unknown, code: string): boolean {
     return false;
   }
   return (error as { code?: unknown }).code === code;
-}
-
-function formatTimestamp(value: string): string {
-  return value.includes("T") ? value.replace("T", " ").slice(0, 16) : value;
 }

@@ -5,68 +5,55 @@ type ToolCallParseResult = {
   toolName: string;
   targetSummary: string;
   statusLabel: string;
-  commandExcerpt: string;
-  outputSummary: string;
+  commandExcerpt: string | null;
+  outputSummary: string | null;
+  detailText: string | null;
+  visibleOutput: string | null;
 };
 
-export function ToolCallItem({ item }: { item: StageItemProjection }): JSX.Element {
+export function ToolCallItem({
+  item,
+  stepIndex = 0,
+}: {
+  item: StageItemProjection;
+  stepIndex?: number;
+}): JSX.Element {
   const parsed = parseToolCallContent(item.content);
 
   return (
     <li className="stage-node-item stage-node-item--tool-call" aria-label="工具调用">
       <header className="stage-node-item__header">
-        <span>{stageItemLabels.tool_call}</span>
+        <span className="stage-node-item__step sr-only">{formatStepNumber(stepIndex)}</span>
+        <span className="stage-node-item__icon" aria-hidden="true">
+          $
+        </span>
+        <span className="stage-node-item__kind">{stageItemLabels.tool_call}</span>
         <strong>{item.title}</strong>
-        <time dateTime={item.occurred_at}>{formatTimestamp(item.occurred_at)}</time>
       </header>
       {item.summary ? <p className="stage-node-item__summary">{item.summary}</p> : null}
-      <div className="stage-node-item__tool-grid" aria-label="Tool call metadata">
-        <ToolDatum label="工具" value={parsed.toolName} />
-        <ToolDatum label="目标" value={parsed.targetSummary} />
-        <ToolDatum label="状态" value={parsed.statusLabel} />
-        <ToolDatum label="耗时" value={readDuration(item.metrics)} />
-      </div>
-      {parsed.commandExcerpt !== item.title ? (
+      {parsed.visibleOutput ? (
+        <p className="stage-node-item__content">{parsed.visibleOutput}</p>
+      ) : null}
+      {parsed.commandExcerpt && parsed.commandExcerpt !== item.title ? (
         <p className="stage-node-item__command">{parsed.commandExcerpt}</p>
       ) : null}
-      {item.content ? (
+      {parsed.detailText ? (
         <details className="stage-node-item__details">
-          <summary>{parsed.outputSummary}</summary>
-          <pre>{item.content}</pre>
+          <summary>查看输出</summary>
+          <pre>{parsed.detailText}</pre>
         </details>
       ) : null}
-      <ReferenceList refs={item.artifact_refs} />
     </li>
   );
 }
 
-function ToolDatum({ label, value }: { label: string; value: string }): JSX.Element {
-  return (
-    <span className="stage-node-item__datum">
-      <strong>{label}</strong>
-      <span>{value}</span>
-    </span>
-  );
-}
-
-function ReferenceList({ refs }: { refs: string[] }): JSX.Element | null {
-  if (refs.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="stage-node-item__refs" aria-label="Artifact references">
-      {refs.map((ref) => (
-        <span key={ref}>{ref}</span>
-      ))}
-    </div>
-  );
-}
-
 function parseToolCallContent(content: string | null): ToolCallParseResult {
-  const lines = content?.split("\n") ?? [];
-  const commandExcerpt = lines[0] ?? "Tool call";
-  const toolName = commandExcerpt.split(" ")[0] ?? "tool";
+  const lines = content?.split("\n").map((line) => line.trim()).filter(Boolean) ?? [];
+  const commandExcerpt = lines[0] ?? null;
+  const toolName =
+    lines.find((line) => line.startsWith("Tool:"))?.replace("Tool:", "").trim() ??
+    commandExcerpt?.split(" ")[0] ??
+    "tool";
   const targetSummary =
     lines.find((line) => line.startsWith("Target:"))?.replace("Target:", "").trim() ??
     "未记录";
@@ -77,7 +64,10 @@ function parseToolCallContent(content: string | null): ToolCallParseResult {
     lines
       .find((line) => line.startsWith("Output summary:"))
       ?.replace("Output summary:", "")
-      .trim() ?? "Command output";
+      .trim() ?? null;
+  const visibleOutput =
+    outputSummary && !isBlockedPlaceholder(outputSummary) ? outputSummary : null;
+  const detailText = readableDetailText(lines);
 
   return {
     toolName,
@@ -85,20 +75,39 @@ function parseToolCallContent(content: string | null): ToolCallParseResult {
     statusLabel: formatStatusLabel(statusValue.toLowerCase()),
     commandExcerpt,
     outputSummary,
+    detailText,
+    visibleOutput,
   };
 }
 
-function readDuration(metrics: Record<string, unknown>): string {
-  const value = metrics.duration_ms;
-  if (typeof value !== "number") {
-    return "未记录";
-  }
-  if (value >= 1000) {
-    return `${Number((value / 1000).toFixed(1))}s`;
-  }
-  return `${value}ms`;
+function readableDetailText(lines: string[]): string | null {
+  const visibleLines = lines.filter(
+    (line) => !isInternalTraceLine(line) && !isBlockedPlaceholder(line),
+  );
+  return visibleLines.length > 1 ? visibleLines.join("\n") : null;
 }
 
-function formatTimestamp(value: string): string {
-  return value.includes("T") ? value.replace("T", " ").slice(0, 16) : value;
+function isBlockedPlaceholder(value: string): boolean {
+  return value.startsWith("[blocked:");
+}
+
+function isInternalTraceLine(line: string): boolean {
+  const lowered = line.toLowerCase();
+  return (
+    lowered.startsWith("call id:") ||
+    lowered.startsWith("artifact refs:") ||
+    lowered.startsWith("trace ref:") ||
+    lowered.startsWith("side effect refs:") ||
+    lowered.startsWith("decision trace") ||
+    lowered.includes("sha256:") ||
+    lowered.includes("evidence_refs") ||
+    lowered.startsWith("status:") ||
+    lowered.startsWith("tool:") ||
+    lowered.startsWith("target:") ||
+    lowered.startsWith("output summary:")
+  );
+}
+
+function formatStepNumber(index: number): string {
+  return String(index + 1).padStart(2, "0");
 }

@@ -23,10 +23,10 @@ export function RunBoundary({ group, children }: RunBoundaryProps): JSX.Element 
         aria-label="Run metadata unavailable boundary"
         tabIndex={-1}
       >
-        <header className="run-boundary__header">
-          <div className="run-boundary__identity">
-            <h2>Run metadata unavailable</h2>
-          </div>
+      <header className="run-boundary__header">
+        <div className="run-boundary__identity">
+          <h2>Run metadata unavailable</h2>
+        </div>
           <div
             className="run-boundary__status-row"
             role="group"
@@ -37,13 +37,6 @@ export function RunBoundary({ group, children }: RunBoundaryProps): JSX.Element 
             </span>
           </div>
         </header>
-        <div
-          className="run-boundary__meta-grid"
-          role="group"
-          aria-label="Run metadata unavailable details"
-        >
-          <RunDatum label="Run id" value={group.runId} />
-        </div>
         {children}
       </section>
     );
@@ -72,25 +65,14 @@ export function RunBoundary({ group, children }: RunBoundaryProps): JSX.Element 
         >
           <span>{formatLabel(group.run.status)}</span>
           <span>{formatLabel(group.run.trigger_source)}</span>
+          {group.run.current_stage_type ? (
+            <span>{formatLabel(group.run.current_stage_type)}</span>
+          ) : null}
           <span>
             {group.entries.length} {group.entries.length === 1 ? "entry" : "entries"}
           </span>
         </div>
       </header>
-      <div
-        className="run-boundary__meta-grid"
-        role="group"
-        aria-label={`${runLabel} metadata`}
-      >
-        <RunDatum label="Started" value={formatTimestamp(group.run.started_at)} />
-        {group.run.ended_at ? (
-          <RunDatum label="Ended" value={formatTimestamp(group.run.ended_at)} />
-        ) : null}
-        {group.run.current_stage_type ? (
-          <RunDatum label="Stage" value={formatLabel(group.run.current_stage_type)} />
-        ) : null}
-        <RunDatum label="Run id" value={group.run.run_id} />
-      </div>
       {shouldShowPendingStage ? <PendingStageIndicator run={group.run} /> : null}
       {children}
     </section>
@@ -168,22 +150,9 @@ function PendingStageIndicator({
   );
 }
 
-function RunDatum({ label, value }: { label: string; value: string }): JSX.Element {
-  return (
-    <span className="run-boundary__datum">
-      <strong>{label}</strong>
-      <span>{value}</span>
-    </span>
-  );
-}
-
 function formatLabel(value: string): string {
   return value
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
-}
-
-function formatTimestamp(value: string): string {
-  return value.includes("T") ? value.replace("T", " ").slice(0, 16) : value;
 }

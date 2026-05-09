@@ -111,6 +111,11 @@ from backend.app.services.events import DomainEventType, EventStore
 from backend.app.services.graph_runtime import GraphCheckpointPort, GraphRuntimeCommandPort
 from backend.app.services.runs import TerminalStatusProjector
 from backend.app.services.runtime_orchestration import RuntimeOrchestrationService
+from backend.app.services.stage_feed_projection import (
+    latest_stage_artifact,
+    stage_metrics,
+    stage_progress_items,
+)
 from backend.app.services.stages import StageRunService
 from backend.app.services.tool_confirmations import ToolConfirmationService
 from backend.app.tools.protocol import ToolAuditRef
@@ -727,6 +732,8 @@ class RuntimeExecutionService:
             ),
             metrics=self._stage_metrics(
                 runtime_session,
+                run_id=run.run_id,
+                stage_run_id=stage.stage_run_id,
                 artifact_refs=[],
             ),
         )
@@ -885,6 +892,8 @@ class RuntimeExecutionService:
             ),
             metrics=self._stage_metrics(
                 runtime_session,
+                run_id=run.run_id,
+                stage_run_id=stage.stage_run_id,
                 artifact_refs=result.artifact_refs,
             ),
         )
@@ -1216,6 +1225,8 @@ class RuntimeExecutionService:
             ),
             metrics=self._stage_metrics(
                 runtime_session,
+                run_id=run.run_id,
+                stage_run_id=stage.stage_run_id,
                 artifact_refs=[],
             ),
         )
@@ -1866,26 +1877,11 @@ class RuntimeExecutionService:
         stage_run_id: str,
         artifact_refs: Sequence[str],
     ) -> StageArtifactModel | None:
-        for artifact_ref in reversed(tuple(artifact_refs)):
-            artifact_id = _stage_artifact_id_from_ref(artifact_ref)
-            artifact = runtime_session.get(StageArtifactModel, artifact_id)
-            if (
-                artifact is not None
-                and artifact.run_id == run_id
-                and artifact.stage_run_id == stage_run_id
-            ):
-                return artifact
-        return (
-            runtime_session.query(StageArtifactModel)
-            .filter(
-                StageArtifactModel.run_id == run_id,
-                StageArtifactModel.stage_run_id == stage_run_id,
-            )
-            .order_by(
-                StageArtifactModel.created_at.desc(),
-                StageArtifactModel.artifact_id.desc(),
-            )
-            .first()
+        return latest_stage_artifact(
+            runtime_session,
+            run_id=run_id,
+            stage_run_id=stage_run_id,
+            artifact_refs=artifact_refs,
         )
 
     @staticmethod
@@ -2080,16 +2076,16 @@ class RuntimeExecutionService:
     def _stage_metrics(
         runtime_session: Session,
         *,
+        run_id: str | None = None,
+        stage_run_id: str | None = None,
         artifact_refs: Sequence[str],
     ) -> dict[str, Any]:
-        if not artifact_refs:
-            return {}
-        metrics: dict[str, Any] = {}
-        for artifact_id in artifact_refs:
-            artifact = runtime_session.get(StageArtifactModel, artifact_id)
-            if artifact is not None and isinstance(artifact.metrics, dict):
-                metrics.update(artifact.metrics)
-        return metrics
+        return stage_metrics(
+            runtime_session,
+            run_id=run_id,
+            stage_run_id=stage_run_id,
+            artifact_refs=artifact_refs,
+        )
 
     @staticmethod
     def _stage_progress_items(
@@ -2100,127 +2096,13 @@ class RuntimeExecutionService:
         occurred_at: datetime,
         artifact_refs: Sequence[str],
     ) -> list[StageItemProjection]:
-        artifact = RuntimeExecutionService._latest_stage_artifact(
+        return stage_progress_items(
             runtime_session,
-            run_id=run.run_id,
-            stage_run_id=stage.stage_run_id,
+            run=run,
+            stage=stage,
+            occurred_at=occurred_at,
             artifact_refs=artifact_refs,
         )
-        if artifact is None or not isinstance(artifact.process, dict):
-            return []
-
-        process = dict(artifact.process)
-        items: list[StageItemProjection] = []
-        for index, record in enumerate(_mapping_records(process.get("model_call_trace")), 1):
-            usage = record.get("usage") if isinstance(record.get("usage"), dict) else {}
-            items.append(
-                StageItemProjection(
-                    item_id=_bounded_id(
-                        "item",
-                        stage.stage_run_id,
-                        "model",
-                        str(index),
-                    ),
-                    type=common.StageItemType.MODEL_CALL,
-                    occurred_at=occurred_at,
-                    title="Model call",
-                    summary=_model_call_summary(record),
-                    content=_json_content(_public_record(record)),
-                    artifact_refs=_stage_ref_list(
-                        record.get("artifact_refs"),
-                        fallback=[_first_existing_text(record, ("model_call_ref",))],
-                    ),
-                    metrics={key: value for key, value in usage.items() if value is not None},
-                )
-            )
-
-        for index, record in enumerate(_mapping_records(process.get("decision_trace")), 1):
-            items.append(
-                StageItemProjection(
-                    item_id=_bounded_id(
-                        "item",
-                        stage.stage_run_id,
-                        "reasoning",
-                        str(index),
-                    ),
-                    type=common.StageItemType.REASONING,
-                    occurred_at=occurred_at,
-                    title="Reasoning",
-                    summary=_decision_summary(record),
-                    content=None,
-                    artifact_refs=_stage_ref_list(
-                        record.get("artifact_refs"),
-                        fallback=[_first_existing_text(record, ("trace_ref",))],
-                    ),
-                    metrics=_compact_metrics(record, ("status", "decision_type")),
-                )
-            )
-
-        for index, record in enumerate(_mapping_records(process.get("tool_trace")), 1):
-            items.append(
-                StageItemProjection(
-                    item_id=_bounded_id(
-                        "item",
-                        stage.stage_run_id,
-                        "tool",
-                        str(index),
-                    ),
-                    type=common.StageItemType.TOOL_CALL,
-                    occurred_at=occurred_at,
-                    title=_tool_title(record),
-                    summary=_tool_summary(record),
-                    content=_json_content(_public_record(record)),
-                    artifact_refs=_stage_ref_list(record.get("artifact_refs")),
-                    metrics=_compact_metrics(record, ("status", "call_id", "tool_name")),
-                )
-            )
-
-        for index, record in enumerate(
-            (
-                *_mapping_records(process.get("change_set")),
-                *_mapping_records(process.get("change_sets")),
-            ),
-            1,
-        ):
-            refs = _stage_ref_list(record.get("diff_refs"))
-            items.append(
-                StageItemProjection(
-                    item_id=_bounded_id(
-                        "item",
-                        stage.stage_run_id,
-                        "diff",
-                        str(index),
-                    ),
-                    type=common.StageItemType.DIFF_PREVIEW,
-                    occurred_at=occurred_at,
-                    title="Diff preview",
-                    summary=_change_set_summary(record),
-                    content=_change_set_content(record),
-                    artifact_refs=refs,
-                    metrics=_compact_metrics(record, ("change_set_id",)),
-                )
-            )
-
-        output_records = _mapping_records(process.get("output_snapshot"))
-        if output_records:
-            output = output_records[-1]
-            items.append(
-                StageItemProjection(
-                    item_id=_bounded_id("item", stage.stage_run_id, "result"),
-                    type=common.StageItemType.RESULT,
-                    occurred_at=occurred_at,
-                    title="Result",
-                    summary=_result_summary(output, stage.stage_type),
-                    content=_json_content(_public_record(output)),
-                    artifact_refs=[
-                        artifact.artifact_id,
-                        *_stage_ref_list(process.get("output_refs")),
-                    ],
-                    metrics=dict(artifact.metrics) if isinstance(artifact.metrics, dict) else {},
-                )
-            )
-
-        return items
 
     @staticmethod
     def _thread_ref(
@@ -2687,6 +2569,8 @@ class _RuntimeDispatchStageRunner:
             ),
             metrics=self._service._stage_metrics(
                 self._runtime_session,
+                run_id=run.run_id,
+                stage_run_id=stage.stage_run_id,
                 artifact_refs=[request.stage_artifact_id],
             ),
         )
@@ -2801,142 +2685,12 @@ def _safe_failure_reason(exc: Exception) -> str:
     return message or "Runtime execution failed."
 
 
-def _stage_artifact_id_from_ref(value: str) -> str:
-    if not value.startswith("stage-artifact://"):
-        return value
-    without_scheme = value.removeprefix("stage-artifact://")
-    without_fragment = without_scheme.split("#", 1)[0]
-    return without_fragment.split("/", 1)[0]
-
-
 def _mapping_records(value: object) -> tuple[dict[str, Any], ...]:
     if isinstance(value, dict):
         return (dict(value),)
     if isinstance(value, list | tuple):
         return tuple(dict(item) for item in value if isinstance(item, dict))
     return ()
-
-
-def _model_call_summary(record: dict[str, Any]) -> str:
-    provider = _optional_text(record.get("provider_id")) or "provider"
-    model = _optional_text(record.get("model_id")) or "model"
-    call_type = _optional_text(record.get("model_call_type")) or "stage call"
-    usage = record.get("usage") if isinstance(record.get("usage"), dict) else {}
-    total_tokens = usage.get("total_tokens")
-    suffix = f", {total_tokens} tokens" if total_tokens is not None else ""
-    return f"{provider} {model} handled {call_type}{suffix}."
-
-
-def _decision_summary(record: dict[str, Any]) -> str:
-    message = _optional_text(record.get("safe_message"))
-    decision_type = _optional_text(record.get("decision_type")) or _optional_text(
-        record.get("decision")
-    )
-    status = _optional_text(record.get("status"))
-    parts = [part for part in (message, decision_type, status) if part]
-    if not parts:
-        return "Model decision summary is available."
-    return " | ".join(parts)
-
-
-def _tool_title(record: dict[str, Any]) -> str:
-    tool_name = _optional_text(record.get("tool_name")) or "runtime tool"
-    return f"Tool call: {tool_name}"
-
-
-def _tool_summary(record: dict[str, Any]) -> str:
-    status = _optional_text(record.get("status")) or "completed"
-    safe_details = record.get("safe_details")
-    if isinstance(safe_details, dict):
-        detail = _optional_text(safe_details.get("summary")) or _optional_text(
-            safe_details.get("message")
-        )
-        if detail:
-            return f"{status}: {detail}"
-    return f"Tool call {status}."
-
-
-def _change_set_summary(record: dict[str, Any]) -> str:
-    summary = _optional_text(record.get("summary"))
-    if summary:
-        return summary
-    files = _stage_ref_list(record.get("changed_files"))
-    if files:
-        return f"{len(files)} file change(s) projected."
-    return "Workspace diff preview is available."
-
-
-def _change_set_content(record: dict[str, Any]) -> str:
-    lines: list[str] = []
-    change_set_id = _optional_text(record.get("change_set_id"))
-    if change_set_id:
-        lines.append(f"Change set: {change_set_id}")
-    files = _stage_ref_list(record.get("changed_files"))
-    if files:
-        lines.append("Changed files:")
-        lines.extend(f"- {file_path}" for file_path in files)
-    diff_refs = _stage_ref_list(record.get("diff_refs"))
-    if diff_refs:
-        lines.append("Diff refs:")
-        lines.extend(f"- {diff_ref}" for diff_ref in diff_refs)
-    return "\n".join(lines) or _json_content(_public_record(record)) or "Diff preview."
-
-
-def _result_summary(record: dict[str, Any], stage_type: StageType) -> str:
-    for key in ("summary", "risk_summary", "failure_summary", "artifact_type"):
-        value = _optional_text(record.get(key))
-        if value:
-            return value
-    return f"{stage_type.value} produced a stage result."
-
-
-def _public_record(record: dict[str, Any]) -> dict[str, Any]:
-    blocked_fragments = ("raw", "prompt", "response", "payload")
-    public: dict[str, Any] = {}
-    for key, value in record.items():
-        lowered = key.lower()
-        if any(fragment in lowered for fragment in blocked_fragments):
-            continue
-        public[key] = value
-    return public
-
-
-def _json_content(value: dict[str, Any]) -> str | None:
-    if not value:
-        return None
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2)
-
-
-def _compact_metrics(
-    record: dict[str, Any],
-    keys: Sequence[str],
-) -> dict[str, Any]:
-    return {key: record[key] for key in keys if record.get(key) is not None}
-
-
-def _stage_ref_list(
-    value: object,
-    *,
-    fallback: Sequence[str | None] = (),
-) -> list[str]:
-    if isinstance(value, str):
-        values: list[object] = [value]
-    elif isinstance(value, list | tuple | set):
-        values = list(value)
-    else:
-        values = list(fallback)
-    return [item for item in values if isinstance(item, str) and item.strip()]
-
-
-def _first_existing_text(
-    mapping: dict[str, Any],
-    keys: Sequence[str],
-) -> str | None:
-    for key in keys:
-        value = _optional_text(mapping.get(key))
-        if value is not None:
-            return value
-    return None
 
 
 def _first_text(

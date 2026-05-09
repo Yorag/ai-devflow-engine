@@ -136,7 +136,7 @@ function UserMessageEntry({ entry }: { entry: MessageFeedEntry }): JSX.Element {
       className="feed-entry feed-entry--user-message"
       aria-label="User message feed entry"
     >
-      <EntryHeader label={formatAuthor(entry.author)} timestamp={entry.occurred_at} />
+      <EntryHeader label={formatAuthor(entry.author)} />
       <p className="feed-entry__body">{entry.content}</p>
     </article>
   );
@@ -154,19 +154,16 @@ function ControlItemEntry({
       className="feed-entry feed-entry--control-item"
       aria-label="Control item feed entry"
     >
-      <EntryHeader
-        label={formatStatusLabel(entry.control_type)}
-        timestamp={entry.occurred_at}
-      />
+      <EntryHeader label={formatStatusLabel(entry.control_type)} />
       <h2>{entry.title}</h2>
       <p className="feed-entry__body">{entry.summary}</p>
-      <div className="feed-entry__meta-grid" aria-label="Control metadata">
-        <Metadata label="来源阶段" value={stageLabels[entry.source_stage_type]} />
-        {entry.target_stage_type &&
-        entry.target_stage_type !== entry.source_stage_type ? (
-          <Metadata label="目标阶段" value={stageLabels[entry.target_stage_type]} />
-        ) : null}
-      </div>
+      {entry.target_stage_type &&
+      entry.target_stage_type !== entry.source_stage_type ? (
+        <p className="feed-entry__supporting">
+          {stageLabels[entry.source_stage_type]}{" -> "}
+          {stageLabels[entry.target_stage_type]}
+        </p>
+      ) : null}
       {onOpenInspectorTarget ? (
         <div className="feed-entry__actions" aria-label="Control item actions">
           <InspectorTrigger
@@ -189,15 +186,12 @@ function ApprovalResultEntry({
       className="feed-entry feed-entry--approval-result"
       aria-label="Approval result feed entry"
     >
-      <EntryHeader
-        label={formatApprovalType(entry.approval_type)}
-        timestamp={entry.created_at}
-      />
+      <EntryHeader label={formatApprovalType(entry.approval_type)} />
       <h2>{formatStatusLabel(entry.decision)}</h2>
       {entry.reason ? <p className="feed-entry__body">{entry.reason}</p> : null}
-      <div className="feed-entry__meta-grid" aria-label="Approval result metadata">
-        <Metadata label="下一阶段" value={stageLabels[entry.next_stage_type]} />
-      </div>
+      <p className="feed-entry__supporting">
+        下一步：{stageLabels[entry.next_stage_type]}
+      </p>
     </article>
   );
 }
@@ -220,11 +214,7 @@ function SystemStatusEntry({
       className="feed-entry feed-entry--system-status"
       aria-label="System status feed entry"
     >
-      <EntryHeader
-        label="系统状态"
-        timestamp={entry.occurred_at}
-        badge={formatStatusLabel(entry.status)}
-      />
+      <EntryHeader label="系统状态" badge={formatStatusLabel(entry.status)} />
       <h2>{entry.title}</h2>
       <p className="feed-entry__body">{entry.reason}</p>
       <RerunAction
@@ -240,28 +230,16 @@ function SystemStatusEntry({
 
 function EntryHeader({
   label,
-  timestamp,
   badge,
 }: {
   label: string;
-  timestamp: string;
   badge?: string;
 }): JSX.Element {
   return (
     <header className="feed-entry__header">
       <span>{label}</span>
-      <time dateTime={timestamp}>{formatTimestamp(timestamp)}</time>
       {badge ? <strong>{badge}</strong> : null}
     </header>
-  );
-}
-
-function Metadata({ label, value }: { label: string; value: string }): JSX.Element {
-  return (
-    <span className="feed-entry__metadata">
-      <strong>{label}</strong>
-      <span>{value}</span>
-    </span>
   );
 }
 
@@ -284,8 +262,4 @@ function InspectorTrigger({
       查看详情
     </button>
   );
-}
-
-function formatTimestamp(value: string): string {
-  return value.includes("T") ? value.replace("T", " ").slice(0, 16) : value;
 }

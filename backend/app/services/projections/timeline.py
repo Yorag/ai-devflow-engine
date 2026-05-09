@@ -14,13 +14,18 @@ from backend.app.db.models.runtime import (
     ToolConfirmationRequestModel,
 )
 from backend.app.domain.enums import RunStatus
-from backend.app.schemas.feed import ApprovalResultFeedEntry, TopLevelFeedEntry
+from backend.app.schemas.feed import (
+    ApprovalResultFeedEntry,
+    ExecutionNodeProjection,
+    TopLevelFeedEntry,
+)
 from backend.app.schemas.run import RunStatusSummaryProjection, RunTimelineProjection
 from backend.app.services.events import DomainEvent, EventStore
 from backend.app.services.publication_boundary import (
     PublicationBoundaryService,
     PublicationBoundaryServiceError,
 )
+from backend.app.services.stage_feed_projection import hydrate_stage_node_from_artifacts
 
 
 TOP_LEVEL_FEED_ENTRY_ADAPTER = TypeAdapter(TopLevelFeedEntry)
@@ -176,7 +181,13 @@ class TimelineProjectionService:
             if value is not None:
                 if key == "tool_confirmation" and isinstance(value, dict):
                     value = self._hydrate_tool_confirmation(value)
-                return TOP_LEVEL_FEED_ENTRY_ADAPTER.validate_python(value)
+                entry = TOP_LEVEL_FEED_ENTRY_ADAPTER.validate_python(value)
+                if isinstance(entry, ExecutionNodeProjection):
+                    return hydrate_stage_node_from_artifacts(
+                        self._runtime_session,
+                        entry,
+                    )
+                return entry
         return None
 
     def _upsert_feed_entry(

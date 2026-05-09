@@ -26,6 +26,7 @@ from backend.app.observability.langsmith_tracing import (
 from backend.app.providers.langchain_adapter import (
     LangChainProviderAdapter,
     ModelCallResult,
+    ModelCallToolRequest,
 )
 from backend.app.runtime.agent_decision import (
     AgentDecision,
@@ -289,7 +290,11 @@ class StageAgentRuntime:
             trace_context=iteration_trace,
             requested_max_output_tokens=request.requested_max_output_tokens,
         )
-        model_call_ref = self._append_model_call_traces(request, model_result)
+        model_call_ref = self._append_model_call_traces(
+            request,
+            model_result,
+            iteration_index=iteration_index,
+        )
         stage_contract = self._stage_contract(request)
         try:
             decision = self._decision_parser.parse_model_result(
@@ -301,7 +306,10 @@ class StageAgentRuntime:
             self._append_process_record(
                 request,
                 "decision_trace",
-                exc.error.model_dump(mode="json"),
+                {
+                    **exc.error.model_dump(mode="json"),
+                    "iteration_index": iteration_index,
+                },
             )
             self._runtime_tracer.record_model_decision(
                 decision_type=(
@@ -337,7 +345,10 @@ class StageAgentRuntime:
         self._append_process_record(
             request,
             "decision_trace",
-            decision.decision_trace.model_dump(mode="json"),
+            {
+                **decision.decision_trace.model_dump(mode="json"),
+                "iteration_index": iteration_index,
+            },
         )
         self._runtime_tracer.record_model_decision(
             decision_type=decision.decision_type.value,
@@ -1142,6 +1153,8 @@ class StageAgentRuntime:
         self,
         request: StageExecutionRequest,
         model_result: ModelCallResult,
+        *,
+        iteration_index: int,
     ) -> str:
         model_call_ref = model_result.raw_response_ref or self._fallback_model_call_ref(
             model_result
@@ -1169,7 +1182,9 @@ class StageAgentRuntime:
                 "retry_trace_count": len(retry_refs),
                 "circuit_breaker_trace_refs": circuit_refs,
                 "circuit_breaker_trace_count": len(circuit_refs),
+                "display_summary": _model_result_display_summary(model_result),
                 "trace": _safe_trace_summary(model_result),
+                "iteration_index": iteration_index,
                 "input_summary": _safe_payload_summary(
                     model_result.trace_summary.input_summary
                 ),
@@ -1646,6 +1661,7 @@ class StageAgentRuntime:
             "side_effect_refs": list(tool_result.side_effect_refs),
             "tool_confirmation_ref": tool_result.tool_confirmation_ref,
             "reconciliation_status": tool_result.reconciliation_status.value,
+            "output_preview": tool_result.output_preview,
             "error_code": (
                 tool_result.error.error_code.value
                 if tool_result.error is not None
@@ -2114,6 +2130,86 @@ def _safe_payload_summary(summary: Mapping[str, object]) -> dict[str, object]:
         "invalid_tool_call_count",
     )
     return {key: summary[key] for key in safe_keys if key in summary}
+
+
+def _model_result_display_summary(model_result: ModelCallResult) -> str:
+    if model_result.tool_call_requests:
+        tool_calls = ", ".join(
+            _tool_request_display_summary(tool_call)
+            for tool_call in model_result.tool_call_requests[:3]
+        )
+        suffix = (
+            f" and {len(model_result.tool_call_requests) - 3} more"
+            if len(model_result.tool_call_requests) > 3
+            else ""
+        )
+        return f"Requested tool call: {tool_calls}{suffix}."
+    if model_result.provider_error_code is not None:
+        return "Provider call failed before a stage decision was produced."
+    structured_output = model_result.structured_output
+    if isinstance(structured_output, Mapping):
+        decision_type = _optional_string(structured_output.get("decision_type"))
+        if decision_type == AgentDecisionType.SUBMIT_STAGE_ARTIFACT.value:
+            artifact_type = _optional_string(structured_output.get("artifact_type"))
+            return (
+                f"Prepared stage result: {artifact_type}."
+                if artifact_type
+                else "Prepared a stage result."
+            )
+        if decision_type == AgentDecisionType.REQUEST_TOOL_CONFIRMATION.value:
+            tool_name = _optional_string(structured_output.get("tool_name")) or "tool"
+            target = _optional_string(structured_output.get("target_resource"))
+            return (
+                f"Requested confirmation for {tool_name} on {target}."
+                if target
+                else f"Requested confirmation for {tool_name}."
+            )
+        if decision_type == AgentDecisionType.REQUEST_CLARIFICATION.value:
+            return "Asked the user for clarification."
+        if decision_type == AgentDecisionType.RETRY_WITH_REVISED_PLAN.value:
+            reason = _optional_string(structured_output.get("reason"))
+            return (
+                f"Requested a revised plan: {_sentence_fragment(reason)}"
+                if reason
+                else "Requested a revised plan."
+            )
+        if decision_type == AgentDecisionType.FAIL_STAGE.value:
+            summary = _optional_string(
+                structured_output.get("user_visible_summary")
+            ) or _optional_string(structured_output.get("failure_reason"))
+            return (
+                f"Model decided to fail the stage: {_sentence_fragment(summary)}"
+                if summary
+                else "Model decided to fail the stage."
+            )
+        if decision_type:
+            return f"Produced decision: {decision_type}."
+    return "Produced a model response for this stage."
+
+
+def _tool_request_display_summary(tool_call: ModelCallToolRequest) -> str:
+    target = _tool_request_target(tool_call.input_payload)
+    if target:
+        return f"{tool_call.tool_name} {target}"
+    return tool_call.tool_name
+
+
+def _tool_request_target(payload: Mapping[str, object]) -> str | None:
+    if "pattern" in payload and "path" in payload:
+        pattern = _optional_string(payload.get("pattern"))
+        path = _optional_string(payload.get("path"))
+        if pattern and path:
+            return _redact_inline_secret_text(f'"{pattern}" in {path}')
+    for key in ("path", "glob", "target", "command", "query"):
+        value = _optional_string(payload.get(key))
+        if value:
+            return _redact_inline_secret_text(_bounded_string(value))
+    return None
+
+
+def _sentence_fragment(value: str) -> str:
+    bounded = _bounded_string(value)
+    return bounded if bounded.endswith((".", "!", "?")) else f"{bounded}."
 
 
 def _safe_tool_input_payload_summary(payload: Mapping[str, object]) -> dict[str, object]:

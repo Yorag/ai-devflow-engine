@@ -66,7 +66,6 @@ describe("formatDeliveryHighlights", () => {
         href: "https://github.com/acme/devflow-engine/pull/42",
       },
       { label: "测试", value: "Frontend 214/214 tests passed." },
-      { label: "引用", value: "delivery-result-ref-git-42" },
     ]);
   });
 
@@ -84,7 +83,6 @@ describe("formatDeliveryHighlights", () => {
           "feature/extremely-long-runtime-delivery-result-branch-name-that-wraps",
       },
       { label: "测试", value: "Frontend 214/214 tests passed." },
-      { label: "引用", value: "delivery-result-ref-git-42" },
     ]);
   });
 });
@@ -97,7 +95,6 @@ describe("buildDeliveryResultViewModel for git_auto_delivery", () => {
     expect(model.title).toBe("Git auto delivery");
     expect(model.summary).toBe("Delivery completed.");
     expect(model.metadata).toEqual([
-      { label: "模式", value: "git_auto_delivery" },
       { label: "分支", value: "feature/run-delivery" },
       { label: "提交", value: "abc123def456" },
       {
@@ -106,7 +103,6 @@ describe("buildDeliveryResultViewModel for git_auto_delivery", () => {
         href: "https://github.example/pulls/1",
       },
       { label: "测试", value: "Resolved upstream test summary." },
-      { label: "引用", value: "git-delivery-result:run-delivery" },
     ]);
   });
 
@@ -119,7 +115,6 @@ describe("buildDeliveryResultViewModel for git_auto_delivery", () => {
       "Git auto delivery pushed the reviewed changes and opened a pull request.",
     );
     expect(model.metadata).toEqual([
-      { label: "模式", value: "git_auto_delivery" },
       {
         label: "分支",
         value:
@@ -135,7 +130,6 @@ describe("buildDeliveryResultViewModel for git_auto_delivery", () => {
         href: "https://github.com/acme/devflow-engine/pull/42",
       },
       { label: "测试", value: "Frontend 214/214 tests passed." },
-      { label: "引用", value: "delivery-result-ref-git-42" },
     ]);
     expect("highlights" in model).toBe(false);
   });
@@ -154,7 +148,6 @@ describe("DeliveryResultBlock for git_auto_delivery", () => {
       name: "Delivery result feed entry",
     });
     expect(within(article).getByText("Git auto delivery")).toBeTruthy();
-    expect(within(article).getByText("Git Auto Delivery")).toBeTruthy();
     expect(
       within(article).getByText(
         "Git auto delivery pushed the reviewed changes and opened a pull request.",
@@ -184,8 +177,6 @@ describe("DeliveryResultBlock for git_auto_delivery", () => {
     expect(
       within(article).getByText("Frontend 214/214 tests passed."),
     ).toBeTruthy();
-    expect(within(article).getByText("引用")).toBeTruthy();
-    expect(within(article).getByText("delivery-result-ref-git-42")).toBeTruthy();
     expect(
       within(article).getByRole("button", {
         name: "查看git_auto_delivery详情",

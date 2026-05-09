@@ -362,7 +362,7 @@ describe("Inspector trigger preservation", () => {
   it("keeps feed-only rendering working when no Inspector handler is passed", () => {
     render(<FeedEntryRenderer entry={mockFeedEntriesByType.stage_node} />);
 
-    expect(screen.getByRole("article", { name: "阶段节点" })).toBeTruthy();
+    expect(screen.getByRole("article", { name: "阶段执行流" })).toBeTruthy();
     expect(
       screen.queryByRole("button", { name: "查看方案设计详情" }),
     ).toBeNull();

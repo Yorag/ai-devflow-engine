@@ -56,26 +56,67 @@ describe("applySessionEvent", () => {
     const snapshot = mockSessionWorkspaces["session-running"];
     initializeWorkspaceFromSnapshot(snapshot);
     const stageNode = findEntry(snapshot.narrative_feed, "stage_node");
+    const providerCallItem: ProviderCallStageItem = {
+      item_id: "stage-item-provider-call",
+      type: "provider_call",
+      occurred_at: "2026-05-01T09:12:30.000Z",
+      title: "deepseek-chat",
+      summary: "Provider call telemetry",
+      content: null,
+      artifact_refs: [],
+      metrics: {},
+      provider_id: "provider-deepseek",
+      model_id: "deepseek-chat",
+      status: "retrying",
+      retry_attempt: 2,
+      max_retry_attempts: 3,
+      backoff_wait_seconds: 5,
+      circuit_breaker_status: "closed",
+      failure_reason: "rate_limit",
+      process_ref: "provider-process-1",
+    };
+    const stageNodeWithProviderCall: ExecutionNodeProjection = {
+      ...stageNode,
+      items: [providerCallItem, ...stageNode.items],
+    };
+    const initialState = {
+      ...useWorkspaceStore.getState(),
+      narrativeFeed: snapshot.narrative_feed.map((entry) =>
+        entry.type === "stage_node" ? stageNodeWithProviderCall : entry,
+      ),
+      snapshot: {
+        ...useWorkspaceStore.getState().snapshot!,
+        narrative_feed: snapshot.narrative_feed.map((entry) =>
+          entry.type === "stage_node" ? stageNodeWithProviderCall : entry,
+        ),
+      },
+    } satisfies WorkspaceStoreState;
     const updatedStageNode: ExecutionNodeProjection = {
       ...stageNode,
       status: "waiting_tool_confirmation",
       summary: "Code Generation is blocked on a high-risk tool confirmation.",
-      items: stageNode.items.map((item) =>
-        item.type === "provider_call"
-          ? {
-              ...item,
-              status: "circuit_open",
-              retry_attempt: 3,
-              backoff_wait_seconds: null,
-              circuit_breaker_status: "open",
-              failure_reason: "quota_exhausted",
-            }
-          : item,
-      ),
+      items: stageNode.items,
     };
+    const providerCallUpdate = {
+      ...providerCallItem,
+      status: "circuit_open",
+      retry_attempt: 3,
+      backoff_wait_seconds: null,
+      circuit_breaker_status: "open",
+      failure_reason: "quota_exhausted",
+    } satisfies ProviderCallStageItem;
+    const updatedState = reduce(
+      initialState,
+      sessionEvent("stage_updated", {
+        stage_node: {
+          ...updatedStageNode,
+          items: [providerCallUpdate, ...updatedStageNode.items],
+        },
+      }),
+    );
 
     let state = reduce(
-      useWorkspaceStore.getState(),
+      updatedState,
       sessionEvent("stage_updated", { stage_node: updatedStageNode }),
     );
     state = reduce(

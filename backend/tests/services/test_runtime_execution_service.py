@@ -544,8 +544,20 @@ def test_completed_step_result_projects_stage_process_records_as_feed_items(
                             "output_tokens": 42,
                             "total_tokens": 162,
                         },
-                        "input_summary": {"content_hash": "sha256:input"},
-                        "output_summary": {"content_hash": "sha256:output"},
+                        "display_summary": (
+                            "Need to inspect the workspace tool implementation."
+                        ),
+                        "input_summary": {
+                            "excerpt": "User asked what code search mode is active.",
+                            "content_hash": "sha256:input",
+                        },
+                        "output_summary": {
+                            "excerpt": (
+                                "I need to inspect the workspace tool implementation "
+                                "before answering."
+                            ),
+                            "content_hash": "sha256:output",
+                        },
                     },
                     "decision_trace": {
                         "trace_ref": "decision-trace-1",
@@ -558,7 +570,12 @@ def test_completed_step_result_projects_stage_process_records_as_feed_items(
                         "call_id": "tool-call-1",
                         "status": "succeeded",
                         "artifact_refs": ["tool-artifact-1"],
+                        "output_preview": "workspace tools include grep, glob, and read_file",
                         "safe_details": {"summary": "Read workspace state."},
+                        "input_payload_summary": {
+                            "path": "backend/app/workspace/tools.py",
+                            "limit": 60,
+                        },
                     },
                     "change_set": {
                         "change_set_id": "changeset-1",
@@ -602,19 +619,27 @@ def test_completed_step_result_projects_stage_process_records_as_feed_items(
         item_types = [item["type"] for item in items]
         assert item_types == [
             "model_call",
-            "reasoning",
+            "decision",
             "tool_call",
             "diff_preview",
             "result",
         ]
-        assert items[0]["title"] == "Model call"
+        assert items[0]["title"] == "Call gpt-5.2"
         assert items[0]["metrics"]["total_tokens"] == 162
+        assert "inspect the workspace tool implementation" in items[0]["summary"]
+        assert items[0]["content"] is None
         assert items[1]["content"] is None
         assert "Selected the structured artifact path." in items[1]["summary"]
+        assert items[2]["title"] == (
+            "read_workspace path=backend/app/workspace/tools.py limit=60"
+        )
+        assert items[2]["summary"] == "Read workspace state."
+        assert "backend/app/workspace/tools.py" in items[2]["content"]
         assert items[2]["artifact_refs"] == ["tool-artifact-1"]
         assert "frontend/src/features/feed/StageNode.tsx" in items[3]["content"]
         assert "artifact-stage-progress" in items[4]["artifact_refs"]
         assert "evidence://requirement-summary" in items[4]["artifact_refs"]
+        assert "Ready for the next stage." in items[4]["content"]
 
 
 def test_stage_progress_callback_publishes_realtime_stage_update(

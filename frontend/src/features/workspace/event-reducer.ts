@@ -6,6 +6,7 @@ import type {
   DeliveryResultFeedEntry,
   ExecutionNodeProjection,
   MessageFeedEntry,
+  ProviderCallStageItem,
   RunStatus,
   RunSummaryProjection,
   SessionEvent,
@@ -176,7 +177,30 @@ export function mergeStageNodeUpdate(
   entries: TopLevelFeedEntry[],
   stageNode: ExecutionNodeProjection,
 ): TopLevelFeedEntry[] {
-  return upsertFeedEntry(entries, stageNode);
+  const index = entries.findIndex(
+    (entry) =>
+      entry.type === "stage_node" && entry.stage_run_id === stageNode.stage_run_id,
+  );
+
+  if (index === -1) {
+    return upsertFeedEntry(entries, stageNode);
+  }
+
+  const currentEntry = entries[index];
+  if (currentEntry.type !== "stage_node") {
+    return upsertFeedEntry(entries, stageNode);
+  }
+
+  const mergedStageNode = stageNode.items.some(isProviderCallStageItem)
+    ? stageNode
+    : {
+        ...stageNode,
+        items: mergeStageNodeItems(currentEntry, stageNode),
+      };
+
+  return entries.map((entry, entryIndex) =>
+    entryIndex === index ? mergedStageNode : entry,
+  );
 }
 
 export function updateComposerStateFromSessionStatus(
@@ -428,6 +452,69 @@ function getFeedIdentity(entry: TopLevelFeedEntry): FeedIdentity {
     case "system_status":
       return `${entry.type}:${entry.run_id}:${entry.status}`;
   }
+}
+
+function mergeStageNodeItems(
+  existingStageNode: ExecutionNodeProjection,
+  incomingStageNode: ExecutionNodeProjection,
+): ExecutionNodeProjection["items"] {
+  const existingProviderItems = existingStageNode.items.filter(
+    isProviderCallStageItem,
+  );
+  if (existingProviderItems.length === 0) {
+    return incomingStageNode.items;
+  }
+
+  const incomingNonProviderItems = incomingStageNode.items.filter(
+    (item) => !isProviderCallStageItem(item),
+  );
+  const providerInsertions = collectProviderInsertions(existingStageNode.items);
+  const mergedItems: ExecutionNodeProjection["items"] = [];
+  let incomingIndex = 0;
+
+  for (let nonProviderIndex = 0; nonProviderIndex <= incomingNonProviderItems.length; nonProviderIndex += 1) {
+    for (const providerItem of providerInsertions.get(nonProviderIndex) ?? []) {
+      mergedItems.push(providerItem);
+    }
+
+    if (nonProviderIndex < incomingNonProviderItems.length) {
+      mergedItems.push(incomingNonProviderItems[nonProviderIndex]);
+      incomingIndex = nonProviderIndex + 1;
+    }
+  }
+
+  if (incomingIndex < incomingNonProviderItems.length) {
+    mergedItems.push(...incomingNonProviderItems.slice(incomingIndex));
+  }
+
+  return mergedItems;
+}
+
+function collectProviderInsertions(
+  items: ExecutionNodeProjection["items"],
+): Map<number, ProviderCallStageItem[]> {
+  const providerInsertions = new Map<number, ProviderCallStageItem[]>();
+  let nonProviderCount = 0;
+
+  for (const item of items) {
+    if (isProviderCallStageItem(item)) {
+      const providerItemsAtPosition =
+        providerInsertions.get(nonProviderCount) ?? [];
+      providerItemsAtPosition.push(item);
+      providerInsertions.set(nonProviderCount, providerItemsAtPosition);
+      continue;
+    }
+
+    nonProviderCount += 1;
+  }
+
+  return providerInsertions;
+}
+
+function isProviderCallStageItem(
+  item: ExecutionNodeProjection["items"][number],
+): item is ProviderCallStageItem {
+  return item.type === "provider_call";
 }
 
 function readPayload<TPayload>(

@@ -274,3 +274,4 @@ def test_stage_agent_model_call_trace_omits_prompt_and_response_summaries() -> N
     assert "raw prompt body" not in str(model_trace)
     assert "raw response body" not in str(model_trace)
     assert "rendered user task" not in str(model_trace)
+    assert model_trace["display_summary"] == "Model decided to fail the stage: Cannot continue."

@@ -17,9 +17,9 @@ export const stageLabels: Record<StageType, string> = {
 export const stageItemLabels: Record<StageItemType, string> = {
   dialogue: "澄清对话",
   context: "上下文",
-  reasoning: "推理记录",
+  reasoning: "思考",
   decision: "决策",
-  model_call: "模型调用",
+  model_call: "模型记录",
   provider_call: "模型服务调用",
   tool_call: "工具调用",
   tool_confirmation: "工具确认",

@@ -105,9 +105,6 @@ export function ToolConfirmationBlock({
       <header className="feed-entry__header feed-entry__header--with-actions">
         <div className="feed-entry__header-main">
           <span>高风险工具确认</span>
-          <time dateTime={displayEntry.requested_at}>
-            {formatTimestamp(displayEntry.requested_at)}
-          </time>
           <strong>{formatStatusLabel(displayEntry.status)}</strong>
         </div>
         {onOpenInspectorTarget ? (
@@ -122,17 +119,10 @@ export function ToolConfirmationBlock({
         ) : null}
       </header>
       <h2>{displayEntry.title}</h2>
-      <div
-        className="feed-entry__meta-grid"
-        aria-label="Tool confirmation metadata"
-      >
-        <Metadata label="工具" value={displayEntry.tool_name} />
-        {displayEntry.command_preview ? (
-          <Metadata label="命令" value={displayEntry.command_preview} />
-        ) : null}
-        <Metadata label="目标" value={displayEntry.target_summary} />
-        <Metadata label="风险等级" value={formatLabel(displayEntry.risk_level)} />
-      </div>
+      <p className="feed-entry__command">
+        {displayEntry.command_preview ?? displayEntry.tool_name}
+      </p>
+      <p className="feed-entry__supporting">{displayEntry.target_summary}</p>
       <p className="feed-entry__body">{displayEntry.reason}</p>
       {displayEntry.risk_categories.length > 0 ? (
         <ChipList
@@ -208,15 +198,6 @@ function getToolConfirmationSignature(entry: ToolConfirmationFeedEntry): string 
   });
 }
 
-function Metadata({ label, value }: { label: string; value: string }): JSX.Element {
-  return (
-    <span className="feed-entry__metadata">
-      <strong>{label}</strong>
-      <span>{value}</span>
-    </span>
-  );
-}
-
 function ChipList({
   label,
   values,
@@ -238,8 +219,4 @@ function formatLabel(value: string): string {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
-}
-
-function formatTimestamp(value: string): string {
-  return value.includes("T") ? value.replace("T", " ").slice(0, 16) : value;
 }

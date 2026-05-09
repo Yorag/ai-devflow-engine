@@ -26,10 +26,7 @@ export function buildDeliveryResultViewModel(
     title:
       entry.delivery_mode === "demo_delivery" ? "Demo delivery" : "Git auto delivery",
     summary: entry.summary,
-    metadata: [
-      { label: "模式", value: entry.delivery_mode },
-      ...formatDeliveryHighlights(entry),
-    ],
+    metadata: formatDeliveryHighlights(entry),
   };
 }
 
@@ -62,10 +59,6 @@ export function formatDeliveryHighlights(
     metadata.push({ label: "测试", value: entry.test_summary });
   }
 
-  if (entry.result_ref) {
-    metadata.push({ label: "引用", value: entry.result_ref });
-  }
-
   return metadata;
 }
 
@@ -95,7 +88,6 @@ export function DeliveryResultBlock({
       <header className="feed-entry__header feed-entry__header--with-actions">
         <div className="feed-entry__header-main">
           <span>交付结果</span>
-          <time dateTime={entry.occurred_at}>{formatTimestamp(entry.occurred_at)}</time>
           <strong>{formatStatusLabel(entry.status)}</strong>
         </div>
         {onOpenInspectorTarget ? (
@@ -111,38 +103,35 @@ export function DeliveryResultBlock({
       </header>
       <div className="feed-entry__title-row delivery-result-block__title-row">
         <h2>{model.title}</h2>
-        <span className="delivery-result-block__mode-chip">{model.modeLabel}</span>
       </div>
       <p className="feed-entry__body">{model.summary}</p>
-      <div className="feed-entry__meta-grid" aria-label="Delivery result metadata">
-        {model.metadata.map((item) => (
-          <span className="feed-entry__metadata" key={item.label}>
-            <strong>{item.label}</strong>
-            <span>
-              {item.href ? (
-                <a
-                  href={item.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label={`${item.label} ${item.value}`}
-                >
-                  {item.value}
-                </a>
-              ) : (
-                item.value
-              )}
+      {model.metadata.length > 0 ? (
+        <div className="feed-entry__meta-grid" aria-label="Delivery result metadata">
+          {model.metadata.map((item) => (
+            <span className="feed-entry__metadata" key={item.label}>
+              <strong>{item.label}</strong>
+              <span>
+                {item.href ? (
+                  <a
+                    href={item.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`${item.label} ${item.value}`}
+                  >
+                    {item.value}
+                  </a>
+                ) : (
+                  item.value
+                )}
+              </span>
             </span>
-          </span>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : null}
     </article>
   );
 }
 
 function formatDeliveryModeLabel(value: DeliveryMode): string {
   return value === "demo_delivery" ? "Demo Delivery" : "Git Auto Delivery";
-}
-
-function formatTimestamp(value: string): string {
-  return value.includes("T") ? value.replace("T", " ").slice(0, 16) : value;
 }

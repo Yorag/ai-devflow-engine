@@ -31,20 +31,21 @@ function findStageItem(
 }
 
 describe("ToolCallItem", () => {
-  it("renders tool name, target, command excerpt, duration, status, and folded output summary", () => {
+  it("renders the tool command and useful output without status telemetry", () => {
     const item = findStageItem(mockCodeGenerationStageNode, "tool_call");
 
     render(<ToolCallItem item={item} />);
 
     const article = screen.getByRole("listitem", { name: "工具调用" });
     expect(within(article).getByText("bash pytest frontend")).toBeTruthy();
-    expect(within(article).getByText("frontend/src/features/feed")).toBeTruthy();
-    expect(within(article).getByText("成功")).toBeTruthy();
-    expect(within(article).getByText("2.4s")).toBeTruthy();
+    expect(within(article).getByText("stdout 4 lines, stderr 0 lines")).toBeTruthy();
     const details = article.querySelector("details");
     expect(details).toBeTruthy();
     expect(details?.hasAttribute("open")).toBe(false);
-    expect(within(article).getByText("stdout 4 lines, stderr 0 lines")).toBeTruthy();
+    expect(within(article).getByText("查看输出")).toBeTruthy();
+    expect(article.textContent).not.toContain("成功，耗时");
+    expect(article.textContent).not.toContain("Target:");
+    expect(article.textContent).not.toContain("Status:");
   });
 
   it("keeps the stable item title visible when tool content is missing", () => {
@@ -63,8 +64,10 @@ describe("ToolCallItem", () => {
 
     const article = screen.getByRole("listitem", { name: "工具调用" });
     expect(within(article).getByText("Read redacted tool trace")).toBeTruthy();
-    expect(within(article).getAllByText("未记录")).toHaveLength(2);
-    expect(within(article).getByText("未知")).toBeTruthy();
+    expect(within(article).getByText("Tool detail is unavailable in the feed projection.")).toBeTruthy();
+    expect(article.textContent).not.toContain("Command output");
+    expect(article.textContent).not.toContain("未记录");
+    expect(article.querySelector("details")).toBeNull();
   });
 });
 
@@ -175,8 +178,9 @@ describe("real backend code and test generation payload contract", () => {
 
     const toolItem = screen.getByRole("listitem", { name: "工具调用" });
     expect(within(toolItem).getByText("edit_file apply implementation patch")).toBeTruthy();
-    expect(within(toolItem).getByText("backend/app/schemas/feed.py")).toBeTruthy();
-    expect(within(toolItem).getByText("成功")).toBeTruthy();
+    expect(within(toolItem).getByText("patch applied, 1 file changed")).toBeTruthy();
+    expect(toolItem.textContent).not.toContain("成功，耗时");
+    expect(toolItem.textContent).not.toContain("tool-call-ref-codegen");
 
     const diffItem = screen.getByRole("listitem", { name: "变更预览" });
     expect(within(diffItem).getByText("backend/app/schemas/feed.py")).toBeTruthy();
