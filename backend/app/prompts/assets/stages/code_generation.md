@@ -29,6 +29,10 @@ When Solution Design has already resolved target files or modules, use the targe
 
 For a UI copy replacement with exact old and new text, first read the named source file, then apply a minimal `edit_file` replacement to that file. Only inspect or edit tests when the implementation plan names the test file or when the current stage responsibility explicitly includes updating tests.
 
+Do not use `grep` with `path="."`, repository-root scans, or broad workspace rediscovery after Solution Design has already named the source file for the change. Prefer the named source file and only the explicitly named downstream test files, unless a concrete tool result proves the named file is missing or stale.
+
+After a successful `edit_file` on a target file, treat that file as updated stage evidence. You must not issue another guessed replacement against the same file in the same stage run unless you first `read_file` that file again and the fresh content proves a distinct remaining required edit. If one exact replacement succeeded, do not retry the same user-intent text change with different punctuation, whitespace, or reconstructed `old_text` variants from memory.
+
 ## Batch Tool Decision Protocol
 
 Batch independent tool calls when the calls are already fully parameterized, stage-scoped, and do not depend on each other's results. Multiple independent `read_file`, `grep`, `glob`, or exact `edit_file` calls may be returned in one native tool-call response when each argument is already justified by the accepted design and current evidence.

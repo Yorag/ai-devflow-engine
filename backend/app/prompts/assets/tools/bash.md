@@ -25,6 +25,8 @@ Do not use bash to read, search, create, or edit files when `read_file`, `grep`,
 
 Provide only the schema field `command` as a non-empty string. The command must parse into one argv vector, match the allowlist, and avoid shell metacharacters, pipes, redirection, command substitution, environment interpolation, absolute or parent-escape paths, and extra keys. Treat the input as a command request, not as a shell script.
 
+Write commands from the repository root using repo-relative forms that the allowlist already documents, such as `npm --prefix frontend run test -- --run ...` or `uv run pytest ...`. Do not invent synthetic workspace aliases such as `/workspace`, `/repo`, or similar model-assumed mount points, and do not emit `cd /workspace/...` or other absolute-path prefixes even if they look conventional in other environments.
+
 ## Output Handling
 
 Use structured output fields: `command`, `argv`, `exit_code`, `duration_ms`, stdout and stderr excerpts, truncation flags, and `changed_files`. Treat excerpts as redacted and bounded. Use `changed_files`, side_effect_refs, and reconciliation_status to determine whether follow-up inspection or reporting is required.

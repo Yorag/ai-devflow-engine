@@ -23,6 +23,8 @@ Derive verification targets from requirements, solution design, changed implemen
 
 Use the plan verification commands from `SolutionDesignArtifact.implementation_plan` when they are permitted by the current stage_contract and runtime command policy. If a planned verification command cannot run, return a task-scoped test gap report tied to the implementation-plan task id and state the exact blocker instead of inventing a replacement command.
 
+Prefer repo-root command forms over environment-specific shell navigation. For frontend verification, use repo-root command forms such as `npm --prefix frontend run test -- --run ...` when they satisfy the same scope. Do not synthesize absolute working-directory commands such as `cd /workspace/frontend && ...` or other guessed mount-point paths.
+
 Record commands, exit codes, key output, failures, skipped checks, flaky behavior, and environmental blockers in the response_schema artifact.
 
 ## Test Edit Parameter Discipline

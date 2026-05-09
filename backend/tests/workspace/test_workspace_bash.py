@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 import shlex
+import shutil
+import subprocess
 
 from backend.app.api.error_codes import ErrorCode
 from backend.app.domain.enums import StageType, ToolRiskCategory, ToolRiskLevel
@@ -296,6 +298,112 @@ def test_bash_rejects_non_allowlisted_command_with_structured_error(tmp_path: Pa
     assert result.error.safe_details["command"] == "echo hacked"
     assert audit.errors[0]["error_code"] == ErrorCode.BASH_COMMAND_NOT_ALLOWED
     assert runner.calls == []
+
+
+def test_bash_executes_normalized_frontend_vitest_command_without_confirmation(
+    tmp_path: Path,
+) -> None:
+    manager, workspace = _build_workspace(tmp_path)
+    audit = _RecordingAudit()
+    confirmations = _RecordingConfirmationPort()
+    runner_calls: list[dict[str, object]] = []
+
+    def runner(argv: list[str], *, cwd: Path, timeout: float | None):
+        runner_calls.append({"argv": list(argv), "cwd": cwd, "timeout": timeout})
+        return {
+            "returncode": 0,
+            "stdout": "PASS src/pages/__tests__/HomePage.test.tsx\n",
+            "stderr": "",
+        }
+
+    registry = ToolRegistry(
+        [BashTool(manager=manager, workspace=workspace, audit_service=audit, runner=runner)]
+    )
+
+    result = registry.execute(
+        _request("cd frontend && npx vitest run src/pages/__tests__/HomePage.test.tsx 2>&1"),
+        _context(manager, workspace, audit, confirmations),
+    )
+
+    assert result.status is ToolResultStatus.SUCCEEDED
+    assert result.output_payload["exit_code"] == 0
+    assert result.output_payload["argv"] == [
+        "npx",
+        "vitest",
+        "run",
+        "src/pages/__tests__/HomePage.test.tsx",
+    ]
+    assert result.output_payload["changed_files"] == []
+    assert confirmations.calls == []
+    assert runner_calls == [
+        {
+            "argv": [
+                "npx",
+                "vitest",
+                "run",
+                "src/pages/__tests__/HomePage.test.tsx",
+            ],
+            "cwd": workspace.root / "frontend",
+            "timeout": 5,
+        }
+    ]
+
+
+def test_bash_resolves_windows_pathext_executable_for_frontend_npm_test(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager, workspace = _build_workspace(tmp_path)
+    audit = _RecordingAudit()
+    confirmations = _RecordingConfirmationPort()
+    captured: dict[str, object] = {}
+
+    def fake_run(args, **kwargs):  # noqa: ANN001
+        captured["args"] = list(args)
+        captured["cwd"] = kwargs["cwd"]
+        captured["shell"] = kwargs.get("shell")
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout="PASS src/pages/__tests__/HomePage.test.tsx\n",
+            stderr="",
+        )
+
+    original_which = shutil.which
+    monkeypatch.setattr(
+        "shutil.which",
+        lambda name: (
+            "D:/nodejs/npm.CMD"
+            if name == "npm"
+            else "D:/nodejs/npx.CMD"
+            if name == "npx"
+            else original_which(name)
+        ),
+    )
+    monkeypatch.setattr("backend.app.workspace.bash.subprocess.run", fake_run)
+
+    registry = ToolRegistry(
+        [BashTool(manager=manager, workspace=workspace, audit_service=audit)]
+    )
+
+    result = registry.execute(
+        _request("npm --prefix frontend run test -- --run src/pages/__tests__/HomePage.test.tsx 2>&1"),
+        _context(manager, workspace, audit, confirmations),
+    )
+
+    assert result.status is ToolResultStatus.SUCCEEDED
+    assert captured["args"] == [
+        "D:/nodejs/npm.CMD",
+        "--prefix",
+        "frontend",
+        "run",
+        "test",
+        "--",
+        "--run",
+        "src/pages/__tests__/HomePage.test.tsx",
+    ]
+    assert captured["cwd"] == workspace.root
+    assert captured["shell"] is False
 
 
 def test_bash_rejects_shell_chaining_without_invoking_subprocess(tmp_path: Path) -> None:
@@ -722,6 +830,7 @@ def test_bash_verification_policy_accepts_same_commands_as_risk_classifier(
         "uv run pytest backend/tests/runtime/test_stage_agent_runtime.py -q",
         "npm --prefix frontend run build",
         "npm --prefix frontend run test",
+        "cd frontend && npx vitest run src/pages/__tests__/HomePage.test.tsx 2>&1",
         "git status --short",
         "git diff HEAD -- frontend/src/pages/HomePage.tsx",
         'grep -n "Make delivery" frontend/src/pages/HomePage.tsx',

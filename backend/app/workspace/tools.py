@@ -891,6 +891,12 @@ def grep(
         )
 
     normalized_path = _relative_path(workspace, resolved) or "."
+    if not resolved.exists():
+        return _grep_success_result(
+            tool_input,
+            matches=[],
+            truncated=False,
+        )
     executable = shutil.which(options.executable)
     if executable is None:
         return _tool_error_result(

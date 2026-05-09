@@ -373,6 +373,24 @@ def test_solution_design_and_tool_prompts_constrain_tool_parameters_by_requireme
     assert "Do not use `glob` after grep has already found" in glob_body
 
 
+def test_bash_and_common_tool_prompts_reject_synthetic_workspace_aliases() -> None:
+    from backend.app.prompts.registry import PromptRegistry
+
+    registry = PromptRegistry.load_builtin_assets()
+    bash_body = registry.get("tool_prompt_fragment.bash").sections[0].body
+    tool_usage_body = registry.get("tool_usage_template").sections[0].body
+    test_stage_body = registry.get(
+        "stage_prompt_fragment.test_generation_execution"
+    ).sections[0].body
+
+    assert "/workspace" in bash_body
+    assert "npm --prefix frontend" in bash_body
+    assert "synthetic workspace aliases" in tool_usage_body
+    assert "/workspace" in tool_usage_body
+    assert "repo-root command forms" in test_stage_body
+    assert "npm --prefix frontend run test" in test_stage_body
+
+
 def test_test_stage_and_edit_file_prompts_constrain_exact_edit_parameters() -> None:
     from backend.app.prompts.registry import PromptRegistry
 
@@ -415,6 +433,20 @@ def test_code_generation_and_common_tool_prompts_define_batch_tool_boundaries() 
     assert "Do not batch dependent read-then-write operations" in tool_usage_body
     assert "Do not use workspace-wide `**/` patterns" in glob_body
     assert "`**/*.html`" in glob_body
+
+
+def test_code_generation_prompt_prevents_repo_wide_rediscovery_and_repeat_edits() -> None:
+    from backend.app.prompts.registry import PromptRegistry
+
+    registry = PromptRegistry.load_builtin_assets()
+    code_generation_body = registry.get(
+        "stage_prompt_fragment.code_generation"
+    ).sections[0].body
+
+    assert 'Do not use `grep` with `path="."`' in code_generation_body
+    assert "After a successful `edit_file` on a target file" in code_generation_body
+    assert "must not issue another guessed replacement" in code_generation_body
+    assert "same file in the same stage run" in code_generation_body
 
 
 def test_load_builtin_assets_rejects_missing_front_matter(tmp_path: Path) -> None:

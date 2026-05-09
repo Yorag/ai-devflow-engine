@@ -79,6 +79,7 @@ class VerificationCommandDecision:
     reason: str
     argv: tuple[str, ...] = ()
     execution_mode: Literal["argv", "inspection"] = "argv"
+    working_directory: Path | None = None
 
 
 def classify_verification_command(
@@ -94,12 +95,20 @@ def classify_verification_command(
             reason="command must parse as one shell-free argv vector",
         )
 
+    normalized = _normalize_verification_argv(argv, workspace_root=workspace_root)
+    if normalized is not None:
+        argv = normalized.argv
+        working_directory = normalized.working_directory
+    else:
+        working_directory = workspace_root
+
     if _contains_blocked_path_argument(argv):
         return VerificationCommandDecision(
             allowed=False,
             read_only=False,
             reason="command references a blocked workspace path",
             argv=argv,
+            working_directory=working_directory,
         )
 
     read_only_shell_mode = _read_only_shell_execution_mode(argv)
@@ -110,6 +119,7 @@ def classify_verification_command(
             reason="allowed read-only workspace inspection command",
             argv=argv,
             execution_mode=read_only_shell_mode,
+            working_directory=working_directory,
         )
 
     if _contains_shell_meta(argv):
@@ -118,6 +128,7 @@ def classify_verification_command(
             read_only=False,
             reason="shell metacharacters and command chaining are not allowed",
             argv=argv,
+            working_directory=working_directory,
         )
 
     executable = argv[0].lower()
@@ -127,6 +138,7 @@ def classify_verification_command(
             read_only=False,
             reason="direct shell/search/file commands are not verification commands",
             argv=argv,
+            working_directory=working_directory,
         )
 
     if tuple(argv[:2]) in _VERSION_PROBES and len(argv) == 2:
@@ -135,6 +147,7 @@ def classify_verification_command(
             read_only=True,
             reason="allowed version probe",
             argv=argv,
+            working_directory=working_directory,
         )
 
     if _is_uv_pytest(argv, workspace_root=workspace_root):
@@ -143,14 +156,20 @@ def classify_verification_command(
             read_only=True,
             reason="allowed repo-local pytest command",
             argv=argv,
+            working_directory=working_directory,
         )
 
-    if _is_frontend_script(argv, workspace_root=workspace_root):
+    if _is_frontend_script(
+        argv,
+        workspace_root=workspace_root,
+        working_directory=working_directory,
+    ):
         return VerificationCommandDecision(
             allowed=True,
             read_only=True,
             reason="allowed declared frontend script",
             argv=argv,
+            working_directory=working_directory,
         )
 
     if _is_read_only_git_command(argv):
@@ -159,6 +178,7 @@ def classify_verification_command(
             read_only=True,
             reason="allowed read-only git command",
             argv=argv,
+            working_directory=working_directory,
         )
 
     if command in _readme_commands(workspace_root):
@@ -167,6 +187,7 @@ def classify_verification_command(
             read_only=True,
             reason="allowed documented project command",
             argv=argv,
+            working_directory=working_directory,
         )
 
     if _is_dependency_command(argv):
@@ -175,6 +196,7 @@ def classify_verification_command(
             read_only=False,
             reason="dependency installation or update is not verification",
             argv=argv,
+            working_directory=working_directory,
         )
 
     return VerificationCommandDecision(
@@ -182,6 +204,55 @@ def classify_verification_command(
         read_only=False,
         reason="command is not in the verification allowlist",
         argv=argv,
+        working_directory=working_directory,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedVerificationCommand:
+    argv: tuple[str, ...]
+    working_directory: Path | None
+
+
+def _normalize_verification_argv(
+    argv: tuple[str, ...],
+    *,
+    workspace_root: Path | None,
+) -> NormalizedVerificationCommand | None:
+    if not argv:
+        return None
+    working_directory = workspace_root
+    tokens = list(argv)
+
+    shell_segments = _split_tokens(tokens, "&&")
+    if len(shell_segments) == 2 and _is_safe_cd_segment(shell_segments[0]):
+        if workspace_root is None:
+            return None
+        target = (workspace_root / shell_segments[0][1]).resolve(strict=False)
+        if not target.is_relative_to(workspace_root):
+            return None
+        working_directory = target
+        tokens = list(shell_segments[1])
+    elif len(shell_segments) > 1:
+        return None
+
+    if tokens and tokens[-1] == "2>&1":
+        tokens = tokens[:-1]
+
+    if not tokens:
+        return None
+
+    if any(token in {"&&", "||", "|", ";", ">", ">>", "<", "`"} for token in tokens):
+        return None
+    if any(
+        any(fragment in token for fragment in ("2>", "1>", "&>", "$(", "${"))
+        for token in tokens
+    ):
+        return None
+
+    return NormalizedVerificationCommand(
+        argv=tuple(tokens),
+        working_directory=working_directory,
     )
 
 
@@ -240,7 +311,12 @@ def _pytest_options_safe(args: Sequence[str]) -> bool:
     return True
 
 
-def _is_frontend_script(argv: tuple[str, ...], *, workspace_root: Path | None) -> bool:
+def _is_frontend_script(
+    argv: tuple[str, ...],
+    *,
+    workspace_root: Path | None,
+    working_directory: Path | None,
+) -> bool:
     scripts = _frontend_scripts(workspace_root)
     if not scripts:
         return False
@@ -248,6 +324,16 @@ def _is_frontend_script(argv: tuple[str, ...], *, workspace_root: Path | None) -
         if argv[3] == "run":
             return argv[4] in scripts
         return argv[3] in scripts and argv[3] not in _DEPENDENCY_COMMANDS
+    if (
+        len(argv) >= 4
+        and argv[0] == "npx"
+        and argv[1] == "vitest"
+        and argv[2] == "run"
+        and working_directory is not None
+        and workspace_root is not None
+        and working_directory == (workspace_root / "frontend").resolve(strict=False)
+    ):
+        return True
     return False
 
 

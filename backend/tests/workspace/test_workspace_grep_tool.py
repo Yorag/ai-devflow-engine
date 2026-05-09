@@ -143,6 +143,7 @@ def _build_harness(
         workspace_ref="workspace-1",
         trace_context=trace_context,
     )
+    (workspace.root / "src").mkdir()
     audit = _RecordingAudit()
     run_log = _RecordingRunLog()
     registry = ToolRegistry(
@@ -481,6 +482,36 @@ def test_grep_treats_rg_exit_code_one_as_empty_success(
 
     assert result.status is ToolResultStatus.SUCCEEDED
     assert result.output_payload == {"matches": [], "truncated": False}
+
+
+def test_grep_treats_missing_workspace_relative_path_as_empty_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = _build_harness(tmp_path)
+    called = False
+
+    def fake_run(args, **kwargs):  # noqa: ANN001
+        nonlocal called
+        called = True
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    monkeypatch.setattr("backend.app.workspace.tools.shutil.which", lambda name: "C:/rg.exe")
+    monkeypatch.setattr("backend.app.workspace.tools.subprocess.run", fake_run)
+
+    result = harness.registry.execute(
+        _request(harness, {"pattern": "needle", "path": "missing-src"}),
+        _context(harness),
+    )
+
+    assert result.status is ToolResultStatus.SUCCEEDED
+    assert result.output_payload == {"matches": [], "truncated": False}
+    assert called is False
 
 
 def test_grep_does_not_exclude_non_log_runtime_paths_by_default(

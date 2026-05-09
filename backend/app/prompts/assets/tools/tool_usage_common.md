@@ -31,6 +31,8 @@ Before each tool call, derive every path, pattern, and query from the accepted r
 
 Do not use `path="."` when the requirement names a product surface that maps to a narrower workspace path such as `frontend`, `backend`, `docs`, or a file path from a prior tool result. Within one stage run, do not repeat the same tool name with the same input payload after a successful result; cite the prior tool result instead.
 
+Do not fabricate environment-specific absolute prefixes or synthetic workspace aliases such as `/workspace`, `/repo`, `/project`, or similar mount-point guesses unless a prior tool result has returned that exact path and the active tool schema explicitly needs it. Prefer repo-root command forms and workspace-relative paths that are already evidenced in this run, such as `npm --prefix frontend ...`, `uv run ...`, `frontend/...`, or `backend/...`.
+
 When the provider supports native tool calling, native tool calls may be batched when every call is independent and stage-scoped. Batch only calls whose paths, patterns, queries, and payloads are already known from accepted requirements, stage inputs, or prior tool results. Do not batch dependent read-then-write operations; if one call's parameters depend on another call's output, wait for the first result before issuing the dependent call.
 
 ## Output Handling

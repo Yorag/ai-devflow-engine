@@ -6,6 +6,7 @@ import hashlib
 from pathlib import Path
 import re
 import shlex
+import shutil
 import subprocess
 import time
 from typing import Any, Literal, Protocol
@@ -211,6 +212,7 @@ def run_bash_command(
     runner: Callable[..., object] | None = None,
     tool_input: ToolInput,
 ) -> ToolResult:
+    command = command.strip()
     decision = classify_verification_command(command, workspace_root=workspace.root)
     argv = list(decision.argv)
     if not decision.allowed:
@@ -231,14 +233,16 @@ def run_bash_command(
             changed_files=(),
         )
         return audit_failure or result
+    execution_mode = decision.execution_mode
+    cwd = decision.working_directory or workspace.root
 
     before = _workspace_snapshot(workspace)
     started = time.monotonic()
     try:
         raw = _run_command(
-            command if decision.execution_mode == "inspection" else argv,
-            execution_mode=decision.execution_mode,
-            cwd=workspace.root,
+            command if execution_mode == "inspection" else argv,
+            execution_mode=execution_mode,
+            cwd=cwd,
             timeout=tool_input.timeout_seconds,
             runner=runner,
         )
@@ -383,8 +387,12 @@ def _run_command(
             timeout=timeout,
         )
     else:
+        argv = list(command_or_argv)
+        resolved_executable = shutil.which(str(argv[0]))
+        if resolved_executable:
+            argv[0] = resolved_executable
         completed = subprocess.run(
-            list(command_or_argv),
+            argv,
             cwd=cwd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

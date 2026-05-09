@@ -21,6 +21,7 @@ from backend.app.api.error_codes import (
 )
 from backend.app.domain.enums import ToolRiskCategory, ToolRiskLevel
 from backend.app.domain.trace_context import TraceContext
+from backend.app.tools.risk import ToolConfirmationGrant
 
 
 NonEmptyRef = Annotated[str, Field(min_length=1)]
@@ -178,6 +179,7 @@ class ToolInput(_StrictBaseModel):
     coordination_key: NonEmptyRef
     side_effect_intent_ref: NonEmptyRef | None = None
     timeout_seconds: PositiveFloat | None = None
+    confirmation_grant: ToolConfirmationGrant | None = None
 
     _validate_input_payload = field_validator("input_payload")(_validate_json_object)
 

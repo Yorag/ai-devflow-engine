@@ -323,6 +323,7 @@ class ToolExecutionGate:
                     validation.audit_ref.audit_id if validation.audit_ref is not None else None
                 ),
                 timeout_seconds=validation.timeout_seconds,
+                confirmation_grant=request.confirmation_grant,
             )
         except ValidationError as exc:
             result = self._error_result(
