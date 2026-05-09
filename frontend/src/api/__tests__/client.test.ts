@@ -119,6 +119,38 @@ describe("createEventSource", () => {
 });
 
 describe("resource clients", () => {
+  it("sends an explicit empty JSON body for approval approve commands", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        expect(input).toBe("/api/approvals/approval-1/approve");
+        expect(init?.method).toBe("POST");
+        expect(init?.headers).toEqual({ "content-type": "application/json" });
+        expect(init?.body).toBe(JSON.stringify({}));
+        return jsonResponse({
+          approval_result: {
+            entry_id: "entry-approval-result",
+            run_id: "run-1",
+            type: "approval_result",
+            occurred_at: "2026-05-01T09:56:00.000Z",
+            approval_id: "approval-1",
+            approval_type: "solution_design_approval",
+            decision: "approved",
+            reason: null,
+            created_at: "2026-05-01T09:56:00.000Z",
+            next_stage_type: "code_generation",
+          },
+          control_item: null,
+        });
+      },
+    );
+
+    const { approveApproval } = await import("../approvals");
+
+    await approveApproval("approval-1", { fetcher: fetchMock });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("exposes the backend rerun command response shape", async () => {
     const responseBody: RunCommandResponse = {
       session: {

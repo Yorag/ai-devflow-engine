@@ -263,23 +263,47 @@ def test_grep_registers_and_returns_sorted_matches_via_tool_registry(
     assert harness.audit.intents == ["grep"]
 
 
-def test_grep_returns_structured_failure_when_rg_is_unavailable(
+def test_grep_falls_back_to_python_search_when_rg_is_unavailable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     harness = _build_harness(tmp_path)
+    (harness.workspace.root / "src" / "alpha.py").write_text(
+        "first line\nmatch alpha\n",
+        encoding="utf-8",
+    )
+    (harness.workspace.root / "src" / "beta.py").write_text(
+        "no hit here\n",
+        encoding="utf-8",
+    )
     monkeypatch.setattr("backend.app.workspace.tools.shutil.which", lambda name: None)
+    called = False
+
+    def fake_run(args, **kwargs):  # noqa: ANN001
+        nonlocal called
+        called = True
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("backend.app.workspace.tools.subprocess.run", fake_run)
 
     result = harness.registry.execute(
         _request(harness, {"pattern": "match", "path": "."}),
         _context(harness),
     )
 
-    assert result.status is ToolResultStatus.FAILED
-    assert result.error is not None
-    assert result.error.error_code is ErrorCode.INTERNAL_ERROR
-    assert result.error.safe_details == {"path": ".", "reason": "rg_unavailable"}
-    assert result.audit_ref is not None
+    assert result.status is ToolResultStatus.SUCCEEDED
+    assert result.output_payload == {
+        "matches": [
+            {
+                "path": "src/alpha.py",
+                "line_number": 2,
+                "snippet": "match alpha",
+                "snippet_truncated": False,
+            }
+        ],
+        "truncated": False,
+    }
+    assert called is False
     assert harness.audit.intents == ["grep"]
 
 

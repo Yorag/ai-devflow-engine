@@ -1210,6 +1210,20 @@ a {
   gap: 10px;
 }
 
+.approval-block--handled {
+  gap: 6px;
+}
+
+.approval-block--handled .feed-entry__summary,
+.approval-block--handled .feed-entry__body {
+  display: none;
+}
+
+.approval-block--handled h2 {
+  margin-bottom: 0;
+  font-size: 0.98rem;
+}
+
 .approval-block__readiness {
   display: grid;
   gap: 10px;

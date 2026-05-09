@@ -4,9 +4,17 @@ import { useState } from "react";
 import { approveApproval, rejectApproval } from "../../api/approvals";
 import type { ApiRequestOptions } from "../../api/client";
 import { apiQueryKeys } from "../../api/hooks";
-import type { ApprovalRequestFeedEntry, SessionStatus } from "../../api/types";
+import type {
+  ApprovalRequestFeedEntry,
+  ApprovalResultFeedEntry,
+  SessionStatus,
+} from "../../api/types";
 import { ErrorState } from "../errors/ErrorState";
-import { formatApprovalType, formatStatusLabel } from "../feed/display-labels";
+import {
+  formatApprovalType,
+  formatStatusLabel,
+  stageLabels,
+} from "../feed/display-labels";
 import { DeliveryReadinessNotice } from "./DeliveryReadinessNotice";
 import { RejectReasonForm } from "./RejectReasonForm";
 
@@ -34,6 +42,12 @@ type HistoricalApprovalState = {
   isCurrentRunTerminal: boolean;
 };
 
+type LocalHandledState = {
+  decision: ApprovalResultFeedEntry["decision"];
+  nextStageType: ApprovalResultFeedEntry["next_stage_type"];
+  reason: string | null;
+};
+
 export function ApprovalBlock({
   entry,
   sessionId = "",
@@ -47,11 +61,29 @@ export function ApprovalBlock({
   const [isBusy, setBusy] = useState(false);
   const [isRejectOpen, setRejectOpen] = useState(false);
   const [apiError, setApiError] = useState<unknown | null>(null);
+  const [localHandledState, setLocalHandledState] =
+    useState<LocalHandledState | null>(null);
   const actionState = resolveApprovalActionState(
     entry,
     currentRunId,
     currentSessionStatus,
   );
+  const handledState =
+    localHandledState ??
+    (entry.status === "approved" || entry.status === "rejected"
+      ? {
+          decision: entry.status,
+          nextStageType:
+            entry.approval_type === "solution_design_approval"
+              ? entry.status === "approved"
+                ? "code_generation"
+                : "solution_design"
+              : entry.status === "approved"
+                ? "delivery_integration"
+                : "code_generation",
+          reason: null,
+        }
+      : null);
   const disabledReason =
     entry.disabled_reason ??
     (actionState.isCurrentRunTerminal
@@ -77,7 +109,12 @@ export function ApprovalBlock({
     setBusy(true);
     setApiError(null);
     try {
-      await approveApproval(entry.approval_id, request ?? {});
+      const response = await approveApproval(entry.approval_id, request ?? {});
+      setLocalHandledState({
+        decision: response.approval_result.decision,
+        nextStageType: response.approval_result.next_stage_type,
+        reason: response.approval_result.reason,
+      });
       setRejectOpen(false);
       await invalidateWorkspaceQueries();
     } catch (error) {
@@ -95,7 +132,16 @@ export function ApprovalBlock({
     setBusy(true);
     setApiError(null);
     try {
-      await rejectApproval(entry.approval_id, { reason }, request ?? {});
+      const response = await rejectApproval(
+        entry.approval_id,
+        { reason },
+        request ?? {},
+      );
+      setLocalHandledState({
+        decision: response.approval_result.decision,
+        nextStageType: response.approval_result.next_stage_type,
+        reason: response.approval_result.reason,
+      });
       setRejectOpen(false);
       await invalidateWorkspaceQueries();
     } catch (error) {
@@ -107,67 +153,90 @@ export function ApprovalBlock({
 
   return (
     <article
-      className="feed-entry feed-entry--approval-request approval-block"
+      className={[
+        "feed-entry",
+        "feed-entry--approval-request",
+        "approval-block",
+        handledState ? "approval-block--handled" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       aria-label="Approval request feed entry"
     >
       <header className="feed-entry__header">
         <span>审批请求</span>
-        <strong>{formatStatusLabel(entry.status)}</strong>
+        <strong>{formatStatusLabel(handledState?.decision ?? entry.status)}</strong>
       </header>
-      <h2>{`等待${formatApprovalType(entry.approval_type)}`}</h2>
-      <p className="feed-entry__summary">{entry.title}</p>
-      <p className="feed-entry__body">{entry.approval_object_excerpt}</p>
-      {entry.risk_excerpt ? (
-        <p className="feed-entry__supporting">{entry.risk_excerpt}</p>
-      ) : null}
-      <DeliveryReadinessNotice entry={entry} onOpenSettings={onOpenSettings} />
-      {disabledReason ? (
-        <p className="feed-entry__supporting">{disabledReason}</p>
-      ) : null}
-      {apiError ? (
-        <ErrorState
-          error={apiError}
-          actionLabel={
-            onOpenSettings && errorHasCode(apiError, "delivery_snapshot_not_ready")
-              ? "Open settings"
-              : undefined
-          }
-          onAction={
-            onOpenSettings && errorHasCode(apiError, "delivery_snapshot_not_ready")
-              ? onOpenSettings
-              : undefined
-          }
-        />
-      ) : null}
-      {actionState.showPrimaryActions ? (
-        <div className="feed-entry__actions" aria-label="Approval actions">
-          <button
-            type="button"
-            disabled={!actionState.canApprove || isBusy}
-            onClick={handleApprove}
-          >
-            {isBusy ? "正在提交批准" : "批准"}
-          </button>
-          <button
-            type="button"
-            disabled={!actionState.canReject || isBusy}
-            onClick={() => setRejectOpen((current) => !current)}
-          >
-            退回
-          </button>
-        </div>
-      ) : null}
-      {isRejectOpen && actionState.canReject ? (
-        <RejectReasonForm
-          isBusy={isBusy}
-          errorMessage={null}
-          onCancel={() => {
-            setRejectOpen(false);
-            setApiError(null);
-          }}
-          onSubmit={handleReject}
-        />
-      ) : null}
+      {handledState ? (
+        <>
+          <h2>{`${formatApprovalType(entry.approval_type)}${formatDecisionSuffix(handledState.decision)}`}</h2>
+          <p className="feed-entry__supporting">
+            下一步：{stageLabels[handledState.nextStageType]}
+          </p>
+          {handledState.reason ? (
+            <p className="feed-entry__supporting">{handledState.reason}</p>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <h2>{`等待${formatApprovalType(entry.approval_type)}`}</h2>
+          <p className="feed-entry__summary">{entry.title}</p>
+          <p className="feed-entry__body">{entry.approval_object_excerpt}</p>
+          {entry.risk_excerpt ? (
+            <p className="feed-entry__supporting">{entry.risk_excerpt}</p>
+          ) : null}
+          <DeliveryReadinessNotice entry={entry} onOpenSettings={onOpenSettings} />
+          {disabledReason ? (
+            <p className="feed-entry__supporting">{disabledReason}</p>
+          ) : null}
+          {apiError ? (
+            <ErrorState
+              error={apiError}
+              actionLabel={
+                onOpenSettings &&
+                errorHasCode(apiError, "delivery_snapshot_not_ready")
+                  ? "Open settings"
+                  : undefined
+              }
+              onAction={
+                onOpenSettings &&
+                errorHasCode(apiError, "delivery_snapshot_not_ready")
+                  ? onOpenSettings
+                  : undefined
+              }
+            />
+          ) : null}
+          {actionState.showPrimaryActions ? (
+            <div className="feed-entry__actions" aria-label="Approval actions">
+              <button
+                type="button"
+                disabled={!actionState.canApprove || isBusy}
+                onClick={handleApprove}
+              >
+                {isBusy ? "正在提交批准" : "批准"}
+              </button>
+              <button
+                type="button"
+                disabled={!actionState.canReject || isBusy}
+                onClick={() => setRejectOpen((current) => !current)}
+              >
+                退回
+              </button>
+            </div>
+          ) : null}
+          {isRejectOpen && actionState.canReject ? (
+            <RejectReasonForm
+              isBusy={isBusy}
+              errorMessage={null}
+              onCancel={() => {
+                setRejectOpen(false);
+                setApiError(null);
+              }}
+              onSubmit={handleReject}
+            />
+          ) : null}
+        </>
+      )}
     </article>
   );
 }
@@ -230,4 +299,10 @@ function errorHasCode(error: unknown, code: string): boolean {
     return false;
   }
   return (error as { code?: unknown }).code === code;
+}
+
+function formatDecisionSuffix(
+  decision: ApprovalResultFeedEntry["decision"],
+): string {
+  return decision === "approved" ? "已批准" : "已退回";
 }

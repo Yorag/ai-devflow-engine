@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import re
+import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -169,6 +170,14 @@ class RuntimeExecutionDispatcher(Protocol):
         resume_payload: RuntimeResumePayload,
         trace_context: TraceContext,
     ) -> RuntimeEngineResult | None: ...
+
+    def resume_async(
+        self,
+        *,
+        interrupt: RuntimeInterrupt,
+        resume_payload: RuntimeResumePayload,
+        trace_context: TraceContext,
+    ) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -436,6 +445,49 @@ class RuntimeExecutionService:
             trace_context=trace_context,
             result=result,
         )
+
+    def resume_async(
+        self,
+        *,
+        interrupt: RuntimeInterrupt,
+        resume_payload: RuntimeResumePayload,
+        trace_context: TraceContext,
+    ) -> None:
+        worker = threading.Thread(
+            target=self._resume_async_worker,
+            kwargs={
+                "interrupt": interrupt,
+                "resume_payload": resume_payload,
+                "trace_context": trace_context,
+            },
+            name=f"runtime-resume-{interrupt.run_id}",
+            daemon=True,
+        )
+        worker.start()
+
+    def _resume_async_worker(
+        self,
+        *,
+        interrupt: RuntimeInterrupt,
+        resume_payload: RuntimeResumePayload,
+        trace_context: TraceContext,
+    ) -> None:
+        try:
+            self.resume(
+                interrupt=interrupt,
+                resume_payload=resume_payload,
+                trace_context=trace_context,
+            )
+        except Exception:
+            _LOGGER.exception(
+                "Runtime async resume failed.",
+                extra={
+                    "run_id": interrupt.run_id,
+                    "stage_run_id": interrupt.stage_run_id,
+                    "approval_id": interrupt.interrupt_ref.approval_id,
+                    "tool_confirmation_id": interrupt.interrupt_ref.tool_confirmation_id,
+                },
+            )
 
     @staticmethod
     def _should_auto_continue(result: RuntimeEngineResult | None) -> bool:

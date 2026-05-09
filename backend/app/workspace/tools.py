@@ -7,8 +7,10 @@ import json
 import posixpath
 from pathlib import Path
 from pathlib import PureWindowsPath
+import re
 import shutil
 import subprocess
+import time
 from typing import Any
 
 from backend.app.api.error_codes import ErrorCode
@@ -515,7 +517,7 @@ class GrepTool:
 
     @property
     def description(self) -> str:
-        return "Search workspace text content with local ripgrep."
+        return "Search workspace text content with local ripgrep or a Python fallback."
 
     @property
     def input_schema(self) -> Mapping[str, object]:
@@ -899,11 +901,12 @@ def grep(
         )
     executable = shutil.which(options.executable)
     if executable is None:
-        return _tool_error_result(
-            tool_input,
-            tool_name="grep",
-            error_code=ErrorCode.INTERNAL_ERROR,
-            safe_details={"path": normalized_path, "reason": "rg_unavailable"},
+        return _python_grep_result(
+            resolved,
+            workspace=workspace,
+            pattern=pattern,
+            options=options,
+            tool_input=tool_input,
         )
 
     command = [
@@ -1142,6 +1145,136 @@ def _grep_result_item(
         snippet=snippet,
         snippet_truncated=snippet_truncated,
     )
+
+
+def _python_grep_result(
+    root: Path,
+    *,
+    workspace: RunWorkspace,
+    pattern: str,
+    options: WorkspaceGrepOptions,
+    tool_input: ToolInput,
+) -> ToolResult:
+    try:
+        compiled = re.compile(pattern)
+    except re.error:
+        return _tool_error_result(
+            tool_input,
+            tool_name="grep",
+            error_code=ErrorCode.INTERNAL_ERROR,
+            safe_details={
+                "path": _relative_path(workspace, root) or ".",
+                "reason": "rg_failed",
+            },
+        )
+
+    matches: list[GrepResultItem] = []
+    truncated = False
+    started_at = time.monotonic()
+
+    for candidate in _python_grep_candidates(root, workspace=workspace, options=options):
+        if tool_input.timeout_seconds is not None and (
+            time.monotonic() - started_at >= tool_input.timeout_seconds
+        ):
+            return _tool_error_result(
+                tool_input,
+                tool_name="grep",
+                error_code=ErrorCode.TOOL_TIMEOUT,
+                safe_details={"timeout_seconds": tool_input.timeout_seconds},
+            )
+        try:
+            raw_content = candidate.read_bytes()
+        except OSError:
+            continue
+        if b"\0" in raw_content:
+            continue
+        try:
+            content = raw_content.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+
+        relative_path = _relative_path(workspace, candidate)
+        for line_number, line in enumerate(content.splitlines(), start=1):
+            if tool_input.timeout_seconds is not None and (
+                time.monotonic() - started_at >= tool_input.timeout_seconds
+            ):
+                return _tool_error_result(
+                    tool_input,
+                    tool_name="grep",
+                    error_code=ErrorCode.TOOL_TIMEOUT,
+                    safe_details={"timeout_seconds": tool_input.timeout_seconds},
+                )
+            if compiled.search(line) is None:
+                continue
+            snippet, snippet_truncated, blocked = _grep_snippet(
+                line,
+                limit=options.snippet_char_limit,
+            )
+            if blocked:
+                return _tool_error_result(
+                    tool_input,
+                    tool_name="grep",
+                    error_code=ErrorCode.INTERNAL_ERROR,
+                    safe_details={
+                        "path": relative_path,
+                        "line_number": line_number,
+                        "reason": "grep_match_blocked",
+                    },
+                )
+            if len(matches) >= options.max_results:
+                truncated = True
+                break
+            matches.append(
+                GrepResultItem(
+                    path=relative_path,
+                    line_number=line_number,
+                    snippet=snippet,
+                    snippet_truncated=snippet_truncated,
+                )
+            )
+        if truncated:
+            break
+
+    ordered_matches = sorted(
+        matches,
+        key=lambda item: (item.path, item.line_number, item.snippet),
+    )
+    return _grep_success_result(
+        tool_input,
+        matches=ordered_matches,
+        truncated=truncated,
+    )
+
+
+def _python_grep_candidates(
+    root: Path,
+    *,
+    workspace: RunWorkspace,
+    options: WorkspaceGrepOptions,
+) -> Sequence[Path]:
+    if root.is_file():
+        relative_path = _relative_path(workspace, root)
+        if _is_excluded_path(relative_path, workspace):
+            return ()
+        if _is_grep_glob_excluded(relative_path, options.excluded_globs):
+            return ()
+        if root.suffix.lower() in _RICH_MEDIA_SUFFIXES:
+            return ()
+        return (root,)
+
+    candidates: list[Path] = []
+    for candidate in root.rglob("*"):
+        if not candidate.is_file():
+            continue
+        relative_path = _relative_path(workspace, candidate)
+        if _is_excluded_path(relative_path, workspace):
+            continue
+        if _is_grep_glob_excluded(relative_path, options.excluded_globs):
+            continue
+        if candidate.suffix.lower() in _RICH_MEDIA_SUFFIXES:
+            continue
+        candidates.append(candidate)
+    return candidates
 
 
 def _grep_snippet(text: str, *, limit: int) -> tuple[str, bool, bool]:

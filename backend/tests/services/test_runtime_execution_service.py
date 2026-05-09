@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import json
 from pathlib import Path
 from types import SimpleNamespace
+import threading
 from typing import Any
 
 from backend.app.db.base import DatabaseRole
@@ -353,6 +354,46 @@ def test_resume_reconstructs_context_and_calls_runtime_engine_resume(
     assert call.resume_payload == resume_payload
     assert type(call.runtime_port).__name__ == "GraphRuntimeCommandPort"
     assert type(call.checkpoint_port).__name__ == "GraphCheckpointPort"
+
+
+def test_resume_async_spawns_background_worker_without_waiting(
+    tmp_path: Path,
+) -> None:
+    fixture = _start_first_run(tmp_path)
+    service = RuntimeExecutionService(
+        database_manager=fixture.manager,
+        environment_settings=fixture.settings,
+        engine_factory=lambda _factory_input: CapturingRuntimeEngine(),
+    )
+    interrupt = _runtime_interrupt(fixture)
+    resume_payload = RuntimeResumePayload(
+        resume_id="resume-runtime-dispatch-async",
+        payload_ref="payload-runtime-dispatch-async",
+        values={"answer": "Continue."},
+    )
+    started = threading.Event()
+    release = threading.Event()
+    recorded: list[tuple[RuntimeInterrupt, RuntimeResumePayload, TraceContext]] = []
+
+    def blocking_resume(*, interrupt, resume_payload, trace_context):  # noqa: ANN001
+        recorded.append((interrupt, resume_payload, trace_context))
+        started.set()
+        release.wait(timeout=5)
+        return None
+
+    service.resume = blocking_resume  # type: ignore[method-assign]
+
+    service.resume_async(
+        interrupt=interrupt,
+        resume_payload=resume_payload,
+        trace_context=fixture.command.trace_context,
+    )
+
+    assert started.wait(timeout=2)
+    assert recorded == [
+        (interrupt, resume_payload, fixture.command.trace_context)
+    ]
+    release.set()
 
 
 def test_resume_failure_cancels_pending_graph_interrupt(

@@ -571,6 +571,11 @@ export type ApprovalResultFeedEntry = FeedEntryBase & {
   next_stage_type: StageType;
 };
 
+export type ApprovalCommandResponse = {
+  approval_result: ApprovalResultFeedEntry;
+  control_item: ControlItemFeedEntry | null;
+};
+
 export type DeliveryResultFeedEntry = FeedEntryBase & {
   type: "delivery_result";
   delivery_record_id: string;

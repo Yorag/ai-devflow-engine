@@ -60,12 +60,23 @@ from backend.tests.services.test_approval_commands import (
 class CapturingRuntimeDispatcher:
     def __init__(self) -> None:
         self.resumes = []
+        self.resume_async_calls = []
 
     def dispatch_started_run(self, command) -> None:  # noqa: ANN001
         raise AssertionError("approval command should not dispatch a new run")
 
     def resume(self, *, interrupt, resume_payload, trace_context):  # noqa: ANN001
         self.resumes.append(
+            {
+                "interrupt": interrupt,
+                "resume_payload": resume_payload,
+                "trace_context": trace_context,
+            }
+        )
+        return None
+
+    def resume_async(self, *, interrupt, resume_payload, trace_context):  # noqa: ANN001
+        self.resume_async_calls.append(
             {
                 "interrupt": interrupt,
                 "resume_payload": resume_payload,
@@ -419,8 +430,9 @@ def test_post_approval_approve_accepts_solution_design_and_returns_approval_resu
         )
 
     assert response.status_code == 200
-    assert len(app.state.runtime_execution_dispatcher.resumes) == 1
-    resume = app.state.runtime_execution_dispatcher.resumes[0]
+    assert app.state.runtime_execution_dispatcher.resumes == []
+    assert len(app.state.runtime_execution_dispatcher.resume_async_calls) == 1
+    resume = app.state.runtime_execution_dispatcher.resume_async_calls[0]
     assert resume["interrupt"].interrupt_ref.interrupt_id == "interrupt-approval-1"
     assert resume["resume_payload"].values == {
         "decision": "approved",
@@ -460,6 +472,8 @@ def test_post_approval_reject_requires_reason_and_returns_control_item(
     assert body["approval_result"]["reason"] == "Missing regression evidence."
     assert body["control_item"]["control_type"] == "rollback"
     assert body["control_item"]["target_stage_type"] == "code_generation"
+    assert app.state.runtime_execution_dispatcher.resumes == []
+    assert len(app.state.runtime_execution_dispatcher.resume_async_calls) == 1
 
 
 def test_post_approval_approve_returns_paused_conflict_without_mutation(
@@ -545,7 +559,7 @@ def test_post_approval_approve_commits_real_snapshot_when_graph_port_resume_woul
         response = client.post(f"/api/approvals/{approval_id}/approve", json={})
 
     assert response.status_code == 200
-    assert len(app.state.runtime_execution_dispatcher.resumes) == 1
+    assert len(app.state.runtime_execution_dispatcher.resume_async_calls) == 1
     assert app.state.h44_runtime_port.calls == []
     with manager.session(DatabaseRole.RUNTIME) as session:
         approval = session.get(ApprovalRequestModel, approval_id)

@@ -103,16 +103,19 @@ describe("ApprovalBlock", () => {
 
   it("submits approve inline for the current pending run and invalidates workspace queries", async () => {
     vi.mocked(approveApproval).mockResolvedValue({
-      entry_id: "entry-approval-result",
-      run_id: "run-waiting-approval",
-      type: "approval_result",
-      occurred_at: "2026-05-01T09:56:00.000Z",
-      approval_id: "approval-code-review",
-      approval_type: "code_review_approval",
-      decision: "approved",
-      reason: null,
-      created_at: "2026-05-01T09:56:00.000Z",
-      next_stage_type: "delivery_integration",
+      approval_result: {
+        entry_id: "entry-approval-result",
+        run_id: "run-waiting-approval",
+        type: "approval_result",
+        occurred_at: "2026-05-01T09:56:00.000Z",
+        approval_id: "approval-code-review",
+        approval_type: "code_review_approval",
+        decision: "approved",
+        reason: null,
+        created_at: "2026-05-01T09:56:00.000Z",
+        next_stage_type: "delivery_integration",
+      },
+      control_item: null,
     });
 
     const { queryClient } = renderApprovalBlock(buildApprovalEntry());
@@ -136,18 +139,63 @@ describe("ApprovalBlock", () => {
     });
   });
 
+  it("collapses into a compact handled entry immediately after approve succeeds", async () => {
+    vi.mocked(approveApproval).mockResolvedValue({
+      approval_result: {
+        entry_id: "entry-approval-result",
+        run_id: "run-waiting-approval",
+        type: "approval_result",
+        occurred_at: "2026-05-01T09:56:00.000Z",
+        approval_id: "approval-code-review",
+        approval_type: "code_review_approval",
+        decision: "approved",
+        reason: null,
+        created_at: "2026-05-01T09:56:00.000Z",
+        next_stage_type: "delivery_integration",
+      },
+      control_item: null,
+    });
+
+    renderApprovalBlock(buildApprovalEntry());
+
+    fireEvent.click(screen.getByRole("button", { name: "批准" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "批准" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "退回" })).toBeNull();
+      expect(screen.getByText("已批准")).toBeTruthy();
+      expect(screen.getByText("代码评审审批已批准")).toBeTruthy();
+      expect(screen.getByText("下一步：交付集成")).toBeTruthy();
+    });
+  });
+
   it("expands an inline reject form, requires a reason, and submits it through rejectApproval", async () => {
     vi.mocked(rejectApproval).mockResolvedValue({
-      entry_id: "entry-approval-result",
-      run_id: "run-waiting-approval",
-      type: "approval_result",
-      occurred_at: "2026-05-01T09:56:00.000Z",
-      approval_id: "approval-code-review",
-      approval_type: "code_review_approval",
-      decision: "rejected",
-      reason: "The rollback explanation is still incomplete.",
-      created_at: "2026-05-01T09:56:00.000Z",
-      next_stage_type: "code_generation",
+      approval_result: {
+        entry_id: "entry-approval-result",
+        run_id: "run-waiting-approval",
+        type: "approval_result",
+        occurred_at: "2026-05-01T09:56:00.000Z",
+        approval_id: "approval-code-review",
+        approval_type: "code_review_approval",
+        decision: "rejected",
+        reason: "The rollback explanation is still incomplete.",
+        created_at: "2026-05-01T09:56:00.000Z",
+        next_stage_type: "code_generation",
+      },
+      control_item: {
+        entry_id: "entry-control-item",
+        run_id: "run-waiting-approval",
+        type: "control_item",
+        occurred_at: "2026-05-01T09:56:00.000Z",
+        control_record_id: "control-1",
+        control_type: "rollback",
+        source_stage_type: "code_review",
+        target_stage_type: "code_generation",
+        title: "Rollback created",
+        summary: "Return to code generation.",
+        payload_ref: "approval-decision:1",
+      },
     });
 
     renderApprovalBlock(buildApprovalEntry());
@@ -171,6 +219,52 @@ describe("ApprovalBlock", () => {
         { reason: "The rollback explanation is still incomplete." },
         expect.anything(),
       );
+    });
+  });
+
+  it("collapses into a compact handled entry immediately after reject succeeds", async () => {
+    vi.mocked(rejectApproval).mockResolvedValue({
+      approval_result: {
+        entry_id: "entry-approval-result",
+        run_id: "run-waiting-approval",
+        type: "approval_result",
+        occurred_at: "2026-05-01T09:56:00.000Z",
+        approval_id: "approval-code-review",
+        approval_type: "code_review_approval",
+        decision: "rejected",
+        reason: "The rollback explanation is still incomplete.",
+        created_at: "2026-05-01T09:56:00.000Z",
+        next_stage_type: "code_generation",
+      },
+      control_item: {
+        entry_id: "entry-control-item",
+        run_id: "run-waiting-approval",
+        type: "control_item",
+        occurred_at: "2026-05-01T09:56:00.000Z",
+        control_record_id: "control-1",
+        control_type: "rollback",
+        source_stage_type: "code_review",
+        target_stage_type: "code_generation",
+        title: "Rollback created",
+        summary: "Return to code generation.",
+        payload_ref: "approval-decision:1",
+      },
+    });
+
+    renderApprovalBlock(buildApprovalEntry());
+
+    fireEvent.click(screen.getByRole("button", { name: "退回" }));
+    fireEvent.change(screen.getByLabelText("退回原因"), {
+      target: { value: "The rollback explanation is still incomplete." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "提交退回原因" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "批准" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "退回" })).toBeNull();
+      expect(screen.getByText("已退回")).toBeTruthy();
+      expect(screen.getByText("代码评审审批已退回")).toBeTruthy();
+      expect(screen.getByText("下一步：代码生成")).toBeTruthy();
     });
   });
 
