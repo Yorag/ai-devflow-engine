@@ -336,21 +336,23 @@ const stageNode: TopLevelFeedEntry = {
       occurred_at: "2026-05-01T09:18:00.000Z",
       title: "Solution design result",
       summary: "Workspace shell design is ready for approval.",
-      content: [
-        "方案概述",
-        "- Keep the narrative feed as the central workspace column and move complete detail to the inspector rail.",
-        "",
-        "影响范围",
-        "- frontend/src/features/feed/StageNode.tsx",
-        "- frontend/src/features/feed/StageNodeItems.tsx",
-        "",
-        "实施计划",
-        "- 1. Refine the stage shell layout so the main transcript stays readable during long runs.",
-        "- 2. Merge tool call and diff preview into one execution step.",
-        "",
-        "验证策略",
-        "- npm --prefix frontend run test -- StageNode",
-      ].join("\n"),
+      content: JSON.stringify(
+        {
+          technical_plan:
+            "Keep the narrative feed as the central workspace column and move complete detail to the inspector rail.",
+          impacted_files: [
+            "frontend/src/features/feed/StageNode.tsx",
+            "frontend/src/features/feed/StageNodeItems.tsx",
+          ],
+          implementation_plan: [
+            "Refine the stage shell layout so the main transcript stays readable during long runs.",
+            "Merge tool call and diff preview into one execution step.",
+          ],
+          test_strategy: ["npm --prefix frontend run test -- StageNode"],
+        },
+        null,
+        2,
+      ),
       artifact_refs: ["solution-design-result-1"],
       metrics: {},
     },
@@ -650,18 +652,22 @@ export const mockCodeGenerationStageNode: ExecutionNodeProjection = {
       occurred_at: "2026-05-04T09:19:00.000Z",
       title: "Code generation result",
       summary: "Feed-specific renderers are ready for review.",
-      content: [
-        "实现结果",
-        "- Feed-specific renderers now merge tool calls and diff previews into one readable execution step.",
-        "",
-        "已修改文件",
-        "- frontend/src/features/feed/StageNodeItems.tsx",
-        "- frontend/src/features/feed/ToolCallItem.tsx",
-        "",
-        "已完成内容",
-        "- Transcript-style stage rows now hide low-signal internal records.",
-        "- Diff snippets remain available inline with the related tool execution.",
-      ].join("\n"),
+      content: JSON.stringify(
+        {
+          implementation_notes:
+            "Feed-specific renderers now merge tool calls and diff previews into one readable execution step.",
+          changed_files: [
+            "frontend/src/features/feed/StageNodeItems.tsx",
+            "frontend/src/features/feed/ToolCallItem.tsx",
+          ],
+          completed_steps: [
+            "Transcript-style stage rows now hide low-signal internal records.",
+            "Diff snippets remain available inline with the related tool execution.",
+          ],
+        },
+        null,
+        2,
+      ),
       artifact_refs: ["codegen-result-1"],
       metrics: {},
     },
@@ -708,16 +714,18 @@ export const mockTestGenerationExecutionStageNode: ExecutionNodeProjection = {
       occurred_at: "2026-05-04T09:31:00.000Z",
       title: "Test execution result",
       summary: "Pytest finished with one failure and one uncovered branch.",
-      content: [
-        "测试结果",
-        "- Pytest finished with one failure and one uncovered branch.",
-        "",
-        "失败项",
-        "- src/features/feed/__tests__/StageNode.test.tsx::renders diff preview",
-        "",
-        "测试缺口",
-        "- no regression yet covers long stderr folding.",
-      ].join("\n"),
+      content: JSON.stringify(
+        {
+          test_execution_result:
+            "Pytest finished with one failure and one uncovered branch.",
+          failed_test_refs: [
+            "src/features/feed/__tests__/StageNode.test.tsx::renders diff preview",
+          ],
+          test_gap_report: ["no regression yet covers long stderr folding."],
+        },
+        null,
+        2,
+      ),
       artifact_refs: ["test-result-1"],
       metrics: {},
     },
@@ -819,13 +827,16 @@ export const backendContractTestGenerationExecutionStageNode: ExecutionNodeProje
       occurred_at: "2026-05-05T02:18:00.000Z",
       title: "Backend contract test result",
       summary: "Contract payload passed schema validation.",
-      content: [
-        "测试结果",
-        "- Contract payload passed schema validation.",
-        "",
-        "测试缺口",
-        "- MetricSet serialized only applicable values; skipped_test_count was omitted.",
-      ].join("\n"),
+      content: JSON.stringify(
+        {
+          test_execution_result: "Contract payload passed schema validation.",
+          test_gap_report: [
+            "MetricSet serialized only applicable values; skipped_test_count was omitted.",
+          ],
+        },
+        null,
+        2,
+      ),
       artifact_refs: ["test-result-ref-contract"],
       metrics: {},
     },

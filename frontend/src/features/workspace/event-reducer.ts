@@ -17,6 +17,7 @@ import type {
   ToolConfirmationFeedEntry,
   TopLevelFeedEntry,
 } from "../../api/types";
+import { sortFeedEntries } from "../feed/feed-sort";
 import type { WorkspaceStoreState } from "./workspace-store";
 
 type FeedIdentity = string;
@@ -329,11 +330,13 @@ function upsertFeedEntry(
   );
 
   if (index === -1) {
-    return [...entries, incoming];
+    return sortFeedEntriesByOccurredAt([...entries, incoming]);
   }
 
-  return entries.map((entry, entryIndex) =>
-    entryIndex === index ? incoming : entry,
+  return sortFeedEntriesByOccurredAt(
+    entries.map((entry, entryIndex) =>
+      entryIndex === index ? incoming : entry,
+    ),
   );
 }
 
@@ -452,6 +455,12 @@ function getFeedIdentity(entry: TopLevelFeedEntry): FeedIdentity {
     case "system_status":
       return `${entry.type}:${entry.run_id}:${entry.status}`;
   }
+}
+
+function sortFeedEntriesByOccurredAt(
+  entries: TopLevelFeedEntry[],
+): TopLevelFeedEntry[] {
+  return sortFeedEntries(entries);
 }
 
 function mergeStageNodeItems(

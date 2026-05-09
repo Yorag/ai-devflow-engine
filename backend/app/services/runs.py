@@ -553,20 +553,6 @@ class RunLifecycleService:
                 trace_context=event_trace,
                 occurred_at=started_at,
             )
-            stage_node = self._build_stage_started_projection(
-                run_id=run_id,
-                stage=stage,
-                occurred_at=started_at,
-            )
-            self._require_events().append(
-                DomainEventType.STAGE_STARTED,
-                payload={"stage_node": stage_node.model_dump(mode="json")},
-                trace_context=event_trace,
-                session_id=session.session_id,
-                run_id=run_id,
-                stage_run_id=stage_run_id,
-                occurred_at=started_at,
-            )
             message_item = MessageFeedEntry(
                 entry_id=_bounded_id("entry", uuid4().hex),
                 run_id=run_id,
@@ -580,6 +566,20 @@ class RunLifecycleService:
             self._require_events().append(
                 DomainEventType.SESSION_MESSAGE_APPENDED,
                 payload={"message_item": message_item.model_dump(mode="json")},
+                trace_context=event_trace,
+                session_id=session.session_id,
+                run_id=run_id,
+                stage_run_id=stage_run_id,
+                occurred_at=started_at,
+            )
+            stage_node = self._build_stage_started_projection(
+                run_id=run_id,
+                stage=stage,
+                occurred_at=started_at,
+            )
+            self._require_events().append(
+                DomainEventType.STAGE_STARTED,
+                payload={"stage_node": stage_node.model_dump(mode="json")},
                 trace_context=event_trace,
                 session_id=session.session_id,
                 run_id=run_id,

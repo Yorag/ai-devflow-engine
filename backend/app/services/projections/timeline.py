@@ -25,6 +25,7 @@ from backend.app.services.publication_boundary import (
     PublicationBoundaryService,
     PublicationBoundaryServiceError,
 )
+from backend.app.services.projections.feed_sort import feed_entry_sort_key
 from backend.app.services.stage_feed_projection import hydrate_stage_node_from_artifacts
 
 
@@ -133,7 +134,7 @@ class TimelineProjectionService:
             if entry is None or entry.run_id != run_id:
                 continue
             entries = self._upsert_feed_entry(entries, entry)
-        return sorted(entries, key=lambda entry: entry.occurred_at)
+        return sorted(entries, key=feed_entry_sort_key)
 
     def _get_visible_run(
         self,

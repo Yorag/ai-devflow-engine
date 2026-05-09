@@ -167,7 +167,8 @@ function ProminentItem({
   item: StageItemProjection;
   stepIndex: number;
 }): JSX.Element {
-  const readableContent = readReadableContent(item.content);
+  const readableContent =
+    item.type === "result" ? readResultContent(item.content) : readReadableContent(item.content);
   const resultContent =
     item.type === "result" ? parseResultContent(readableContent?.text ?? "") : null;
 
@@ -538,6 +539,16 @@ function readReadableContent(
   return { text: trimmed, source: "plain" };
 }
 
+function readResultContent(
+  content: string | null,
+): { text: string; source: "plain" | "structured" } | null {
+  const trimmed = content?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return { text: trimmed, source: "plain" };
+}
+
 function readStructuredSummary(value: string): string | null {
   if (!value.startsWith("{") && !value.startsWith("[")) {
     return null;
@@ -581,6 +592,11 @@ function parseResultContent(text: string): ResultSection[] | null {
   const trimmed = text.trim();
   if (!trimmed) {
     return null;
+  }
+
+  const structuredSections = parseStructuredResultContent(trimmed);
+  if (structuredSections) {
+    return structuredSections;
   }
 
   const blocks = trimmed
@@ -627,6 +643,153 @@ function parseResultContent(text: string): ResultSection[] | null {
   }
 
   return sections.length > 0 ? sections : null;
+}
+
+function parseStructuredResultContent(text: string): ResultSection[] | null {
+  if (!text.startsWith("{") && !text.startsWith("[")) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    const sections = resultSectionsFromStructuredValue(parsed);
+    return sections.length > 0 ? sections : null;
+  } catch {
+    return null;
+  }
+}
+
+function resultSectionsFromStructuredValue(value: unknown): ResultSection[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return [];
+  }
+
+  const record = value as Record<string, unknown>;
+  const sections: ResultSection[] = [];
+
+  for (const [key, raw] of Object.entries(record)) {
+    const title = formatResultKey(key);
+    const section = resultSectionFromValue(title, raw);
+    if (section) {
+      sections.push(section);
+    }
+  }
+
+  return sections;
+}
+
+function resultSectionFromValue(
+  title: string,
+  value: unknown,
+): ResultSection | null {
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text ? { type: "paragraph", title, text } : null;
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return { type: "paragraph", title, text: String(value) };
+  }
+
+  if (Array.isArray(value)) {
+    const items = value
+      .map((item) => formatStructuredListItem(item))
+      .filter((item): item is string => Boolean(item));
+    return items.length > 0 ? { type: "list", title, items } : null;
+  }
+
+  if (value && typeof value === "object") {
+    const nested = value as Record<string, unknown>;
+    const nestedItems = Object.entries(nested)
+      .map(([nestedKey, nestedValue]) => {
+        const formattedValue = formatStructuredInlineValue(nestedValue);
+        if (!formattedValue) {
+          return null;
+        }
+        return `${formatResultKey(nestedKey)}: ${formattedValue}`;
+      })
+      .filter((item): item is string => Boolean(item));
+    return nestedItems.length > 0 ? { type: "list", title, items: nestedItems } : null;
+  }
+
+  return null;
+}
+
+function formatStructuredListItem(value: unknown): string | null {
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text || null;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (value && typeof value === "object") {
+    const formatted = formatStructuredInlineValue(value);
+    return formatted || null;
+  }
+  return null;
+}
+
+function formatStructuredInlineValue(value: unknown): string | null {
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text || null;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((item) => formatStructuredInlineValue(item))
+      .filter((item): item is string => Boolean(item));
+    return parts.length > 0 ? parts.join(", ") : null;
+  }
+  if (value && typeof value === "object") {
+    const parts = Object.entries(value as Record<string, unknown>)
+      .map(([key, nestedValue]) => {
+        const formatted = formatStructuredInlineValue(nestedValue);
+        return formatted ? `${formatResultKey(key)}: ${formatted}` : null;
+      })
+      .filter((item): item is string => Boolean(item));
+    return parts.length > 0 ? parts.join("；") : null;
+  }
+  return null;
+}
+
+function formatResultKey(value: string): string {
+  const labels: Record<string, string> = {
+    structured_requirement: "需求",
+    acceptance_criteria: "验收条件",
+    clarification_summary: "澄清结论",
+    assumptions: "关键假设",
+    non_goals: "非目标",
+    open_questions: "待确认问题",
+    analysis_notes: "分析说明",
+    technical_plan: "方案",
+    implementation_plan: "实施计划",
+    impacted_files: "影响范围",
+    api_design: "接口设计",
+    data_flow_design: "数据流设计",
+    risks: "风险",
+    test_strategy: "验证策略",
+    validation_report: "校验结论",
+    changed_files: "修改文件",
+    implementation_notes: "实现说明",
+    completed_steps: "已完成内容",
+    remaining_steps: "剩余工作",
+    generated_tests: "新增测试",
+    executed_tests: "执行内容",
+    test_execution_result: "测试结果",
+    test_gap_report: "测试缺口",
+    failed_test_refs: "失败项",
+    review_report: "评审结论",
+    issue_list: "问题列表",
+    risk_assessment: "风险评估",
+    fix_requirements: "修复要求",
+    regression_decision: "回归建议",
+    summary: "摘要",
+  };
+  return labels[value] ?? formatLabel(value);
 }
 
 function isBulletLine(line: string): boolean {

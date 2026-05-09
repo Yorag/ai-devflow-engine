@@ -441,8 +441,8 @@ def test_session_service_start_run_from_new_requirement_creates_first_run_state(
     assert event_types == [
         "pipeline_run_created",
         "session_status_changed",
-        "stage_started",
         "session_message_appended",
+        "stage_started",
     ]
 
     with manager.session(DatabaseRole.EVENT) as session:

@@ -32,6 +32,7 @@ from backend.app.schemas.workspace import SessionWorkspaceProjection
 from backend.app.services.delivery_channels import DeliveryChannelService
 from backend.app.services.events import DomainEvent, EventStore
 from backend.app.services.publication_boundary import PublicationBoundaryService
+from backend.app.services.projections.feed_sort import feed_entry_sort_key
 from backend.app.services.stage_feed_projection import hydrate_stage_node_from_artifacts
 
 
@@ -227,7 +228,7 @@ class WorkspaceProjectionService:
             entry = self._entry_from_event(event)
             if entry is not None:
                 entries = self._upsert_feed_entry(entries, entry)
-        return entries
+        return sorted(entries, key=feed_entry_sort_key)
 
     def _entry_from_event(self, event: DomainEvent) -> TopLevelFeedEntry | None:
         for key in (

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+import json
 import hashlib
 from typing import Any
 
@@ -476,6 +477,10 @@ def _tool_content(record: dict[str, Any]) -> str | None:
     output_summary = _tool_output_summary(record)
     if output_summary:
         lines.append(f"Output summary: {output_summary}")
+    output_preview = _optional_text(record.get("output_preview"))
+    if output_preview:
+        lines.append("")
+        lines.append(output_preview)
     return "\n".join(dict.fromkeys(lines)) or None
 
 
@@ -588,13 +593,6 @@ def _change_set_content(record: dict[str, Any]) -> str:
 def _result_summary(record: dict[str, Any], stage_type: StageType) -> str:
     payload = record.get("artifact_payload")
     if isinstance(payload, Mapping):
-        stage_specific_summary = _stage_specific_result_summary(
-            payload,
-            artifact_type=_optional_text(record.get("artifact_type")),
-            stage_type=stage_type,
-        )
-        if stage_specific_summary:
-            return stage_specific_summary
         for key in (
             "summary",
             "requirement_summary",
@@ -622,320 +620,82 @@ def _result_content(record: dict[str, Any], stage_type: StageType) -> str | None
         lines.append(risk_summary)
     if failure_summary:
         lines.append(failure_summary)
-    artifact_type = _optional_text(record.get("artifact_type"))
     payload = record.get("artifact_payload")
     if isinstance(payload, Mapping):
-        stage_specific_lines = _stage_specific_result_lines(
-            payload,
-            artifact_type=artifact_type,
-            stage_type=stage_type,
-        )
-        if stage_specific_lines:
-            lines.extend(stage_specific_lines)
+        filtered_payload = _filter_user_facing_result_payload(payload)
+        if filtered_payload:
+            lines.append(_serialize_user_facing_result_payload(filtered_payload))
         else:
             lines.extend(_result_payload_lines(payload))
     return "\n".join(dict.fromkeys(lines)) or None
 
 
-def _stage_specific_result_summary(
+def _filter_user_facing_result_payload(
     payload: Mapping[str, object],
-    *,
-    artifact_type: str | None,
-    stage_type: StageType,
-) -> str | None:
-    if artifact_type == "RequirementAnalysisArtifact" or stage_type is StageType.REQUIREMENT_ANALYSIS:
-        return (
-            _optional_text(payload.get("summary"))
-            or _structured_requirement_summary(payload.get("structured_requirement"))
-            or _optional_text(payload.get("clarification_summary"))
-        )
-    if artifact_type == "SolutionDesignArtifact" or stage_type is StageType.SOLUTION_DESIGN:
-        return (
-            _optional_text(payload.get("summary"))
-            or _optional_text(payload.get("technical_plan"))
-            or _optional_text(payload.get("validation_report"))
-        )
-    if artifact_type == "CodeGenerationArtifact" or stage_type is StageType.CODE_GENERATION:
-        return (
-            _optional_text(payload.get("summary"))
-            or _optional_text(payload.get("implementation_summary"))
-            or _optional_text(payload.get("implementation_notes"))
-        )
-    if (
-        artifact_type == "TestGenerationExecutionArtifact"
-        or stage_type is StageType.TEST_GENERATION_EXECUTION
-    ):
-        return (
-            _optional_text(payload.get("summary"))
-            or _optional_text(payload.get("test_execution_result"))
-            or _optional_text(payload.get("test_gap_report"))
-        )
-    if artifact_type == "CodeReviewArtifact" or stage_type is StageType.CODE_REVIEW:
-        review_report = payload.get("review_report")
-        if isinstance(review_report, Mapping):
-            review_summary = _optional_text(review_report.get("summary"))
-            if review_summary:
-                return review_summary
-        return (
-            _optional_text(payload.get("summary"))
-            or _optional_text(payload.get("review_summary"))
-            or _optional_text(payload.get("regression_decision"))
-        )
-    if stage_type is StageType.DELIVERY_INTEGRATION:
-        return (
-            _optional_text(payload.get("summary"))
-            or _optional_text(payload.get("delivery_summary"))
-            or _optional_text(payload.get("test_summary"))
-        )
-    return None
+) -> dict[str, object]:
+    filtered: dict[str, object] = {}
+    for key, value in payload.items():
+        if _should_hide_result_key(key):
+            continue
+        normalized = _filter_user_facing_result_value(value)
+        if normalized is None:
+            continue
+        filtered[key] = normalized
+    return filtered
 
 
-def _stage_specific_result_lines(
-    payload: Mapping[str, object],
-    *,
-    artifact_type: str | None,
-    stage_type: object = None,
-) -> list[str]:
-    if artifact_type == "RequirementAnalysisArtifact" or stage_type == StageType.REQUIREMENT_ANALYSIS:
-        return _requirement_analysis_result_lines(payload)
-    if artifact_type == "SolutionDesignArtifact" or stage_type == StageType.SOLUTION_DESIGN:
-        return _solution_design_result_lines(payload)
-    if artifact_type == "CodeGenerationArtifact" or stage_type == StageType.CODE_GENERATION:
-        return _code_generation_result_lines(payload)
-    if (
-        artifact_type == "TestGenerationExecutionArtifact"
-        or stage_type == StageType.TEST_GENERATION_EXECUTION
-    ):
-        return _test_generation_result_lines(payload)
-    if artifact_type == "CodeReviewArtifact" or stage_type == StageType.CODE_REVIEW:
-        return _code_review_result_lines(payload)
-    return []
-
-
-def _requirement_analysis_result_lines(payload: Mapping[str, object]) -> list[str]:
-    sections: list[str] = []
-    structured_requirement = _structured_requirement_summary(
-        payload.get("structured_requirement")
-    )
-    if structured_requirement:
-        sections.append(
-            "\n".join(("需求规格", f"- {structured_requirement}"))
-        )
-
-    acceptance_criteria = _string_values(payload.get("acceptance_criteria"))
-    if acceptance_criteria:
-        sections.append(_bullet_section("验收条件", acceptance_criteria))
-
-    clarification_summary = _optional_text(payload.get("clarification_summary"))
-    if clarification_summary:
-        sections.append(
-            "\n".join(("澄清结论", f"- {clarification_summary}"))
-        )
-
-    assumptions = _string_values(payload.get("assumptions"))
-    if assumptions:
-        sections.append(_bullet_section("关键假设", assumptions))
-
-    non_goals = _string_values(payload.get("non_goals"))
-    if non_goals:
-        sections.append(_bullet_section("非目标", non_goals))
-
-    open_questions = _string_values(payload.get("open_questions"))
-    if open_questions:
-        sections.append(_bullet_section("待确认问题", open_questions))
-
-    analysis_notes = _optional_text(payload.get("analysis_notes"))
-    if analysis_notes:
-        sections.append(
-            "\n".join(("分析说明", f"- {analysis_notes}"))
-        )
-    return sections
-
-
-def _solution_design_result_lines(payload: Mapping[str, object]) -> list[str]:
-    sections: list[str] = []
-    technical_plan = _optional_text(payload.get("technical_plan"))
-    if technical_plan:
-        sections.append("\n".join(("方案概述", f"- {technical_plan}")))
-
-    impacted_files = _string_values(payload.get("impacted_files"))
-    if impacted_files:
-        sections.append(_bullet_section("影响范围", impacted_files))
-
-    api_design = _optional_text(payload.get("api_design"))
-    if api_design:
-        sections.append("\n".join(("接口设计", f"- {api_design}")))
-
-    data_flow_design = _optional_text(payload.get("data_flow_design"))
-    if data_flow_design:
-        sections.append("\n".join(("数据流设计", f"- {data_flow_design}")))
-
-    plan_lines = _implementation_plan_lines(payload.get("implementation_plan"))
-    if plan_lines:
-        sections.append(_bullet_section("实施计划", plan_lines))
-
-    test_strategy_lines = _string_values(payload.get("test_strategy"))
-    if test_strategy_lines:
-        sections.append(_bullet_section("验证策略", test_strategy_lines))
-    else:
-        test_strategy = _optional_text(payload.get("test_strategy"))
-        if test_strategy:
-            sections.append("\n".join(("验证策略", f"- {test_strategy}")))
-
-    risks = _string_values(payload.get("risks"))
-    if risks:
-        sections.append(_bullet_section("风险与关注点", risks))
-
-    validation_report = _optional_text(payload.get("validation_report"))
-    if validation_report:
-        sections.append("\n".join(("方案校验", f"- {validation_report}")))
-    return sections
-
-
-def _code_generation_result_lines(payload: Mapping[str, object]) -> list[str]:
-    sections: list[str] = []
-    notes = _optional_text(payload.get("implementation_notes")) or _optional_text(
-        payload.get("implementation_summary")
-    )
-    if notes:
-        sections.append("\n".join(("实现结果", f"- {notes}")))
-
-    changed_files = _string_values(payload.get("changed_files"))
-    if changed_files:
-        sections.append(_bullet_section("已修改文件", changed_files))
-
-    completed_steps = _string_values(payload.get("completed_steps"))
-    if completed_steps:
-        sections.append(_bullet_section("已完成内容", completed_steps))
-
-    remaining_steps = _string_values(payload.get("remaining_steps"))
-    if remaining_steps:
-        sections.append(_bullet_section("剩余工作", remaining_steps))
-    return sections
-
-
-def _test_generation_result_lines(payload: Mapping[str, object]) -> list[str]:
-    sections: list[str] = []
-    execution_result = _optional_text(payload.get("test_execution_result"))
-    if execution_result:
-        sections.append("\n".join(("测试结果", f"- {execution_result}")))
-
-    generated_tests = _string_values(payload.get("generated_tests"))
-    if generated_tests:
-        sections.append(_bullet_section("新增测试", generated_tests))
-
-    executed_tests = _string_values(payload.get("executed_tests"))
-    if executed_tests:
-        sections.append(_bullet_section("执行命令", executed_tests))
-
-    failed_tests = _string_values(payload.get("failed_test_refs"))
-    if failed_tests:
-        sections.append(_bullet_section("失败项", failed_tests))
-
-    gap_lines = _string_values(payload.get("test_gap_report"))
-    if gap_lines:
-        sections.append(_bullet_section("测试缺口", gap_lines))
-    else:
-        gap_summary = _optional_text(payload.get("test_gap_report"))
-        if gap_summary:
-            sections.append("\n".join(("测试缺口", f"- {gap_summary}")))
-    return sections
-
-
-def _code_review_result_lines(payload: Mapping[str, object]) -> list[str]:
-    sections: list[str] = []
-    review_report = payload.get("review_report")
-    if isinstance(review_report, Mapping):
-        review_summary = _optional_text(review_report.get("summary"))
-        if review_summary:
-            sections.append("\n".join(("评审结论", f"- {review_summary}")))
-        review_issues = _string_values(review_report.get("issues"))
-        if review_issues:
-            sections.append(_bullet_section("评审问题", review_issues))
-
-    issue_list = _string_values(payload.get("issue_list"))
-    if issue_list:
-        sections.append(_bullet_section("评审问题", issue_list))
-
-    risk_assessment = _mapping_or_text_lines(
-        payload.get("risk_assessment"),
-        fallback_title="风险评估",
-    )
-    if risk_assessment:
-        sections.extend(risk_assessment)
-
-    fix_requirements = _string_values(payload.get("fix_requirements"))
-    if fix_requirements:
-        sections.append(_bullet_section("修复要求", fix_requirements))
-
-    regression_decision = _optional_text(payload.get("regression_decision"))
-    if regression_decision:
-        sections.append("\n".join(("回归建议", f"- {regression_decision}")))
-    return sections
-
-
-def _implementation_plan_lines(value: object) -> list[str]:
+def _filter_user_facing_result_value(value: object) -> object | None:
     if isinstance(value, Mapping):
-        tasks = value.get("tasks")
-        if isinstance(tasks, Sequence) and not isinstance(
-            tasks, str | bytes | bytearray
-        ):
-            lines: list[str] = []
-            for index, item in enumerate(tasks, 1):
-                if not isinstance(item, Mapping):
-                    continue
-                title = _optional_text(item.get("title")) or _optional_text(
-                    item.get("task_id")
-                )
-                if title is None:
-                    continue
-                target_files = _string_values(item.get("target_files"))
-                verification_commands = _string_values(item.get("verification_commands"))
-                detail_parts = []
-                if target_files:
-                    detail_parts.append(f"目标文件：{', '.join(target_files[:4])}")
-                if verification_commands:
-                    detail_parts.append(
-                        f"验证：{', '.join(verification_commands[:2])}"
-                    )
-                detail = f"（{'；'.join(detail_parts)}）" if detail_parts else ""
-                lines.append(f"{index}. {title}{detail}")
-            return lines
-    return _string_values(value)
-
-
-def _mapping_or_text_lines(
-    value: object,
-    *,
-    fallback_title: str,
-) -> list[str]:
-    if isinstance(value, Mapping):
-        bullet_values = []
-        for key, raw in value.items():
-            text = _optional_text(raw)
-            if text:
-                bullet_values.append(f"{_humanize_key(str(key))}: {text}")
-        return [_bullet_section(fallback_title, bullet_values)] if bullet_values else []
-    text = _optional_text(value)
-    return ["\n".join((fallback_title, f"- {text}"))] if text else []
-
-
-def _structured_requirement_summary(value: object) -> str | None:
+        filtered = _filter_user_facing_result_payload(value)
+        return filtered or None
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        filtered_items = [
+            normalized
+            for item in value
+            if (normalized := _filter_user_facing_result_value(item)) is not None
+        ]
+        return filtered_items or None
     if isinstance(value, str):
-        return _optional_text(value)
-    if isinstance(value, Mapping):
-        for key in ("summary", "title", "requirement", "content"):
-            candidate = _optional_text(value.get(key))
-            if candidate:
-                return candidate
+        stripped = value.strip()
+        return stripped or None
+    if isinstance(value, bool | int | float):
+        return value
     return None
 
 
-def _bullet_section(title: str, values: Sequence[str]) -> str:
-    unique_values = [value for value in dict.fromkeys(values) if value]
-    if not unique_values:
-        return ""
-    return "\n".join((title, *[f"- {value}" for value in unique_values]))
+def _should_hide_result_key(key: str) -> bool:
+    lowered = key.lower()
+    if lowered.endswith("_refs") or lowered.endswith("_ref"):
+        return True
+    if lowered.endswith("_id") or lowered.endswith("_ids"):
+        return True
+    if "trace" in lowered:
+        return True
+    if lowered in {
+        "artifact_type",
+        "evidence_refs",
+        "source_message_refs",
+        "clarification_record_refs",
+        "attachment_refs",
+        "context_refs",
+        "changeset_ref",
+        "changeset_refs",
+        "diff_refs",
+        "file_edit_trace_refs",
+        "command_trace_refs",
+        "requirement_refs",
+        "solution_refs",
+        "acceptance_criteria_refs",
+        "test_result_refs",
+        "payload_ref",
+        "result_ref",
+    }:
+        return True
+    return False
+
+
+def _serialize_user_facing_result_payload(payload: Mapping[str, object]) -> str:
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 def _result_payload_lines(payload: Mapping[str, object]) -> list[str]:

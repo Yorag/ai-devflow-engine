@@ -22,6 +22,7 @@ import {
 } from "../../api/templates";
 import { ErrorState } from "../errors/ErrorState";
 import { Composer } from "../composer/Composer";
+import { sortFeedEntries } from "../feed/feed-sort";
 import { NarrativeFeed } from "../feed/NarrativeFeed";
 import { InspectorPanel } from "../inspector/InspectorPanel";
 import { useInspector } from "../inspector/useInspector";
@@ -74,6 +75,10 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
     { request },
   );
   const snapshot = sessionWorkspaceQuery.data;
+  const normalizedSnapshotFeed = useMemo(
+    () => (snapshot ? sortFeedEntries(snapshot.narrative_feed) : []),
+    [snapshot],
+  );
   const workspaceSessionId = useWorkspaceStore((state) => state.session?.session_id);
   const workspaceSessionStatus = useWorkspaceStore((state) => state.session?.status);
   const workspaceRuns = useWorkspaceStore((state) => state.runs);
@@ -103,6 +108,13 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
           composer_state: workspaceComposerState ?? snapshot.composer_state,
         }
       : snapshot;
+  const workspaceWithNormalizedFeed =
+    workspace && snapshot && workspace === snapshot
+      ? {
+          ...workspace,
+          narrative_feed: normalizedSnapshotFeed,
+        }
+      : workspace;
   const selectedTemplateId =
     selectedSession && templateSelections[selectedSession.session_id]
       ? templateSelections[selectedSession.session_id]
@@ -429,16 +441,16 @@ export function WorkspaceShell({ request }: WorkspaceShellProps = {}): JSX.Eleme
               <div className="workspace-main__panel workspace-main__panel--feed">
                 <div className="narrative-feed" aria-label="Narrative Feed" />
               </div>
-            ) : workspace ? (
+            ) : workspaceWithNormalizedFeed ? (
               <div className="workspace-main__panel workspace-main__panel--feed">
                 <div className="narrative-feed" aria-label="Narrative Feed">
                   <NarrativeFeed
-                    entries={workspace.narrative_feed}
-                    runs={workspace.runs}
-                    currentRunId={workspace.current_run_id}
-                    currentSessionStatus={workspace.session.status}
-                    sessionId={workspace.session.session_id}
-                    projectId={workspace.project.project_id}
+                    entries={workspaceWithNormalizedFeed.narrative_feed}
+                    runs={workspaceWithNormalizedFeed.runs}
+                    currentRunId={workspaceWithNormalizedFeed.current_run_id}
+                    currentSessionStatus={workspaceWithNormalizedFeed.session.status}
+                    sessionId={workspaceWithNormalizedFeed.session.session_id}
+                    projectId={workspaceWithNormalizedFeed.project.project_id}
                     request={request}
                     onOpenInspectorTarget={inspector.openEntry}
                     onOpenSettings={() => setSettingsOpen(true)}

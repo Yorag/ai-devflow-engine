@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { SessionWorkspaceProjection } from "../../../api/types";
 import { mockSessionWorkspaces } from "../../../mocks/fixtures";
 import {
   initializeWorkspaceFromSnapshot,
@@ -48,6 +49,21 @@ describe("workspace-store snapshot initialization", () => {
     expect(selectComposerState(state)?.mode).toBe("draft");
     expect(selectComposerState(state)?.is_input_enabled).toBe(true);
     expect(state.narrativeFeed).toEqual([]);
+  });
+
+  it("normalizes snapshot narrative feed order during initialization", () => {
+    const snapshot = mockSessionWorkspaces["session-running"];
+    const reversedSnapshot: SessionWorkspaceProjection = {
+      ...snapshot,
+      narrative_feed: [...snapshot.narrative_feed].reverse(),
+    };
+
+    initializeWorkspaceFromSnapshot(reversedSnapshot);
+
+    const state = useWorkspaceStore.getState();
+    expect(state.narrativeFeed.map((entry) => entry.entry_id)).toEqual(
+      snapshot.narrative_feed.map((entry) => entry.entry_id),
+    );
   });
 
   it("stores Inspector open and close state without changing the snapshot", () => {

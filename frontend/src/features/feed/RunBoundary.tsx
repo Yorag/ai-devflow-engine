@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import type { RunSummaryProjection, TopLevelFeedEntry } from "../../api/types";
+import { sortFeedEntries } from "./feed-sort";
 
 export type RunEntryGroup = {
   runId: string;
@@ -87,7 +88,7 @@ export function groupEntriesByRun(
   for (const entry of entries) {
     const runEntries = entriesByRun.get(entry.run_id) ?? [];
     runEntries.push(entry);
-    entriesByRun.set(entry.run_id, runEntries);
+    entriesByRun.set(entry.run_id, sortFeedEntriesByOccurredAt(runEntries));
   }
 
   const groups: RunEntryGroup[] = runs.map((run) => ({
@@ -112,6 +113,12 @@ export function groupEntriesByRun(
 
 export function getRunBoundaryId(runId: string): string {
   return `run-boundary-${runId}`;
+}
+
+function sortFeedEntriesByOccurredAt(
+  entries: TopLevelFeedEntry[],
+): TopLevelFeedEntry[] {
+  return sortFeedEntries(entries);
 }
 
 function isActiveRunWithoutStageNode(group: RunEntryGroup): boolean {

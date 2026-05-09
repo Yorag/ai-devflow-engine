@@ -95,6 +95,46 @@ describe("RunBoundary grouping", () => {
     ]);
   });
 
+  it("orders entries within each run by occurred_at instead of input array order", () => {
+    const groups = groupEntriesByRun(
+      [firstRunStatus, firstRunMessage, secondRunStage, secondRunMessage],
+      runs,
+    );
+
+    expect(groups[0].entries.map((entry) => entry.entry_id)).toEqual([
+      "entry-first-message",
+      "entry-first-failed",
+    ]);
+    expect(groups[1].entries.map((entry) => entry.entry_id)).toEqual([
+      "entry-second-message",
+      "entry-second-stage",
+    ]);
+  });
+
+  it("prefers user messages before stage nodes when occurred_at is identical", () => {
+    const sameTimeMessage: TopLevelFeedEntry = {
+      ...mockFeedEntriesByType.user_message,
+      entry_id: "entry-same-time-message",
+      run_id: "run-second",
+      occurred_at: "2026-05-01T09:22:00.000Z",
+      content: "Same-time requirement.",
+    };
+    const sameTimeStage: TopLevelFeedEntry = {
+      ...mockFeedEntriesByType.stage_node,
+      entry_id: "entry-same-time-stage",
+      run_id: "run-second",
+      occurred_at: "2026-05-01T09:22:00.000Z",
+      summary: "Same-time stage.",
+    };
+
+    const groups = groupEntriesByRun([sameTimeStage, sameTimeMessage], runs);
+
+    expect(groups[1].entries.map((entry) => entry.entry_id)).toEqual([
+      "entry-same-time-message",
+      "entry-same-time-stage",
+    ]);
+  });
+
   it("keeps entries visible with a neutral boundary when run metadata is missing", () => {
     const orphanEntry: TopLevelFeedEntry = {
       ...mockFeedEntriesByType.control_item,

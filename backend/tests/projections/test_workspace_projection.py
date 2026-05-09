@@ -724,9 +724,150 @@ def test_workspace_projection_hydrates_stage_node_items_from_stage_artifact(
     )
     assert stage_node["items"][2]["summary"] is None
     assert stage_node["items"][5]["summary"] == "Stage feed projection now shows real steps."
-    assert "已修改文件" in stage_node["items"][5]["content"]
+    assert '"changed_files"' in stage_node["items"][5]["content"]
     assert "frontend/src/features/feed/StageNodeItems.tsx" in stage_node["items"][5]["content"]
+    assert "evidence_refs" not in stage_node["items"][5]["content"]
     assert "sha256:internal" not in str(stage_node)
+
+
+def test_workspace_projection_sorts_narrative_feed_by_occurred_at_within_run(
+    tmp_path,
+) -> None:
+    from backend.app.services.projections.workspace import WorkspaceProjectionService
+
+    manager = _manager(tmp_path)
+    _seed_workspace(manager)
+
+    with manager.session(DatabaseRole.EVENT) as session:
+        store = EventStore(
+            session,
+            now=lambda: NOW,
+            id_factory=iter(["event-stage-late", "event-message-early"]).__next__,
+        )
+        store.append(
+            DomainEventType.STAGE_UPDATED,
+            payload={
+                "stage_node": ExecutionNodeProjection(
+                    entry_id="entry-stage-late",
+                    run_id="run-active",
+                    occurred_at=NOW + timedelta(minutes=8),
+                    stage_run_id="stage-active",
+                    stage_type=common.StageType.CODE_GENERATION,
+                    status=common.StageStatus.RUNNING,
+                    attempt_index=1,
+                    started_at=NOW + timedelta(minutes=2),
+                    ended_at=None,
+                    summary="A later stage node.",
+                    items=[],
+                    metrics={},
+                ).model_dump(mode="json")
+            },
+            trace_context=_trace(run_id="run-active", stage_run_id="stage-active"),
+        )
+        store.append(
+            DomainEventType.SESSION_MESSAGE_APPENDED,
+            payload={
+                "message_item": MessageFeedEntry(
+                    entry_id="entry-message-early",
+                    run_id="run-active",
+                    occurred_at=NOW + timedelta(minutes=3),
+                    message_id="message-early",
+                    author="user",
+                    content="This user requirement should stay above the later stage node.",
+                    stage_run_id=None,
+                ).model_dump(mode="json")
+            },
+            trace_context=_trace(run_id="run-active"),
+        )
+        session.commit()
+
+    with (
+        manager.session(DatabaseRole.CONTROL) as control_session,
+        manager.session(DatabaseRole.RUNTIME) as runtime_session,
+        manager.session(DatabaseRole.EVENT) as event_session,
+    ):
+        workspace = WorkspaceProjectionService(
+            control_session,
+            runtime_session,
+            event_session,
+        ).get_session_workspace("session-1")
+
+    active_entry_ids = [
+        entry.entry_id for entry in workspace.narrative_feed if entry.run_id == "run-active"
+    ]
+    assert active_entry_ids.index("entry-message-early") < active_entry_ids.index(
+        "entry-stage-late"
+    )
+
+
+def test_workspace_projection_prefers_user_message_before_stage_node_when_timestamps_match(
+    tmp_path,
+) -> None:
+    from backend.app.services.projections.workspace import WorkspaceProjectionService
+
+    manager = _manager(tmp_path)
+    _seed_workspace(manager)
+
+    with manager.session(DatabaseRole.EVENT) as session:
+        store = EventStore(
+            session,
+            now=lambda: NOW,
+            id_factory=iter(["event-stage-same-time", "event-message-same-time"]).__next__,
+        )
+        store.append(
+            DomainEventType.STAGE_UPDATED,
+            payload={
+                "stage_node": ExecutionNodeProjection(
+                    entry_id="entry-stage-same-time",
+                    run_id="run-active",
+                    occurred_at=NOW + timedelta(minutes=8),
+                    stage_run_id="stage-active",
+                    stage_type=common.StageType.CODE_GENERATION,
+                    status=common.StageStatus.RUNNING,
+                    attempt_index=1,
+                    started_at=NOW + timedelta(minutes=2),
+                    ended_at=None,
+                    summary="Same-time stage node.",
+                    items=[],
+                    metrics={},
+                ).model_dump(mode="json")
+            },
+            trace_context=_trace(run_id="run-active", stage_run_id="stage-active"),
+        )
+        store.append(
+            DomainEventType.SESSION_MESSAGE_APPENDED,
+            payload={
+                "message_item": MessageFeedEntry(
+                    entry_id="entry-message-same-time",
+                    run_id="run-active",
+                    occurred_at=NOW + timedelta(minutes=8),
+                    message_id="message-same-time",
+                    author="user",
+                    content="Same-time user requirement.",
+                    stage_run_id=None,
+                ).model_dump(mode="json")
+            },
+            trace_context=_trace(run_id="run-active"),
+        )
+        session.commit()
+
+    with (
+        manager.session(DatabaseRole.CONTROL) as control_session,
+        manager.session(DatabaseRole.RUNTIME) as runtime_session,
+        manager.session(DatabaseRole.EVENT) as event_session,
+    ):
+        workspace = WorkspaceProjectionService(
+            control_session,
+            runtime_session,
+            event_session,
+        ).get_session_workspace("session-1")
+
+    active_entry_ids = [
+        entry.entry_id for entry in workspace.narrative_feed if entry.run_id == "run-active"
+    ]
+    assert active_entry_ids.index("entry-message-same-time") < active_entry_ids.index(
+        "entry-stage-same-time"
+    )
 
 
 def test_workspace_projection_hydrates_denied_tool_confirmation_deny_followup_from_runtime_model(

@@ -365,6 +365,73 @@ def test_timeline_projection_preserves_replay_order_for_same_timestamp_approval_
     ]
 
 
+def test_timeline_projection_prefers_user_message_before_stage_node_when_timestamps_match(
+    tmp_path,
+) -> None:
+    from backend.app.services.projections.timeline import TimelineProjectionService
+
+    manager = _manager(tmp_path)
+    _seed_workspace(manager)
+    with manager.session(DatabaseRole.EVENT) as session:
+        store = EventStore(
+            session,
+            now=lambda: NOW,
+            id_factory=iter(["event-stage-same-time", "event-message-same-time"]).__next__,
+        )
+        store.append(
+            DomainEventType.STAGE_UPDATED,
+            payload={
+                "stage_node": ExecutionNodeProjection(
+                    entry_id="entry-stage-same-time",
+                    run_id="run-active",
+                    occurred_at=NOW + timedelta(minutes=8),
+                    stage_run_id="stage-active",
+                    stage_type=common.StageType.CODE_GENERATION,
+                    status=common.StageStatus.RUNNING,
+                    attempt_index=1,
+                    started_at=NOW + timedelta(minutes=2),
+                    ended_at=None,
+                    summary="Same-time stage node.",
+                    items=[],
+                    metrics={},
+                ).model_dump(mode="json")
+            },
+            trace_context=_trace(run_id="run-active", stage_run_id="stage-active"),
+        )
+        store.append(
+            DomainEventType.SESSION_MESSAGE_APPENDED,
+            payload={
+                "message_item": MessageFeedEntry(
+                    entry_id="entry-message-same-time",
+                    run_id="run-active",
+                    occurred_at=NOW + timedelta(minutes=8),
+                    message_id="message-same-time",
+                    author="user",
+                    content="Same-time user requirement.",
+                    stage_run_id=None,
+                ).model_dump(mode="json")
+            },
+            trace_context=_trace(run_id="run-active"),
+        )
+        session.commit()
+
+    with (
+        manager.session(DatabaseRole.CONTROL) as control_session,
+        manager.session(DatabaseRole.RUNTIME) as runtime_session,
+        manager.session(DatabaseRole.EVENT) as event_session,
+    ):
+        timeline = TimelineProjectionService(
+            control_session,
+            runtime_session,
+            event_session,
+        ).get_run_timeline("run-active")
+
+    entry_ids = [entry.entry_id for entry in timeline.entries]
+    assert entry_ids.index("entry-message-same-time") < entry_ids.index(
+        "entry-stage-same-time"
+    )
+
+
 def test_timeline_projection_does_not_leak_current_stage_from_another_run(
     tmp_path,
 ) -> None:

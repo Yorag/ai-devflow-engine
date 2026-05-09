@@ -11,6 +11,7 @@ import type {
   StageType,
   TopLevelFeedEntry,
 } from "../../api/types";
+import { sortFeedEntries } from "../feed/feed-sort";
 import { applySessionEvent as reduceSessionEvent } from "./event-reducer";
 
 export type WorkspaceInspectorTarget =
@@ -122,7 +123,7 @@ function createWorkspaceDataFromSnapshot(
     project: snapshot.project,
     deliveryChannel: snapshot.delivery_channel,
     runs,
-    narrativeFeed: [...snapshot.narrative_feed],
+    narrativeFeed: sortFeedEntries(snapshot.narrative_feed),
     currentRunId: snapshot.current_run_id,
     focusedRunId: resolveInitialFocusedRunId(snapshot, runs),
     currentStageType: snapshot.current_stage_type,

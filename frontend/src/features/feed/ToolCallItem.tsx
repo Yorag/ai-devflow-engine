@@ -1,15 +1,14 @@
+import { useState } from "react";
+
 import type { StageItemProjection } from "../../api/types";
 import { parseDiffPreviewContent } from "./DiffPreview";
-import { formatStatusLabel, stageItemLabels } from "./display-labels";
+import { stageItemLabels } from "./display-labels";
 
 type ToolCallParseResult = {
-  toolName: string;
-  targetSummary: string;
-  statusLabel: string;
   commandExcerpt: string | null;
   outputSummary: string | null;
   detailText: string | null;
-  visibleOutput: string | null;
+  detailVariant: "plain" | "pre";
 };
 
 export function ToolCallItem({
@@ -21,94 +20,172 @@ export function ToolCallItem({
   diffItem?: StageItemProjection | null;
   stepIndex?: number;
 }): JSX.Element {
+  const [isExpanded, setIsExpanded] = useState(false);
   const parsed = parseToolCallContent(item.content);
   const diff = diffItem ? parseDiffPreviewContent(diffItem.content) : null;
+  const displayTitle = parsed.commandExcerpt ?? item.title;
+  const detailSummary = dedupeToolDetailSummary(
+    parsed.outputSummary ?? item.summary,
+    parsed.detailText,
+    parsed.detailVariant,
+  );
+  const hasExpandableContent = Boolean(
+    detailSummary ||
+      parsed.detailText ||
+      (diff && (diff.files.length > 0 || diff.previewLines.length > 0 || diff.remainder)),
+  );
+  const detailsId = `tool-call-details-${item.item_id}`;
 
   return (
     <li className="stage-node-item stage-node-item--tool-call" aria-label="工具调用">
-      <header className="stage-node-item__header">
+      <header className="stage-node-item__header stage-node-item__header--tool">
         <span className="stage-node-item__step sr-only">{formatStepNumber(stepIndex)}</span>
         <span className="stage-node-item__icon" aria-hidden="true">
           $
         </span>
         <span className="stage-node-item__kind">{stageItemLabels.tool_call}</span>
-        <strong>{item.title}</strong>
+        {hasExpandableContent ? (
+          <button
+            type="button"
+            className="stage-node-item__tool-trigger"
+            aria-expanded={isExpanded}
+            aria-controls={detailsId}
+            onClick={() => setIsExpanded((current) => !current)}
+          >
+            <span className="stage-node-item__tool-title">{displayTitle}</span>
+            <span className="stage-node-item__tool-toggle" aria-hidden="true">
+              {"›"}
+            </span>
+          </button>
+        ) : (
+          <strong>{displayTitle}</strong>
+        )}
       </header>
-      {item.summary ? <p className="stage-node-item__summary">{item.summary}</p> : null}
-      {parsed.visibleOutput ? (
-        <p className="stage-node-item__content">{parsed.visibleOutput}</p>
-      ) : null}
-      {parsed.commandExcerpt && parsed.commandExcerpt !== item.title ? (
-        <p className="stage-node-item__command">{parsed.commandExcerpt}</p>
-      ) : null}
-      {diff && diff.files.length > 0 ? (
-        <ul className="stage-node-item__file-list" aria-label="变更文件">
-          {diff.files.map((file) => (
-            <li key={file}>{file}</li>
-          ))}
-        </ul>
-      ) : null}
-      {diff && diff.previewLines.length > 0 ? (
-        <pre className="stage-node-item__diff-snippet">
-          {diff.previewLines.map((line) => (
-            <span key={line}>{line}</span>
-          ))}
-        </pre>
-      ) : null}
-      {parsed.detailText ? (
-        <details className="stage-node-item__details">
-          <summary>查看输出</summary>
-          <pre>{parsed.detailText}</pre>
-        </details>
-      ) : null}
-      {diff?.remainder ? (
-        <details className="stage-node-item__details">
-          <summary>查看更多变更上下文</summary>
-          <pre>{diff.remainder}</pre>
-        </details>
+      {hasExpandableContent && isExpanded ? (
+        <div
+          className="stage-node-item__tool-details"
+          id={detailsId}
+        >
+          {detailSummary ? <p className="stage-node-item__detail-copy">{detailSummary}</p> : null}
+          {parsed.detailText ? (
+            parsed.detailVariant === "plain" ? (
+              <div className="stage-node-item__tool-plain-output">
+                {parsed.detailText.split(/\n+/u).map((line) => (
+                  <p key={line}>{line}</p>
+                ))}
+              </div>
+            ) : (
+              <pre>{parsed.detailText}</pre>
+            )
+          ) : null}
+          {diff && diff.files.length > 0 ? (
+            <ul className="stage-node-item__file-list" aria-label="变更文件">
+              {diff.files.map((file) => (
+                <li key={file}>{file}</li>
+              ))}
+            </ul>
+          ) : null}
+          {diff && diff.previewLines.length > 0 ? (
+            <pre className="stage-node-item__diff-snippet">
+              {diff.previewLines.map((line) => (
+                <span key={line}>{line}</span>
+              ))}
+            </pre>
+          ) : null}
+          {diff?.remainder ? <pre>{diff.remainder}</pre> : null}
+        </div>
       ) : null}
     </li>
   );
 }
 
 function parseToolCallContent(content: string | null): ToolCallParseResult {
-  const lines = content?.split("\n").map((line) => line.trim()).filter(Boolean) ?? [];
-  const commandExcerpt = lines[0] ?? null;
-  const toolName =
-    lines.find((line) => line.startsWith("Tool:"))?.replace("Tool:", "").trim() ??
-    commandExcerpt?.split(" ")[0] ??
-    "tool";
-  const targetSummary =
-    lines.find((line) => line.startsWith("Target:"))?.replace("Target:", "").trim() ??
-    "未记录";
-  const statusValue =
-    lines.find((line) => line.startsWith("Status:"))?.replace("Status:", "").trim() ??
-    "unknown";
+  const lines = content?.split("\n").map((line) => line.replace(/\r$/u, "")) ?? [];
+  const visibleLines = lines.filter((line) => line.trim().length > 0);
+  const commandExcerpt = visibleLines[0]?.trim() ?? null;
   const outputSummary =
-    lines
+    visibleLines
+      .map((line) => line.trim())
       .find((line) => line.startsWith("Output summary:"))
       ?.replace("Output summary:", "")
       .trim() ?? null;
-  const visibleOutput =
-    outputSummary && !isBlockedPlaceholder(outputSummary) ? outputSummary : null;
-  const detailText = readableDetailText(lines);
+  const detailText = readableDetailText(lines, commandExcerpt);
+  const detailVariant = detectDetailVariant(commandExcerpt, detailText);
 
   return {
-    toolName,
-    targetSummary,
-    statusLabel: formatStatusLabel(statusValue.toLowerCase()),
     commandExcerpt,
-    outputSummary,
+    outputSummary:
+      outputSummary && !isBlockedPlaceholder(outputSummary) ? outputSummary : null,
     detailText,
-    visibleOutput,
+    detailVariant,
   };
 }
 
-function readableDetailText(lines: string[]): string | null {
+function readableDetailText(
+  lines: string[],
+  commandExcerpt: string | null,
+): string | null {
   const visibleLines = lines.filter(
-    (line) => !isInternalTraceLine(line) && !isBlockedPlaceholder(line),
+    (line) =>
+      line.trim().length > 0 &&
+      !isInternalTraceLine(line.trim()) &&
+      !isBlockedPlaceholder(line.trim()),
   );
-  return visibleLines.length > 1 ? visibleLines.join("\n") : null;
+  const contentLines =
+    commandExcerpt && visibleLines[0]?.trim() === commandExcerpt
+      ? visibleLines.slice(1)
+      : visibleLines;
+  const detailText = contentLines.join("\n").trim();
+  return detailText ? detailText : null;
+}
+
+function dedupeToolDetailSummary(
+  summary: string | null,
+  detailText: string | null,
+  detailVariant: "plain" | "pre",
+): string | null {
+  const normalizedSummary = normalizeWhitespace(summary);
+  if (!normalizedSummary) {
+    return null;
+  }
+
+  if (detailVariant === "plain" && detailText) {
+    return null;
+  }
+
+  const normalizedDetails = normalizeWhitespace(detailText);
+  if (
+    normalizedDetails &&
+    (normalizedDetails === normalizedSummary ||
+      normalizedDetails.startsWith(normalizedSummary) ||
+      normalizedDetails.includes(normalizedSummary))
+  ) {
+    return null;
+  }
+
+  return summary;
+}
+
+function detectDetailVariant(
+  commandExcerpt: string | null,
+  detailText: string | null,
+): "plain" | "pre" {
+  const command = commandExcerpt?.toLowerCase() ?? "";
+  if (
+    command.startsWith("grep ") ||
+    command.startsWith("glob ") ||
+    command.startsWith("read_file ") ||
+    command.startsWith("read_workspace ")
+  ) {
+    return "plain";
+  }
+  void detailText;
+  return "pre";
+}
+
+function normalizeWhitespace(value: string | null): string | null {
+  const normalized = value?.replace(/\s+/gu, " ").trim() ?? "";
+  return normalized || null;
 }
 
 function isBlockedPlaceholder(value: string): boolean {

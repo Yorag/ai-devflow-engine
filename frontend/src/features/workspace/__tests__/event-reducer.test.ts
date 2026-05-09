@@ -429,6 +429,78 @@ describe("applySessionEvent", () => {
       ),
     ).toHaveLength(1);
   });
+
+  it("keeps narrative feed ordered by occurred_at when later events are reduced before earlier ones", () => {
+    initializeWorkspaceFromSnapshot({
+      ...mockSessionWorkspaces["session-running"],
+      narrative_feed: [],
+    });
+
+    const laterStage = {
+      ...mockFeedEntriesByType.stage_node,
+      entry_id: "entry-stage-later",
+      run_id: "run-running",
+      occurred_at: "2026-05-01T09:40:00.000Z",
+    } satisfies ExecutionNodeProjection;
+    const earlierMessage = {
+      ...mockFeedEntriesByType.user_message,
+      entry_id: "entry-message-earlier",
+      message_id: "message-earlier",
+      run_id: "run-running",
+      occurred_at: "2026-05-01T09:20:00.000Z",
+      content: "Earlier user message.",
+    };
+
+    let state = reduce(
+      useWorkspaceStore.getState(),
+      sessionEvent("stage_updated", { stage_node: laterStage }),
+    );
+    state = reduce(
+      state,
+      sessionEvent("session_message_appended", { message_item: earlierMessage }),
+    );
+
+    expect(state.narrativeFeed.map((entry) => entry.entry_id)).toEqual([
+      "entry-message-earlier",
+      "entry-stage-later",
+    ]);
+  });
+
+  it("prefers user messages before stage nodes when occurred_at is identical", () => {
+    initializeWorkspaceFromSnapshot({
+      ...mockSessionWorkspaces["session-running"],
+      narrative_feed: [],
+    });
+
+    const stageAtSameTime = {
+      ...mockFeedEntriesByType.stage_node,
+      entry_id: "entry-stage-same-time",
+      run_id: "run-running",
+      occurred_at: "2026-05-01T09:30:00.000Z",
+    } satisfies ExecutionNodeProjection;
+    const messageAtSameTime = {
+      ...mockFeedEntriesByType.user_message,
+      entry_id: "entry-message-same-time",
+      message_id: "message-same-time",
+      run_id: "run-running",
+      occurred_at: "2026-05-01T09:30:00.000Z",
+      content: "Same-time user requirement.",
+    };
+
+    let state = reduce(
+      useWorkspaceStore.getState(),
+      sessionEvent("stage_updated", { stage_node: stageAtSameTime }),
+    );
+    state = reduce(
+      state,
+      sessionEvent("session_message_appended", { message_item: messageAtSameTime }),
+    );
+
+    expect(state.narrativeFeed.map((entry) => entry.entry_id)).toEqual([
+      "entry-message-same-time",
+      "entry-stage-same-time",
+    ]);
+  });
 });
 
 function reduce(

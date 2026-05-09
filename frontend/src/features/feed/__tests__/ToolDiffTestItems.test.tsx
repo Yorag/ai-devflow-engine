@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { ExecutionNodeProjection, StageItemProjection } from "../../../api/types";
@@ -31,18 +31,27 @@ function findStageItem(
 }
 
 describe("ToolCallItem", () => {
-  it("renders the tool command and useful output without status telemetry", () => {
+  it("renders the tool command as the fold header with raw output inside", () => {
     const item = findStageItem(mockCodeGenerationStageNode, "tool_call");
 
     render(<ToolCallItem item={item} />);
 
     const article = screen.getByRole("listitem", { name: "工具调用" });
-    expect(within(article).getByText("bash pytest frontend")).toBeTruthy();
-    expect(within(article).getByText("stdout 4 lines, stderr 0 lines")).toBeTruthy();
-    const details = article.querySelector("details");
-    expect(details).toBeTruthy();
-    expect(details?.hasAttribute("open")).toBe(false);
-    expect(within(article).getByText("查看输出")).toBeTruthy();
+    const toggle = within(article).getByRole("button", {
+      name: /bash pytest frontend/,
+    });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    const details = article.querySelector(`#tool-call-details-${item.item_id}`);
+    expect(details?.hasAttribute("hidden")).toBe(false);
+    expect(within(details as HTMLElement).getByText("stdout 4 lines, stderr 0 lines")).toBeTruthy();
+    expect(
+      within(details as HTMLElement).getByText((_, element) =>
+        element?.tagName.toLowerCase() === "pre" &&
+        element.textContent?.includes("> collected 4 items") === true,
+      ),
+    ).toBeTruthy();
     expect(article.textContent).not.toContain("成功，耗时");
     expect(article.textContent).not.toContain("Target:");
     expect(article.textContent).not.toContain("Status:");
@@ -63,11 +72,48 @@ describe("ToolCallItem", () => {
     render(<ToolCallItem item={item} />);
 
     const article = screen.getByRole("listitem", { name: "工具调用" });
+    const toggle = within(article).getByRole("button", {
+      name: /Read redacted tool trace/,
+    });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    const details = article.querySelector(`#tool-call-details-${item.item_id}`);
+    expect(details?.hasAttribute("hidden")).toBe(false);
     expect(within(article).getByText("Read redacted tool trace")).toBeTruthy();
-    expect(within(article).getByText("Tool detail is unavailable in the feed projection.")).toBeTruthy();
+    expect(within(details as HTMLElement).getByText("Tool detail is unavailable in the feed projection.")).toBeTruthy();
     expect(article.textContent).not.toContain("Command output");
     expect(article.textContent).not.toContain("未记录");
     expect(article.querySelector("details")).toBeNull();
+  });
+
+  it("renders grep-style tool output as one consistent text block instead of mixing summary and monospace output", () => {
+    const item: StageItemProjection = {
+      item_id: "tool-call-grep",
+      type: "tool_call",
+      occurred_at: "2026-05-04T09:20:00.000Z",
+      title: 'grep pattern="Make delivery work traceable" path=frontend',
+      summary: null,
+      content:
+        'grep pattern="Make delivery work traceable" path=frontend\nfrontend/src/pages/HomePage.tsx:87: <h1>Make delivery work traceable.</h1>\nfrontend/src/pages/__tests__/ConsolePage.test.tsx:88: name: "Make delivery work traceable.",',
+      artifact_refs: [],
+      metrics: {},
+    };
+
+    render(<ToolCallItem item={item} />);
+
+    const article = screen.getByRole("listitem", { name: "工具调用" });
+    const toggle = within(article).getByRole("button", {
+      name: /grep pattern="Make delivery work traceable" path=frontend/,
+    });
+    fireEvent.click(toggle);
+
+    const details = article.querySelector(`#tool-call-details-${item.item_id}`);
+    expect(details).toBeTruthy();
+    expect(
+      Array.from((details as HTMLElement).querySelectorAll(".stage-node-item__tool-plain-output p")),
+    ).toHaveLength(2);
+    expect(within(details as HTMLElement).queryByText((_, element) => element?.tagName.toLowerCase() === "pre")).toBeNull();
   });
 });
 
@@ -177,12 +223,19 @@ describe("real backend code and test generation payload contract", () => {
     );
 
     const toolItem = screen.getByRole("listitem", { name: "工具调用" });
-    expect(within(toolItem).getByText("edit_file apply implementation patch")).toBeTruthy();
-    expect(within(toolItem).getByText("patch applied, 1 file changed")).toBeTruthy();
     expect(toolItem.textContent).not.toContain("成功，耗时");
     expect(toolItem.textContent).not.toContain("tool-call-ref-codegen");
-    expect(within(toolItem).getByText("backend/app/schemas/feed.py")).toBeTruthy();
-    expect(within(toolItem).getByText("@@ StageItemProjection")).toBeTruthy();
+    const toggle = within(toolItem).getByRole("button", {
+      name: /edit_file apply implementation patch/,
+    });
+    fireEvent.click(toggle);
+    const details = toolItem.querySelector(
+      `#tool-call-details-${findStageItem(backendContractCodeGenerationStageNode, "tool_call").item_id}`,
+    );
+    expect(details?.hasAttribute("hidden")).toBe(false);
+    expect(within(details as HTMLElement).getByText("patch applied, 1 file changed")).toBeTruthy();
+    expect(within(details as HTMLElement).getByText("backend/app/schemas/feed.py")).toBeTruthy();
+    expect(within(details as HTMLElement).getByText("@@ StageItemProjection")).toBeTruthy();
     expect(screen.queryByRole("listitem", { name: "变更预览" })).toBeNull();
   });
 

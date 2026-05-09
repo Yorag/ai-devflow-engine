@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { ExecutionNodeProjection, StageItemProjection } from "../../../api/types";
@@ -29,6 +29,22 @@ function stageItem(
     metrics: {},
     ...overrides,
   };
+}
+
+function expandToolItem(
+  container: HTMLElement,
+  itemId: string,
+  toggleName?: string | RegExp,
+): HTMLElement {
+  const toggle = toggleName
+    ? within(container).getByRole("button", { name: toggleName })
+    : within(container).getByRole("button");
+  fireEvent.click(toggle);
+  const details = container.querySelector(`#tool-call-details-${itemId}`);
+  if (!(details instanceof HTMLElement)) {
+    throw new Error(`Missing tool details for ${itemId}`);
+  }
+  return details;
 }
 
 const requirementAnalysisStage: ExecutionNodeProjection = {
@@ -130,20 +146,23 @@ const requirementAnalysisStage: ExecutionNodeProjection = {
       type: "result",
       title: "Requirement analysis result",
       summary: "The stage can continue into Solution Design.",
-      content: [
-        "需求规格",
-        "- Keep provider binding fixed for the active run.",
-        "",
-        "验收条件",
-        "- Retries keep the original provider binding.",
-        "- New runs can use updated provider configuration.",
-        "",
-        "澄清结论",
-        "- The active run snapshot remains immutable once execution starts.",
-        "",
-        "分析说明",
-        "- This preserves deterministic retry behavior and keeps provider changes scoped to future runs.",
-      ].join("\n"),
+      content: JSON.stringify(
+        {
+          structured_requirement: {
+            summary: "Keep provider binding fixed for the active run.",
+          },
+          acceptance_criteria: [
+            "Retries keep the original provider binding.",
+            "New runs can use updated provider configuration.",
+          ],
+          clarification_summary:
+            "The active run snapshot remains immutable once execution starts.",
+          analysis_notes:
+            "This preserves deterministic retry behavior and keeps provider changes scoped to future runs.",
+        },
+        null,
+        2,
+      ),
       artifact_refs: ["requirement-analysis-output"],
     }),
   ],
@@ -184,12 +203,35 @@ describe("StageNode", () => {
     expect(within(steps[2]).getByText("思考")).toBeTruthy();
     expect(within(steps[2]).getByText("The active run snapshot is immutable.")).toBeTruthy();
     expect(within(steps[3]).getByText("工具调用")).toBeTruthy();
-    expect(within(steps[3]).getByText("read_file frontend/src/api/types.ts")).toBeTruthy();
-    expect(within(steps[3]).getByText("frontend/src/features/feed/StageNode.tsx", { exact: false })).toBeTruthy();
+    expect(
+      within(steps[3]).getByRole("button", {
+        name: /read_file frontend\/src\/api\/types\.ts/,
+      }),
+    ).toBeTruthy();
+    const toolDetails = expandToolItem(
+      steps[3],
+      "tool-call-1",
+      /read_file frontend\/src\/api\/types\.ts/,
+    );
+    expect(
+      within(toolDetails).getByText(
+        "Read the frozen projection types.",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(toolDetails).getByText(
+        "frontend/src/features/feed/StageNode.tsx",
+        { exact: false },
+      ),
+    ).toBeTruthy();
     expect(within(steps[4]).getByText("阶段结果")).toBeTruthy();
     expect(within(steps[4]).getByText("The stage can continue into Solution Design.")).toBeTruthy();
-    expect(within(steps[4]).getByText("需求规格")).toBeTruthy();
-    expect(within(steps[4]).getByText("Keep provider binding fixed for the active run.")).toBeTruthy();
+    expect(within(steps[4]).getByText("需求")).toBeTruthy();
+    expect(
+      within(steps[4]).getByText(
+        "摘要: Keep provider binding fixed for the active run.",
+      ),
+    ).toBeTruthy();
     expect(within(steps[4]).getByText("验收条件")).toBeTruthy();
     expect(within(steps[4]).getByText("Retries keep the original provider binding.")).toBeTruthy();
 
@@ -235,13 +277,33 @@ describe("StageNode", () => {
     expect(screen.queryByRole("listitem", { name: "模型记录" })).toBeNull();
     const toolItem = screen.getByRole("listitem", { name: "工具调用" });
     expect(toolItem).toBeTruthy();
-    expect(within(toolItem).getByText("read_file frontend/src/api/types.ts")).toBeTruthy();
     expect(
-      within(toolItem).getByText("frontend/src/features/feed/StageNode.tsx", { exact: false }),
+      within(toolItem).getByRole("button", {
+        name: /read_file frontend\/src\/api\/types\.ts/,
+      }),
+    ).toBeTruthy();
+    const toolDetails = expandToolItem(
+      toolItem,
+      "tool-call-1",
+      /read_file frontend\/src\/api\/types\.ts/,
+    );
+    expect(
+      within(toolDetails).getByText(
+        "Read the frozen projection types.",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(toolDetails).getByText(
+        "frontend/src/features/feed/StageNode.tsx",
+        { exact: false },
+      ),
     ).toBeTruthy();
     expect(screen.getByRole("listitem", { name: "阶段结果" })).toBeTruthy();
     expect(screen.getByText("The stage can continue into Solution Design.")).toBeTruthy();
-    expect(screen.getByText("Keep provider binding fixed for the active run.")).toBeTruthy();
+    expect(
+      screen.getByText("摘要: Keep provider binding fixed for the active run."),
+    ).toBeTruthy();
+    expect(screen.getByText("The active run snapshot remains immutable once execution starts.")).toBeTruthy();
     expect(screen.queryByRole("listitem", { name: "模型服务调用" })).toBeNull();
     expect(screen.queryByRole("listitem", { name: "变更预览" })).toBeNull();
   });
@@ -314,9 +376,10 @@ describe("StageNode", () => {
     }
 
     const toolItem = screen.getByRole("listitem", { name: "工具调用" });
-    expect(toolItem.querySelector("details")).toBeNull();
-    expect(within(toolItem).getByText("Tool call remains visible.")).toBeTruthy();
-    expect(within(toolItem).getByText("Diff preview content may remain open.")).toBeTruthy();
+    const toolDetails = expandToolItem(toolItem, "compact-tool-call");
+    expect(
+      within(toolDetails).getByText("Tool call remains visible."),
+    ).toBeTruthy();
     expect(screen.queryByRole("listitem", { name: "模型记录" })).toBeNull();
     expect(screen.queryByRole("listitem", { name: "变更预览" })).toBeNull();
     expect(screen.queryByRole("listitem", { name: "工具确认" })).toBeNull();
@@ -368,18 +431,26 @@ describe("StageNode", () => {
     render(<StageNode entry={mockCodeGenerationStageNode} />);
 
     const toolItem = screen.getByRole("listitem", { name: "工具调用" });
-    expect(within(toolItem).getByText("bash pytest frontend")).toBeTruthy();
-    expect(
-      within(toolItem).getByText("stdout 4 lines, stderr 0 lines"),
-    ).toBeTruthy();
-    expect(within(toolItem).getByText("查看输出")).toBeTruthy();
     expect(toolItem.textContent).not.toContain("成功，耗时");
     expect(toolItem.textContent).not.toContain("tool-call-ref");
     expect(toolItem.textContent).not.toContain("sha256:");
     expect(
-      within(toolItem).getByText("frontend/src/features/feed/ToolCallItem.tsx"),
+      within(toolItem).getByRole("button", { name: /bash pytest frontend/ }),
     ).toBeTruthy();
-    expect(within(toolItem).getByText("@@ renderStageItemByType")).toBeTruthy();
+    const details = expandToolItem(
+      toolItem,
+      "tool-call-codegen-1",
+      /bash pytest frontend/,
+    );
+    expect(within(details).getByText("stdout 4 lines, stderr 0 lines")).toBeTruthy();
+    expect(
+      within(details).getByText(
+        "frontend/src/features/feed/ToolCallItem.tsx",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(details).getByText("@@ renderStageItemByType"),
+    ).toBeTruthy();
     expect(screen.queryByRole("listitem", { name: "变更预览" })).toBeNull();
   });
 
