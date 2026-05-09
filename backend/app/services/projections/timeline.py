@@ -201,7 +201,8 @@ class TimelineProjectionService:
         incoming_identity = self._feed_identity(incoming)
         for index, entry in enumerate(entries):
             if self._feed_identity(entry) == incoming_identity:
-                return entries[:index] + [incoming] + entries[index + 1 :]
+                merged = self._merge_feed_entry(entry, incoming)
+                return entries[:index] + [merged] + entries[index + 1 :]
         return [*entries, incoming]
 
     def _apply_approval_result(
@@ -251,6 +252,24 @@ class TimelineProjectionService:
                 request.deny_followup_summary if request is not None else None
             ),
         }
+
+    @staticmethod
+    def _merge_feed_entry(
+        existing: TopLevelFeedEntry,
+        incoming: TopLevelFeedEntry,
+    ) -> TopLevelFeedEntry:
+        if (
+            existing.type == "stage_node"
+            and incoming.type == "stage_node"
+            and existing.stage_run_id == incoming.stage_run_id
+        ):
+            return incoming.model_copy(
+                update={
+                    "entry_id": existing.entry_id,
+                    "occurred_at": existing.occurred_at,
+                }
+            )
+        return incoming
 
     @staticmethod
     def _feed_identity(entry: TopLevelFeedEntry) -> str:

@@ -8,7 +8,7 @@ import re
 import shlex
 import subprocess
 import time
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from backend.app.api.error_codes import ErrorCode
 from backend.app.domain.enums import ToolRiskCategory, ToolRiskLevel
@@ -91,7 +91,7 @@ class BashAuditPort(Protocol):
 
 
 BashRunner = Callable[
-    [list[str]],
+    [object],
     object,
 ]
 
@@ -235,7 +235,13 @@ def run_bash_command(
     before = _workspace_snapshot(workspace)
     started = time.monotonic()
     try:
-        raw = _run_command(argv, cwd=workspace.root, timeout=tool_input.timeout_seconds, runner=runner)
+        raw = _run_command(
+            command if decision.execution_mode == "inspection" else argv,
+            execution_mode=decision.execution_mode,
+            cwd=workspace.root,
+            timeout=tool_input.timeout_seconds,
+            runner=runner,
+        )
     except subprocess.TimeoutExpired:
         changed_files = _changed_files(before, _workspace_snapshot(workspace))
         result = _tool_error_result(
@@ -361,16 +367,68 @@ def run_bash_command(
 
 
 def _run_command(
-    argv: list[str],
+    command_or_argv: object,
     *,
+    execution_mode: Literal["argv", "inspection"],
     cwd: Path,
     timeout: float | None,
     runner: Callable[..., object] | None,
 ) -> dict[str, object]:
     if runner is not None:
-        return _coerce_runner_result(runner(argv, cwd=cwd, timeout=timeout))
-    completed = subprocess.run(
-        argv,
+        return _coerce_runner_result(runner(command_or_argv, cwd=cwd, timeout=timeout))
+    if execution_mode == "inspection":
+        completed = _run_inspection_command(
+            str(command_or_argv),
+            cwd=cwd,
+            timeout=timeout,
+        )
+    else:
+        completed = subprocess.run(
+            list(command_or_argv),
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
+            shell=False,
+        )
+    return {
+        "returncode": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+    }
+
+
+def _run_inspection_command(
+    command: str,
+    *,
+    cwd: Path,
+    timeout: float | None,
+) -> subprocess.CompletedProcess[str]:
+    working_directory = cwd
+    pipeline = command
+    tokens = shlex.split(command, posix=True)
+    shell_segments = _split_tokens(tokens, "&&")
+    if len(shell_segments) == 2 and shell_segments[0][:1] == ("cd",):
+        working_directory = (cwd / shell_segments[0][1]).resolve(strict=False)
+        pipeline = shlex.join(list(shell_segments[1]))
+    script = f"""
+$ErrorActionPreference = 'Stop'
+Set-Location -LiteralPath '{_escape_powershell_single_quoted(working_directory)}'
+{_inspection_command_to_powershell(pipeline)}
+"""
+    return subprocess.run(
+        [
+            "powershell",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            script,
+        ],
         cwd=cwd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -381,11 +439,82 @@ def _run_command(
         check=False,
         shell=False,
     )
-    return {
-        "returncode": completed.returncode,
-        "stdout": completed.stdout,
-        "stderr": completed.stderr,
-    }
+
+
+def _inspection_command_to_powershell(command: str) -> str:
+    tokens = shlex.split(command, posix=True)
+    pipeline_segments = _split_tokens(tokens, "|")
+    rendered_segments = [_inspection_segment_to_powershell(segment) for segment in pipeline_segments]
+    return " | ".join(rendered_segments)
+
+
+def _inspection_segment_to_powershell(argv: tuple[str, ...]) -> str:
+    executable = argv[0].lower()
+    if executable in {"cat", "type", "get-content"}:
+        return _render_get_content(argv)
+    if executable in {"grep", "findstr", "select-string", "rg"}:
+        return _render_select_string(argv)
+    if executable in {"ls", "dir", "get-childitem"}:
+        return _render_get_child_item(argv)
+    raise ValueError(f"Unsupported inspection executable: {argv[0]}")
+
+
+def _render_get_content(argv: tuple[str, ...]) -> str:
+    paths = [token for token in argv[1:] if not token.startswith("-")]
+    rendered = " ".join(
+        f"-LiteralPath '{_escape_powershell_single_quoted(path)}'"
+        for path in paths
+    )
+    return f"Get-Content {rendered}"
+
+
+def _render_select_string(argv: tuple[str, ...]) -> str:
+    executable = argv[0].lower()
+    values = [token for token in argv[1:] if not token.startswith("-")]
+    if not values:
+        raise ValueError("Missing pattern")
+    pattern = values[0]
+    path_tokens = values[1:]
+    case_sensitive = "-CaseSensitive" if any(
+        token in {"-n", "-N"} for token in argv[1:]
+    ) else ""
+    path_args = ""
+    if path_tokens:
+        path_args = " " + " ".join(
+            f"-Path '{_escape_powershell_single_quoted(path)}'" for path in path_tokens
+        )
+    if executable == "rg":
+        case_sensitive = ""
+    return (
+        f"Select-String -Pattern '{_escape_powershell_single_quoted(pattern)}'"
+        f"{path_args} {case_sensitive}".rstrip()
+    )
+
+
+def _render_get_child_item(argv: tuple[str, ...]) -> str:
+    paths = [token for token in argv[1:] if not token.startswith("-")]
+    rendered = " ".join(
+        f"-LiteralPath '{_escape_powershell_single_quoted(path)}'"
+        for path in paths
+    )
+    return f"Get-ChildItem {rendered}"
+
+
+def _split_tokens(
+    argv: Sequence[str],
+    separator: str,
+) -> list[tuple[str, ...]]:
+    segments: list[list[str]] = [[]]
+    for token in argv:
+        if token == separator:
+            segments.append([])
+            continue
+        segments[-1].append(token)
+    return [tuple(segment) for segment in segments if segment]
+
+
+def _escape_powershell_single_quoted(value: object) -> str:
+    return str(value).replace("'", "''")
 
 
 def _coerce_runner_result(result: object) -> dict[str, object]:

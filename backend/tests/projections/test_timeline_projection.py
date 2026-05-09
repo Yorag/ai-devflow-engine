@@ -385,7 +385,7 @@ def test_timeline_projection_prefers_user_message_before_stage_node_when_timesta
                     entry_id="entry-stage-same-time",
                     run_id="run-active",
                     occurred_at=NOW + timedelta(minutes=8),
-                    stage_run_id="stage-active",
+                    stage_run_id="stage-same-time",
                     stage_type=common.StageType.CODE_GENERATION,
                     status=common.StageStatus.RUNNING,
                     attempt_index=1,
@@ -396,7 +396,7 @@ def test_timeline_projection_prefers_user_message_before_stage_node_when_timesta
                     metrics={},
                 ).model_dump(mode="json")
             },
-            trace_context=_trace(run_id="run-active", stage_run_id="stage-active"),
+            trace_context=_trace(run_id="run-active", stage_run_id="stage-same-time"),
         )
         store.append(
             DomainEventType.SESSION_MESSAGE_APPENDED,
@@ -430,6 +430,64 @@ def test_timeline_projection_prefers_user_message_before_stage_node_when_timesta
     assert entry_ids.index("entry-message-same-time") < entry_ids.index(
         "entry-stage-same-time"
     )
+
+
+def test_timeline_projection_preserves_stage_node_anchor_when_later_update_arrives(
+    tmp_path,
+) -> None:
+    from backend.app.services.projections.timeline import TimelineProjectionService
+
+    manager = _manager(tmp_path)
+    _seed_workspace(manager)
+    with manager.session(DatabaseRole.EVENT) as session:
+        store = EventStore(
+            session,
+            now=lambda: NOW,
+            id_factory=iter(["event-stage-late-update"]).__next__,
+        )
+        store.append(
+            DomainEventType.STAGE_UPDATED,
+            payload={
+                "stage_node": ExecutionNodeProjection(
+                    entry_id="entry-stage-late-update",
+                    run_id="run-active",
+                    occurred_at=NOW + timedelta(minutes=8),
+                    stage_run_id="stage-active",
+                    stage_type=common.StageType.CODE_GENERATION,
+                    status=common.StageStatus.WAITING_TOOL_CONFIRMATION,
+                    attempt_index=1,
+                    started_at=NOW + timedelta(minutes=2),
+                    ended_at=None,
+                    summary="Later stage update should not move the stage block.",
+                    items=[],
+                    metrics={},
+                ).model_dump(mode="json")
+            },
+            trace_context=_trace(run_id="run-active", stage_run_id="stage-active"),
+        )
+        session.commit()
+
+    with (
+        manager.session(DatabaseRole.CONTROL) as control_session,
+        manager.session(DatabaseRole.RUNTIME) as runtime_session,
+        manager.session(DatabaseRole.EVENT) as event_session,
+    ):
+        timeline = TimelineProjectionService(
+            control_session,
+            runtime_session,
+            event_session,
+        ).get_run_timeline("run-active")
+
+    entry_ids = [entry.entry_id for entry in timeline.entries]
+    assert entry_ids == [
+        "entry-message",
+        "entry-stage-active",
+        "entry-tool-confirmation",
+    ]
+    stage_node = next(entry for entry in timeline.entries if entry.type == "stage_node")
+    assert stage_node.entry_id == "entry-stage-active"
+    assert stage_node.occurred_at == NOW + timedelta(minutes=6)
+    assert stage_node.summary == "Later stage update should not move the stage block."
 
 
 def test_timeline_projection_does_not_leak_current_stage_from_another_run(

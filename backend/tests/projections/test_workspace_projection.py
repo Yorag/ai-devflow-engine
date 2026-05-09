@@ -606,11 +606,11 @@ def test_workspace_projection_hydrates_stage_node_items_from_stage_artifact(
                             },
                         },
                     ],
-                    "decision_trace": [
-                        {
-                            "trace_ref": "decision-1",
-                            "decision_type": "request_tool_call",
-                            "status": "accepted",
+                      "decision_trace": [
+                          {
+                              "trace_ref": "decision-1",
+                              "decision_type": "request_tool_call",
+                              "status": "accepted",
                             "safe_message": "Read the feed renderer.",
                             "iteration_index": 1,
                         },
@@ -618,14 +618,25 @@ def test_workspace_projection_hydrates_stage_node_items_from_stage_artifact(
                             "trace_ref": "decision-2",
                             "decision_type": "submit_stage_artifact",
                             "status": "accepted",
-                            "safe_message": "Submit the code generation artifact.",
-                            "iteration_index": 2,
-                        },
-                    ],
-                    "tool_trace": {
-                        "tool_name": "read_file",
-                        "call_id": "tool-call-1",
-                        "status": "succeeded",
+                              "safe_message": "Submit the code generation artifact.",
+                              "iteration_index": 2,
+                          },
+                      ],
+                      "tool_confirmation_trace": [
+                          {
+                              "tool_confirmation_ref": "tool-confirmation-1",
+                              "tool_name": "bash",
+                              "status": "pending",
+                              "safe_details": {
+                                  "summary": "Command needs confirmation before execution."
+                              },
+                              "iteration_index": 1,
+                          }
+                      ],
+                      "tool_trace": {
+                          "tool_name": "read_file",
+                          "call_id": "tool-call-1",
+                          "status": "succeeded",
                         "artifact_refs": [],
                         "output_preview": "StageNodeItems renders stage rows.",
                         "input_payload_summary": {
@@ -684,7 +695,7 @@ def test_workspace_projection_hydrates_stage_node_items_from_stage_artifact(
                         )
                     ],
                     metrics={},
-                ).model_dump(mode="json")
+                    ).model_dump(mode="json")
             },
             trace_context=_trace(run_id="run-active", stage_run_id="stage-active"),
         )
@@ -708,6 +719,7 @@ def test_workspace_projection_hydrates_stage_node_items_from_stage_artifact(
     assert [item["type"] for item in stage_node["items"]] == [
         "model_call",
         "decision",
+        "tool_confirmation",
         "tool_call",
         "model_call",
         "decision",
@@ -716,17 +728,20 @@ def test_workspace_projection_hydrates_stage_node_items_from_stage_artifact(
     assert stage_node["items"][0]["content"] == (
         "I need to inspect the feed renderer before editing."
     )
-    assert stage_node["items"][2]["title"] == (
+    assert stage_node["items"][2]["title"] == "Confirm bash tool action"
+    assert stage_node["items"][3]["title"] == (
         "read_file path=frontend/src/features/feed/StageNodeItems.tsx"
     )
-    assert stage_node["items"][3]["content"] == (
+    assert stage_node["items"][4]["content"] == (
         "The edit is complete and ready to summarize."
     )
-    assert stage_node["items"][2]["summary"] is None
-    assert stage_node["items"][5]["summary"] == "Stage feed projection now shows real steps."
-    assert '"changed_files"' in stage_node["items"][5]["content"]
-    assert "frontend/src/features/feed/StageNodeItems.tsx" in stage_node["items"][5]["content"]
-    assert "evidence_refs" not in stage_node["items"][5]["content"]
+    assert stage_node["items"][2]["summary"] == (
+        "Command needs confirmation before execution."
+    )
+    assert stage_node["items"][6]["summary"] == "Stage feed projection now shows real steps."
+    assert '"changed_files"' in stage_node["items"][6]["content"]
+    assert "frontend/src/features/feed/StageNodeItems.tsx" in stage_node["items"][6]["content"]
+    assert "evidence_refs" not in stage_node["items"][6]["content"]
     assert "sha256:internal" not in str(stage_node)
 
 
@@ -760,7 +775,7 @@ def test_workspace_projection_sorts_narrative_feed_by_occurred_at_within_run(
                     summary="A later stage node.",
                     items=[],
                     metrics={},
-                ).model_dump(mode="json")
+                    ).model_dump(mode="json")
             },
             trace_context=_trace(run_id="run-active", stage_run_id="stage-active"),
         )
@@ -796,7 +811,7 @@ def test_workspace_projection_sorts_narrative_feed_by_occurred_at_within_run(
         entry.entry_id for entry in workspace.narrative_feed if entry.run_id == "run-active"
     ]
     assert active_entry_ids.index("entry-message-early") < active_entry_ids.index(
-        "entry-stage-late"
+        "entry-stage-active"
     )
 
 
@@ -821,7 +836,7 @@ def test_workspace_projection_prefers_user_message_before_stage_node_when_timest
                     entry_id="entry-stage-same-time",
                     run_id="run-active",
                     occurred_at=NOW + timedelta(minutes=8),
-                    stage_run_id="stage-active",
+                    stage_run_id="stage-same-time",
                     stage_type=common.StageType.CODE_GENERATION,
                     status=common.StageStatus.RUNNING,
                     attempt_index=1,
@@ -832,7 +847,7 @@ def test_workspace_projection_prefers_user_message_before_stage_node_when_timest
                     metrics={},
                 ).model_dump(mode="json")
             },
-            trace_context=_trace(run_id="run-active", stage_run_id="stage-active"),
+            trace_context=_trace(run_id="run-active", stage_run_id="stage-same-time"),
         )
         store.append(
             DomainEventType.SESSION_MESSAGE_APPENDED,
@@ -868,6 +883,67 @@ def test_workspace_projection_prefers_user_message_before_stage_node_when_timest
     assert active_entry_ids.index("entry-message-same-time") < active_entry_ids.index(
         "entry-stage-same-time"
     )
+
+
+def test_workspace_projection_preserves_stage_node_anchor_when_later_update_arrives(
+    tmp_path,
+) -> None:
+    from backend.app.services.projections.workspace import WorkspaceProjectionService
+
+    manager = _manager(tmp_path)
+    _seed_workspace(manager)
+    with manager.session(DatabaseRole.EVENT) as session:
+        store = EventStore(
+            session,
+            now=lambda: NOW,
+            id_factory=iter(["event-stage-late-update"]).__next__,
+        )
+        store.append(
+            DomainEventType.STAGE_UPDATED,
+            payload={
+                "stage_node": ExecutionNodeProjection(
+                    entry_id="entry-stage-late-update",
+                    run_id="run-active",
+                    occurred_at=NOW + timedelta(minutes=8),
+                    stage_run_id="stage-active",
+                    stage_type=common.StageType.CODE_GENERATION,
+                    status=common.StageStatus.WAITING_TOOL_CONFIRMATION,
+                    attempt_index=1,
+                    started_at=NOW + timedelta(minutes=2),
+                    ended_at=None,
+                    summary="Later stage update should not move the stage block.",
+                    items=[],
+                    metrics={},
+                ).model_dump(mode="json")
+            },
+            trace_context=_trace(run_id="run-active", stage_run_id="stage-active"),
+        )
+        session.commit()
+
+    with (
+        manager.session(DatabaseRole.CONTROL) as control_session,
+        manager.session(DatabaseRole.RUNTIME) as runtime_session,
+        manager.session(DatabaseRole.EVENT) as event_session,
+    ):
+        workspace = WorkspaceProjectionService(
+            control_session,
+            runtime_session,
+            event_session,
+        ).get_session_workspace("session-1")
+
+    active_entries = [
+        entry for entry in workspace.narrative_feed if entry.run_id == "run-active"
+    ]
+    active_entry_ids = [entry.entry_id for entry in active_entries]
+    assert active_entry_ids == [
+        "entry-message",
+        "entry-stage-active",
+        "entry-tool-confirmation",
+    ]
+    stage_node = next(entry for entry in active_entries if entry.type == "stage_node")
+    assert stage_node.entry_id == "entry-stage-active"
+    assert stage_node.occurred_at == NOW + timedelta(minutes=6)
+    assert stage_node.summary == "Later stage update should not move the stage block."
 
 
 def test_workspace_projection_hydrates_denied_tool_confirmation_deny_followup_from_runtime_model(

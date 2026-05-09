@@ -192,12 +192,14 @@ export function mergeStageNodeUpdate(
     return upsertFeedEntry(entries, stageNode);
   }
 
-  const mergedStageNode = stageNode.items.some(isProviderCallStageItem)
-    ? stageNode
-    : {
-        ...stageNode,
-        items: mergeStageNodeItems(currentEntry, stageNode),
-      };
+  const mergedStageNode = {
+    ...stageNode,
+    entry_id: currentEntry.entry_id,
+    occurred_at: currentEntry.occurred_at,
+    items: stageNode.items.some(isProviderCallStageItem)
+      ? stageNode.items
+      : mergeStageNodeItems(currentEntry, stageNode),
+  };
 
   return entries.map((entry, entryIndex) =>
     entryIndex === index ? mergedStageNode : entry,

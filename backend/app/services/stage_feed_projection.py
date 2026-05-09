@@ -430,7 +430,7 @@ def _decision_action(decision_type: str) -> str:
 
 def _tool_confirmation_title(record: dict[str, Any]) -> str:
     tool_name = _optional_text(record.get("tool_name")) or "tool"
-    return f"Confirm {_tool_action(tool_name).lower()}"
+    return f"Confirm {tool_name} tool action"
 
 
 def _tool_confirmation_summary(record: dict[str, Any]) -> str:

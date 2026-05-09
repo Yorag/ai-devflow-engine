@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import posixpath
 import shlex
-from typing import Sequence
+from typing import Literal, Sequence
 
 
 _VERSION_PROBES = {
@@ -43,6 +43,20 @@ _REJECTED_EXECUTABLES = {
     "move-item",
     "remove-item",
 }
+_DIRECT_READ_ONLY_INSPECTION_EXECUTABLES = {
+    "cat",
+    "dir",
+    "findstr",
+    "get-childitem",
+    "get-content",
+    "grep",
+    "ls",
+    "rg",
+    "select-string",
+    "type",
+}
+_PIPE_SOURCE_EXECUTABLES = {"cat", "get-content", "type"}
+_PIPE_FILTER_EXECUTABLES = {"findstr", "grep", "select-string"}
 _CREDENTIAL_SEGMENTS = {".ssh", "secrets"}
 _CREDENTIAL_FILENAMES = {
     ".env",
@@ -64,6 +78,7 @@ class VerificationCommandDecision:
     read_only: bool
     reason: str
     argv: tuple[str, ...] = ()
+    execution_mode: Literal["argv", "inspection"] = "argv"
 
 
 def classify_verification_command(
@@ -79,19 +94,29 @@ def classify_verification_command(
             reason="command must parse as one shell-free argv vector",
         )
 
-    if _contains_shell_meta(argv):
-        return VerificationCommandDecision(
-            allowed=False,
-            read_only=False,
-            reason="shell metacharacters and command chaining are not allowed",
-            argv=argv,
-        )
-
     if _contains_blocked_path_argument(argv):
         return VerificationCommandDecision(
             allowed=False,
             read_only=False,
             reason="command references a blocked workspace path",
+            argv=argv,
+        )
+
+    read_only_shell_mode = _read_only_shell_execution_mode(argv)
+    if read_only_shell_mode is not None and _is_allowed_read_only_inspection_command(argv):
+        return VerificationCommandDecision(
+            allowed=True,
+            read_only=True,
+            reason="allowed read-only workspace inspection command",
+            argv=argv,
+            execution_mode=read_only_shell_mode,
+        )
+
+    if _contains_shell_meta(argv):
+        return VerificationCommandDecision(
+            allowed=False,
+            read_only=False,
+            reason="shell metacharacters and command chaining are not allowed",
             argv=argv,
         )
 
@@ -176,6 +201,24 @@ def _contains_shell_meta(argv: Sequence[str]) -> bool:
     )
 
 
+def _read_only_shell_execution_mode(
+    argv: tuple[str, ...],
+) -> Literal["argv", "inspection"] | None:
+    if not argv:
+        return None
+    if any(token in {"||", ";", ">", ">>", "<", "`"} for token in argv):
+        return None
+    if any("$(" in token or "${" in token for token in argv):
+        return None
+    if any(token in {"&&", "|"} for token in argv):
+        return "inspection"
+    if argv[0].lower() in _DIRECT_READ_ONLY_INSPECTION_EXECUTABLES - {"rg"}:
+        return "inspection"
+    if argv[0].lower() == "rg":
+        return "argv"
+    return None
+
+
 def _is_uv_pytest(argv: tuple[str, ...], *, workspace_root: Path | None) -> bool:
     if len(argv) < 3 or argv[:3] != ("uv", "run", "pytest"):
         return False
@@ -206,6 +249,122 @@ def _is_frontend_script(argv: tuple[str, ...], *, workspace_root: Path | None) -
             return argv[4] in scripts
         return argv[3] in scripts and argv[3] not in _DEPENDENCY_COMMANDS
     return False
+
+
+def _is_allowed_read_only_inspection_command(argv: tuple[str, ...]) -> bool:
+    if not argv:
+        return False
+    if any(token in {"||", ";", ">", ">>", "<", "`"} for token in argv):
+        return False
+    if any("$(" in token or "${" in token for token in argv):
+        return False
+
+    shell_segments = _split_tokens(argv, "&&")
+    if len(shell_segments) > 2:
+        return False
+    if len(shell_segments) == 2:
+        if not _is_safe_cd_segment(shell_segments[0]):
+            return False
+        command_tokens = shell_segments[1]
+    else:
+        command_tokens = shell_segments[0]
+
+    if not command_tokens:
+        return False
+
+    pipeline_segments = _split_tokens(command_tokens, "|")
+    if len(pipeline_segments) == 1:
+        return _is_safe_direct_inspection_segment(pipeline_segments[0])
+    if len(pipeline_segments) == 2:
+        return _is_safe_pipeline(pipeline_segments[0], pipeline_segments[1])
+    return False
+
+
+def _split_tokens(
+    argv: Sequence[str],
+    separator: str,
+) -> list[tuple[str, ...]]:
+    segments: list[list[str]] = [[]]
+    for token in argv:
+        if token == separator:
+            if not segments[-1]:
+                return []
+            segments.append([])
+            continue
+        segments[-1].append(token)
+    if not segments or not segments[-1]:
+        return []
+    return [tuple(segment) for segment in segments]
+
+
+def _is_safe_cd_segment(argv: tuple[str, ...]) -> bool:
+    return len(argv) == 2 and argv[0].lower() == "cd" and _is_safe_inspection_path(argv[1])
+
+
+def _is_safe_pipeline(
+    source_segment: tuple[str, ...],
+    filter_segment: tuple[str, ...],
+) -> bool:
+    return _is_safe_cat_segment(source_segment) and _is_safe_filter_segment(
+        filter_segment,
+        allow_pathless=True,
+    )
+
+
+def _is_safe_direct_inspection_segment(argv: tuple[str, ...]) -> bool:
+    if not argv:
+        return False
+    executable = argv[0].lower()
+    if executable in _PIPE_SOURCE_EXECUTABLES:
+        return _is_safe_cat_segment(argv)
+    if executable in _PIPE_FILTER_EXECUTABLES:
+        return _is_safe_filter_segment(argv, allow_pathless=False)
+    if executable == "rg":
+        return _is_safe_filter_segment(argv, allow_pathless=False)
+    if executable in {"dir", "get-childitem", "ls"}:
+        return _is_safe_list_segment(argv)
+    return False
+
+
+def _is_safe_cat_segment(argv: tuple[str, ...]) -> bool:
+    if not argv or argv[0].lower() not in _PIPE_SOURCE_EXECUTABLES:
+        return False
+    paths = [token for token in argv[1:] if not token.startswith("-")]
+    return bool(paths) and all(_is_safe_inspection_path(path) for path in paths)
+
+
+def _is_safe_filter_segment(
+    argv: tuple[str, ...],
+    *,
+    allow_pathless: bool,
+) -> bool:
+    if not argv:
+        return False
+    executable = argv[0].lower()
+    if executable not in (*_PIPE_FILTER_EXECUTABLES, "rg"):
+        return False
+    values = [token for token in argv[1:] if not token.startswith("-")]
+    if allow_pathless:
+        if len(values) < 1:
+            return False
+        return all(_is_safe_inspection_path(path) for path in values[1:])
+    if len(values) < 2:
+        return False
+    return all(_is_safe_inspection_path(path) for path in values[1:])
+
+
+def _is_safe_list_segment(argv: tuple[str, ...]) -> bool:
+    if not argv or argv[0].lower() not in {"dir", "get-childitem", "ls"}:
+        return False
+    paths = [token for token in argv[1:] if not token.startswith("-")]
+    return bool(paths) and all(_is_safe_inspection_path(path) for path in paths)
+
+
+def _is_safe_inspection_path(token: str) -> bool:
+    candidate = token.strip()
+    if not candidate or candidate in {".", "./", ".\\"}:
+        return False
+    return not _is_blocked_argument_path(candidate)
 
 
 def _is_read_only_git_command(argv: tuple[str, ...]) -> bool:

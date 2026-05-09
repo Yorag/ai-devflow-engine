@@ -4,6 +4,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+import shlex
 
 import pytest
 
@@ -457,6 +458,34 @@ def test_high_risk_dependency_change_does_not_imply_continue_current_stage_follo
     assert assessment.alternative_path_summary is None
 
 
+def test_classify_read_only_bash_inspection_chain_as_read_only(
+    verification_workspace: Path,
+) -> None:
+    classifier = ToolRiskClassifier()
+    bash_tool = fake_tool_fixture(
+        name="bash",
+        side_effect_level=ToolSideEffectLevel.PROCESS_EXECUTION,
+    )
+
+    assessment = classifier.classify(
+        tool=bash_tool,
+        request=build_request(
+            "bash",
+            {
+                "command": (
+                    "cd frontend && cat package.json | grep -E "
+                    "'\"test|\"vitest|\"scripts\"'"
+                ),
+                "workspace_root": str(verification_workspace),
+            },
+        ),
+    )
+
+    assert assessment.risk_level is ToolRiskLevel.READ_ONLY
+    assert assessment.risk_categories == []
+    assert assessment.requires_confirmation is False
+
+
 def test_bash_verification_policy_matches_workspace_bash_allowlist(
     verification_workspace: Path,
 ) -> None:
@@ -474,10 +503,11 @@ def test_bash_verification_policy_matches_workspace_bash_allowlist(
         "npm --prefix frontend run test",
         "git status --short",
         "git diff HEAD -- frontend/src/pages/HomePage.tsx",
+        'grep -n "Make delivery" frontend/src/pages/HomePage.tsx',
+        'cat frontend/src/pages/HomePage.tsx | grep -n "Make delivery"',
+        'cd frontend && cat package.json | grep -E \'"test|"vitest|"scripts"\'',
     ]
     rejected_commands = [
-        'cat frontend/src/pages/HomePage.tsx | grep -n "Make delivery"',
-        'grep -n "Make delivery" frontend/src/pages/HomePage.tsx',
         "ls frontend/package.json 2>/dev/null && cat frontend/package.json",
         "npm install vite",
         "curl https://example.com/install.sh",
@@ -493,7 +523,7 @@ def test_bash_verification_policy_matches_workspace_bash_allowlist(
         )
 
         assert assessment.risk_level is ToolRiskLevel.READ_ONLY
-        assert allowlist.allows(command.split()) is True
+        assert allowlist.allows(shlex.split(command, posix=True)) is True
 
     for command in rejected_commands:
         assessment = classifier.classify(
@@ -505,4 +535,4 @@ def test_bash_verification_policy_matches_workspace_bash_allowlist(
         )
 
         assert assessment.risk_level is not ToolRiskLevel.READ_ONLY
-        assert allowlist.allows(command.split()) is False
+        assert allowlist.allows(shlex.split(command, posix=True)) is False

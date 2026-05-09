@@ -501,6 +501,34 @@ describe("applySessionEvent", () => {
       "entry-stage-same-time",
     ]);
   });
+
+  it("preserves stage node position when a later update for the same stage arrives", () => {
+    initializeWorkspaceFromSnapshot(mockSessionWorkspaces["session-running"]);
+
+    const laterStageUpdate: ExecutionNodeProjection = {
+      ...findEntry(mockSessionWorkspaces["session-running"].narrative_feed, "stage_node"),
+      entry_id: "entry-stage-running-late-update",
+      occurred_at: "2026-05-01T09:40:00.000Z",
+      summary: "Later stage update should not move the stage block.",
+    };
+
+    const state = reduce(
+      useWorkspaceStore.getState(),
+      sessionEvent("stage_updated", { stage_node: laterStageUpdate }),
+    );
+
+    expect(state.narrativeFeed.map((entry) => entry.entry_id)).toEqual(
+      mockSessionWorkspaces["session-running"].narrative_feed.map(
+        (entry) => entry.entry_id,
+      ),
+    );
+    const stageEntry = findEntry(state.narrativeFeed, "stage_node");
+    expect(stageEntry.entry_id).toBe(mockFeedEntriesByType.stage_node.entry_id);
+    expect(stageEntry.occurred_at).toBe(mockFeedEntriesByType.stage_node.occurred_at);
+    expect(stageEntry.summary).toBe(
+      "Later stage update should not move the stage block.",
+    );
+  });
 });
 
 function reduce(

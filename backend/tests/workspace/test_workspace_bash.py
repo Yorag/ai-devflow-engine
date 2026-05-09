@@ -320,6 +320,43 @@ def test_bash_rejects_shell_chaining_without_invoking_subprocess(tmp_path: Path)
     assert runner.calls == []
 
 
+def test_bash_executes_read_only_inspection_chain_without_confirmation(
+    tmp_path: Path,
+) -> None:
+    manager, workspace = _build_workspace(tmp_path)
+    audit = _RecordingAudit()
+    confirmations = _RecordingConfirmationPort()
+    runner_calls: list[dict[str, object]] = []
+
+    def runner(command: object, *, cwd: Path, timeout: float | None):
+        runner_calls.append({"command": command, "cwd": cwd, "timeout": timeout})
+        return {
+            "returncode": 0,
+            "stdout": '"test": "vitest run"\n',
+            "stderr": "",
+        }
+
+    registry = ToolRegistry(
+        [BashTool(manager=manager, workspace=workspace, audit_service=audit, runner=runner)]
+    )
+
+    result = registry.execute(
+        _request('cd frontend && cat package.json | grep -E \'"test|"vitest|"scripts"\''),
+        _context(manager, workspace, audit, confirmations),
+    )
+
+    assert result.status is ToolResultStatus.SUCCEEDED
+    assert result.output_payload["changed_files"] == []
+    assert confirmations.calls == []
+    assert runner_calls == [
+        {
+            "command": 'cd frontend && cat package.json | grep -E \'"test|"vitest|"scripts"\'',
+            "cwd": workspace.root,
+            "timeout": 5,
+        }
+    ]
+
+
 def test_bash_truncates_secret_bearing_output_without_leaking_token(
     tmp_path: Path,
 ) -> None:
@@ -687,10 +724,11 @@ def test_bash_verification_policy_accepts_same_commands_as_risk_classifier(
         "npm --prefix frontend run test",
         "git status --short",
         "git diff HEAD -- frontend/src/pages/HomePage.tsx",
+        'grep -n "Make delivery" frontend/src/pages/HomePage.tsx',
+        'cat frontend/src/pages/HomePage.tsx | grep -n "Make delivery"',
+        'cd frontend && cat package.json | grep -E \'"test|"vitest|"scripts"\'',
     ]
     rejected_commands = [
-        'cat frontend/src/pages/HomePage.tsx | grep -n "Make delivery"',
-        'grep -n "Make delivery" frontend/src/pages/HomePage.tsx',
         "ls frontend/package.json 2>/dev/null && cat frontend/package.json",
         "npm install vite",
         "curl https://example.com/install.sh",
