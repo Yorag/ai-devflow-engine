@@ -25,6 +25,11 @@ _DEPENDENCY_COMMANDS = {
     "upgrade",
     "ci",
 }
+_CONFIRMABLE_LOCAL_DEPENDENCY_COMMANDS = {
+    ("npm", "--prefix", "frontend", "ci"),
+    ("npm", "--prefix", "e2e", "ci"),
+    ("uv", "sync"),
+}
 _REJECTED_EXECUTABLES = {
     "cat",
     "curl",
@@ -191,6 +196,18 @@ def classify_verification_command(
         )
 
     if _is_dependency_command(argv):
+        if _is_confirmable_local_dependency_command(
+            argv,
+            workspace_root=workspace_root,
+            working_directory=working_directory,
+        ):
+            return VerificationCommandDecision(
+                allowed=True,
+                read_only=False,
+                reason="repo-local dependency installation requires confirmation",
+                argv=argv,
+                working_directory=working_directory,
+            )
         return VerificationCommandDecision(
             allowed=False,
             read_only=False,
@@ -484,8 +501,12 @@ def _is_dependency_command(argv: tuple[str, ...]) -> bool:
     if not argv:
         return False
     command = argv[0].lower()
-    if command == "npm" and len(argv) >= 2:
-        return argv[1].lower() in _DEPENDENCY_COMMANDS
+    if command == "npm":
+        subcommand_index = 1
+        if len(argv) >= 4 and argv[1] == "--prefix":
+            subcommand_index = 3
+        if len(argv) > subcommand_index:
+            return argv[subcommand_index].lower() in _DEPENDENCY_COMMANDS
     if command in {"pnpm", "yarn"} and len(argv) >= 2:
         return argv[1].lower() in _DEPENDENCY_COMMANDS
     if command in {"pip", "pip3"} and len(argv) >= 2:
@@ -496,6 +517,28 @@ def _is_dependency_command(argv: tuple[str, ...]) -> bool:
             "install",
         )
     return False
+
+
+def _is_confirmable_local_dependency_command(
+    argv: tuple[str, ...],
+    *,
+    workspace_root: Path | None,
+    working_directory: Path | None,
+) -> bool:
+    if workspace_root is None:
+        return False
+    if argv[:4] == ("npm", "--prefix", "frontend", "ci"):
+        return len(argv) == 4 and (workspace_root / "frontend" / "package.json").is_file()
+    if argv[:4] == ("npm", "--prefix", "e2e", "ci"):
+        return len(argv) == 4 and (workspace_root / "e2e" / "package.json").is_file()
+    if argv[:2] == ("uv", "sync"):
+        return len(argv) == 2 and (workspace_root / "pyproject.toml").is_file()
+    if argv[:1] == ("npm",) and len(argv) >= 2 and argv[1] == "ci":
+        if working_directory == (workspace_root / "frontend").resolve(strict=False):
+            return len(argv) == 2 and (workspace_root / "frontend" / "package.json").is_file()
+        if working_directory == (workspace_root / "e2e").resolve(strict=False):
+            return len(argv) == 2 and (workspace_root / "e2e" / "package.json").is_file()
+    return argv in _CONFIRMABLE_LOCAL_DEPENDENCY_COMMANDS
 
 
 def _has_pytest_config(workspace_root: Path | None) -> bool:

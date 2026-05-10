@@ -564,6 +564,34 @@ def succeeded_bash_result(call_id: str) -> ToolResult:
     )
 
 
+def failed_bash_result(
+    call_id: str,
+    *,
+    command: str = "npm --prefix frontend run test -- --run src/pages/__tests__/ConsolePage.test.tsx",
+    error_code: str = "internal_error",
+    safe_details: dict[str, Any] | None = None,
+) -> ToolResult:
+    return ToolResult(
+        tool_name="bash",
+        call_id=call_id,
+        status=ToolResultStatus.FAILED,
+        output_payload={},
+        side_effect_refs=[f"command_trace:run-1:{call_id}"],
+        error=ToolError.from_code(
+            error_code,
+            trace_context=trace_context(),
+            safe_details=safe_details
+            or {
+                "exit_code": 1,
+                "reason": "local_dependency_missing",
+                "command": command,
+            },
+        ),
+        trace_context=trace_context(),
+        coordination_key=f"stage-run-1:{call_id}",
+    )
+
+
 def read_file_description() -> ToolBindableDescription:
     return ToolBindableDescription(
         name="read_file",
@@ -1704,6 +1732,91 @@ def test_execution_normalizes_command_refs_from_successful_bash_result() -> None
     assert output["artifact_payload"]["command_trace_refs"] == [expected_ref]
     assert expected_ref in output["evidence_refs"]
     assert expected_ref in runtime.artifact_store.complete_calls[0]["output_refs"]
+
+
+def test_execution_allows_recoverable_failed_bash_result_to_inform_next_decision() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(tool_call_requests=(bash_call("call-bash-1"),)),
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "TestGenerationExecutionArtifact",
+                    "artifact_payload": execution_artifact_payload(),
+                    "evidence_refs": ["stage-process://stage-run-1/model-call/submit"],
+                    "failure_summary": {
+                        "classification": "environment_blocked",
+                        "reason": "frontend dependencies missing in workspace",
+                    },
+                }
+            ),
+        ],
+        tool_results=[failed_bash_result("call-bash-1")],
+        allowed_tools=["bash"],
+        available_tools=(bash_description(),),
+        stage_type=StageType.TEST_GENERATION_EXECUTION,
+        structured_artifact_required="TestGenerationExecutionArtifact",
+    )
+
+    result = runtime.run_stage(invocation(stage_type=StageType.TEST_GENERATION_EXECUTION))
+
+    assert result.status is StageStatus.COMPLETED
+    assert len(runtime.provider_adapter.calls) == 2
+    assert "stage_agent_failed" not in runtime.artifact_store.process
+    tool_trace = runtime.artifact_store.process["tool_trace"]
+    if isinstance(tool_trace, list):
+        tool_trace = tool_trace[0]
+    assert tool_trace["status"] == "failed"
+    second_call_messages = runtime.provider_adapter.calls[1]["messages"]
+    assert any(
+        "Recent Tool Results" in getattr(message, "content", "")
+        and '"status": "failed"' in getattr(message, "content", "")
+        and '"reason": "local_dependency_missing"' in getattr(message, "content", "")
+        for message in second_call_messages
+    )
+
+
+def test_execution_allows_recoverable_failed_bash_result_to_request_dependency_install_confirmation() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(tool_call_requests=(bash_call("call-bash-1"),)),
+            model_result(
+                structured_output={
+                    "decision_type": "request_tool_confirmation",
+                    "tool_name": "bash",
+                    "command_summary": "Install repo-local frontend dependencies with npm ci",
+                    "target_resource": "frontend/node_modules",
+                    "risk_level": "high_risk",
+                    "risk_categories": ["dependency_change"],
+                    "expected_side_effects": [
+                        "Install frontend dependencies from frontend/package-lock.json."
+                    ],
+                    "alternative_path_summary": "Stop verification and report an environment blocker.",
+                    "input_payload": {"command": "npm --prefix frontend ci"},
+                }
+            ),
+        ],
+        tool_results=[failed_bash_result("call-bash-1")],
+        allowed_tools=["bash"],
+        available_tools=(bash_description(),),
+        stage_type=StageType.TEST_GENERATION_EXECUTION,
+        structured_artifact_required="TestGenerationExecutionArtifact",
+    )
+
+    result = runtime.run_stage(invocation(stage_type=StageType.TEST_GENERATION_EXECUTION))
+
+    assert result.status is StageStatus.WAITING_TOOL_CONFIRMATION
+    assert result.route_key == "waiting_tool_confirmation"
+    assert "stage_agent_failed" not in runtime.artifact_store.process
+    trace = runtime.artifact_store.process["tool_confirmation_trace"]
+    assert trace["tool_name"] == "bash"
+    assert trace["input_payload"]["command"] == "npm --prefix frontend ci"
+    second_call_messages = runtime.provider_adapter.calls[1]["messages"]
+    assert any(
+        "Recent Tool Results" in getattr(message, "content", "")
+        and '"status": "failed"' in getattr(message, "content", "")
+        for message in second_call_messages
+    )
 
 
 def test_execution_requires_successful_command_evidence() -> None:

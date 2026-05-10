@@ -479,6 +479,7 @@ class WorkspaceGrepOptions:
         ".superpowers/**",
         ".pytest_cache/**",
         ".worktrees/**",
+        "**/node_modules/**",
         "node_modules/**",
         ".venv/**",
         "venv/**",

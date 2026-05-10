@@ -10,6 +10,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from backend.app.context.builder import ContextBuildRequest, ContextEnvelopeBuilder
+from backend.app.api.error_codes import ErrorCode
 from backend.app.domain.enums import (
     StageStatus,
     StageType,
@@ -121,6 +122,7 @@ class _StageArtifactEvidencePolicy:
     payload_field: str
     tool_names: tuple[str, ...]
     ref_prefix: str
+    accepted_statuses: tuple[ToolResultStatus, ...] = (ToolResultStatus.SUCCEEDED,)
 
 
 @dataclass(frozen=True, slots=True)
@@ -796,10 +798,11 @@ class StageAgentRuntime:
                 request=request,
             )
 
-        refs = _successful_side_effect_refs(
+        refs = _evidence_side_effect_refs(
             tool_results,
             tool_names=policy.tool_names,
             ref_prefix=policy.ref_prefix,
+            accepted_statuses=policy.accepted_statuses,
         )
         if not refs:
             return self._repair_or_fail_missing_stage_artifact_evidence(
@@ -1292,6 +1295,19 @@ class StageAgentRuntime:
                     "safe_details": _tool_error_safe_details(tool_result),
                 },
             )
+        if _is_recoverable_tool_failure(tool_result):
+            self.persist_recovery_checkpoint(
+                request,
+                self._recovery_cursor(
+                    request,
+                    iteration_index=iteration_index,
+                    last_decision_trace_ref=last_decision_trace_ref,
+                    last_model_call_ref=last_model_call_ref,
+                    last_tool_call_id=tool_result.call_id,
+                    completed_tool_call_ids=completed_ids,
+                ),
+            )
+            return None
         return self._failed_result(
             request,
             reason=f"tool_{tool_result.status.value}",
@@ -1752,6 +1768,10 @@ def _evidence_policy_for_artifact(
             payload_field="command_trace_refs",
             tool_names=("bash",),
             ref_prefix="command_trace:",
+            accepted_statuses=(
+                ToolResultStatus.SUCCEEDED,
+                ToolResultStatus.FAILED,
+            ),
         )
     else:
         return None
@@ -1806,15 +1826,16 @@ def _base_response_schema_decision_types(
     return decision_types
 
 
-def _successful_side_effect_refs(
+def _evidence_side_effect_refs(
     tool_results: Sequence[ToolResult],
     *,
     tool_names: tuple[str, ...],
     ref_prefix: str,
+    accepted_statuses: tuple[ToolResultStatus, ...],
 ) -> tuple[str, ...]:
     refs: list[str] = []
     for result in tool_results:
-        if result.status is not ToolResultStatus.SUCCEEDED:
+        if result.status not in accepted_statuses:
             continue
         if result.tool_name not in tool_names:
             continue
@@ -1828,6 +1849,14 @@ def _successful_side_effect_refs(
 
 def _dedupe_strings(values: Sequence[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(values))
+
+
+def _is_recoverable_tool_failure(tool_result: ToolResult) -> bool:
+    if tool_result.status is not ToolResultStatus.FAILED:
+        return False
+    if tool_result.error is None:
+        return False
+    return tool_result.error.error_code is ErrorCode.INTERNAL_ERROR
 
 
 def _stage_artifact_semantic_violation(

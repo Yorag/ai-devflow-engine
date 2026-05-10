@@ -389,6 +389,9 @@ def test_bash_and_common_tool_prompts_reject_synthetic_workspace_aliases() -> No
     assert "/workspace" in tool_usage_body
     assert "repo-root command forms" in test_stage_body
     assert "npm --prefix frontend run test" in test_stage_body
+    assert "npm --prefix frontend ci" in test_stage_body
+    assert "uv sync" in test_stage_body
+    assert "repo-local dependency install" in bash_body
 
 
 def test_test_stage_and_edit_file_prompts_constrain_exact_edit_parameters() -> None:

@@ -276,6 +276,48 @@ def test_bash_executes_allowlisted_build_command_shell_free_and_tracks_changed_f
     ]
 
 
+def test_bash_snapshot_ignores_linked_frontend_node_modules_changes(
+    tmp_path: Path,
+) -> None:
+    manager, workspace = _build_workspace(tmp_path)
+    audit = _RecordingAudit()
+    confirmations = _RecordingConfirmationPort()
+    project_root = manager._settings.default_project_root  # noqa: SLF001
+    source_node_modules = project_root / "frontend" / "node_modules"
+    source_tool = source_node_modules / ".bin" / "vitest.cmd"
+    source_tool.parent.mkdir(parents=True, exist_ok=True)
+    source_tool.write_text("@echo off\r\necho old\r\n", encoding="utf-8")
+    linked_node_modules = workspace.root / "frontend" / "node_modules"
+    subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(linked_node_modules), str(source_node_modules)],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    def runner(argv: list[str], *, cwd: Path, timeout: float | None):
+        del argv, cwd, timeout
+        source_tool.write_text("@echo off\r\necho new\r\n", encoding="utf-8")
+        return {
+            "returncode": 0,
+            "stdout": "PASS src/pages/__tests__/HomePage.test.tsx\n",
+            "stderr": "",
+        }
+
+    registry = ToolRegistry(
+        [BashTool(manager=manager, workspace=workspace, audit_service=audit, runner=runner)]
+    )
+
+    result = registry.execute(
+        _request("npm --prefix frontend run test -- --run src/pages/__tests__/HomePage.test.tsx 2>&1"),
+        _context(manager, workspace, audit, confirmations),
+    )
+
+    assert result.status is ToolResultStatus.SUCCEEDED
+    assert result.output_payload["changed_files"] == []
+    assert result.side_effect_refs == ["command_trace:run-1:call-bash"]
+
+
 def test_bash_rejects_non_allowlisted_command_with_structured_error(tmp_path: Path) -> None:
     manager, workspace = _build_workspace(tmp_path)
     audit = _RecordingAudit()
@@ -344,6 +386,69 @@ def test_bash_executes_normalized_frontend_vitest_command_without_confirmation(
                 "src/pages/__tests__/HomePage.test.tsx",
             ],
             "cwd": workspace.root / "frontend",
+            "timeout": 5,
+        }
+    ]
+
+
+def test_bash_executes_confirmed_repo_local_frontend_ci_command(
+    tmp_path: Path,
+) -> None:
+    manager, workspace = _build_workspace(tmp_path)
+    audit = _RecordingAudit()
+    confirmations = _RecordingConfirmationPort()
+    runner_calls: list[dict[str, object]] = []
+
+    def runner(argv: list[str], *, cwd: Path, timeout: float | None):
+        runner_calls.append({"argv": list(argv), "cwd": cwd, "timeout": timeout})
+        return {
+            "returncode": 0,
+            "stdout": "added 0 packages\n",
+            "stderr": "",
+        }
+
+    registry = ToolRegistry(
+        [BashTool(manager=manager, workspace=workspace, audit_service=audit, runner=runner)]
+    )
+
+    pending = registry.execute(
+        _request("npm --prefix frontend ci"),
+        _context(manager, workspace, audit, confirmations),
+    )
+    assert pending.status is ToolResultStatus.WAITING_CONFIRMATION
+    assert pending.error is not None
+
+    confirmed_trace = _trace().model_copy(
+        update={"tool_confirmation_id": pending.tool_confirmation_ref}
+    )
+    confirmed_request = ToolExecutionRequest(
+        tool_name="bash",
+        call_id="call-bash",
+        input_payload={"command": "npm --prefix frontend ci"},
+        trace_context=confirmed_trace,
+        coordination_key="coordination-bash",
+        confirmation_grant=ToolConfirmationGrant(
+            tool_confirmation_id=str(pending.tool_confirmation_ref),
+            confirmation_object_ref=str(confirmations.calls[-1]["confirmation_object_ref"]),
+            tool_name="bash",
+            input_digest=str(pending.error.safe_details["input_digest"]),
+            target_summary=str(pending.error.safe_details["target_summary"]),
+            risk_level=ToolRiskLevel.HIGH_RISK,
+            risk_categories=[ToolRiskCategory.DEPENDENCY_CHANGE],
+        ),
+    )
+
+    result = registry.execute(
+        confirmed_request,
+        _context(manager, workspace, audit, confirmations),
+    )
+
+    assert result.status is ToolResultStatus.SUCCEEDED
+    assert result.output_payload["argv"] == ["npm", "--prefix", "frontend", "ci"]
+    assert runner_calls == [
+        {
+            "argv": ["npm", "--prefix", "frontend", "ci"],
+            "cwd": workspace.root,
             "timeout": 5,
         }
     ]

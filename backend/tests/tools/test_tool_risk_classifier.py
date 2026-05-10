@@ -458,6 +458,31 @@ def test_high_risk_dependency_change_does_not_imply_continue_current_stage_follo
     assert assessment.alternative_path_summary is None
 
 
+def test_classify_repo_local_frontend_ci_as_high_risk_confirmable_dependency_change(
+    verification_workspace: Path,
+) -> None:
+    classifier = ToolRiskClassifier()
+    bash_tool = fake_tool_fixture(
+        name="bash",
+        side_effect_level=ToolSideEffectLevel.PROCESS_EXECUTION,
+    )
+
+    assessment = classifier.classify(
+        tool=bash_tool,
+        request=build_request(
+            "bash",
+            {
+                "command": "npm --prefix frontend ci",
+                "workspace_root": str(verification_workspace),
+            },
+        ),
+    )
+
+    assert assessment.risk_level is ToolRiskLevel.HIGH_RISK
+    assert assessment.risk_categories == [ToolRiskCategory.DEPENDENCY_CHANGE]
+    assert assessment.requires_confirmation is True
+
+
 def test_classify_read_only_bash_inspection_chain_as_read_only(
     verification_workspace: Path,
 ) -> None:

@@ -213,6 +213,37 @@ def test_create_for_run_copies_git_tracked_project_files_without_credentials(
     assert not (workspace.root / ".runtime").exists()
 
 
+def test_create_for_run_links_frontend_node_modules_without_copying_or_deleting_source(
+    tmp_path: Path,
+) -> None:
+    manager = build_manager(tmp_path)
+    project_root = manager._settings.default_project_root  # noqa: SLF001
+    frontend = project_root / "frontend"
+    source_node_modules = frontend / "node_modules"
+    source_vitest = source_node_modules / ".bin" / "vitest.cmd"
+    source_vitest.parent.mkdir(parents=True)
+    source_vitest.write_text("@echo off\r\necho vitest\r\n", encoding="utf-8")
+
+    workspace = manager.create_for_run(
+        run_id="run-1",
+        workspace_ref="workspace-1",
+        trace_context=build_trace(),
+    )
+
+    workspace_node_modules = workspace.root / "frontend" / "node_modules"
+
+    assert workspace_node_modules.exists()
+    assert workspace_node_modules.samefile(source_node_modules)
+    assert "echo vitest" in (workspace_node_modules / ".bin" / "vitest.cmd").read_text(
+        encoding="utf-8"
+    )
+
+    manager.cleanup_run_workspace(workspace=workspace, trace_context=build_trace())
+
+    assert source_node_modules.is_dir()
+    assert source_vitest.is_file()
+
+
 def test_get_run_workspace_returns_existing_workspace_and_missing_lookup_fails(
     tmp_path: Path,
 ) -> None:

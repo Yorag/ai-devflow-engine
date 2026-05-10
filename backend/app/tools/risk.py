@@ -119,7 +119,7 @@ _CREDENTIAL_FILENAMES = frozenset(
 _PATH_KEYS = ("path", "target_path", "file_path", "destination", "dest", "source")
 _PATH_LIST_KEYS = ("paths", "target_paths", "files", "file_paths")
 _DEPENDENCY_COMMAND_PATTERN = re.compile(
-    r"\b(?:npm|pnpm|yarn)\s+(?:install|i|add|update|upgrade)\b"
+    r"\b(?:npm|pnpm|yarn)(?:\s+--prefix\s+\S+)?\s+(?:install|i|add|update|upgrade|ci)\b"
     r"|\b(?:pip|pip3)\s+install\b"
     r"|\buv\s+(?:add|pip\s+install|sync)\b"
     r"|\bpoetry\s+(?:add|install|update)\b"

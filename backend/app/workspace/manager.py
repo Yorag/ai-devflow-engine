@@ -264,6 +264,10 @@ class WorkspaceManager:
             destination = workspace.root / relative_path
             destination.parent.mkdir(parents=True, exist_ok=True)
             copy2(source, destination)
+        self._link_local_dependency_directories(
+            project_root=project_root,
+            workspace=workspace,
+        )
 
     def _git_tracked_paths(self, project_root: Path) -> tuple[Path, ...] | None:
         if not (project_root / ".git").exists():
@@ -362,6 +366,38 @@ class WorkspaceManager:
         if workspace_root == project_root or workspace_root.is_relative_to(project_root):
             return workspace_root.relative_to(project_root).as_posix()
         return None
+
+    def _link_local_dependency_directories(
+        self,
+        *,
+        project_root: Path,
+        workspace: RunWorkspace,
+    ) -> None:
+        for relative_path in (
+            Path("frontend") / "node_modules",
+            Path("e2e") / "node_modules",
+        ):
+            source = (project_root / relative_path).resolve(strict=False)
+            if not source.is_dir() or not source.is_relative_to(project_root):
+                continue
+            destination = workspace.root / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            self._create_directory_link(destination=destination, source=source)
+
+    def _create_directory_link(self, *, destination: Path, source: Path) -> None:
+        if destination.exists() or destination.is_symlink():
+            self._remove_managed_workspace_path(destination)
+        try:
+            destination.symlink_to(source, target_is_directory=True)
+            return
+        except OSError:
+            pass
+        subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(destination), str(source)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
     def _remove_managed_workspace_path(self, path: Path) -> None:
         self._assert_managed_workspace_path(path)

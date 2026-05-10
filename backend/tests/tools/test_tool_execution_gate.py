@@ -1004,6 +1004,46 @@ def test_execute_high_risk_action_returns_waiting_confirmation_without_running_t
     assert tool.calls == []
 
 
+def test_execute_repo_local_frontend_ci_returns_waiting_confirmation_without_running_tool() -> None:
+    tool = ExecutableFakeTool(
+        name="bash",
+        side_effect_level=ToolSideEffectLevel.PROCESS_EXECUTION,
+        permission_boundary=ToolPermissionBoundary(
+            boundary_type="workspace",
+            requires_workspace=False,
+            resource_scopes=(),
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"command": {"type": "string", "minLength": 1}},
+            "required": ["command"],
+            "additionalProperties": False,
+        },
+    )
+    registry = ToolRegistry([tool])
+    confirmations = RecordingConfirmationPort()
+    audit = RecordingAudit()
+    base_context = context(
+        allowed_tools=["bash"],
+        audit_recorder=audit,
+    )
+    execution_context = ToolExecutionContext(
+        **{**base_context.__dict__, "confirmation_port": confirmations}
+    )
+
+    result = registry.execute(
+        request("bash", {"command": "npm --prefix frontend ci"}),
+        execution_context,
+    )
+
+    assert result.status is ToolResultStatus.WAITING_CONFIRMATION
+    assert result.error is not None
+    assert result.error.error_code is ErrorCode.TOOL_CONFIRMATION_REQUIRED
+    assert result.error.safe_details["risk_categories"] == ["dependency_change"]
+    assert confirmations.calls[0]["target_summary"] == "command: npm --prefix frontend ci"
+    assert tool.calls == []
+
+
 def test_execute_high_risk_action_runs_without_confirmation_when_skip_policy_enabled() -> None:
     tool = ExecutableFakeTool(
         name="bash",

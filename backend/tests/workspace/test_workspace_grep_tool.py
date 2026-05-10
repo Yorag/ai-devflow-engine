@@ -263,6 +263,7 @@ def test_grep_registers_and_returns_sorted_matches_via_tool_registry(
     assert "!.superpowers/**" in captured["args"]
     assert "!.pytest_cache/**" in captured["args"]
     assert "!.worktrees/**" in captured["args"]
+    assert "!**/node_modules/**" in captured["args"]
     assert captured["shell"] is False
     assert harness.audit.intents == ["grep"]
 

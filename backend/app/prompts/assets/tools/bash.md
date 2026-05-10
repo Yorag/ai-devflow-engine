@@ -19,7 +19,9 @@ Use `bash` only when the current stage_contract allowed_tools includes it, the c
 
 ## Do Not Use When
 
-Do not use bash to read, search, create, or edit files when `read_file`, `grep`, `glob`, `write_file`, or `edit_file` is available for the same task. Do not use it to bypass a dedicated tool failure, execute arbitrary shell snippets, chain commands, access credentials, install dependencies, run migrations, perform Git or remote delivery writes, or mutate runtime-private paths unless the active stage contract and runtime controls explicitly authorize that path.
+Do not use bash to read, search, create, or edit files when `read_file`, `grep`, `glob`, `write_file`, or `edit_file` is available for the same task. Do not use it to bypass a dedicated tool failure, execute arbitrary shell snippets, chain commands, access credentials, run migrations, perform Git or remote delivery writes, or mutate runtime-private paths unless the active stage contract and runtime controls explicitly authorize that path.
+
+If a stage-scoped verification command fails because repo-local dependencies are missing, you may request a repo-local dependency install only when the current stage contract and runtime controls already permit that path through confirmation. Use only narrow repo-local commands already evidenced by the project layout, such as `npm --prefix frontend ci`, `npm --prefix e2e ci`, or `uv sync`. Do not invent broader install commands, global installs, manifest edits, or lockfile mutations beyond the authorized command itself.
 
 ## Input Rules
 

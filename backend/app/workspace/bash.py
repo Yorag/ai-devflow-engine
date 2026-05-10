@@ -74,6 +74,11 @@ _EXCLUDED_PATH_PREFIXES = (
     "coverage",
     "__pycache__",
 )
+_EXCLUDED_PATH_SEGMENTS = frozenset(
+    {
+        "node_modules",
+    }
+)
 _BASH_SENSITIVE_TEXT_PATTERNS = (
     re.compile(r"Authorization:", re.IGNORECASE),
     re.compile(r"Cookie:", re.IGNORECASE),
@@ -307,12 +312,40 @@ def run_bash_command(
     )
 
     if execution.returncode != 0:
-        result = _tool_error_result(
-            tool_input,
-            error_code=ErrorCode.INTERNAL_ERROR,
-            safe_details={"exit_code": execution.returncode},
-            workspace=workspace,
-            changed_files=changed_files,
+        result = ToolResult(
+            tool_name="bash",
+            call_id=tool_input.call_id,
+            status=ToolResultStatus.FAILED,
+            output_payload={
+                "command": safe_command,
+                "argv": safe_argv,
+                "exit_code": execution.returncode,
+                "duration_ms": execution.duration_ms,
+                "stdout_excerpt": stdout,
+                "stderr_excerpt": stderr,
+                "stdout_truncated": stdout_truncated,
+                "stderr_truncated": stderr_truncated,
+                "changed_files": list(changed_files),
+            },
+            output_preview=_preview_bash(command, stdout, stderr),
+            error=ToolError.from_code(
+                ErrorCode.INTERNAL_ERROR,
+                trace_context=tool_input.trace_context,
+                safe_details={
+                    "command": safe_command,
+                    "exit_code": execution.returncode,
+                    "stdout_excerpt": stdout,
+                    "stderr_excerpt": stderr,
+                },
+            ),
+            side_effect_refs=_side_effect_refs(workspace, tool_input, changed_files),
+            reconciliation_status=(
+                ToolReconciliationStatus.PENDING
+                if changed_files
+                else ToolReconciliationStatus.NOT_REQUIRED
+            ),
+            trace_context=tool_input.trace_context,
+            coordination_key=tool_input.coordination_key,
         )
         audit_failure = _record_tool_error(
             audit_service,
@@ -573,7 +606,10 @@ def _workspace_snapshot(workspace: RunWorkspace) -> dict[str, str]:
 
 def _is_snapshot_excluded(relative: str, workspace: RunWorkspace) -> bool:
     prefixes = (*workspace.excluded_relative_paths, *_EXCLUDED_PATH_PREFIXES)
-    return any(relative == prefix or relative.startswith(f"{prefix}/") for prefix in prefixes)
+    if any(relative == prefix or relative.startswith(f"{prefix}/") for prefix in prefixes):
+        return True
+    parts = tuple(Path(relative).parts)
+    return any(part in _EXCLUDED_PATH_SEGMENTS for part in parts)
 
 
 def _changed_files(before: dict[str, str], after: dict[str, str]) -> list[str]:
