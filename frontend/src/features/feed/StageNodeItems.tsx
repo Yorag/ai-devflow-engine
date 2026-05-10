@@ -171,89 +171,110 @@ function ProminentItem({
     item.type === "result" ? readResultContent(item.content) : readReadableContent(item.content);
   const resultContent =
     item.type === "result" ? parseResultContent(readableContent?.text ?? "") : null;
+  const resultSummary =
+    item.type === "result" ? readResultSummary(item.summary, resultContent) : null;
 
   return (
     <li
       className={`stage-node-item stage-node-item--${item.type}`}
       aria-label={stageItemLabels[item.type]}
     >
-      <StageItemHeader item={item} stepIndex={stepIndex} />
-      {item.summary ? <p className="stage-node-item__summary">{item.summary}</p> : null}
-      {readableContent && readableContent.text !== item.summary ? (
-        item.type === "result" ? (
-          <ResultContent text={readableContent.text} parsed={resultContent} />
-        ) : (
-          <p className="stage-node-item__content">{readableContent.text}</p>
-        )
+      {item.type === "result" ? null : (
+        <StageItemHeader item={item} stepIndex={stepIndex} />
+      )}
+      {item.type === "result" ? (
+        <ResultMarkdownPanel summary={resultSummary} sections={resultContent} />
+      ) : readableContent && readableContent.text !== item.summary ? (
+        <p className="stage-node-item__content">{readableContent.text}</p>
+      ) : null}
+      {item.type !== "result" && item.summary ? (
+        <p className="stage-node-item__summary">{item.summary}</p>
       ) : null}
     </li>
   );
 }
 
-type ResultSection =
-  | { type: "paragraph"; title: string | null; text: string }
-  | { type: "list"; title: string | null; items: string[] };
+type ResultSection = {
+  title: string | null;
+  paragraphs: string[];
+  bullets: ResultBullet[];
+};
 
-function ResultContent({
-  text,
-  parsed,
-}: {
+type ResultBullet = {
   text: string;
-  parsed: ResultSection[] | null;
-}): JSX.Element {
-  if (parsed && parsed.length > 0) {
-    return (
-      <div className="stage-node-item__result-sections">
-        {parsed.map((section, index) => {
-          if (section.type === "paragraph") {
-            return (
-              <div
-                key={`${section.type}-${index}-${section.text}`}
-                className="stage-node-item__result-section"
-              >
-                {section.title ? (
-                  <strong className="stage-node-item__result-heading">
-                    {section.title}
-                  </strong>
-                ) : null}
-                <p className="stage-node-item__content">{section.text}</p>
-              </div>
-            );
-          }
+  level: number;
+};
 
-          return (
-            <section
-              key={`${section.type}-${index}-${section.title ?? "items"}`}
-              className="stage-node-item__result-section"
-            >
-              {section.title ? (
-                <strong className="stage-node-item__result-heading">
-                  {section.title}
-                </strong>
-              ) : null}
-              <ul className="stage-node-item__result-list">
-                {section.items.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            </section>
-          );
-        })}
-      </div>
-    );
+function ResultMarkdownPanel({
+  summary,
+  sections,
+}: {
+  summary: string | null;
+  sections: ResultSection[] | null;
+}): JSX.Element | null {
+  if (!summary && (!sections || sections.length === 0)) {
+    return null;
   }
 
-  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
-  if (lines.length <= 1) {
-    return <p className="stage-node-item__content">{text}</p>;
-  }
   return (
-    <ul className="stage-node-item__result-list">
-      {lines.map((line) => (
-        <li key={line}>{line}</li>
+    <div className="stage-result-panel" aria-label="Stage result content">
+      {summary ? <p className="stage-result-panel__summary">{summary}</p> : null}
+      {sections?.map((section, index) => (
+        <section
+          key={`${section.title ?? "result"}-${index}`}
+          className="stage-result-panel__section"
+        >
+          {section.title ? (
+            <p className="stage-result-panel__line stage-result-panel__line--heading">
+              {`## ${section.title}`}
+            </p>
+          ) : null}
+          {section.paragraphs.map((paragraph) => (
+            <p key={paragraph} className="stage-result-panel__line">
+              {paragraph}
+            </p>
+          ))}
+          {section.bullets.map((bullet) => (
+            <p
+              key={`${bullet.level}-${bullet.text}`}
+              className={`stage-result-panel__line stage-result-panel__line--bullet stage-result-panel__line--bullet-level-${bullet.level}`}
+            >
+              {`- ${bullet.text}`}
+            </p>
+          ))}
+        </section>
       ))}
-    </ul>
+    </div>
   );
+}
+
+function readResultSummary(
+  value: string | null,
+  sections: ResultSection[] | null,
+): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed || isArtifactSummary(trimmed)) {
+    return null;
+  }
+  return resultSectionsContainText(sections, trimmed) ? null : trimmed;
+}
+
+function resultSectionsContainText(
+  sections: ResultSection[] | null,
+  candidate: string,
+): boolean {
+  if (!sections) {
+    return false;
+  }
+
+  return sections.some((section) =>
+    section.paragraphs.includes(candidate)
+    || section.bullets.some((bullet) => bullet.text === candidate),
+  );
+}
+
+function isArtifactSummary(value: string): boolean {
+  return value.toLowerCase().replace(/[\s_-]+/gu, "").endsWith("artifact");
 }
 
 function CompactItem({
@@ -617,28 +638,19 @@ function parseResultContent(text: string): ResultSection[] | null {
     const firstLine = lines[0];
     const remainder = lines.slice(1);
     const firstLineLooksLikeHeading = remainder.length > 0 && !isBulletLine(firstLine);
-    const bulletLines = (firstLineLooksLikeHeading ? remainder : lines)
+    const contentLines = firstLineLooksLikeHeading ? remainder : lines;
+    const bulletLines = contentLines
       .map(stripBulletPrefix)
       .filter(Boolean);
-    const allBulletLines = bulletLines.length > 0 && (
-      firstLineLooksLikeHeading
-        ? remainder.every(isBulletLine)
-        : lines.every(isBulletLine)
-    );
-
-    if (allBulletLines) {
-      sections.push({
-        type: "list",
-        title: firstLineLooksLikeHeading ? firstLine : null,
-        items: bulletLines,
-      });
-      continue;
-    }
+    const allBulletLines = bulletLines.length > 0 && contentLines.every(isBulletLine);
+    const textLines = allBulletLines ? [] : contentLines;
 
     sections.push({
-      type: "paragraph",
       title: firstLineLooksLikeHeading ? firstLine : null,
-      text: (firstLineLooksLikeHeading ? remainder : lines).join("\n"),
+      paragraphs: textLines.length > 0 ? [textLines.join("\n")] : [],
+      bullets: allBulletLines
+        ? bulletLines.map((bullet) => ({ text: bullet, level: 0 }))
+        : [],
     });
   }
 
@@ -682,52 +694,251 @@ function resultSectionFromValue(
   title: string,
   value: unknown,
 ): ResultSection | null {
+  if (title === "实施计划" && value && typeof value === "object" && !Array.isArray(value)) {
+    const section = formatImplementationPlanSection(value as Record<string, unknown>);
+    if (section) {
+      return {
+        title,
+        ...section,
+      };
+    }
+  }
+
   if (typeof value === "string") {
     const text = value.trim();
-    return text ? { type: "paragraph", title, text } : null;
+    return text
+      ? {
+          title,
+          paragraphs: [text],
+          bullets: [],
+        }
+      : null;
   }
 
   if (typeof value === "number" || typeof value === "boolean") {
-    return { type: "paragraph", title, text: String(value) };
+    return {
+      title,
+      paragraphs: [String(value)],
+      bullets: [],
+    };
   }
 
   if (Array.isArray(value)) {
     const items = value
-      .map((item) => formatStructuredListItem(item))
-      .filter((item): item is string => Boolean(item));
-    return items.length > 0 ? { type: "list", title, items } : null;
+      .flatMap((item) => formatStructuredListItem(item))
+      .filter(Boolean);
+    return items.length > 0
+      ? {
+          title,
+          paragraphs: [],
+          bullets: items.map((item) => ({ text: item, level: 0 })),
+        }
+      : null;
   }
 
   if (value && typeof value === "object") {
-    const nested = value as Record<string, unknown>;
-    const nestedItems = Object.entries(nested)
-      .map(([nestedKey, nestedValue]) => {
-        const formattedValue = formatStructuredInlineValue(nestedValue);
-        if (!formattedValue) {
-          return null;
-        }
-        return `${formatResultKey(nestedKey)}: ${formattedValue}`;
-      })
-      .filter((item): item is string => Boolean(item));
-    return nestedItems.length > 0 ? { type: "list", title, items: nestedItems } : null;
+    const nestedObject = value as Record<string, unknown>;
+    const summary = readStructuredSectionSummary(nestedObject);
+    const nestedItems = formatStructuredObjectItems(nestedObject);
+    if (!summary && nestedItems.length === 0) {
+      return null;
+    }
+    return {
+      title,
+      paragraphs: summary ? [summary] : [],
+      bullets: nestedItems.map((item) => ({ text: item, level: 0 })),
+    };
   }
 
   return null;
 }
 
-function formatStructuredListItem(value: unknown): string | null {
+function formatStructuredListItem(value: unknown): string[] {
   if (typeof value === "string") {
     const text = value.trim();
-    return text || null;
+    return text ? [text] : [];
   }
   if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
+    return [String(value)];
   }
   if (value && typeof value === "object") {
-    const formatted = formatStructuredInlineValue(value);
-    return formatted || null;
+    return formatStructuredObjectItems(value as Record<string, unknown>);
   }
-  return null;
+  return [];
+}
+
+function formatImplementationPlanSection(
+  value: Record<string, unknown>,
+): Omit<ResultSection, "title"> | null {
+  const paragraphs = readStructuredSectionSummary(value)
+    ? [readStructuredSectionSummary(value) as string]
+    : [];
+  const bullets: ResultBullet[] = [];
+
+  for (const [key, nestedValue] of Object.entries(value)) {
+    if (
+      key === "summary" ||
+      key === "plan_id" ||
+      key === "downstream_refs"
+    ) {
+      continue;
+    }
+
+    if (key === "tasks" && Array.isArray(nestedValue)) {
+      bullets.push(...formatImplementationTasks(nestedValue));
+      continue;
+    }
+
+    const label = formatResultKey(key);
+    bullets.push(
+      ...formatStructuredNamedItems(label, nestedValue).map((item) => ({
+        text: item,
+        level: 0,
+      })),
+    );
+  }
+
+  if (paragraphs.length === 0 && bullets.length === 0) {
+    return null;
+  }
+
+  return {
+    paragraphs,
+    bullets,
+  };
+}
+
+function formatImplementationTasks(value: unknown[]): ResultBullet[] {
+  const bullets: ResultBullet[] = [];
+
+  value.forEach((task, index) => {
+    if (!task || typeof task !== "object" || Array.isArray(task)) {
+      return;
+    }
+
+    const taskRecord = task as Record<string, unknown>;
+    bullets.push({
+      text: formatImplementationTaskTitle(taskRecord, index),
+      level: 0,
+    });
+
+    bullets.push(
+      ...formatImplementationTaskDetails(taskRecord).map((detail) => ({
+        text: detail,
+        level: 1,
+      })),
+    );
+  });
+
+  return bullets;
+}
+
+function formatImplementationTaskTitle(
+  value: Record<string, unknown>,
+  index: number,
+): string {
+  const order =
+    typeof value.order_index === "number" && Number.isFinite(value.order_index)
+      ? value.order_index
+      : index + 1;
+  const workDescription =
+    typeof value.work_description === "string" && value.work_description.trim()
+      ? value.work_description.trim()
+      : null;
+
+  return workDescription ? `任务 ${order}: ${workDescription}` : `任务 ${order}`;
+}
+
+function formatImplementationTaskDetails(
+  value: Record<string, unknown>,
+): string[] {
+  const orderedKeys = [
+    "target_files",
+    "verification_commands",
+    "dependency_assumptions",
+    "risk_handling",
+  ];
+  const consumed = new Set([
+    "task_id",
+    "order_index",
+    "work_description",
+    "summary",
+  ]);
+  const lines: string[] = [];
+
+  for (const key of orderedKeys) {
+    if (!(key in value)) {
+      continue;
+    }
+    consumed.add(key);
+    lines.push(...formatStructuredNamedItems(formatResultKey(key), value[key]));
+  }
+
+  for (const [key, nestedValue] of Object.entries(value)) {
+    if (consumed.has(key)) {
+      continue;
+    }
+    lines.push(...formatStructuredNamedItems(formatResultKey(key), nestedValue));
+  }
+
+  return lines;
+}
+
+function formatStructuredObjectItems(
+  value: Record<string, unknown>,
+): string[] {
+  return Object.entries(value).flatMap(([nestedKey, nestedValue]) =>
+    formatStructuredNamedItems(formatResultKey(nestedKey), nestedValue),
+  );
+}
+
+function formatStructuredNamedItems(
+  label: string,
+  value: unknown,
+): string[] {
+  if (shouldHideStructuredResultKey(label) || label === "摘要") {
+    return [];
+  }
+
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text ? [`${label}: ${text}`] : [];
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return [`${label}: ${String(value)}`];
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return [];
+    }
+
+    if (value.every((item) => typeof item !== "object" || item === null)) {
+      return value
+        .map((item) => formatStructuredInlineValue(item))
+        .filter((item): item is string => Boolean(item))
+        .map((item) => `${label}: ${item}`);
+    }
+
+    return value.flatMap((item) => {
+      if (item && typeof item === "object" && !Array.isArray(item)) {
+        return formatStructuredObjectItems(item as Record<string, unknown>);
+      }
+      const formatted = formatStructuredInlineValue(item);
+      return formatted ? [`${label}: ${formatted}`] : [];
+    });
+  }
+
+  if (value && typeof value === "object") {
+    return formatStructuredObjectItems(value as Record<string, unknown>);
+  }
+
+  return [];
+}
+
+function shouldHideStructuredResultKey(label: string): boolean {
+  return label === "Plan Id" || label === "Task Id" || label === "Downstream Refs";
 }
 
 function formatStructuredInlineValue(value: unknown): string | null {
@@ -788,8 +999,27 @@ function formatResultKey(value: string): string {
     fix_requirements: "修复要求",
     regression_decision: "回归建议",
     summary: "摘要",
+    change_type: "变更类型",
+    scope_note: "范围说明",
+    plan_id: "Plan Id",
+    task_id: "Task Id",
+    order_index: "顺序",
+    title: "标题",
+    target_files: "目标文件",
+    work_description: "工作内容",
+    verification_commands: "验证命令",
+    dependency_assumptions: "依赖假设",
+    risk_handling: "风险处理",
+    downstream_refs: "Downstream Refs",
   };
   return labels[value] ?? formatLabel(value);
+}
+
+function readStructuredSectionSummary(
+  value: Record<string, unknown>,
+): string | null {
+  const summary = value.summary;
+  return typeof summary === "string" && summary.trim() ? summary.trim() : null;
 }
 
 function isBulletLine(line: string): boolean {

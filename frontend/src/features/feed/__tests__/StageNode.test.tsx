@@ -224,16 +224,16 @@ describe("StageNode", () => {
         { exact: false },
       ),
     ).toBeTruthy();
-    expect(within(steps[4]).getByText("阶段结果")).toBeTruthy();
+    expect(steps[4].getAttribute("aria-label")).toBe("阶段结果");
     expect(within(steps[4]).getByText("The stage can continue into Solution Design.")).toBeTruthy();
-    expect(within(steps[4]).getByText("需求")).toBeTruthy();
+    expect(within(steps[4]).getByText("## 需求")).toBeTruthy();
     expect(
-      within(steps[4]).getByText(
-        "摘要: Keep provider binding fixed for the active run.",
-      ),
+      within(steps[4]).getByText("Keep provider binding fixed for the active run."),
     ).toBeTruthy();
-    expect(within(steps[4]).getByText("验收条件")).toBeTruthy();
-    expect(within(steps[4]).getByText("Retries keep the original provider binding.")).toBeTruthy();
+    expect(within(steps[4]).getByText("## 验收条件")).toBeTruthy();
+    expect(
+      within(steps[4]).getByText("- Retries keep the original provider binding."),
+    ).toBeTruthy();
 
     expect(article.textContent).not.toContain("provider-trace-1");
     expect(article.textContent).not.toContain("provider-artifact-1");
@@ -300,8 +300,9 @@ describe("StageNode", () => {
     ).toBeTruthy();
     expect(screen.getByRole("listitem", { name: "阶段结果" })).toBeTruthy();
     expect(screen.getByText("The stage can continue into Solution Design.")).toBeTruthy();
+    expect(screen.getByText("## 需求")).toBeTruthy();
     expect(
-      screen.getByText("摘要: Keep provider binding fixed for the active run."),
+      screen.getByText("Keep provider binding fixed for the active run."),
     ).toBeTruthy();
     expect(screen.getByText("The active run snapshot remains immutable once execution starts.")).toBeTruthy();
     expect(screen.queryByRole("listitem", { name: "模型服务调用" })).toBeNull();
@@ -452,6 +453,99 @@ describe("StageNode", () => {
       within(details).getByText("@@ renderStageItemByType"),
     ).toBeTruthy();
     expect(screen.queryByRole("listitem", { name: "变更预览" })).toBeNull();
+  });
+
+  it("renders stage results inside one dense markdown-style panel without artifact chrome or metadata noise", () => {
+    const solutionDesignResultStage: ExecutionNodeProjection = {
+      entry_id: "entry-stage-solution-design-plan-format",
+      run_id: "run-running",
+      type: "stage_node",
+      occurred_at: occurredAt,
+      stage_run_id: "stage-solution-design-plan-format",
+      stage_type: "solution_design",
+      status: "completed",
+      attempt_index: 1,
+      started_at: occurredAt,
+      ended_at: "2026-05-01T09:20:00.000Z",
+      summary: "Structured implementation plan is ready.",
+      items: [
+        stageItem({
+          item_id: "result-plan-format",
+          type: "result",
+          title: "Solution design result",
+          summary: "Solutiondesignartifact",
+          content: JSON.stringify(
+            {
+              technical_plan:
+                {
+                  summary:
+                    "Only the homepage heading and downstream assertions need changes.",
+                  change_type: "UI copy update",
+                  scope_note:
+                    "No data flow, API, module architecture, or routing changes.",
+                },
+              implementation_plan: {
+                plan_id: "plan-homepage-copy-1",
+                tasks: [
+                  {
+                    task_id: "task-homepage-copy",
+                    order_index: 1,
+                    target_files: ["frontend/src/pages/HomePage.tsx"],
+                    work_description: "Update homepage heading",
+                    verification_commands: [
+                      "rg -n '<h1>Make delivery work</h1>' frontend/src/pages/HomePage.tsx",
+                    ],
+                    risk_handling: "Single-line text replacement only.",
+                  },
+                ],
+                downstream_refs: [
+                  "docs/plans/implementation/homepage-copy.md",
+                ],
+              },
+              validation_report:
+                "No data flow, API, routing, or module boundary changes.",
+            },
+            null,
+            2,
+          ),
+        }),
+      ],
+      metrics: {},
+    };
+
+    render(<StageNode entry={solutionDesignResultStage} />);
+
+    const resultItem = screen.getByRole("listitem", { name: "阶段结果" });
+    expect(within(resultItem).getByText("## 方案")).toBeTruthy();
+    expect(within(resultItem).getByText("## 实施计划")).toBeTruthy();
+    expect(
+      within(resultItem).getByText(
+        "Only the homepage heading and downstream assertions need changes.",
+      ),
+    ).toBeTruthy();
+    expect(within(resultItem).getByText("- 变更类型: UI copy update")).toBeTruthy();
+    expect(
+      within(resultItem).getByText(
+        "- 范围说明: No data flow, API, module architecture, or routing changes.",
+      ),
+    ).toBeTruthy();
+    expect(within(resultItem).getByText("- 任务 1: Update homepage heading")).toBeTruthy();
+    expect(
+      within(resultItem).getByText("- 目标文件: frontend/src/pages/HomePage.tsx"),
+    ).toBeTruthy();
+    expect(
+      within(resultItem).getByText(
+        "- 验证命令: rg -n '<h1>Make delivery work</h1>' frontend/src/pages/HomePage.tsx",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(resultItem).getByText("- 风险处理: Single-line text replacement only."),
+    ).toBeTruthy();
+    expect(within(resultItem).queryByText("Solutiondesignartifact")).toBeNull();
+    expect(within(resultItem).queryByText("阶段产物")).toBeNull();
+    expect(within(resultItem).queryByText(/Plan Id/i)).toBeNull();
+    expect(within(resultItem).queryByText(/Task Id/i)).toBeNull();
+    expect(within(resultItem).queryByText(/Downstream Refs/i)).toBeNull();
   });
 
   it("renders test-result summary above test_generation_execution internal items", () => {
