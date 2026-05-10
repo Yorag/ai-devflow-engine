@@ -124,7 +124,7 @@ def allow_tool_confirmation(
             actor_id="session-user",
             trace_context=get_trace_context(),
         )
-        runtime_dispatcher.resume(
+        runtime_dispatcher.resume_async(
             interrupt=result.runtime_interrupt,
             resume_payload=result.runtime_resume_payload,
             trace_context=result.runtime_trace_context,
@@ -166,7 +166,7 @@ def deny_tool_confirmation(
             actor_id="session-user",
             trace_context=get_trace_context(),
         )
-        runtime_dispatcher.resume(
+        runtime_dispatcher.resume_async(
             interrupt=result.runtime_interrupt,
             resume_payload=result.runtime_resume_payload,
             trace_context=result.runtime_trace_context,

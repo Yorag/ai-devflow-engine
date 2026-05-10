@@ -47,12 +47,23 @@ from backend.tests.services.test_tool_confirmation_commands import (
 class CapturingRuntimeDispatcher:
     def __init__(self) -> None:
         self.resumes = []
+        self.resume_async_calls = []
 
     def dispatch_started_run(self, command) -> None:  # noqa: ANN001
         raise AssertionError("tool confirmation command should not dispatch a new run")
 
     def resume(self, *, interrupt, resume_payload, trace_context):  # noqa: ANN001
         self.resumes.append(
+            {
+                "interrupt": interrupt,
+                "resume_payload": resume_payload,
+                "trace_context": trace_context,
+            }
+        )
+        return None
+
+    def resume_async(self, *, interrupt, resume_payload, trace_context):  # noqa: ANN001
+        self.resume_async_calls.append(
             {
                 "interrupt": interrupt,
                 "resume_payload": resume_payload,
@@ -360,8 +371,9 @@ def test_post_tool_confirmation_allow_returns_tool_confirmation_projection(
         )
 
     assert response.status_code == 200
-    assert len(app.state.runtime_execution_dispatcher.resumes) == 1
-    resume = app.state.runtime_execution_dispatcher.resumes[0]
+    assert app.state.runtime_execution_dispatcher.resumes == []
+    assert len(app.state.runtime_execution_dispatcher.resume_async_calls) == 1
+    resume = app.state.runtime_execution_dispatcher.resume_async_calls[0]
     assert (
         resume["interrupt"].interrupt_ref.interrupt_id
         == "interrupt-tool-confirmation-1"
@@ -402,8 +414,9 @@ def test_post_tool_confirmation_deny_returns_tool_confirmation_projection(
     assert body["tool_confirmation"]["deny_followup_summary"] == (
         "Code Generation will continue with a low-risk fallback."
     )
-    assert len(app.state.runtime_execution_dispatcher.resumes) == 1
-    resume = app.state.runtime_execution_dispatcher.resumes[0]
+    assert app.state.runtime_execution_dispatcher.resumes == []
+    assert len(app.state.runtime_execution_dispatcher.resume_async_calls) == 1
+    resume = app.state.runtime_execution_dispatcher.resume_async_calls[0]
     assert resume["resume_payload"].values == {
         "decision": "denied",
         "tool_confirmation_id": confirmation_id,
@@ -441,10 +454,10 @@ def test_post_tool_confirmation_deny_persists_run_failed_followup_fields(
         )
 
     assert response.status_code == 200
-    assert app.state.runtime_execution_dispatcher.resumes[0]["resume_payload"].values[
+    assert app.state.runtime_execution_dispatcher.resume_async_calls[0]["resume_payload"].values[
         "deny_followup_action"
     ] == "run_failed"
-    assert app.state.runtime_execution_dispatcher.resumes[0]["resume_payload"].values[
+    assert app.state.runtime_execution_dispatcher.resume_async_calls[0]["resume_payload"].values[
         "deny_followup_summary"
     ] == "The run will fail because no low-risk fallback is available."
     assert app.state.h41_runtime_port.calls == []
@@ -476,10 +489,10 @@ def test_post_tool_confirmation_deny_persists_awaiting_run_control_followup_fiel
         )
 
     assert response.status_code == 200
-    assert app.state.runtime_execution_dispatcher.resumes[0]["resume_payload"].values[
+    assert app.state.runtime_execution_dispatcher.resume_async_calls[0]["resume_payload"].values[
         "deny_followup_action"
     ] == "awaiting_run_control"
-    assert app.state.runtime_execution_dispatcher.resumes[0]["resume_payload"].values[
+    assert app.state.runtime_execution_dispatcher.resume_async_calls[0]["resume_payload"].values[
         "deny_followup_summary"
     ] == "The run is waiting for an explicit pause or terminate decision."
     assert app.state.h41_runtime_port.calls == []
@@ -674,7 +687,8 @@ def test_tool_confirmation_route_prefers_h44a_app_state_injection(
         )
 
     assert response.status_code == 200
-    assert len(app.state.runtime_execution_dispatcher.resumes) == 1
+    assert app.state.runtime_execution_dispatcher.resumes == []
+    assert len(app.state.runtime_execution_dispatcher.resume_async_calls) == 1
     assert app.state.h44a_runtime_port.calls == []
     assert app.state.h44a_audit_service.records[0]["action"] == (
         "tool_confirmation.allow"

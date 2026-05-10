@@ -30,12 +30,23 @@ from backend.tests.services.test_clarification_flow import NOW
 class CapturingRuntimeDispatcher:
     def __init__(self) -> None:
         self.resumes = []
+        self.resume_async_calls = []
 
     def dispatch_started_run(self, command) -> None:  # noqa: ANN001
         raise AssertionError("clarification reply should not dispatch a new run")
 
     def resume(self, *, interrupt, resume_payload, trace_context):  # noqa: ANN001
         self.resumes.append(
+            {
+                "interrupt": interrupt,
+                "resume_payload": resume_payload,
+                "trace_context": trace_context,
+            }
+        )
+        return None
+
+    def resume_async(self, *, interrupt, resume_payload, trace_context):  # noqa: ANN001
+        self.resume_async_calls.append(
             {
                 "interrupt": interrupt,
                 "resume_payload": resume_payload,
@@ -198,8 +209,9 @@ def test_post_session_message_accepts_clarification_reply_and_restores_running(
         )
 
     assert response.status_code == 200
-    assert len(app.state.runtime_execution_dispatcher.resumes) == 1
-    resume = app.state.runtime_execution_dispatcher.resumes[0]
+    assert app.state.runtime_execution_dispatcher.resumes == []
+    assert len(app.state.runtime_execution_dispatcher.resume_async_calls) == 1
+    resume = app.state.runtime_execution_dispatcher.resume_async_calls[0]
     assert resume["interrupt"].interrupt_ref.interrupt_id == (
         f"interrupt-{clarification_id}"
     )

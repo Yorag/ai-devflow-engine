@@ -439,7 +439,7 @@ def append_session_message(
                 clarification_service=clarification_service,
                 trace_context=trace_context,
             )
-            runtime_dispatcher.resume(
+            runtime_dispatcher.resume_async(
                 interrupt=answer.runtime_interrupt,
                 resume_payload=answer.runtime_resume_payload,
                 trace_context=answer.runtime_trace_context,

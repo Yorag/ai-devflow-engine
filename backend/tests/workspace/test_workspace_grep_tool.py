@@ -170,7 +170,7 @@ def _context(harness: _Harness) -> ToolExecutionContext:
         ),
         audit_recorder=harness.audit,
         run_log_recorder=harness.run_log,
-        runtime_tool_timeout_seconds=5,
+        runtime_tool_timeout_seconds=None,
         platform_tool_timeout_hard_limit_seconds=30,
     )
 
@@ -254,11 +254,15 @@ def test_grep_registers_and_returns_sorted_matches_via_tool_registry(
         "truncated": False,
     }
     assert captured["cwd"] == harness.workspace.root
-    assert captured["timeout"] == 5
+    assert captured["timeout"] == 15
     assert "--json" in captured["args"]
     assert "src" in captured["args"]
     assert "-g" in captured["args"]
     assert "!.runtime/logs/**" in captured["args"]
+    assert "!.codex/**" in captured["args"]
+    assert "!.superpowers/**" in captured["args"]
+    assert "!.pytest_cache/**" in captured["args"]
+    assert "!.worktrees/**" in captured["args"]
     assert captured["shell"] is False
     assert harness.audit.intents == ["grep"]
 

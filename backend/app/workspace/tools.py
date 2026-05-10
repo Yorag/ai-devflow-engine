@@ -475,6 +475,10 @@ class WorkspaceGrepOptions:
     snippet_char_limit: int = 240
     excluded_globs: tuple[str, ...] = (
         ".runtime/logs/**",
+        ".codex/**",
+        ".superpowers/**",
+        ".pytest_cache/**",
+        ".worktrees/**",
         "node_modules/**",
         ".venv/**",
         "venv/**",
@@ -558,7 +562,7 @@ class GrepTool:
 
     @property
     def default_timeout_seconds(self) -> float | None:
-        return 5.0
+        return 15.0
 
     def bindable_description(self) -> ToolBindableDescription:
         return ToolBindableDescription(
