@@ -602,9 +602,18 @@ class LangChainProviderAdapter:
         ):
             parsed = raw_response["parsed"]
             structured_output = dict(parsed) if isinstance(parsed, Mapping) else None
-            candidates = (structured_output,) if structured_output is not None else ()
             raw_message = raw_response["raw"]
             ai_message = raw_message if isinstance(raw_message, AIMessage) else None
+            fallback_candidate = (
+                self._content_candidate(ai_message.content)
+                if structured_output is None and ai_message is not None
+                else None
+            )
+            candidates = (
+                (structured_output,)
+                if structured_output is not None
+                else ((fallback_candidate,) if fallback_candidate is not None else ())
+            )
             return {
                 "ai_message": ai_message,
                 "structured_output": structured_output,
@@ -644,6 +653,10 @@ class LangChainProviderAdapter:
             return dict(content)
         if isinstance(content, str):
             return self._json_object_from_text_content(content)
+        if isinstance(content, list):
+            text = self._content_text(content)
+            if text is not None:
+                return self._json_object_from_text_content(text)
         return None
 
     def _json_object_from_text_content(self, content: str) -> JsonObject | None:

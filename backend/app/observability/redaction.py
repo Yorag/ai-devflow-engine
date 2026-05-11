@@ -92,6 +92,9 @@ class RedactionPolicy:
         r"\b([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*[^\s,;]+",
         re.IGNORECASE,
     )
+    _sensitive_assignment_field_tokens = frozenset(
+        {"authorization", "cookie", "credential", "password", "secret", "token"}
+    )
 
     def __init__(self, max_text_length: int = 4096, excerpt_length: int = 512) -> None:
         if max_text_length < 1:
@@ -337,9 +340,19 @@ class RedactionPolicy:
         if any(pattern.search(text) is not None for pattern in self._sensitive_text_patterns):
             return True
         return any(
-            self._is_sensitive_field(match.group(1))
+            self._is_sensitive_assignment_field(match.group(1))
             for match in self._assignment_pattern.finditer(text)
         )
+
+    def _is_sensitive_assignment_field(self, field_name: str) -> bool:
+        normalized = self._normalize_field_name(field_name)
+        compact = normalized.replace("_", "")
+        if normalized in self._safe_field_names or compact in self._safe_field_names:
+            return False
+        if normalized in self._sensitive_field_names or compact in self._sensitive_field_names:
+            return True
+        tokens = normalized.split("_")
+        return any(token in self._sensitive_assignment_field_tokens for token in tokens)
 
     def _normalize_field_name(self, field_name: str) -> str:
         camel_split = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", field_name)

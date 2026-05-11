@@ -1495,6 +1495,11 @@ def test_default_stage_runner_uses_workspace_tool_registry(
         "edit_file",
         "write_file",
         "bash",
+        "read_delivery_snapshot",
+        "prepare_branch",
+        "create_commit",
+        "push_branch",
+        "create_code_review_request",
     }.issubset(tool_names)
     workspace = kwargs["workspace_boundary"].workspace
     assert (workspace.root / "frontend/src/pages/HomePage.tsx").is_file()

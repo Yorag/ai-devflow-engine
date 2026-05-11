@@ -694,6 +694,30 @@ def test_read_file_rejects_binary_content_without_returning_raw_bytes(
     assert "raw-bytes" not in str(result.error.safe_details)
 
 
+def test_read_file_reports_missing_file_without_exposing_workspace_bytes(
+    tmp_path: Path,
+) -> None:
+    harness = _build_harness(tmp_path)
+
+    result = harness.registry.execute(
+        _request(
+            "read_file",
+            {"path": "src/missing.py"},
+            trace_context=harness.trace_context,
+        ),
+        harness.context,
+    )
+
+    assert result.status is ToolResultStatus.FAILED
+    assert result.output_payload == {}
+    assert result.output_preview is None
+    assert result.error is not None
+    assert result.error.safe_details == {
+        "path": "src/missing.py",
+        "reason": "file_not_found",
+    }
+
+
 def test_read_file_rejects_utf8_decodable_rich_media_by_file_type(
     tmp_path: Path,
 ) -> None:
@@ -752,6 +776,32 @@ def test_read_file_directly_rejects_private_runtime_log_path(
     }
     assert "private" not in str(result.output_payload)
     assert "private" not in result.error.safe_message
+
+
+def test_edit_file_reports_missing_file_without_mutation(tmp_path: Path) -> None:
+    harness = _build_harness(tmp_path)
+
+    result = harness.registry.execute(
+        _request(
+            "edit_file",
+            {
+                "path": "src/missing.py",
+                "old_text": "old",
+                "new_text": "new",
+            },
+            trace_context=harness.trace_context,
+        ),
+        harness.context,
+    )
+
+    assert result.status is ToolResultStatus.FAILED
+    assert result.output_payload == {}
+    assert result.output_preview is None
+    assert result.error is not None
+    assert result.error.safe_details == {
+        "path": "src/missing.py",
+        "reason": "file_not_found",
+    }
 
 
 def test_glob_registers_and_returns_sorted_relative_matches_without_file_content(
@@ -888,7 +938,7 @@ def test_glob_directly_rejects_expanded_candidate_outside_workspace(
     assert "outside" not in str(result.output_payload)
 
 
-def test_glob_directly_maps_runtime_log_candidate_boundary_to_existing_error_contract(
+def test_glob_directly_skips_runtime_log_candidates(
     tmp_path: Path,
 ) -> None:
     harness = _build_harness_with_runtime_root(
@@ -908,10 +958,46 @@ def test_glob_directly_maps_runtime_log_candidate_boundary_to_existing_error_con
         )
     )
 
-    assert result.status is ToolResultStatus.FAILED
-    assert result.output_payload == {}
-    assert result.output_preview is None
-    assert result.error is not None
-    assert result.error.error_code is ErrorCode.TOOL_WORKSPACE_BOUNDARY_VIOLATION
-    assert result.error.error_code.value == "tool_workspace_boundary_violation"
-    assert result.error.safe_details == {"target": ".runtime/logs/run.jsonl"}
+    assert result.status is ToolResultStatus.SUCCEEDED
+    assert result.error is None
+    assert result.output_payload == {"matches": []}
+    assert ".runtime/logs/run.jsonl" not in str(result.output_payload)
+
+
+def test_glob_skips_linked_node_modules_candidates_instead_of_failing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    harness = _build_harness(tmp_path)
+    visible_file = harness.workspace.root / "frontend" / "package.json"
+    visible_file.parent.mkdir(parents=True, exist_ok=True)
+    visible_file.write_text('{"name":"frontend-app"}\n', encoding="utf-8")
+
+    node_modules_dir = harness.workspace.root / "frontend" / "node_modules" / "ansi-regex"
+    node_modules_dir.mkdir(parents=True, exist_ok=True)
+    blocked_file = node_modules_dir / "package.json"
+    blocked_file.write_text('{"name":"ansi-regex"}\n', encoding="utf-8")
+
+    original_glob = Path.glob
+
+    def fake_glob(path: Path, pattern: str):
+        if path == harness.workspace.root and pattern == "frontend/**/package.json":
+            return iter([blocked_file, visible_file])
+        return original_glob(path, pattern)
+
+    monkeypatch.setattr(Path, "glob", fake_glob)
+    tool = harness.registry.resolve("glob")
+
+    result = tool.execute(
+        _tool_input(
+            "glob",
+            {"pattern": "frontend/**/package.json"},
+            trace_context=harness.trace_context,
+        )
+    )
+
+    assert result.status is ToolResultStatus.SUCCEEDED
+    assert result.error is None
+    assert result.output_payload == {
+        "matches": [{"path": "frontend/package.json", "path_type": "file"}]
+    }

@@ -624,6 +624,13 @@ def read_file(
         )
     try:
         raw_content = resolved.read_bytes()
+    except FileNotFoundError:
+        return _failed_result(
+            tool_input,
+            tool_name="read_file",
+            path=normalized_path,
+            reason="file_not_found",
+        )
     except OSError:
         return _failed_result(
             tool_input,
@@ -698,6 +705,8 @@ def glob(
                 path=str(candidate),
                 reason="workspace_candidate_outside",
             )
+        if _is_excluded_path(relative_candidate, workspace):
+            continue
         try:
             manager.assert_inside_workspace(
                 relative_candidate,
@@ -710,8 +719,6 @@ def glob(
                 tool_name="glob",
                 target=exc.target,
             )
-        if _is_excluded_path(relative_candidate, workspace):
-            continue
         matched_paths.append(relative_candidate)
 
     matches = [
@@ -813,6 +820,13 @@ def edit_file(
         )
     try:
         content = resolved.read_bytes().decode("utf-8")
+    except FileNotFoundError:
+        return _failed_result(
+            tool_input,
+            tool_name="edit_file",
+            path=normalized_path,
+            reason="file_not_found",
+        )
     except UnicodeDecodeError:
         return _failed_result(
             tool_input,

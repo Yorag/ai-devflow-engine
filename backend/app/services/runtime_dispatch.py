@@ -124,6 +124,14 @@ from backend.app.services.stages import StageRunService
 from backend.app.services.tool_confirmations import ToolConfirmationService
 from backend.app.tools.protocol import ToolAuditRef
 from backend.app.tools.registry import ToolRegistry
+from backend.app.delivery.scm import (
+    CreateCodeReviewRequestTool,
+    CreateCommitTool,
+    PrepareBranchTool,
+    PushBranchTool,
+    ReadDeliverySnapshotTool,
+    ScmDeliveryAdapter,
+)
 from backend.app.workspace.bash import BashTool
 from backend.app.workspace.manager import (
     RunWorkspace,
@@ -1510,6 +1518,7 @@ class RuntimeExecutionService:
         tool_registry = self._workspace_tool_registry(
             workspace_manager=workspace_manager,
             workspace=workspace,
+            runtime_session=factory_input.runtime_session,
             log_session=factory_input.log_session,
             log_writer=factory_input.log_writer,
         )
@@ -1676,10 +1685,15 @@ class RuntimeExecutionService:
         *,
         workspace_manager: WorkspaceManager,
         workspace: RunWorkspace,
+        runtime_session: Session,
         log_session: Session,
         log_writer: JsonlLogWriter,
     ) -> ToolRegistry:
         audit_service = AuditService(log_session, audit_writer=log_writer)
+        delivery_adapter = ScmDeliveryAdapter(
+            runtime_session=runtime_session,
+            audit_service=audit_service,
+        )
         return ToolRegistry(
             (
                 FileReadTool(manager=workspace_manager, workspace=workspace),
@@ -1692,6 +1706,11 @@ class RuntimeExecutionService:
                     workspace=workspace,
                     audit_service=audit_service,
                 ),
+                ReadDeliverySnapshotTool(adapter=delivery_adapter),
+                PrepareBranchTool(adapter=delivery_adapter),
+                CreateCommitTool(adapter=delivery_adapter),
+                PushBranchTool(adapter=delivery_adapter),
+                CreateCodeReviewRequestTool(adapter=delivery_adapter),
             )
         )
 

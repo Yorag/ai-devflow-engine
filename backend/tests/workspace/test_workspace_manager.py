@@ -116,7 +116,11 @@ def test_create_for_run_creates_workspace_under_resolved_root_and_marks_runtime_
     assert workspace.workspace_ref == "workspace-1"
     assert workspace.root == (tmp_path / "managed-workspaces" / "workspace-1").resolve()
     assert workspace.root.is_dir()
-    assert workspace.excluded_relative_paths == (".runtime/logs",)
+    assert workspace.excluded_relative_paths == (
+        ".runtime/logs",
+        "frontend/node_modules",
+        "e2e/node_modules",
+    )
 
 
 def test_create_for_run_recreates_clean_workspace_when_stale_contents_exist(
@@ -428,7 +432,10 @@ def test_workspace_root_outside_default_project_root_has_no_runtime_log_relative
         trace_context=build_trace(),
     )
 
-    assert workspace.excluded_relative_paths == ()
+    assert workspace.excluded_relative_paths == (
+        "frontend/node_modules",
+        "e2e/node_modules",
+    )
 
 
 def test_create_lookup_and_cleanup_failures_write_workspace_error_logs(

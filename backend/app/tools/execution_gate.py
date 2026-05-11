@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 import time
 from dataclasses import dataclass
@@ -33,6 +34,7 @@ from backend.app.tools.risk import (
 
 JsonObject = dict[str, Any]
 _CONTRACT_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+_LOGGER = logging.getLogger(__name__)
 
 
 class ToolWorkspaceBoundaryError(ValueError):
@@ -347,6 +349,12 @@ class ToolExecutionGate:
                 safe_details={"timeout_seconds": validation.timeout_seconds},
             )
         except Exception:
+            _LOGGER.exception(
+                "Tool execution crashed: tool_name=%s call_id=%s stage_type=%s",
+                validation.tool.name,
+                request.call_id,
+                context.stage_type.value,
+            )
             result = self._error_result(
                 request=request,
                 context=context,

@@ -786,6 +786,12 @@ class StageAgentRuntime:
                 decision=decision,
                 request=request,
             )
+        stage_artifact = _normalize_stage_artifact_payload(
+            stage_artifact,
+            stage_run_id=request.invocation.stage_run_id,
+            now=self._now(),
+        )
+        decision = decision.model_copy(update={"stage_artifact": stage_artifact})
         policy = _evidence_policy_for_artifact(
             stage_artifact.artifact_type,
             allowed_tools=_allowed_tool_names(
@@ -1856,7 +1862,20 @@ def _is_recoverable_tool_failure(tool_result: ToolResult) -> bool:
         return False
     if tool_result.error is None:
         return False
-    return tool_result.error.error_code is ErrorCode.INTERNAL_ERROR
+    if tool_result.error.error_code is ErrorCode.INTERNAL_ERROR:
+        return True
+    if tool_result.error.error_code is not ErrorCode.TOOL_INPUT_SCHEMA_INVALID:
+        return False
+    if tool_result.tool_name not in {"read_file", "glob", "grep"}:
+        return False
+    reason = tool_result.error.safe_details.get("reason")
+    return reason in {
+        "file_not_found",
+        "file_unreadable",
+        "unsupported_file_type",
+        "not_utf8_text",
+        "invalid_glob_pattern",
+    }
 
 
 def _stage_artifact_semantic_violation(
@@ -2005,6 +2024,145 @@ def _solution_design_target_files(stage_artifacts: Sequence[object]) -> set[str]
         for path in files
         if "/" in path or "\\" in path or path.lower().endswith((".py", ".tsx", ".ts"))
     }
+
+
+def _normalize_stage_artifact_payload(
+    stage_artifact: object,
+    *,
+    stage_run_id: str,
+    now: datetime,
+):
+    artifact_type = getattr(stage_artifact, "artifact_type", None)
+    payload = getattr(stage_artifact, "artifact_payload", None)
+    if artifact_type != "SolutionDesignArtifact" or not isinstance(payload, Mapping):
+        return stage_artifact
+    normalized_payload = dict(payload)
+    normalized_payload["implementation_plan"] = _normalize_solution_implementation_plan(
+        payload,
+        stage_run_id=stage_run_id,
+        created_at=now,
+    )
+    return stage_artifact.model_copy(update={"artifact_payload": normalized_payload})
+
+
+def _normalize_solution_implementation_plan(
+    payload: Mapping[str, object],
+    *,
+    stage_run_id: str,
+    created_at: datetime,
+) -> object:
+    implementation_plan = payload.get("implementation_plan")
+    if isinstance(implementation_plan, Mapping) and _implementation_plan_is_structured(
+        implementation_plan
+    ):
+        return dict(implementation_plan)
+
+    tasks_source: Sequence[object]
+    if isinstance(implementation_plan, Sequence) and not isinstance(
+        implementation_plan,
+        str,
+    ):
+        tasks_source = implementation_plan
+    elif isinstance(implementation_plan, str):
+        tasks_source = (implementation_plan,)
+    else:
+        return implementation_plan
+
+    normalized_tasks: list[dict[str, object]] = []
+    for index, item in enumerate(tasks_source, start=1):
+        normalized = _normalize_solution_plan_task(item, order_index=index)
+        if normalized is not None:
+            normalized_tasks.append(normalized)
+    if not normalized_tasks:
+        return implementation_plan
+
+    plan_id = _optional_string(payload.get("plan_id")) or f"plan-{stage_run_id}"
+    return {
+        "plan_id": plan_id,
+        "source_stage_run_id": stage_run_id,
+        "tasks": normalized_tasks,
+        "downstream_refs": [f"implementation-plan:{plan_id}"],
+        "created_at": created_at.isoformat(),
+    }
+
+
+def _implementation_plan_is_structured(value: Mapping[str, object]) -> bool:
+    tasks = value.get("tasks")
+    return isinstance(tasks, Sequence) and not isinstance(tasks, str) and bool(tasks)
+
+
+def _normalize_solution_plan_task(
+    value: object,
+    *,
+    order_index: int,
+) -> dict[str, object] | None:
+    if isinstance(value, Mapping):
+        target_files = _string_tuple(
+            value.get("target_files")
+            or value.get("target")
+            or value.get("targets")
+            or value.get("files")
+        )
+        target_modules = _string_tuple(value.get("target_modules") or value.get("modules"))
+        verification_commands = _string_tuple(
+            value.get("verification_commands")
+            or value.get("verification")
+            or value.get("verify")
+        )
+        title = (
+            _optional_string(value.get("title"))
+            or _optional_string(value.get("description"))
+            or _optional_string(value.get("summary"))
+            or f"Implementation task {order_index}"
+        )
+        task_id = (
+            _optional_string(value.get("task_id"))
+            or _optional_string(value.get("id"))
+            or f"task-{order_index}"
+        )
+        depends_on = _string_tuple(
+            value.get("depends_on_task_ids")
+            or value.get("dependencies")
+            or value.get("depends_on")
+        )
+        order_value = value.get("order_index", value.get("order"))
+        normalized_order = (
+            int(order_value)
+            if isinstance(order_value, int) and order_value >= 1
+            else order_index
+        )
+        risk_handling = _optional_string(
+            value.get("risk_handling") or value.get("risk") or value.get("risks")
+        )
+        if not target_files and not target_modules:
+            target_files = _path_like_strings(value)
+        if not verification_commands:
+            verification_commands = ("manual review",)
+        return {
+            "task_id": task_id,
+            "order_index": normalized_order,
+            "title": title,
+            "depends_on_task_ids": list(depends_on),
+            "target_files": list(target_files),
+            "target_modules": list(target_modules),
+            "acceptance_refs": list(_string_tuple(value.get("acceptance_refs"))),
+            "verification_commands": list(verification_commands),
+            "risk_handling": risk_handling,
+        }
+    if isinstance(value, str):
+        target_files = _path_like_strings(value)
+        return {
+            "task_id": f"task-{order_index}",
+            "order_index": order_index,
+            "title": value.strip() or f"Implementation task {order_index}",
+            "depends_on_task_ids": [],
+            "target_files": list(target_files),
+            "target_modules": [],
+            "acceptance_refs": [],
+            "verification_commands": ["manual review"],
+            "risk_handling": None,
+        }
+    return None
 
 
 def _solution_design_payloads(

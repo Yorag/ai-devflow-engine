@@ -117,6 +117,27 @@ class _FakeStructuredModel:
         }
 
 
+class _FakeStructuredParsedNoneModel:
+    def __init__(self, raw_message: AIMessage) -> None:
+        self._raw_message = raw_message
+
+    def bind_tools(self, schemas, **kwargs):
+        self.bound_schemas = schemas
+        self.bound_kwargs = kwargs
+        return self
+
+    def with_structured_output(self, schema, **kwargs):
+        self.structured_schema = schema
+        self.structured_kwargs = kwargs
+        return self
+
+    def invoke(self, _messages):
+        return {
+            "parsed": None,
+            "raw": self._raw_message,
+        }
+
+
 class _FakeStructuredErrorModel:
     def __init__(self, error: Exception) -> None:
         self._error = error
@@ -598,6 +619,92 @@ def test_invoke_structured_parses_embedded_json_object_text_as_candidate() -> No
 
     assert result.structured_output is None
     assert result.structured_output_candidates == ({"summary": "candidate"},)
+
+
+def test_invoke_structured_parses_json_fence_from_content_blocks_as_candidate() -> None:
+    from backend.app.providers.langchain_adapter import LangChainProviderAdapter
+
+    fake_provider = fake_provider_fixture(
+        provider_snapshot=provider_snapshot_fixture(
+            capabilities=provider_capabilities_fixture(
+                supports_structured_output=False
+            )
+        )
+    )
+    adapter = LangChainProviderAdapter(
+        provider_config=fake_provider.config,
+        provider_call_policy_snapshot=provider_policy_snapshot(),
+        chat_model_factory=lambda _config, _timeout, _max_tokens: _FakeBoundModel(
+            AIMessage(
+                content=[
+                    {"type": "text", "text": "Here is the response:"},
+                    {"type": "text", "text": '```json\n{"summary":"candidate"}\n```'},
+                ]
+            )
+        ),
+    )
+
+    result = adapter.invoke_structured(
+        messages=(SystemMessage(content="system"), HumanMessage(content="user")),
+        response_schema={
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+            "required": ["summary"],
+            "additionalProperties": False,
+        },
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        tool_descriptions=(),
+        trace_context=trace_context(),
+    )
+
+    assert result.structured_output is None
+    assert result.structured_output_candidates == ({"summary": "candidate"},)
+
+
+def test_invoke_structured_falls_back_to_raw_message_candidate_when_parsed_none() -> None:
+    from backend.app.providers.langchain_adapter import LangChainProviderAdapter
+
+    fake_provider = fake_provider_fixture()
+    adapter = LangChainProviderAdapter(
+        provider_config=fake_provider.config,
+        provider_call_policy_snapshot=provider_policy_snapshot(),
+        chat_model_factory=lambda _config, _timeout, _max_tokens: _FakeStructuredParsedNoneModel(
+            AIMessage(
+                content=[
+                    {"type": "text", "text": "## Solution Design Artifact"},
+                    {
+                        "type": "text",
+                        "text": (
+                            "```json\n"
+                            '{"summary":"candidate","details":"from raw fallback"}\n'
+                            "```"
+                        ),
+                    },
+                ]
+            )
+        ),
+    )
+
+    result = adapter.invoke_structured(
+        messages=(SystemMessage(content="system"), HumanMessage(content="user")),
+        response_schema={
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string"},
+                "details": {"type": "string"},
+            },
+            "required": ["summary", "details"],
+            "additionalProperties": False,
+        },
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        tool_descriptions=(),
+        trace_context=trace_context(),
+    )
+
+    assert result.structured_output is None
+    assert result.structured_output_candidates == (
+        {"summary": "candidate", "details": "from raw fallback"},
+    )
 
 
 def test_invoke_structured_ignores_non_object_json_text_content() -> None:

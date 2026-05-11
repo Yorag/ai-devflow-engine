@@ -339,6 +339,23 @@ def test_summarize_text_blocks_secret_patterns_without_echoing_secret_text() -> 
     assert "raw-private-key-material" not in result.excerpt
 
 
+def test_summarize_text_allows_jsx_key_props_in_source_code() -> None:
+    from backend.app.observability.redaction import RedactionPolicy
+
+    policy = RedactionPolicy()
+    jsx_source = (
+        "export function List() {\n"
+        "  return items.map((item) => <li key={item.id}>{item.label}</li>);\n"
+        "}\n"
+    )
+
+    result = policy.summarize_text(jsx_source, payload_type="source_code")
+
+    assert result.redaction_status is RedactionStatus.NOT_REQUIRED
+    assert result.redacted_payload == jsx_source
+    assert "key={item.id}" in result.excerpt
+
+
 def test_summarize_payload_marks_unserializable_payload_without_repr_leakage() -> None:
     from backend.app.observability.redaction import RedactionPolicy
 

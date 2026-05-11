@@ -236,12 +236,18 @@ class WorkspaceManager:
         default_project_root = self._settings.default_project_root.expanduser().resolve(
             strict=False
         )
+        excluded_paths = [
+            Path("frontend") / "node_modules",
+            Path("e2e") / "node_modules",
+        ]
+        excluded: list[str] = [path.as_posix() for path in excluded_paths]
         logs_dir = self._runtime_data.logs_dir
         if logs_dir == default_project_root or logs_dir.is_relative_to(
             default_project_root
         ):
-            return (logs_dir.relative_to(default_project_root).as_posix(),)
-        return ()
+            excluded.insert(0, logs_dir.relative_to(default_project_root).as_posix())
+
+        return tuple(excluded)
 
     def _copy_project_snapshot(self, workspace: RunWorkspace) -> None:
         project_root = self._settings.default_project_root.expanduser().resolve(

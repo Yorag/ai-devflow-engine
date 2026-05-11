@@ -496,6 +496,27 @@ def succeeded_tool_result(call_id: str) -> ToolResult:
     )
 
 
+def failed_read_file_result(
+    call_id: str,
+    *,
+    path: str = "frontend/vitest.config.ts",
+    reason: str = "file_not_found",
+) -> ToolResult:
+    return ToolResult(
+        tool_name="read_file",
+        call_id=call_id,
+        status=ToolResultStatus.FAILED,
+        output_payload={},
+        error=ToolError.from_code(
+            "tool_input_schema_invalid",
+            trace_context=trace_context(),
+            safe_details={"path": path, "reason": reason},
+        ),
+        trace_context=trace_context(),
+        coordination_key=f"stage-run-1:{call_id}",
+    )
+
+
 def waiting_confirmation_tool_result(call_id: str) -> ToolResult:
     error = ToolError.from_code(
         "tool_confirmation_required",
@@ -947,6 +968,44 @@ def test_stage_agent_executes_tool_decision_through_tool_registry_and_continues(
         "redaction_status": "summary_only",
         "path": "backend/app/runtime/nodes.py",
     }
+
+
+def test_stage_agent_allows_recoverable_failed_read_file_to_inform_next_decision() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(tool_call_requests=(read_file_call("call-1"),)),
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "CodeGenerationArtifact",
+                    "artifact_payload": code_generation_payload(),
+                    "evidence_refs": ["stage-process://stage-run-1/model-call/submit"],
+                }
+            ),
+        ],
+        tool_results=[failed_read_file_result("call-1")],
+    )
+
+    result = runtime.run_stage(invocation())
+
+    assert result.status is StageStatus.COMPLETED
+    assert len(runtime.provider_adapter.calls) == 2
+    assert "stage_agent_failed" not in runtime.artifact_store.process
+    tool_trace = runtime.artifact_store.process["tool_trace"]
+    if isinstance(tool_trace, list):
+        tool_trace = tool_trace[0]
+    assert tool_trace["status"] == "failed"
+    assert tool_trace["safe_details"] == {
+        "path": "frontend/vitest.config.ts",
+        "reason": "file_not_found",
+    }
+    second_call_messages = runtime.provider_adapter.calls[1]["messages"]
+    assert any(
+        "Recent Tool Results" in getattr(message, "content", "")
+        and '"status": "failed"' in getattr(message, "content", "")
+        and '"reason": "file_not_found"' in getattr(message, "content", "")
+        for message in second_call_messages
+    )
 
 
 def test_stage_agent_executes_native_tool_call_batch_before_next_model_call() -> None:
@@ -1517,6 +1576,97 @@ def test_solution_design_rejects_unrelated_generic_plan_before_code_generation()
     assert runtime.artifact_store.process["stage_agent_failed"]["reason"] == (
         "stage_semantic_gate_failed"
     )
+
+
+def test_solution_design_normalizes_list_plan_into_structured_tasks_before_submit() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "SolutionDesignArtifact",
+                    "artifact_payload": {
+                        "technical_plan": (
+                            "Update the homepage heading and align dependent tests "
+                            "with the new copy."
+                        ),
+                        "implementation_plan": [
+                            {
+                                "order": 1,
+                                "task_id": "SD-1",
+                                "title": "Update homepage heading copy.",
+                                "target": ["frontend/src/pages/HomePage.tsx"],
+                                "verification": [
+                                    "npm --prefix frontend run test -- HomePage"
+                                ],
+                                "dependencies": [],
+                                "risk_handling": "Keep change limited to copy text.",
+                            },
+                            {
+                                "order": 2,
+                                "task_id": "SD-2",
+                                "title": "Update impacted page tests.",
+                                "target": [
+                                    "frontend/src/pages/__tests__/HomePage.test.tsx",
+                                    "frontend/src/pages/__tests__/ConsolePage.test.tsx",
+                                ],
+                                "verification": [
+                                    "npm --prefix frontend run test -- HomePage ConsolePage"
+                                ],
+                                "dependencies": ["SD-1"],
+                                "risk_handling": "Preserve existing assertions unrelated to the copy.",
+                            },
+                        ],
+                        "impacted_files": [
+                            "frontend/src/pages/HomePage.tsx",
+                            "frontend/src/pages/__tests__/HomePage.test.tsx",
+                            "frontend/src/pages/__tests__/ConsolePage.test.tsx",
+                        ],
+                        "api_design": "No API changes.",
+                        "data_flow_design": "No runtime data flow changes.",
+                        "risks": ["Tests may still assert the old copy."],
+                        "test_strategy": (
+                            "Update page-level tests that assert the homepage copy."
+                        ),
+                        "validation_report": "Plan is scoped to homepage copy and tests.",
+                        "requirement_refs": ["REQ-HOMEPAGE-COPY-1"],
+                        "evidence_refs": [
+                            "stage-process://stage-run-1/model-call/1"
+                        ],
+                    },
+                    "evidence_refs": ["stage-process://stage-run-1/model-call/1"],
+                }
+            )
+        ],
+        allowed_tools=[],
+        available_tools=(),
+        stage_type=StageType.SOLUTION_DESIGN,
+        structured_artifact_required="SolutionDesignArtifact",
+        task_objective=(
+            "项目的官网主页面帮我把Make delivery work traceable."
+            "改成Make delivery work"
+        ),
+    )
+
+    result = runtime.run_stage(invocation(stage_type=StageType.SOLUTION_DESIGN))
+
+    assert result.status is StageStatus.COMPLETED
+    payload = runtime.artifact_store.complete_calls[0]["output_snapshot"][
+        "artifact_payload"
+    ]
+    plan = payload["implementation_plan"]
+    assert isinstance(plan, dict)
+    assert [task["task_id"] for task in plan["tasks"]] == ["SD-1", "SD-2"]
+    assert plan["tasks"][0]["order_index"] == 1
+    assert plan["tasks"][0]["target_files"] == ["frontend/src/pages/HomePage.tsx"]
+    assert plan["tasks"][1]["depends_on_task_ids"] == ["SD-1"]
+    assert plan["tasks"][1]["target_files"] == [
+        "frontend/src/pages/__tests__/HomePage.test.tsx",
+        "frontend/src/pages/__tests__/ConsolePage.test.tsx",
+    ]
+    assert plan["tasks"][1]["verification_commands"] == [
+        "npm --prefix frontend run test -- HomePage ConsolePage"
+    ]
 
 
 def test_code_generation_rejects_missing_file_failure_when_design_identifies_target() -> None:

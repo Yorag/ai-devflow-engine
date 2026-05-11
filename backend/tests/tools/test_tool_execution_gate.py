@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+import logging
 from typing import Mapping
 
 from backend.app.api.error_codes import ErrorCode
@@ -889,10 +890,13 @@ def test_execute_converts_tool_timeout_to_structured_error() -> None:
     assert tool.calls
 
 
-def test_execute_converts_unexpected_tool_exception_to_structured_internal_error_and_logs() -> None:
+def test_execute_converts_unexpected_tool_exception_to_structured_internal_error_and_logs(
+    caplog,
+) -> None:
     tool = ExecutableFakeTool(unexpected_error_message="boom")
     registry = ToolRegistry([tool])
     log = RecordingLog()
+    caplog.set_level(logging.ERROR, logger="backend.app.tools.execution_gate")
 
     result = registry.execute(
         request(),
@@ -909,6 +913,12 @@ def test_execute_converts_unexpected_tool_exception_to_structured_internal_error
     assert result.error.safe_details["reason"] == "tool_execution_failed"
     assert tool.calls
     assert log.records[-1]["error_code"] == "internal_error"
+    assert any(
+        record.message.startswith("Tool execution crashed:")
+        and record.exc_info is not None
+        and str(record.exc_info[1]) == "boom"
+        for record in caplog.records
+    )
 
 
 def test_execute_rejects_non_tool_result_with_structured_internal_error() -> None:
