@@ -1911,6 +1911,86 @@ def test_resume_default_dispatcher_continues_after_completed_resume_step(
         assert control_session.status is SessionStatus.COMPLETED
 
 
+def test_project_step_result_advances_run_pointer_to_completed_next_stage(
+    tmp_path: Path,
+) -> None:
+    fixture = _start_first_run(tmp_path)
+    command = _move_fixture_to_stage(fixture, StageType.CODE_REVIEW)
+    next_stage_id = f"stage-run-{fixture.result.run.run_id}-delivery_integration"
+    with fixture.manager.session(DatabaseRole.RUNTIME) as runtime_session:
+        next_stage = StageRunModel(
+            stage_run_id=next_stage_id,
+            run_id=fixture.result.run.run_id,
+            stage_type=StageType.DELIVERY_INTEGRATION,
+            status=StageStatus.RUNNING,
+            attempt_index=1,
+            graph_node_key=StageType.DELIVERY_INTEGRATION.value,
+            stage_contract_ref=(
+                f"graph-definition-run-1/stage-contracts/"
+                f"{StageType.DELIVERY_INTEGRATION.value}"
+            ),
+            input_ref=None,
+            output_ref=None,
+            summary="delivery_integration started by test fixture.",
+            started_at=NOW,
+            ended_at=None,
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        runtime_session.add(next_stage)
+        runtime_session.commit()
+
+    with fixture.manager.session(DatabaseRole.CONTROL) as control_session:
+        with fixture.manager.session(DatabaseRole.RUNTIME) as runtime_session:
+            with fixture.manager.session(DatabaseRole.EVENT) as event_session:
+                service = RuntimeExecutionService(
+                    database_manager=fixture.manager,
+                    environment_settings=fixture.settings,
+                )
+                context = service._build_context(  # noqa: SLF001
+                    run_id=fixture.result.run.run_id,
+                    trace_context=command.trace_context,
+                    runtime_session=runtime_session,
+                    graph_session=fixture.manager.session(DatabaseRole.GRAPH),
+                    span_prefix="runtime-execution-run_next",
+                )
+                result = RuntimeStepResult(
+                    run_id=fixture.result.run.run_id,
+                    stage_run_id=next_stage_id,
+                    stage_type=StageType.DELIVERY_INTEGRATION,
+                    status=StageStatus.COMPLETED,
+                    trace_context=command.trace_context.child_span(
+                        span_id="runtime-step-delivery-integration-completed",
+                        created_at=NOW,
+                        run_id=fixture.result.run.run_id,
+                        stage_run_id=next_stage_id,
+                        graph_thread_id=fixture.result.run.graph_thread_ref,
+                    ),
+                    artifact_refs=[],
+                    domain_event_refs=[],
+                    log_summary_refs=[],
+                    audit_refs=[],
+                )
+                service._project_step_result(  # noqa: SLF001
+                    result=result,
+                    context=context,
+                    control_session=control_session,
+                    runtime_session=runtime_session,
+                    event_session=event_session,
+                )
+                runtime_session.commit()
+                control_session.commit()
+                event_session.commit()
+
+    with fixture.manager.session(DatabaseRole.RUNTIME) as session:
+        run = session.get(PipelineRunModel, fixture.result.run.run_id)
+        next_stage = session.get(StageRunModel, next_stage_id)
+        assert run is not None
+        assert next_stage is not None
+        assert run.current_stage_run_id == next_stage_id
+        assert run.status is RunStatus.RUNNING
+        assert next_stage.status is StageStatus.COMPLETED
+
 def test_dispatch_started_run_default_dispatcher_allows_auto_regression_retry_path(
     tmp_path: Path,
     monkeypatch,

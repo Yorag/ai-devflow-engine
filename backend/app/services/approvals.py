@@ -961,12 +961,11 @@ class ApprovalService:
         stage: StageRunModel,
         timestamp: datetime,
     ) -> None:
+        del stage
         control_session.status = SessionStatus.RUNNING
         control_session.updated_at = timestamp
         run.status = RunStatus.RUNNING
         run.updated_at = timestamp
-        stage.status = StageStatus.RUNNING
-        stage.updated_at = timestamp
 
     def _load_delivery_channel(self, project_id: str) -> DeliveryChannelModel | None:
         project = self._control_session.get(

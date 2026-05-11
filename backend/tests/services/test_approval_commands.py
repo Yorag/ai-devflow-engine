@@ -583,10 +583,16 @@ def test_approve_solution_design_creates_decision_and_returns_resume_command(
     with manager.session(DatabaseRole.RUNTIME) as session:
         approval = session.get(ApprovalRequestModel, approval_id)
         decision = session.query(ApprovalDecisionModel).one()
+        run = session.get(PipelineRunModel, "run-1")
+        stage = session.get(StageRunModel, "stage-run-1")
         assert approval is not None
         assert approval.status is ApprovalStatus.APPROVED
         assert approval.resolved_at == NOW.replace(tzinfo=None)
         assert decision.reason is None
+        assert run is not None
+        assert stage is not None
+        assert run.status is RunStatus.RUNNING
+        assert stage.status is StageStatus.WAITING_APPROVAL
     with manager.session(DatabaseRole.EVENT) as session:
         event = session.query(DomainEventModel).one()
         assert event.payload["approval_result"]["decision"] == "approved"
@@ -631,8 +637,14 @@ def test_reject_code_review_creates_decision_rollback_and_returns_resume_command
         "next_stage_type": "code_generation",
     }
     with manager.session(DatabaseRole.RUNTIME) as session:
+        run = session.get(PipelineRunModel, "run-1")
+        stage = session.get(StageRunModel, "stage-run-1")
         assert session.query(ApprovalDecisionModel).count() == 1
         assert session.query(RunControlRecordModel).count() == 1
+        assert run is not None
+        assert stage is not None
+        assert run.status is RunStatus.RUNNING
+        assert stage.status is StageStatus.WAITING_APPROVAL
     assert audit.records[0]["action"] == "approval.reject"
 
 
