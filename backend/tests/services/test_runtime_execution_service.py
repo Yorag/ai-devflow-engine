@@ -1681,6 +1681,81 @@ def test_default_engine_factory_starts_next_stage_before_projecting_run_next(
     )
 
 
+def test_dispatch_started_run_blocks_code_review_approval_without_test_results(
+    tmp_path: Path,
+) -> None:
+    fixture = _start_first_run(tmp_path)
+    command = _move_fixture_to_stage(fixture, StageType.CODE_REVIEW)
+    stage_run_id = f"stage-run-{fixture.result.run.run_id}-{StageType.CODE_REVIEW.value}"
+    artifact_id = "artifact-code-review-runtime-dispatch"
+    with fixture.manager.session(DatabaseRole.RUNTIME) as session:
+        stage = session.get(StageRunModel, stage_run_id)
+        assert stage is not None
+        artifact = StageArtifactModel(
+            artifact_id=artifact_id,
+            run_id=fixture.result.run.run_id,
+            stage_run_id=stage_run_id,
+            artifact_type="code_review_stage_agent_stage",
+            payload_ref=f"stage-artifact://{artifact_id}/output",
+            process={
+                "output_snapshot": {
+                    "artifact_type": "CodeReviewArtifact",
+                    "artifact_payload": {
+                        "review_report": "Approved without running tests.",
+                        "issue_list": [],
+                        "risk_assessment": "No blocking risks identified.",
+                        "regression_decision": "approved - no regression detected.",
+                        "fix_requirements": None,
+                        "evidence_refs": [
+                            "read_file:frontend/src/pages/HomePage.tsx",
+                        ],
+                        "changeset_refs": ["frontend/src/pages/HomePage.tsx"],
+                        "test_result_refs": "no test execution results available",
+                    },
+                    "evidence_refs": [
+                        "read_file:frontend/src/pages/HomePage.tsx",
+                    ],
+                    "risk_summary": None,
+                    "failure_summary": None,
+                }
+            },
+            metrics={},
+            created_at=NOW,
+        )
+        stage.output_ref = artifact_id
+        session.add(artifact)
+        session.add(stage)
+        session.commit()
+
+    fake_engine = CapturingRuntimeEngine(
+        step_status=StageStatus.WAITING_APPROVAL,
+        artifact_refs=[artifact_id],
+    )
+    service = RuntimeExecutionService(
+        database_manager=fixture.manager,
+        environment_settings=fixture.settings,
+        engine_factory=lambda _factory_input: fake_engine,
+    )
+
+    service.dispatch_started_run(command)
+
+    with fixture.manager.session(DatabaseRole.RUNTIME) as session:
+        run = session.get(PipelineRunModel, fixture.result.run.run_id)
+        stage = session.get(StageRunModel, stage_run_id)
+        assert run is not None
+        assert stage is not None
+        assert run.status is RunStatus.FAILED
+        assert stage.status is StageStatus.FAILED
+        assert stage.summary is not None
+        assert "test execution evidence" in stage.summary.lower()
+        assert session.query(ApprovalRequestModel).count() == 0
+
+    with fixture.manager.session(DatabaseRole.CONTROL) as session:
+        control_session = session.get(SessionModel, fixture.result.session.session_id)
+        assert control_session is not None
+        assert control_session.status is SessionStatus.FAILED
+
+
 def test_dispatch_started_run_default_dispatcher_drives_until_final_stage_completed(
     tmp_path: Path,
     monkeypatch,

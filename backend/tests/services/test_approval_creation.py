@@ -21,6 +21,7 @@ from backend.app.db.models.runtime import (
     PipelineRunModel,
     ProviderCallPolicySnapshotModel,
     RuntimeLimitSnapshotModel,
+    StageArtifactModel,
     StageRunModel,
 )
 from backend.app.domain.enums import (
@@ -384,6 +385,86 @@ def test_create_code_review_approval_uses_code_review_type_and_reject_target_pro
         approval = session.get(ApprovalRequestModel, result.approval_id)
     assert approval is not None
     assert approval.approval_type is ApprovalType.CODE_REVIEW_APPROVAL
+
+
+def test_create_code_review_approval_rejects_approved_review_without_test_results(
+    tmp_path: Path,
+) -> None:
+    manager = build_manager(tmp_path)
+    seed_running_stage(manager, stage_type=StageType.CODE_REVIEW)
+    with manager.session(DatabaseRole.RUNTIME) as session:
+        artifact = StageArtifactModel(
+            artifact_id="artifact-code-review-1",
+            run_id="run-1",
+            stage_run_id="stage-run-1",
+            artifact_type="code_review_stage_agent_stage",
+            payload_ref="stage-artifact://artifact-code-review-1/output",
+            process={
+                "output_snapshot": {
+                    "artifact_type": "CodeReviewArtifact",
+                    "artifact_payload": {
+                        "review_report": (
+                            "Approved despite skipping test execution."
+                        ),
+                        "issue_list": [],
+                        "risk_assessment": (
+                            "No blocking risks identified."
+                        ),
+                        "regression_decision": (
+                            "approved - no regression detected."
+                        ),
+                        "fix_requirements": None,
+                        "evidence_refs": [
+                            "read_file:frontend/src/pages/HomePage.tsx",
+                        ],
+                        "changeset_refs": [
+                            "frontend/src/pages/HomePage.tsx",
+                        ],
+                        "test_result_refs": "no test execution results available",
+                    },
+                    "evidence_refs": [
+                        "read_file:frontend/src/pages/HomePage.tsx",
+                    ],
+                    "risk_summary": None,
+                    "failure_summary": None,
+                }
+            },
+            metrics={},
+            created_at=NOW,
+        )
+        stage = session.get(StageRunModel, "stage-run-1")
+        assert stage is not None
+        stage.output_ref = artifact.artifact_id
+        stage.updated_at = NOW
+        session.add(artifact)
+
+    service, runtime_port, log_writer = build_service(manager)
+
+    with pytest.raises(ApprovalServiceError) as exc_info:
+        service.create_code_review_approval(
+            session_id="session-1",
+            run_id="run-1",
+            stage_run_id="stage-run-1",
+            payload_ref="code-review-artifact-1",
+            approval_object_excerpt="Review code changes and tests.",
+            risk_excerpt="Runtime requested approval before continuing.",
+            approval_object_preview={"artifact_id": "artifact-code-review-1"},
+            trace_context=build_trace(stage_run_id="stage-run-1"),
+        )
+
+    assert exc_info.value.error_code is ErrorCode.VALIDATION_ERROR
+    assert exc_info.value.status_code == 409
+    assert "test execution" in exc_info.value.message.lower()
+    assert runtime_port.calls == []
+    assert log_writer.records == []
+    with manager.session(DatabaseRole.RUNTIME) as session:
+        assert session.query(ApprovalRequestModel).count() == 0
+        run = session.get(PipelineRunModel, "run-1")
+        stage = session.get(StageRunModel, "stage-run-1")
+        assert run is not None
+        assert stage is not None
+        assert run.status is RunStatus.RUNNING
+        assert stage.status is StageStatus.RUNNING
 
 
 def test_create_solution_design_approval_rejects_wrong_stage_before_interrupt(

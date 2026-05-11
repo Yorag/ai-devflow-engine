@@ -16,6 +16,7 @@ from backend.app.db.models.runtime import (
     ApprovalDecisionModel,
     ApprovalRequestModel,
     PipelineRunModel,
+    StageArtifactModel,
     StageRunModel,
 )
 from backend.app.domain.enums import (
@@ -69,6 +70,9 @@ APPROVAL_NOT_PENDING_MESSAGE = "Approval is no longer pending."
 APPROVAL_DELIVERY_BLOCKED_MESSAGE = "DeliveryChannel is not ready for approval."
 APPROVAL_COMMAND_FAILED_MESSAGE = "approval command failed."
 APPROVAL_REJECT_REASON_BLANK_MESSAGE = "Reject reason must not be blank."
+APPROVAL_REVIEW_EVIDENCE_BLOCKED_MESSAGE = (
+    "Code review approval requires concrete test execution evidence before continuing."
+)
 
 
 class RunLogWriter(Protocol):
@@ -383,6 +387,11 @@ class ApprovalService:
                 run_id=run_id,
                 stage_run_id=stage_run_id,
                 expected_stage_type=expected_stage_type,
+            )
+            self._assert_approval_artifact_ready(
+                approval_type=approval_type,
+                run=run,
+                stage=stage,
             )
             self._assert_no_pending_approval(
                 run_id=run_id,
@@ -1334,6 +1343,89 @@ class ApprovalService:
         error_code: ErrorCode = ErrorCode.VALIDATION_ERROR,
     ) -> None:
         raise ApprovalServiceError(error_code, message, 409)
+
+    def _assert_approval_artifact_ready(
+        self,
+        *,
+        approval_type: ApprovalType,
+        run: PipelineRunModel,
+        stage: StageRunModel,
+    ) -> None:
+        if approval_type is not ApprovalType.CODE_REVIEW_APPROVAL:
+            return
+        artifact_snapshot = self._load_stage_output_artifact(run=run, stage=stage)
+        if artifact_snapshot is None:
+            return
+        artifact_payload = artifact_snapshot.get("artifact_payload")
+        review_payload = (
+            artifact_payload if isinstance(artifact_payload, dict) else artifact_snapshot
+        )
+        regression_decision = self._normalized_review_decision(
+            review_payload.get("regression_decision")
+        )
+        if regression_decision not in {"approved", "no_changes_requested"}:
+            return
+        if self._has_concrete_test_results(review_payload.get("test_result_refs")):
+            return
+        self._raise_target_conflict(APPROVAL_REVIEW_EVIDENCE_BLOCKED_MESSAGE)
+
+    def _load_stage_output_artifact(
+        self,
+        *,
+        run: PipelineRunModel,
+        stage: StageRunModel,
+    ) -> dict[str, Any] | None:
+        if not stage.output_ref:
+            return None
+        artifact = self._runtime_session.get(StageArtifactModel, stage.output_ref)
+        if artifact is None or artifact.run_id != run.run_id:
+            return None
+        process = artifact.process if isinstance(artifact.process, dict) else {}
+        output_snapshot = process.get("output_snapshot")
+        if not isinstance(output_snapshot, dict):
+            return None
+        return dict(output_snapshot)
+
+    @staticmethod
+    def _normalized_review_decision(value: object) -> str | None:
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip().lower()
+        if not normalized:
+            return None
+        if normalized.startswith("approved"):
+            return "approved"
+        if normalized.startswith("no_changes_requested"):
+            return "no_changes_requested"
+        if normalized.startswith("changes_requested"):
+            return "changes_requested"
+        return None
+
+    @staticmethod
+    def _has_concrete_test_results(value: object) -> bool:
+        entries: list[str] = []
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped:
+                entries.append(stripped)
+        elif isinstance(value, list | tuple):
+            entries.extend(
+                item.strip()
+                for item in value
+                if isinstance(item, str) and item.strip()
+            )
+        if not entries:
+            return False
+        blocking_markers = (
+            "no test execution",
+            "test_execution_result=none",
+            "not executed",
+            "not run",
+        )
+        return any(
+            all(marker not in entry.lower() for marker in blocking_markers)
+            for entry in entries
+        )
 
     def _commit_all(self) -> None:
         self._runtime_session.commit()
