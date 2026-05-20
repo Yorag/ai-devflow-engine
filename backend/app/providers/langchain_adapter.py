@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from contextvars import copy_context
 from dataclasses import replace
 from datetime import UTC, datetime
 from hashlib import sha256
 import json
 import os
+import threading
 import time
 from typing import Any
 
@@ -199,7 +201,10 @@ class LangChainProviderAdapter:
         )
 
         try:
-            raw_response = runnable.invoke(tuple(messages))
+            raw_response = self._invoke_runnable_with_local_timeout(
+                runnable,
+                messages,
+            )
             return self._result_from_raw_response(
                 raw_response,
                 model_call_type=model_call_type,
@@ -453,7 +458,10 @@ class LangChainProviderAdapter:
             tool_descriptions=tool_descriptions,
             requested_max_output_tokens=requested_max_output_tokens,
         )
-        raw_response = runnable.invoke(tuple(messages))
+        raw_response = self._invoke_runnable_with_local_timeout(
+            runnable,
+            messages,
+        )
         return self._result_from_raw_response(
             raw_response,
             model_call_type=model_call_type,
@@ -461,6 +469,51 @@ class LangChainProviderAdapter:
             input_summary=input_summary,
             tool_descriptions=tool_descriptions,
         )
+
+    def _invoke_runnable_with_local_timeout(
+        self,
+        runnable: Any,
+        messages: Sequence[BaseMessage],
+    ) -> Any:
+        timeout_seconds = float(
+            self.provider_call_policy_snapshot.provider_call_policy.request_timeout_seconds
+        )
+        if timeout_seconds <= 0:
+            return runnable.invoke(tuple(messages))
+
+        call_context = copy_context()
+        completed = threading.Event()
+        result_box: dict[str, Any] = {}
+        error_box: dict[str, BaseException] = {}
+
+        def _target() -> None:
+            try:
+                result_box["value"] = call_context.run(
+                    runnable.invoke,
+                    tuple(messages),
+                )
+            except BaseException as exc:  # pragma: no cover - defensive propagation
+                error_box["error"] = exc
+            finally:
+                completed.set()
+
+        thread = threading.Thread(
+            target=_target,
+            name=(
+                "provider-call-"
+                f"{self.provider_config.provider_snapshot_id}-"
+                f"{self.provider_config.model_binding_snapshot_id}"
+            ),
+            daemon=True,
+        )
+        thread.start()
+        if not completed.wait(timeout_seconds):
+            raise TimeoutError("Provider request timed out.")
+
+        error = error_box.get("error")
+        if error is not None:
+            raise error
+        return result_box.get("value")
 
     def _structured_runnable(
         self,

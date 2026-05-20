@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import threading
+import time
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -185,6 +187,25 @@ class _RetrySequenceModel:
                 "raw": AIMessage(content="ok"),
             }
         return outcome
+
+
+class _BlockingStructuredModel:
+    def __init__(self, started: threading.Event, release: threading.Event) -> None:
+        self._started = started
+        self._release = release
+
+    def with_structured_output(self, schema, **kwargs):
+        self.structured_schema = schema
+        self.structured_kwargs = kwargs
+        return self
+
+    def invoke(self, _messages):
+        self._started.set()
+        self._release.wait(timeout=5)
+        return {
+            "parsed": {"decision_type": "submit_stage_artifact"},
+            "raw": AIMessage(content="late"),
+        }
 
 
 class _ArtifactProcessRecordRecorder:
@@ -470,6 +491,48 @@ def test_invoke_structured_respects_smaller_requested_output_budget() -> None:
         "artifact_name": "solution",
         "summary": "done",
     }
+
+
+def test_invoke_with_retry_enforces_local_hard_timeout_for_blocked_provider_call() -> None:
+    from backend.app.providers.langchain_adapter import LangChainProviderAdapter
+
+    started = threading.Event()
+    release = threading.Event()
+    fake_provider = fake_provider_fixture()
+
+    def factory(_config, _timeout, _max_tokens):
+        return _BlockingStructuredModel(started, release)
+
+    adapter = LangChainProviderAdapter(
+        provider_config=fake_provider.config,
+        provider_call_policy_snapshot=provider_policy_snapshot(
+            request_timeout_seconds=1,
+            network_error_max_retries=0,
+        ),
+        chat_model_factory=factory,
+    )
+
+    started_at = time.perf_counter()
+    result = adapter.invoke_with_retry(
+        messages=(SystemMessage(content="system"), HumanMessage(content="user")),
+        response_schema={
+            "type": "object",
+            "properties": {"decision_type": {"type": "string"}},
+            "required": ["decision_type"],
+            "additionalProperties": False,
+        },
+        model_call_type=ModelCallType.STAGE_EXECUTION,
+        tool_descriptions=(),
+        trace_context=trace_context(),
+    )
+    elapsed = time.perf_counter() - started_at
+    release.set()
+
+    assert started.is_set() is True
+    assert elapsed < 2.5
+    assert result.provider_error_code is ErrorCode.PROVIDER_RETRY_EXHAUSTED
+    assert result.provider_error_message == "Provider request timed out."
+    assert result.structured_output is None
 
 
 def test_invoke_structured_fallback_dict_outputs_are_candidates_only() -> None:
