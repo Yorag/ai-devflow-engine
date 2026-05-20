@@ -339,6 +339,7 @@ class StageAgentRuntime:
                     iteration_index=iteration_index,
                     last_model_call_ref=model_call_ref,
                     last_decision_trace_ref=exc.error.decision_trace.trace_ref,
+                    safe_details=exc.error.safe_details,
                 ),
                 (),
                 request,
@@ -2003,14 +2004,14 @@ def _control_decision_semantic_violation(
 def _solution_design_target_files(stage_artifacts: Sequence[object]) -> set[str]:
     files: set[str] = set()
     for payload in _solution_design_payloads(stage_artifacts):
-        files.update(_string_tuple(payload.get("impacted_files")))
+        files.update(_declared_file_paths(payload.get("impacted_files")))
         implementation_plan = payload.get("implementation_plan")
         if isinstance(implementation_plan, Mapping):
             tasks = implementation_plan.get("tasks")
             if isinstance(tasks, Sequence) and not isinstance(tasks, str):
                 for task in tasks:
                     if isinstance(task, Mapping):
-                        files.update(_string_tuple(task.get("target_files")))
+                        files.update(_task_target_files(task))
         elif isinstance(implementation_plan, Sequence) and not isinstance(
             implementation_plan,
             str,
@@ -2019,11 +2020,7 @@ def _solution_design_target_files(stage_artifacts: Sequence[object]) -> set[str]
                 files.update(_path_like_strings(item))
         else:
             files.update(_path_like_strings(implementation_plan))
-    return {
-        path
-        for path in files
-        if "/" in path or "\\" in path or path.lower().endswith((".py", ".tsx", ".ts"))
-    }
+    return {path for path in files if _is_semantic_file_path(path)}
 
 
 def _normalize_stage_artifact_payload(
@@ -2097,12 +2094,7 @@ def _normalize_solution_plan_task(
     order_index: int,
 ) -> dict[str, object] | None:
     if isinstance(value, Mapping):
-        target_files = _string_tuple(
-            value.get("target_files")
-            or value.get("target")
-            or value.get("targets")
-            or value.get("files")
-        )
+        target_files = _task_target_files(value)
         target_modules = _string_tuple(value.get("target_modules") or value.get("modules"))
         verification_commands = _string_tuple(
             value.get("verification_commands")
@@ -2273,13 +2265,65 @@ def _path_like_strings(value: object) -> tuple[str, ...]:
     candidates = []
     for raw in text.replace(",", " ").split():
         token = raw.strip("`'\".()[]{}")
-        if "/" in token or "\\" in token or token.lower().endswith((".py", ".tsx", ".ts")):
+        if _is_semantic_file_path(token):
             candidates.append(token)
     return tuple(candidates)
 
 
 def _normalize_path_for_semantics(value: str) -> str:
     return value.replace("\\", "/").strip().lower()
+
+
+def _task_target_files(value: Mapping[str, object]) -> tuple[str, ...]:
+    return _declared_file_paths(
+        value.get("target_files")
+        or value.get("target_file")
+        or value.get("target_path")
+        or value.get("target")
+        or value.get("targets")
+        or value.get("files")
+    )
+
+
+def _declared_file_paths(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value.strip(),) if _is_semantic_file_path(value) else ()
+    if isinstance(value, Mapping):
+        paths: list[str] = []
+        for key, nested_value in value.items():
+            if not isinstance(key, str):
+                continue
+            if _is_file_group_key(key) or not isinstance(nested_value, str):
+                paths.extend(_declared_file_paths(nested_value))
+        return tuple(paths)
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        paths: list[str] = []
+        for item in value:
+            paths.extend(_declared_file_paths(item))
+        return tuple(paths)
+    return ()
+
+
+def _is_file_group_key(value: str) -> bool:
+    normalized = value.strip().lower()
+    return (
+        normalized in {"primary", "secondary", "tests", "cleanup_candidates"}
+        or "file" in normalized
+        or "path" in normalized
+    )
+
+
+def _is_semantic_file_path(value: str) -> bool:
+    stripped = value.strip()
+    if not stripped or "://" in stripped or "<" in stripped or ">" in stripped:
+        return False
+    normalized = stripped.replace("\\", "/")
+    if normalized.endswith("/") or normalized.startswith(("/", "#")):
+        return False
+    lower = normalized.lower().rstrip(":")
+    if lower.endswith((".py", ".tsx", ".ts", ".jsx", ".js", ".css", ".json", ".md")):
+        return True
+    return "/" in normalized and "." in normalized.rsplit("/", 1)[-1]
 
 
 def _flatten_text(value: object) -> str:
@@ -2419,6 +2463,11 @@ def _safe_tool_input_payload_summary(payload: Mapping[str, object]) -> dict[str,
         "new_path",
         "old_text",
         "new_text",
+        "offset",
+        "limit",
+        "max_chars",
+        "start_line",
+        "line_limit",
     ):
         if key not in payload or _is_sensitive_input_key(key):
             continue

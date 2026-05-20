@@ -496,6 +496,34 @@ def test_execute_rejects_non_json_payload_before_tool_runs() -> None:
     assert tool.calls == []
 
 
+def test_execute_rejects_integer_below_schema_minimum_before_tool_runs() -> None:
+    tool = ExecutableFakeTool(
+        input_schema={
+            "type": "object",
+            "properties": {"limit": {"type": "integer", "minimum": 1}},
+            "required": ["limit"],
+            "additionalProperties": False,
+        },
+        permission_boundary=ToolPermissionBoundary(
+            boundary_type="workspace",
+            requires_workspace=False,
+            resource_scopes=(),
+        ),
+    )
+    registry = ToolRegistry([tool])
+
+    result = registry.execute(
+        request(payload={"limit": 0}),
+        context(allowed_tools=["read_file"]),
+    )
+
+    assert result.status is ToolResultStatus.FAILED
+    assert result.error is not None
+    assert result.error.error_code is ErrorCode.TOOL_INPUT_SCHEMA_INVALID
+    assert result.error.safe_details["reason"] == "$.limit is below minimum"
+    assert tool.calls == []
+
+
 def test_execute_rejects_malformed_property_schema_before_tool_runs() -> None:
     tool = ExecutableFakeTool(
         input_schema={

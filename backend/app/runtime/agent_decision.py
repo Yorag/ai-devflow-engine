@@ -153,6 +153,26 @@ _SUBMIT_STAGE_ARTIFACT_ENVELOPE_FIELDS = frozenset(
 )
 
 
+_ARTIFACT_STRING_REF_ARRAY_FIELDS = frozenset(
+    {
+        "acceptance_criteria_refs",
+        "attachment_refs",
+        "changeset_refs",
+        "clarification_record_refs",
+        "command_trace_refs",
+        "context_refs",
+        "diff_refs",
+        "evidence_refs",
+        "failed_test_refs",
+        "file_edit_trace_refs",
+        "requirement_refs",
+        "solution_refs",
+        "source_message_refs",
+        "test_result_refs",
+    }
+)
+
+
 def agent_decision_response_schema(
     *,
     artifact_type: str | None = None,
@@ -556,7 +576,11 @@ def _artifact_field_properties(
     required_fields = _ARTIFACT_REQUIRED_FIELDS.get(artifact_type or "")
     if required_fields is None:
         return {}
-    properties = {field_name: json_value_schema for field_name in required_fields}
+    properties = _artifact_required_field_properties(
+        required_fields,
+        json_value_schema=json_value_schema,
+        string_array_schema=string_array_schema,
+    )
     properties["evidence_refs"] = string_array_schema
     return properties
 
@@ -728,6 +752,11 @@ def _artifact_payload_schema(
     json_object_schema: JsonObject,
     json_value_schema: JsonObject,
 ) -> JsonObject:
+    string_array_schema: JsonObject = {
+        "type": "array",
+        "items": {"type": "string", "minLength": 1},
+        "minItems": 1,
+    }
     required_fields = (
         _ARTIFACT_REQUIRED_FIELDS.get(artifact_type)
         if artifact_type is not None
@@ -737,11 +766,29 @@ def _artifact_payload_schema(
         return json_object_schema
     return {
         "type": "object",
-        "properties": {
-            field_name: json_value_schema for field_name in required_fields
-        },
+        "properties": _artifact_required_field_properties(
+            required_fields,
+            json_value_schema=json_value_schema,
+            string_array_schema=string_array_schema,
+        ),
         "required": list(required_fields),
         "additionalProperties": True,
+    }
+
+
+def _artifact_required_field_properties(
+    required_fields: Sequence[str],
+    *,
+    json_value_schema: JsonObject,
+    string_array_schema: JsonObject,
+) -> JsonObject:
+    return {
+        field_name: (
+            string_array_schema
+            if field_name in _ARTIFACT_STRING_REF_ARRAY_FIELDS
+            else json_value_schema
+        )
+        for field_name in required_fields
     }
 
 

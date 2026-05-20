@@ -427,6 +427,11 @@ def test_stage_response_schema_uses_submit_artifact_protocol_without_repair_unio
     from backend.app.runtime.agent_decision import stage_response_schema
 
     schema = stage_response_schema(artifact_type="SolutionDesignArtifact")
+    string_ref_array_schema = {
+        "type": "array",
+        "items": {"type": "string", "minLength": 1},
+        "minItems": 1,
+    }
 
     assert schema["title"] == "StageResponse"
     assert schema["properties"]["artifact_type"]["const"] == "SolutionDesignArtifact"
@@ -439,6 +444,11 @@ def test_stage_response_schema_uses_submit_artifact_protocol_without_repair_unio
         "requirement_refs",
         "evidence_refs",
     }
+    assert (
+        schema["properties"]["artifact_payload"]["properties"]["requirement_refs"]
+        == string_ref_array_schema
+    )
+    assert schema["oneOf"][0]["properties"]["requirement_refs"] == string_ref_array_schema
 
 
 def test_stage_response_schema_allows_bare_artifact_evidence_refs() -> None:

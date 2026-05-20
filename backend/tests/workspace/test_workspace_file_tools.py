@@ -665,6 +665,72 @@ def test_read_file_registers_and_reads_utf8_text_through_tool_registry(
     assert result.error is None
 
 
+def test_read_file_accepts_optional_limit_for_bounded_content(
+    tmp_path: Path,
+) -> None:
+    harness = _build_harness(tmp_path)
+    schema = harness.registry.resolve("read_file").input_schema
+    target = harness.workspace.root / "src" / "large.tsx"
+    target.parent.mkdir(parents=True)
+    target.write_text("0123456789abcdef", encoding="utf-8")
+
+    result = harness.registry.execute(
+        _request(
+            "read_file",
+            {"path": "src/large.tsx", "offset": 4, "limit": 6},
+            trace_context=harness.trace_context,
+        ),
+        harness.context,
+    )
+
+    assert schema["properties"]["limit"] == {"type": "integer", "minimum": 1}
+    assert result.status is ToolResultStatus.SUCCEEDED
+    assert result.output_payload == {
+        "path": "src/large.tsx",
+        "content": "456789",
+        "offset": 4,
+        "limit": 6,
+        "total_chars": 16,
+        "truncated": True,
+    }
+    assert result.output_preview == "src/large.tsx\n456789"
+    assert result.error is None
+
+
+def test_read_file_accepts_line_window_for_grep_line_context(
+    tmp_path: Path,
+) -> None:
+    harness = _build_harness(tmp_path)
+    schema = harness.registry.resolve("read_file").input_schema
+    target = harness.workspace.root / "src" / "page.tsx"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"line 1\nline 2\nline 3\nline 4\nline 5\n")
+
+    result = harness.registry.execute(
+        _request(
+            "read_file",
+            {"path": "src/page.tsx", "start_line": 3, "line_limit": 2},
+            trace_context=harness.trace_context,
+        ),
+        harness.context,
+    )
+
+    assert schema["properties"]["start_line"] == {"type": "integer", "minimum": 1}
+    assert schema["properties"]["line_limit"] == {"type": "integer", "minimum": 1}
+    assert result.status is ToolResultStatus.SUCCEEDED
+    assert result.output_payload == {
+        "path": "src/page.tsx",
+        "content": "line 3\nline 4\n",
+        "start_line": 3,
+        "line_limit": 2,
+        "end_line": 4,
+        "total_lines": 5,
+        "truncated": True,
+    }
+    assert result.output_preview == "src/page.tsx\nline 3\nline 4\n"
+    assert result.error is None
+
+
 def test_read_file_rejects_binary_content_without_returning_raw_bytes(
     tmp_path: Path,
 ) -> None:

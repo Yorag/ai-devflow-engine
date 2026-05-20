@@ -282,6 +282,12 @@ def test_builtin_tool_prompt_fragments_include_industrial_usage_guidance() -> No
     by_id = {asset.prompt_id: asset.sections[0].body for asset in assets}
 
     assert "Prefer this tool over bash" in by_id["tool_prompt_fragment.read_file"]
+    assert "Use `start_line` with grep `line_number` values" in by_id[
+        "tool_prompt_fragment.read_file"
+    ]
+    assert "`offset` is a zero-based character offset" in by_id[
+        "tool_prompt_fragment.read_file"
+    ]
     assert "ripgrep" in by_id["tool_prompt_fragment.grep"]
     assert (
         "Do not use bash to read, search, create, or edit files"

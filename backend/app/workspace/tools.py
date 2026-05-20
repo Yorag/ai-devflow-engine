@@ -31,7 +31,14 @@ from backend.app.workspace.manager import RunWorkspace, WorkspaceManager
 
 _READ_FILE_INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
-    "properties": {"path": {"type": "string", "minLength": 1}},
+    "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "offset": {"type": "integer", "minimum": 0},
+        "limit": {"type": "integer", "minimum": 1},
+        "max_chars": {"type": "integer", "minimum": 1},
+        "start_line": {"type": "integer", "minimum": 1},
+        "line_limit": {"type": "integer", "minimum": 1},
+    },
     "required": ["path"],
     "additionalProperties": False,
 }
@@ -40,6 +47,14 @@ _READ_FILE_RESULT_SCHEMA: dict[str, Any] = {
     "properties": {
         "path": {"type": "string"},
         "content": {"type": "string"},
+        "offset": {"type": "integer"},
+        "limit": {"type": "integer"},
+        "total_chars": {"type": "integer"},
+        "start_line": {"type": "integer"},
+        "line_limit": {"type": "integer"},
+        "end_line": {"type": "integer"},
+        "total_lines": {"type": "integer"},
+        "truncated": {"type": "boolean"},
     },
     "required": ["path", "content"],
     "additionalProperties": False,
@@ -223,6 +238,17 @@ class FileReadTool:
             self.manager,
             self.workspace,
             path,
+            offset=_optional_non_negative_int(tool_input.input_payload.get("offset")),
+            limit=_optional_positive_int(
+                tool_input.input_payload.get("limit")
+                or tool_input.input_payload.get("max_chars")
+            ),
+            start_line=_optional_positive_int(
+                tool_input.input_payload.get("start_line")
+            ),
+            line_limit=_optional_positive_int(
+                tool_input.input_payload.get("line_limit")
+            ),
             tool_input=tool_input,
         )
 
@@ -593,6 +619,10 @@ def read_file(
     workspace: RunWorkspace,
     path: str,
     *,
+    offset: int | None = None,
+    limit: int | None = None,
+    start_line: int | None = None,
+    line_limit: int | None = None,
     tool_input: ToolInput,
 ) -> ToolResult:
     try:
@@ -654,12 +684,75 @@ def read_file(
             path=normalized_path,
             reason="not_utf8_text",
         )
+    if start_line is not None:
+        lines = content.splitlines(keepends=True)
+        total_lines = len(lines)
+        start_index = start_line - 1
+        if start_index >= total_lines:
+            visible_lines: list[str] = []
+        elif line_limit is None:
+            visible_lines = lines[start_index:]
+        else:
+            visible_lines = lines[start_index : start_index + line_limit]
+        visible_content = "".join(visible_lines)
+        if visible_lines:
+            end_line = start_line + len(visible_lines) - 1
+        else:
+            end_line = min(start_line - 1, total_lines)
+        resolved_line_limit = (
+            line_limit
+            if line_limit is not None
+            else max(total_lines - start_index, 0)
+        )
+        truncated = start_line > 1 or end_line < total_lines
+        output_payload: dict[str, object] = {
+            "path": normalized_path,
+            "content": visible_content,
+            "start_line": start_line,
+            "line_limit": resolved_line_limit,
+            "end_line": end_line,
+            "total_lines": total_lines,
+            "truncated": truncated,
+        }
+        return ToolResult(
+            tool_name="read_file",
+            call_id=tool_input.call_id,
+            status=ToolResultStatus.SUCCEEDED,
+            output_payload=output_payload,
+            output_preview=_preview(f"{normalized_path}\n{visible_content}"),
+            trace_context=tool_input.trace_context,
+            coordination_key=tool_input.coordination_key,
+        )
+
+    total_chars = len(content)
+    resolved_offset = offset or 0
+    resolved_limit = limit
+    if resolved_offset > total_chars:
+        visible_content = ""
+    elif resolved_limit is None:
+        visible_content = content[resolved_offset:]
+    else:
+        visible_content = content[resolved_offset : resolved_offset + resolved_limit]
+    truncated = resolved_offset > 0 or len(visible_content) < total_chars
+    output_payload: dict[str, object] = {
+        "path": normalized_path,
+        "content": visible_content,
+    }
+    if offset is not None or limit is not None:
+        output_payload.update(
+            {
+                "offset": resolved_offset,
+                "limit": resolved_limit if resolved_limit is not None else total_chars,
+                "total_chars": total_chars,
+                "truncated": truncated,
+            }
+        )
     return ToolResult(
         tool_name="read_file",
         call_id=tool_input.call_id,
         status=ToolResultStatus.SUCCEEDED,
-        output_payload={"path": normalized_path, "content": content},
-        output_preview=_preview(f"{normalized_path}\n{content}"),
+        output_payload=output_payload,
+        output_preview=_preview(f"{normalized_path}\n{visible_content}"),
         trace_context=tool_input.trace_context,
         coordination_key=tool_input.coordination_key,
     )
@@ -1312,6 +1405,22 @@ def _grep_snippet(text: str, *, limit: int) -> tuple[str, bool, bool]:
     if limit <= 3:
         return "." * max(limit, 0), True, False
     return f"{visible[: limit - 3]}...", True, False
+
+
+def _optional_non_negative_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    return None
+
+
+def _optional_positive_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 1:
+        return value
+    return None
 
 
 def _is_grep_glob_excluded(

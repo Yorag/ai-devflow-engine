@@ -204,6 +204,22 @@ class ToolInputSchemaValidator:
             if isinstance(value, str) and len(value) < min_length:
                 raise ValueError(f"{path} is shorter than minLength")
 
+        minimum = schema.get("minimum")
+        if minimum is not None:
+            if not isinstance(minimum, int | float) or isinstance(minimum, bool):
+                raise ValueError(f"{path}.minimum must be a number")
+            if isinstance(value, int | float) and not isinstance(value, bool):
+                if value < minimum:
+                    raise ValueError(f"{path} is below minimum")
+
+        maximum = schema.get("maximum")
+        if maximum is not None:
+            if not isinstance(maximum, int | float) or isinstance(maximum, bool):
+                raise ValueError(f"{path}.maximum must be a number")
+            if isinstance(value, int | float) and not isinstance(value, bool):
+                if value > maximum:
+                    raise ValueError(f"{path} is above maximum")
+
         if expected_type == "object":
             if not isinstance(value, dict):
                 raise ValueError(f"{path} must be an object")

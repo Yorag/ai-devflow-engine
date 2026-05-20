@@ -619,7 +619,14 @@ def read_file_description() -> ToolBindableDescription:
         description="Read a file.",
         input_schema={
             "type": "object",
-            "properties": {"path": {"type": "string", "minLength": 1}},
+            "properties": {
+                "path": {"type": "string", "minLength": 1},
+                "offset": {"type": "integer", "minimum": 0},
+                "limit": {"type": "integer", "minimum": 1},
+                "max_chars": {"type": "integer", "minimum": 1},
+                "start_line": {"type": "integer", "minimum": 1},
+                "line_limit": {"type": "integer", "minimum": 1},
+            },
             "required": ["path"],
             "additionalProperties": False,
         },
@@ -970,6 +977,66 @@ def test_stage_agent_executes_tool_decision_through_tool_registry_and_continues(
     }
 
 
+def test_stage_agent_tool_trace_summarizes_read_file_range_inputs() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(
+                tool_call_requests=(
+                    ModelCallToolRequest(
+                        call_id="call-1",
+                        tool_name="read_file",
+                        input_payload={
+                            "path": "frontend/src/pages/HomePage.tsx",
+                            "start_line": 87,
+                            "line_limit": 12,
+                            "offset": 86,
+                            "limit": 200,
+                            "max_chars": 200,
+                        },
+                        schema_version="tool-schema-v1",
+                    ),
+                )
+            ),
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "CodeGenerationArtifact",
+                    "artifact_payload": code_generation_payload(),
+                    "evidence_refs": ["tool-result://call-1"],
+                }
+            ),
+        ],
+        tool_results=[succeeded_tool_result("call-1")],
+    )
+
+    result = runtime.run_stage(invocation())
+
+    assert result.status is StageStatus.COMPLETED
+    tool_trace = next(
+        call["process_value"]
+        for call in runtime.artifact_store.append_calls
+        if call["process_key"] == "tool_trace"
+    )
+    assert tool_trace["input_payload_summary"] == {
+        "input_keys": [
+            "limit",
+            "line_limit",
+            "max_chars",
+            "offset",
+            "path",
+            "start_line",
+        ],
+        "payload_size_bytes": 114,
+        "redaction_status": "summary_only",
+        "path": "frontend/src/pages/HomePage.tsx",
+        "offset": 86,
+        "limit": 200,
+        "max_chars": 200,
+        "start_line": 87,
+        "line_limit": 12,
+    }
+
+
 def test_stage_agent_allows_recoverable_failed_read_file_to_inform_next_decision() -> None:
     runtime = build_runtime(
         provider_results=[
@@ -1006,6 +1073,36 @@ def test_stage_agent_allows_recoverable_failed_read_file_to_inform_next_decision
         and '"reason": "file_not_found"' in getattr(message, "content", "")
         for message in second_call_messages
     )
+
+
+def test_stage_agent_persists_parser_error_safe_details_on_terminal_failure() -> None:
+    runtime = build_runtime(
+        provider_results=[
+            model_result(
+                tool_call_requests=(
+                    ModelCallToolRequest(
+                        call_id="call-1",
+                        tool_name="read_file",
+                        input_payload={
+                            "path": "backend/app/runtime/nodes.py",
+                            "unexpected": 1,
+                        },
+                        schema_version="tool-schema-v1",
+                    ),
+                )
+            )
+        ],
+    )
+
+    result = runtime.run_stage(invocation())
+
+    assert result.status is StageStatus.FAILED
+    failure = runtime.artifact_store.process["stage_agent_failed"]
+    assert failure["reason"] == "tool_input_schema_invalid"
+    assert failure["safe_details"] == {
+        "tool_name": "read_file",
+        "reason": "$.unexpected is not allowed",
+    }
 
 
 def test_stage_agent_executes_native_tool_call_batch_before_next_model_call() -> None:
@@ -1707,6 +1804,107 @@ def test_code_generation_rejects_missing_file_failure_when_design_identifies_tar
     assert runtime.artifact_store.process["stage_agent_failed"]["reason"] == (
         "stage_semantic_gate_failed"
     )
+
+
+def test_code_generation_boundary_uses_singular_target_file_without_text_fragments() -> None:
+    design_artifact = SimpleNamespace(
+        artifact_type="SolutionDesignArtifact",
+        payload={
+            "implementation_plan": [
+                {
+                    "task_id": "SOL-001",
+                    "target_file": "frontend/src/pages/HomePage.tsx",
+                    "description": (
+                        "Change `<h1>Make delivery work traceable.</h1>` to "
+                        "`<h1>Make delivery work</h1>`."
+                    ),
+                }
+            ],
+        },
+        artifact_id="artifact-solution-design",
+    )
+    payload = code_generation_payload()
+    payload["changed_files"] = [
+        "frontend/src/pages/HomePage.tsx",
+        "traceable.</h1>",
+    ]
+    runtime = build_runtime(
+        provider_results=[
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "CodeGenerationArtifact",
+                    "artifact_payload": payload,
+                    "evidence_refs": ["stage-process://stage-run-1/model-call/1"],
+                }
+            )
+        ],
+        stage_artifacts=[design_artifact],
+    )
+
+    result = runtime.run_stage(invocation())
+
+    assert result.status is StageStatus.FAILED
+    failure = runtime.artifact_store.process["stage_agent_failed"]
+    assert failure["safe_details"]["semantic_rule"] == (
+        "code_generation_changed_files_outside_solution_boundary"
+    )
+    assert failure["safe_details"]["expected_files"] == [
+        "frontend/src/pages/HomePage.tsx"
+    ]
+    assert failure["safe_details"]["unexpected_files"] == ["traceable.</h1>"]
+
+
+def test_code_generation_boundary_includes_structured_impacted_file_groups() -> None:
+    design_artifact = SimpleNamespace(
+        artifact_type="SolutionDesignArtifact",
+        payload={
+            "impacted_files": {
+                "primary": ["frontend/src/pages/HomePage.tsx"],
+                "test_files": ["frontend/src/pages/__tests__/ConsolePage.test.tsx"],
+                "cleanup_candidates": [
+                    "frontend/src/features/feed/__tests__/ToolDiffTestItems.test.tsx"
+                ],
+                "note": (
+                    "Optional cleanup may mention `<h1>Make delivery work</h1>` "
+                    "without making the JSX fragment a file path."
+                ),
+            },
+            "implementation_plan": [],
+        },
+        artifact_id="artifact-solution-design",
+    )
+    payload = code_generation_payload()
+    payload["changed_files"] = [
+        "frontend/src/pages/HomePage.tsx",
+        "frontend/src/pages/__tests__/ConsolePage.test.tsx",
+        "frontend/src/features/feed/__tests__/ToolDiffTestItems.test.tsx",
+        "work</h1>",
+    ]
+    runtime = build_runtime(
+        provider_results=[
+            model_result(
+                structured_output={
+                    "decision_type": "submit_stage_artifact",
+                    "artifact_type": "CodeGenerationArtifact",
+                    "artifact_payload": payload,
+                    "evidence_refs": ["stage-process://stage-run-1/model-call/1"],
+                }
+            )
+        ],
+        stage_artifacts=[design_artifact],
+    )
+
+    result = runtime.run_stage(invocation())
+
+    assert result.status is StageStatus.FAILED
+    failure = runtime.artifact_store.process["stage_agent_failed"]
+    assert failure["safe_details"]["expected_files"] == [
+        "frontend/src/features/feed/__tests__/ToolDiffTestItems.test.tsx",
+        "frontend/src/pages/HomePage.tsx",
+        "frontend/src/pages/__tests__/ConsolePage.test.tsx",
+    ]
+    assert failure["safe_details"]["unexpected_files"] == ["work</h1>"]
 
 
 def test_stage_agent_creates_stage_input_before_process_records() -> None:
