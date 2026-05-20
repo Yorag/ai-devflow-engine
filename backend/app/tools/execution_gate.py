@@ -364,7 +364,7 @@ class ToolExecutionGate:
                 tool_name=validation.tool.name,
                 safe_details={"timeout_seconds": validation.timeout_seconds},
             )
-        except Exception:
+        except Exception as exc:
             _LOGGER.exception(
                 "Tool execution crashed: tool_name=%s call_id=%s stage_type=%s",
                 validation.tool.name,
@@ -376,7 +376,10 @@ class ToolExecutionGate:
                 context=context,
                 error_code=ErrorCode.INTERNAL_ERROR,
                 tool_name=validation.tool.name,
-                safe_details={"reason": "tool_execution_failed"},
+                safe_details={
+                    "reason": "tool_execution_failed",
+                    "exception_type": type(exc).__name__,
+                },
                 audit_ref=validation.audit_ref,
             )
 

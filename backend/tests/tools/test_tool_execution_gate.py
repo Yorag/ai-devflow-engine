@@ -939,6 +939,7 @@ def test_execute_converts_unexpected_tool_exception_to_structured_internal_error
     assert result.error is not None
     assert result.error.error_code is ErrorCode.INTERNAL_ERROR
     assert result.error.safe_details["reason"] == "tool_execution_failed"
+    assert result.error.safe_details["exception_type"] == "RuntimeError"
     assert tool.calls
     assert log.records[-1]["error_code"] == "internal_error"
     assert any(
