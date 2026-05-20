@@ -592,7 +592,9 @@ def test_approve_solution_design_creates_decision_and_returns_resume_command(
         assert run is not None
         assert stage is not None
         assert run.status is RunStatus.RUNNING
-        assert stage.status is StageStatus.WAITING_APPROVAL
+        assert stage.status is StageStatus.COMPLETED
+        assert stage.summary == "solution_design approval approved."
+        assert stage.ended_at == NOW.replace(tzinfo=None)
     with manager.session(DatabaseRole.EVENT) as session:
         event = session.query(DomainEventModel).one()
         assert event.payload["approval_result"]["decision"] == "approved"
@@ -644,7 +646,9 @@ def test_reject_code_review_creates_decision_rollback_and_returns_resume_command
         assert run is not None
         assert stage is not None
         assert run.status is RunStatus.RUNNING
-        assert stage.status is StageStatus.WAITING_APPROVAL
+        assert stage.status is StageStatus.COMPLETED
+        assert stage.summary == "code_review approval rejected."
+        assert stage.ended_at == NOW.replace(tzinfo=None)
     assert audit.records[0]["action"] == "approval.reject"
 
 
